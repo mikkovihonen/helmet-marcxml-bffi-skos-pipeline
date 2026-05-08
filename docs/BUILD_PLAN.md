@@ -185,7 +185,7 @@ BFFI_EVAL_DIR=./eval-runs
 
 ### M0 — Skeleton
 
-- [ ] `pyproject.toml` with all dependencies pinned in `uv.lock`. Includes pytest marker declarations:
+- [x] `pyproject.toml` with all dependencies pinned in `uv.lock`. Includes pytest marker declarations:
   ```toml
   [tool.pytest.ini_options]
   markers = [
@@ -193,11 +193,11 @@ BFFI_EVAL_DIR=./eval-runs
       "requires_llm: tests that additionally require a running Ollama instance",
   ]
   ```
-- [ ] Repo structure as above (empty modules with docstrings are fine).
-- [ ] `Makefile` with all targets stubbed (`echo "not implemented"`).
-- [ ] `docker-compose.yml` runs Fuseki on `:3030` (dataset `bffi`) and Skosmos on `:9090` reading from Fuseki.
-- [ ] `make lint` passes on the empty skeleton.
-- [ ] `pytest tests/` runs (zero tests is fine) and exits 0.
+- [x] Repo structure as above (empty modules with docstrings are fine).
+- [x] `Makefile` with all targets stubbed (`echo "not implemented"`).
+- [x] `docker-compose.yml` runs Fuseki on `:3030` (dataset `bffi`) and Skosmos on `:9090` reading from Fuseki.
+- [x] `make lint` passes on the empty skeleton.
+- [x] `pytest tests/` runs (zero tests is fine) and exits 0.
 
 **Definition of done:** `make test && make lint` is green.
 

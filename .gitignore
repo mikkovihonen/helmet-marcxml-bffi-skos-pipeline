@@ -1,0 +1,27 @@
+# Generated / runtime data (configurable via BFFI_*_DIR env vars)
+data/
+logs/
+eval-runs/
+
+# Local environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# uv / virtualenv
+.venv/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

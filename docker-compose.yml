@@ -1,0 +1,36 @@
+# Fuseki + Skosmos for the BFFI pipeline.
+# Fuseki is pinned per docs/ci-strategy.md.
+# Skosmos pin is a deferred decision (see CLAUDE.md "Deferred decisions") and is
+# expected to land in M11 along with config/skosmos-config.ttl.
+
+services:
+  fuseki:
+    image: stain/jena-fuseki:5.0.0
+    container_name: bffi-fuseki
+    ports:
+      - "3030:3030"
+    environment:
+      ADMIN_PASSWORD: admin
+      FUSEKI_DATASET_1: bffi
+      JVM_ARGS: -Xmx4g
+    volumes:
+      - fuseki-data:/fuseki
+    restart: unless-stopped
+
+  skosmos:
+    # TODO(M11): pin to a specific Skosmos 3.x point release.
+    image: ghcr.io/natlibfi/skosmos:3
+    container_name: bffi-skosmos
+    ports:
+      - "9090:8080"
+    depends_on:
+      - fuseki
+    environment:
+      SPARQL_ENDPOINT: http://fuseki:3030/bffi/query
+    # config/skosmos-config.ttl is produced in M11; uncomment then.
+    # volumes:
+    #   - ./config/skosmos-config.ttl:/var/www/html/config.ttl:ro
+    restart: unless-stopped
+
+volumes:
+  fuseki-data:
