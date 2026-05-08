@@ -223,6 +223,7 @@ BFFI_EVAL_DIR=./eval-runs
   ```
   Operational read model — fast in-process lookup during M5/M6/M9 without round-tripping through SPARQL. Deduplicate on `helmet_bib_id` (last-write-wins).
 - [ ] **Conversion provenance:** for each successful conversion, emit a `prov:Activity` of type `bffi-prov:MarcConversion` with `prov:used` pointing at the source filename, `bffi-prov:helmetBibId`, and `bffi-prov:converterVersion`. The minted Work and Instance get `prov:wasGeneratedBy` pointing at this Activity.
+- [ ] **Initial AdminMetadata stamp:** for each minted raw `bf:Work` (and the corresponding `bf:Instance`), emit one `bffi:AdminMetadata` block linked via `bffi:adminMetadata`. Initial fields: `bffi:adminMetadataFor` (back-link), `bffi:descriptionCreationDate` and `bffi:dateGenerated` (both = conversion timestamp), `bffi:descriptionModifier` = `<bib:agent/marc2bibframe2>`, `bffi:generationProcess` = `<bib:gen-process/bffi-pipeline/v<version>>`, `bffi:descriptionConventions` = `<bib:desc-conv/bffi-1.0.0>`, `bffi:descriptionLevel` = `<bib:desc-level/minimum>`, `bffi:encodingLevel` = `<bib:enc-level/auto>`, `bffi:descriptionAuthentication` = `<bib:auth/auto-merged>`, `bffi:recordingSource` = `<bib:recording-source/helmet>`, `bffi:metadataLicensor` = `<bib:metadata-licensor/cc0>`, `bffi:sourceMetadata` = the Helmet record URI for this conversion. Spine link: `prov:wasGeneratedBy` = the `bffi-prov:MarcConversion` Activity URI. Vocabulary instances live in `config/bffi-admin-vocabulary.ttl` (see M10). See spec § 8 "AdminMetadata view".
 - [ ] **Boundary 1 validation (MARCXML).** Validate each input against `src/bffi_pipeline/schemas/MARC21slim.xsd` using cached `lxml.etree.XMLSchema`, then run a minimum-content check (at least one 1XX/7XX, one 245, one 008, one 336/337/338). Failures are typed (`marcxml-xml-syntax`, `marcxml-xsd-validation`, `marcxml-content-minimum`). Vendor `MARC21slim.xsd` from LoC; pin the version with a comment naming source URL and download date.
 - [ ] **Boundary 2 validation (BIBFRAME post-conversion).** Validate XSLT output against `config/shapes/bibframe-conversion.shape.ttl` via `pyshacl`. Records failing the shape go to `_errors.jsonl` with `error_type: "bibframe-shape"` and are excluded from downstream stages.
 - [ ] **Error handling:** all failure types go to `<BFFI_DATA_DIR>/bibframe/_errors.jsonl` with the Helmet bib ID (if extractable), filename, typed error code, and message. Continue with the rest of the corpus. Print a summary at the end.
@@ -234,6 +235,7 @@ BFFI_EVAL_DIR=./eval-runs
 
 ### M3 — BIBFRAME → BFFI
 
+- [ ] **Cross-check property allocation against `docs/lkd.rdf` before shipping the CONSTRUCT pair.** The vendored ontology (~4600 lines, RDF/XML) is the single source of truth for `bffi:*` predicate names and `rdfs:domain` / `rdfs:range`. `https://schema.finto.fi/bffi/` is the published URL but is currently 403-protected outside the Finto network. Spec § 3 has been verified against `docs/lkd.rdf`; re-verify whenever BFFI publishes a minor revision.
 - [ ] `sparql/bf_to_bffi_work.rq` and `sparql/bf_to_bffi_expression.rq` per spec §3.
 - [ ] `src/bffi_pipeline/stages/bf_to_bffi.py` runs both CONSTRUCTs against an in-memory rdflib graph and writes Turtle output.
 - [ ] **Preserve `bf:identifiedBy` triples through the CONSTRUCT.** Both passes must copy the Helmet identifier from the source `bf:Work` onto the new `bffi:Work` *and* the new `bffi:Expression`. M8 is where multiple raw Works merge; M3 is where identifiers are first attached.
@@ -317,9 +319,10 @@ BFFI_EVAL_DIR=./eval-runs
   ```
   Joined with `helmet-map.jsonl` from M2, this gives O(1) Helmet ID → canonical Work URI lookup.
 - [ ] Idempotent: running merge twice is a no-op. Identifier sets are deduplicated.
-- [ ] Unit tests cover: chain merging (A=B, B=C → A=B=C); conflict handling (A=B, A≠C, B=C — flag for review, don't merge silently); identifier accumulation; idempotency.
+- [ ] **Mint canonical-Work AdminMetadata.** Each canonical `bffi:Work` and each `bffi:Expression` produced at merge time gets a fresh `bffi:AdminMetadata` block via `bffi:adminMetadata`. Fields: `bffi:adminMetadataFor` (back-link), `bffi:descriptionCreationDate` = earliest absorbed M2 timestamp (from `helmet-map.jsonl`), `bffi:descriptionChangeDate` and `bffi:dateGenerated` = merge timestamp, `bffi:descriptionModifier` = the cascade winner (e.g., `<bib:agent/qwen3-32b-instruct>` or `<bib:agent/qwen3-72b-instruct>`), `bffi:descriptionAuthentication` = `<bib:auth/auto-merged>`, `bffi:descriptionLevel` = `<bib:desc-level/minimum>`, `bffi:encodingLevel` = `<bib:enc-level/auto>`, `bffi:generationProcess` = `<bib:gen-process/bffi-pipeline/v<version>>`, `bffi:descriptionConventions` = `<bib:desc-conv/bffi-1.0.0>`, `bffi:metadataLicensor` = `<bib:metadata-licensor/cc0>`, `bffi:recordingSource` = `<bib:recording-source/helmet>`, `bffi:sourceMetadata` = the union of absorbed Helmet record URIs (matching `canonical-map.jsonl`). Spine link: `prov:wasGeneratedBy` = the latest `bffi-prov:WorkMergeDecision` Activity URI for this Work. See spec § 8 "AdminMetadata view".
+- [ ] Unit tests cover: chain merging (A=B, B=C → A=B=C); conflict handling (A=B, A≠C, B=C — flag for review, don't merge silently); identifier accumulation; idempotency; AdminMetadata block presence and `sourceMetadata` count = absorbed-record count.
 
-**Definition of done:** Sample corpus produces merged authority Works with provenance pointing at the source records, every canonical Work carries one `bf:identifiedBy` per absorbed Helmet record, and `canonical-map.jsonl` is correctly populated.
+**Definition of done:** Sample corpus produces merged authority Works with provenance pointing at the source records, every canonical Work carries one `bf:identifiedBy` per absorbed Helmet record AND one `bffi:adminMetadata` link to a populated `bffi:AdminMetadata` block, and `canonical-map.jsonl` is correctly populated.
 
 ### M9 — Reconciliation against KANTO / VIAF / YSO / KAUNO / MUSO
 
@@ -339,17 +342,19 @@ Each entity type queries its primary authority first, falling back only on miss.
 - [ ] **Tiered decision logic** — don't reach for the LLM if you don't have to:
   - If exactly one candidate has lexical similarity > 0.95 → take it deterministically. Log to provenance with stage `"reconciliation-lexical"`.
   - If multiple high-similarity candidates → LLM-pick from the top-k. Log with stage `"reconciliation-llm"`.
-  - If LLM returns `uncertain` OR LLM confidence < 0.80 → **deterministic fallback**: take the highest lexical-similarity candidate but mark the canonical Work with `bffi-prov:reconciliationStatus = "needs-review"`. Log with stage `"reconciliation-fallback"`.
+  - If LLM returns `uncertain` OR LLM confidence < 0.80 → **deterministic fallback**: take the highest lexical-similarity candidate but set the canonical Work's AdminMetadata `bffi:descriptionAuthentication` to `<bib:auth/needs-review>` (see spec § 8 "AdminMetadata view"). Log the reconciliation Activity with stage `"reconciliation-fallback"`.
   - If no candidate has lexical similarity > 0.70 → leave unreconciled. Log with stage `"reconciliation-no-candidate"`.
 - [ ] Cache results aggressively. Cache key includes the authority source, the input agent string, and the date (re-fetch monthly).
 - [ ] Add the appropriate authority URI link (e.g., `bffi:creator` pointing at a KANTO URI) to canonical Works on success. On any non-success, leave the literal but log the attempt.
-- [ ] Generate a reconciliation review queue from the `"reconciliation-fallback"` and `"reconciliation-no-candidate"` cases.
+- [ ] **AdminMetadata update on success.** When reconciliation lands on a real authority URI (any of the four success cases above except `"reconciliation-no-candidate"`), append the chosen authority URI to the canonical Work's AdminMetadata via `bffi:sourceConsulted` and bump `bffi:descriptionChangeDate` to the reconciliation timestamp. On the `"reconciliation-fallback"` path, also set `bffi:descriptionAuthentication` = `<bib:auth/needs-review>` (already specified above). See spec § 8 "AdminMetadata view".
+- [ ] Generate a reconciliation review queue from the `"reconciliation-fallback"` and `"reconciliation-no-candidate"` cases. The query is the AdminMetadata-side filter `?w bffi:adminMetadata/bffi:descriptionAuthentication <bib:auth/needs-review>`, joined to the latest reconciliation Activity for rationale.
 
 **Definition of done:** Sample creators that exist in KANTO are linked deterministically where possible, by LLM where lexical is ambiguous, and flagged for review where neither is confident. The provenance graph distinguishes all four cases. The reconciliation review queue is non-empty and meaningful.
 
 ### M10 — Skosify overlay + Fuseki load
 
 - [ ] `config/overlay/bffi-skos-overlay.ttl` and `config/bffi.cfg` per spec §5.
+- [ ] **`config/bffi-admin-vocabulary.ttl`** per spec § 8 "AdminMetadata view" — stable URIs for shared value-class instances (Agents dual-typed `prov:SoftwareAgent, bffi:Agent`; `bffi:GenerationProcess`; `bffi:DescriptionAuthentication` for `auto-merged` / `needs-review` / `verified`; `bffi:DescriptionConventions`; `bffi:DescriptionLevel`; `bffi:EncodingLevel`; `bffi:MetadataLicensor` for CC0; `bffi:RecordingSource` for Helmet). Loaded alongside the overlay.
 - [ ] **Declare the Helmet source URI in the overlay file** so it's resolvable as a real entity in Skosmos:
   ```turtle
   <http://urn.fi/URN:NBN:fi:bib:source:helmet> a bf:Source ;
@@ -358,7 +363,7 @@ Each entity type queries its primary authority first, falling back only on miss.
       rdfs:comment "Joint catalog of the public libraries of Helsinki, Espoo, Vantaa, and Kauniainen. Underlying ILS is Sierra; this is implementation detail and not preserved in the data."@en .
   ```
 - [ ] `src/bffi_pipeline/stages/skosify_run.py` shells out to Skosify with the overlay, producing dual-typed output.
-- [ ] `src/bffi_pipeline/stages/load.py` uploads to Fuseki via SPARQL Graph Store Protocol. Loads main data into the configured graph; provenance into the provenance graph.
+- [ ] `src/bffi_pipeline/stages/load.py` uploads to Fuseki via SPARQL Graph Store Protocol. Loads main data and `config/bffi-admin-vocabulary.ttl` into the configured `bffi-works` graph; provenance Activities into the provenance graph.
 - [ ] **Pin Fuseki version** in `docker-compose.yml` to a specific Apache Jena 5.x release (e.g., `stain/jena-fuseki:5.0.0`). Verify `jena-text` is enabled. Document the chosen version in the runbook.
 - [ ] **Boundary 5 validation (post-load smoke tests).** Run all `ASK` queries from `config/shapes/post-load-smoke.rq` against Fuseki immediately after load. All must return `true`:
   - `ASK { ?w a bffi:Work, skos:Concept ; skos:prefLabel ?l }` — Skosify dual-typing worked.

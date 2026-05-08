@@ -1,0 +1,46 @@
+# sparql/admin/admin_with_rationale.rq
+#
+# Review-queue helper. Joins the AdminMetadata view (which Works are awaiting
+# human review) to the PROV-O graph (the rationale + confidence behind each
+# auto-merge), so the cataloguer sees both the latest administrative state and
+# the decision-level reasoning in one query.
+#
+# This is the canonical replacement for the standalone "low-confidence merges
+# awaiting review" query at the top of spec § 8 "Useful queries" — it surfaces
+# the same Works but reaches into the provenance graph only for the rationale.
+#
+# Returns rows ordered by ascending confidence so the most uncertain
+# auto-merges surface first for triage.
+
+PREFIX bffi:      <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX bffi-prov: <http://urn.fi/URN:NBN:fi:schema:bffi-prov#>
+PREFIX prov:      <http://www.w3.org/ns/prov#>
+PREFIX skos:      <http://www.w3.org/2004/02/skos/core#>
+
+SELECT ?work ?label ?changeDate ?modifier ?confidence ?rationale ?activity
+WHERE {
+  # ----- AdminMetadata side: which Works are flagged for review -----
+  ?work a bffi:Work ;
+        skos:prefLabel ?label ;
+        bffi:adminMetadata ?am .
+  ?am bffi:descriptionAuthentication <http://urn.fi/URN:NBN:fi:bib:auth/needs-review> ;
+      bffi:descriptionChangeDate     ?changeDate ;
+      bffi:descriptionModifier       ?modifier ;
+      prov:wasGeneratedBy            ?activity .
+
+  # ----- PROV-O side: rationale and confidence from the spine-linked Activity -----
+  GRAPH <http://urn.fi/URN:NBN:fi:bib:graph:provenance> {
+    ?activity bffi-prov:rationale  ?rationale ;
+              bffi-prov:confidence ?confidence .
+  }
+
+  # Skip Works that already have a HumanReview Activity attached — they're
+  # already in the cataloguer's history, not the open queue.
+  FILTER NOT EXISTS {
+    GRAPH <http://urn.fi/URN:NBN:fi:bib:graph:provenance> {
+      ?review prov:wasInformedBy ?activity ;
+              a bffi-prov:HumanReview .
+    }
+  }
+}
+ORDER BY ?confidence ?changeDate

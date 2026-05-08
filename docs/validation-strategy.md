@@ -55,6 +55,8 @@ Intentionally minimal — this validates "BIBFRAME my pipeline can handle," not 
 
 ### Boundary 3 — BFFI post-CONSTRUCT
 
+All shape constraints below derive from `docs/lkd.rdf`; that file is the single source of truth for BFFI domain/range checks. The shape file `config/shapes/bffi.shape.ttl` should carry a comment naming the schema commit it was generated against, so a future BFFI revision can be diffed against the shape.
+
 This is where validation pays for itself. Required shapes:
 
 - Every `bffi:Work` has at least one `bffi:hasExpression`.
@@ -63,6 +65,7 @@ This is where validation pays for itself. Required shapes:
 - Every Work has `skos:prefLabel` in at least one of `fi`/`sv`/`en`.
 - Class disjointness — nothing is both `bffi:Work` and `bffi:Expression`.
 - Properties BFFI assigns to Work-only don't appear on Expression and vice versa. **This is the invariant most likely to drift as the model evolves; don't skip it.**
+- Every canonical `bffi:Work` and every `bffi:Expression` has exactly one `bffi:adminMetadata` triple pointing at one `bffi:AdminMetadata` instance. Each `bffi:AdminMetadata` instance carries at minimum the six required predicates: `bffi:adminMetadataFor`, `bffi:descriptionCreationDate`, `bffi:descriptionConventions`, `bffi:descriptionAuthentication`, `bffi:generationProcess`, `bffi:recordingSource` (plus `bffi:metadataLicensor` for the CC0 commitment). See spec § 8 "AdminMetadata view".
 
 `pyshacl` runs this on every conversion batch. Failures don't block the pipeline (you still get the data) but they surface in `<BFFI_DATA_DIR>/bffi/_validation.jsonl` and emit a CLI warning. CI fails on regressions in the validation report against a baseline.
 
@@ -72,7 +75,7 @@ Pydantic structural constraint via `with_structured_output(WorkMatchDecision, me
 
 - `decision="uncertain"` with `confidence > 0.7` is incoherent.
 - `decision="same_work"` with empty `matching_fields` is incoherent.
-- Rationale containing stub phrases ("I don't know", "unable to determine", "n/a") is invalid.
+- Rationale containing stub phrases ("I don't know", "unable to determine", "n/a", "not sure") is invalid.
 - Rationale shorter than 20 characters is invalid.
 
 Validation failures here trigger the same retry path as JSON parse errors (max 2 retries; persistent failure → log `decision="uncertain"` with the validation error in the rationale). **Validation-failed responses must not be cached** — otherwise you cement bad outputs and re-runs reproduce them.
@@ -86,6 +89,18 @@ ASK { ?w a bffi:Work, skos:Concept ; skos:prefLabel ?l }
 ASK { ?e a bffi:Expression, skos:Concept ; bffi:expressionOf ?w }
 ASK { ?w a bffi:Work ; bf:identifiedBy [ bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] }
 ASK { ?w skos:narrower ?e . ?e skos:broader ?w }   # Skosify-inferred inverses
+
+# AdminMetadata view — every canonical Work and every Expression has a populated
+# bffi:AdminMetadata block, and the vocabulary instances loaded from
+# config/bffi-admin-vocabulary.ttl resolve to typed entities.
+ASK { ?w a bffi:Work ;
+         bffi:adminMetadata [ a bffi:AdminMetadata ;
+                              bffi:descriptionConventions <http://urn.fi/URN:NBN:fi:bib:desc-conv/bffi-1.0.0> ;
+                              bffi:descriptionAuthentication ?auth ] }
+ASK { ?e a bffi:Expression ;
+         bffi:adminMetadata [ a bffi:AdminMetadata ;
+                              bffi:generationProcess ?gp ] }
+ASK { <http://urn.fi/URN:NBN:fi:bib:auth/auto-merged> a bffi:DescriptionAuthentication }
 ```
 
 These run automatically after `make publish` and before declaring the load successful. Failure rolls back the load (delete the loaded graph; don't leave Fuseki in a half-loaded state).
