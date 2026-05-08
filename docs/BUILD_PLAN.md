@@ -203,9 +203,9 @@ BFFI_EVAL_DIR=./eval-runs
 
 ### M1 — URI minting + config
 
-- [ ] `src/bffi_pipeline/config.py` with Pydantic Settings reading from `.env` and `config/`.
-- [ ] `src/bffi_pipeline/uris.py` with `mint_work_uri(creator_uri, original_title)` and `mint_expression_uri(work_uri, language)`. Deterministic SHA-1; covered by unit tests with explicit input → expected output pairs.
-- [ ] `tests/unit/test_uris.py` covering: stable across runs, sensitive to creator change, sensitive to title normalization, insensitive to whitespace.
+- [x] `src/bffi_pipeline/config.py` with Pydantic Settings reading from `.env` and `config/`.
+- [x] `src/bffi_pipeline/uris.py` with `mint_work_uri(creator_uri, original_title)` and `mint_expression_uri(work_uri, language)`. Deterministic SHA-1; covered by unit tests with explicit input → expected output pairs.
+- [x] `tests/unit/test_uris.py` covering: stable across runs, sensitive to creator change, sensitive to title normalization, insensitive to whitespace.
 
 **Definition of done:** URI tests pass; running `mint_work_uri` twice with the same args returns the same URI.
 
