@@ -1,0 +1,120 @@
+# Boundary 3 — SHACL shapes for the post-CONSTRUCT BFFI graph.
+#
+# Validates the M3 output: cardinality between Work and Expression, Helmet
+# identifier preservation, prefLabel language tagging, class disjointness,
+# and conservative property routing. Failures emit a row to
+# `<BFFI_DATA_DIR>/bffi/_validation.jsonl` and a CLI warning, but the
+# pipeline continues — at 800k records, even 0.1% failure is 800 records
+# that need triage, not a halt (see docs/BUILD_PLAN.md M3).
+#
+# Property routing here is the *pipeline's* allocation, not BFFI's broadest
+# permissible domain (spec § 3 "conservative" note in docs/lkd.rdf).
+
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+@prefix bf:    <http://id.loc.gov/ontologies/bibframe/> .
+@prefix bffi:  <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+@prefix skos:  <http://www.w3.org/2004/02/skos/core#> .
+@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+# --- bffi:Work shape ------------------------------------------------------
+bffi:WorkShape
+    a sh:NodeShape ;
+    sh:targetClass bffi:Work ;
+    rdfs:label "BFFI Work" ;
+
+    # Class disjointness: a node is not both Work and Expression.
+    sh:not [ sh:property [ sh:path rdf:type ; sh:hasValue bffi:Expression ] ] ;
+
+    # Cardinality: every Work has at least one Expression.
+    sh:property [
+        sh:path bffi:hasExpression ;
+        sh:minCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "bffi:Work must link to at least one bffi:Expression via bffi:hasExpression."
+    ] ;
+
+    # Helmet identifier preserved.
+    sh:property [
+        sh:path bf:identifiedBy ;
+        sh:minCount 1 ;
+        sh:qualifiedValueShape [
+            sh:property [
+                sh:path bf:source ;
+                sh:hasValue <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
+            ] ;
+            sh:property [ sh:path rdf:value ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+        ] ;
+        sh:qualifiedMinCount 1 ;
+        sh:message "bffi:Work must carry a Helmet bf:identifiedBy."
+    ] ;
+
+    # prefLabel must exist in at least one of fi/sv/en.
+    sh:property [
+        sh:path skos:prefLabel ;
+        sh:minCount 1 ;
+        sh:qualifiedValueShape [
+            sh:datatype rdf:langString ;
+            sh:languageIn ( "fi" "sv" "en" ) ;
+        ] ;
+        sh:qualifiedMinCount 1 ;
+        sh:message "bffi:Work must have skos:prefLabel in fi/sv/en."
+    ] ;
+
+    # Properties that belong only to bffi:Expression (per spec § 3 routing)
+    # MUST NOT appear here.
+    sh:property [ sh:path bffi:expressionOf ; sh:maxCount 0 ;
+                  sh:message "bffi:expressionOf is Expression-only." ] ;
+    sh:property [ sh:path bffi:language    ; sh:maxCount 0 ;
+                  sh:message "bffi:language is Expression-only." ] ;
+    sh:property [ sh:path bffi:content     ; sh:maxCount 0 ;
+                  sh:message "bffi:content is Expression-only." ] ;
+    sh:property [ sh:path bffi:summary     ; sh:maxCount 0 ;
+                  sh:message "bffi:summary is Expression-only." ] ;
+    sh:property [ sh:path bffi:note        ; sh:maxCount 0 ;
+                  sh:message "bffi:note is Expression-only." ] .
+
+# --- bffi:Expression shape -----------------------------------------------
+bffi:ExpressionShape
+    a sh:NodeShape ;
+    sh:targetClass bffi:Expression ;
+    rdfs:label "BFFI Expression" ;
+
+    sh:not [ sh:property [ sh:path rdf:type ; sh:hasValue bffi:Work ] ] ;
+
+    # Exactly one Work via bffi:expressionOf.
+    sh:property [
+        sh:path bffi:expressionOf ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "bffi:Expression must point at exactly one bffi:Work via bffi:expressionOf."
+    ] ;
+
+    # Helmet identifier preserved.
+    sh:property [
+        sh:path bf:identifiedBy ;
+        sh:minCount 1 ;
+        sh:qualifiedValueShape [
+            sh:property [
+                sh:path bf:source ;
+                sh:hasValue <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
+            ] ;
+            sh:property [ sh:path rdf:value ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+        ] ;
+        sh:qualifiedMinCount 1 ;
+        sh:message "bffi:Expression must carry a Helmet bf:identifiedBy."
+    ] ;
+
+    # Properties that belong only to bffi:Work MUST NOT appear here.
+    sh:property [ sh:path bffi:hasExpression  ; sh:maxCount 0 ;
+                  sh:message "bffi:hasExpression is Work-only." ] ;
+    sh:property [ sh:path bffi:subject        ; sh:maxCount 0 ;
+                  sh:message "bffi:subject is Work-only." ] ;
+    sh:property [ sh:path bffi:classification ; sh:maxCount 0 ;
+                  sh:message "bffi:classification is Work-only." ] ;
+    sh:property [ sh:path bffi:originDate     ; sh:maxCount 0 ;
+                  sh:message "bffi:originDate is Work-only." ] ;
+    sh:property [ sh:path bffi:genreForm      ; sh:maxCount 0 ;
+                  sh:message "bffi:genreForm is Work-only." ] .

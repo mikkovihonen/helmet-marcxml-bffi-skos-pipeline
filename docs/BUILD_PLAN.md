@@ -235,16 +235,16 @@ BFFI_EVAL_DIR=./eval-runs
 
 ### M3 — BIBFRAME → BFFI
 
-- [ ] **Cross-check property allocation against `docs/lkd.rdf` before shipping the CONSTRUCT pair.** The vendored ontology (~4600 lines, RDF/XML) is the single source of truth for `bffi:*` predicate names and `rdfs:domain` / `rdfs:range`. `https://schema.finto.fi/bffi/` is the published URL but is currently 403-protected outside the Finto network. Spec § 3 has been verified against `docs/lkd.rdf`; re-verify whenever BFFI publishes a minor revision.
-- [ ] `sparql/bf_to_bffi_work.rq` and `sparql/bf_to_bffi_expression.rq` per spec §3.
-- [ ] `src/bffi_pipeline/stages/bf_to_bffi.py` runs both CONSTRUCTs against an in-memory rdflib graph and writes Turtle output.
-- [ ] **Preserve `bf:identifiedBy` triples through the CONSTRUCT.** Both passes must copy the Helmet identifier from the source `bf:Work` onto the new `bffi:Work` *and* the new `bffi:Expression`. M8 is where multiple raw Works merge; M3 is where identifiers are first attached.
-- [ ] Unit tests verify property allocation: translator's `bf:contribution` → `bffi:Expression`, primary creator → `bffi:Work`, language → Expression, originDate → Work.
-- [ ] Unit test verifies identifier preservation: every minted `bffi:Work` and `bffi:Expression` carries `bf:identifiedBy` with the correct Helmet bib ID.
-- [ ] Tests cover deterministic linking: every `bffi:Expression` has a matching `bffi:Work` via `bffi:expressionOf`.
-- [ ] **Boundary 3 validation (BFFI post-CONSTRUCT).** Validate output against `config/shapes/bffi.shape.ttl` via `pyshacl`. Required shapes: every `bffi:Work` has at least one `bffi:hasExpression`; every `bffi:Expression` has exactly one `bffi:expressionOf`; every Work and Expression has a `bf:identifiedBy` with `bf:source = <http://urn.fi/URN:NBN:fi:bib:source:helmet>`; every Work has `skos:prefLabel` in at least one of `fi`/`sv`/`en`; class disjointness; properties allocated to Work-only don't appear on Expression and vice versa.
-- [ ] Validation report goes to `<BFFI_DATA_DIR>/bffi/_validation.jsonl`. Failures emit a CLI warning with counts but **do not block** the pipeline — at 800k records, even 0.1% failure is 800 records that need triage, not a halt.
-- [ ] Unit tests for the shapes: hand-craft one valid and one deliberately invalid graph per shape and assert each is judged correctly.
+- [x] **Cross-check property allocation against `docs/lkd.rdf` before shipping the CONSTRUCT pair.** The vendored ontology (~4600 lines, RDF/XML) is the single source of truth for `bffi:*` predicate names and `rdfs:domain` / `rdfs:range`. `https://schema.finto.fi/bffi/` is the published URL but is currently 403-protected outside the Finto network. Spec § 3 has been verified against `docs/lkd.rdf`; re-verify whenever BFFI publishes a minor revision. *(Note: marc2bibframe2 v3.1.0 emits `bf:PrimaryContribution`, not `bflc:PrimaryContribution` as the spec example shows; CONSTRUCTs match converter output.)*
+- [x] `sparql/bf_to_bffi_work.rq` and `sparql/bf_to_bffi_expression.rq` per spec §3.
+- [x] `src/bffi_pipeline/stages/bf_to_bffi.py` runs both CONSTRUCTs against an in-memory rdflib graph and writes Turtle output.
+- [x] **Preserve `bf:identifiedBy` triples through the CONSTRUCT.** Both passes must copy the Helmet identifier from the source `bf:Work` onto the new `bffi:Work` *and* the new `bffi:Expression`. M8 is where multiple raw Works merge; M3 is where identifiers are first attached.
+- [x] Unit tests verify property allocation: translator's `bf:contribution` → `bffi:Expression`, primary creator → `bffi:Work`, language → Expression, originDate → Work.
+- [x] Unit test verifies identifier preservation: every minted `bffi:Work` and `bffi:Expression` carries `bf:identifiedBy` with the correct Helmet bib ID.
+- [x] Tests cover deterministic linking: every `bffi:Expression` has a matching `bffi:Work` via `bffi:expressionOf`.
+- [x] **Boundary 3 validation (BFFI post-CONSTRUCT).** Validate output against `config/shapes/bffi.shape.ttl` via `pyshacl`. Required shapes: every `bffi:Work` has at least one `bffi:hasExpression`; every `bffi:Expression` has exactly one `bffi:expressionOf`; every Work and Expression has a `bf:identifiedBy` with `bf:source = <http://urn.fi/URN:NBN:fi:bib:source:helmet>`; every Work has `skos:prefLabel` in at least one of `fi`/`sv`/`en`; class disjointness; properties allocated to Work-only don't appear on Expression and vice versa.
+- [x] Validation report goes to `<BFFI_DATA_DIR>/bffi/_validation.jsonl`. Failures emit a CLI warning with counts but **do not block** the pipeline — at 800k records, even 0.1% failure is 800 records that need triage, not a halt.
+- [x] Unit tests for the shapes: hand-craft one valid and one deliberately invalid graph per shape and assert each is judged correctly.
 
 **Definition of done:** Sample records produce well-formed BFFI with correct property routing, Helmet identifiers attached, and a clean validation report (or a known/expected failure set documented in the runbook).
 

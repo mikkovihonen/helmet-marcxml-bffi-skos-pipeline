@@ -1,0 +1,68 @@
+# Pass 1: BFFI Work CONSTRUCT (M3, spec § 3).
+#
+# Mints raw bffi:Work URIs from the source bf:Work URIs via arq:sha1 (the
+# Jena extension function; registered for rdflib in
+# bffi_pipeline.uris.register_sparql_functions). Routes Work-only properties
+# (PrimaryContribution, subject, classification, originDate, genreForm,
+# marcKey, prefLabel) and preserves the Helmet bf:identifiedBy attached at
+# M2.
+#
+# Note vs spec § 3: marc2bibframe2 v3.1.0 emits `bf:PrimaryContribution`
+# (not `bflc:PrimaryContribution` as the spec example uses). We match the
+# converter's actual output here.
+
+PREFIX bf:    <http://id.loc.gov/ontologies/bibframe/>
+PREFIX bflc:  <http://id.loc.gov/ontologies/bflc/>
+PREFIX bffi:  <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs:  <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos:  <http://www.w3.org/2004/02/skos/core#>
+PREFIX arq:   <http://jena.apache.org/ARQ/function#>
+
+CONSTRUCT {
+  ?workURI a bffi:Work ;
+           bffi:hasExpression  ?exprURI ;
+           bffi:contribution   [ a bffi:PrimaryContribution ;
+                                 bffi:agent ?primaryAgent ] ;
+           bffi:subject        ?subject ;
+           bffi:classification ?class ;
+           bffi:originDate     ?originDate ;
+           bffi:genreForm      ?workGenre ;
+           bffi:marcKey        ?marcKey ;
+           skos:prefLabel      ?workLabel ;
+           bf:identifiedBy     ?ident .
+  ?ident   a               bf:Local ;
+           rdf:value       ?identValue ;
+           bf:source       ?identSource .
+}
+WHERE {
+  ?bfWork a bf:Work .
+
+  BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:work:",
+            arq:sha1(STR(?bfWork)))) AS ?workURI )
+  BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:expression:",
+            arq:sha1(STR(?bfWork)))) AS ?exprURI )
+
+  # Primary creator only (translators, editors -> Expression, see Pass 2)
+  OPTIONAL {
+    ?bfWork bf:contribution ?c .
+    ?c a bf:PrimaryContribution ;
+       bf:agent ?primaryAgent .
+  }
+  OPTIONAL { ?bfWork bf:subject        ?subject }
+  OPTIONAL { ?bfWork bf:classification ?class }
+  OPTIONAL { ?bfWork bf:originDate     ?originDate }
+  OPTIONAL { ?bfWork bf:genreForm      ?workGenre }
+  OPTIONAL { ?bfWork bflc:marcKey      ?marcKey }
+  OPTIONAL {
+    ?bfWork bf:title ?t . ?t bf:mainTitle ?workLabel .
+  }
+
+  # Helmet identifier preservation (added by M2 post-process).
+  OPTIONAL {
+    ?bfWork bf:identifiedBy ?ident .
+    ?ident  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
+            rdf:value ?identValue ;
+            bf:source ?identSource .
+  }
+}

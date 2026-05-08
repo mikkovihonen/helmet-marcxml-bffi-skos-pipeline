@@ -3,7 +3,7 @@
   <record>
     <leader>00000cas a2200000 a 4500</leader>
     <controlfield tag="001">10000006</controlfield>
-    <controlfield tag="008">230101c20239999fi xx p     0   a0fin d</controlfield>
+    <controlfield tag="008">230101c20239999fi    p      0    0 fin d</controlfield>
     <datafield tag="040" ind1=" " ind2=" ">
       <subfield code="a">FI-Helmet</subfield>
       <subfield code="b">fin</subfield>
