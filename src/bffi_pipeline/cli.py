@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages import bf_to_bffi, marc_to_bf
+from bffi_pipeline.stages import bf_to_bffi, marc_to_bf, workkey
 
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
 
@@ -102,6 +102,27 @@ def bf_to_bffi_command(
     typer.echo(summary.render())
     if summary.errored:
         raise typer.Exit(code=1)
+
+
+@app.command("workkey-stats")
+def workkey_stats_command(
+    path: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            readable=True,
+            resolve_path=True,
+            help=(
+                "Path to a single BFFI Turtle file or to a data directory "
+                "(with bffi/ and bibframe/ subdirs)."
+            ),
+        ),
+    ],
+) -> None:
+    """Report Stage-1 block-size distribution (M4)."""
+    graph = workkey.load_corpus(path)
+    stats = workkey.compute_blocks(graph)
+    typer.echo(stats.render())
 
 
 if __name__ == "__main__":

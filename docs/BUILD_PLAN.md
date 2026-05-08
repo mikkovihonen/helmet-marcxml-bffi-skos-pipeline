@@ -250,9 +250,9 @@ BFFI_EVAL_DIR=./eval-runs
 
 ### M4 — Work-key blocking (Stage 1)
 
-- [ ] `src/bffi_pipeline/stages/workkey.py` with `compute_blocking_key(work: dict) -> str`. Deterministic, accent-fold + lowercase + strip punctuation, normalized creator surname + first significant title token + content type code.
-- [ ] CLI subcommand `bffi-pipeline workkey-stats <bffi.ttl>` reports block size distribution.
-- [ ] Unit tests cover: same surname different given names → same block; transliteration variants → same block (use accent folding); accents → ignored.
+- [x] `src/bffi_pipeline/stages/workkey.py` with `compute_blocking_key(work: dict) -> str`. Deterministic, accent-fold + lowercase + strip punctuation, normalized creator surname + first significant title token + content type code.
+- [x] CLI subcommand `bffi-pipeline workkey-stats <bffi.ttl>` reports block size distribution. *(Accepts a single `.ttl` file or a data directory with `bffi/` + `bibframe/` subdirs — the directory mode joins agent labels in.)*
+- [x] Unit tests cover: same surname different given names → same block; transliteration variants → same block (use accent folding); accents → ignored.
 
 **Definition of done:** Running on the sample produces blocks that group what should be grouped.
 
