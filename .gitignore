@@ -1,7 +1,8 @@
-# Generated / runtime data (configurable via BFFI_*_DIR env vars)
-data/
-logs/
-eval-runs/
+# Generated / runtime data (configurable via BFFI_*_DIR env vars).
+# Anchor with a leading slash so test fixtures under tests/data/ are tracked.
+/data/
+/logs/
+/eval-runs/
 
 # Local environment
 .env

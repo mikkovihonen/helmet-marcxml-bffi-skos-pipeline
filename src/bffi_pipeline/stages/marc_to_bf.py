@@ -1,1 +1,462 @@
-"""MARCXML to BIBFRAME conversion via the LoC marc2bibframe2 XSLT (filled in M2)."""
+"""Stage M2: MARCXML to BIBFRAME via the LoC ``marc2bibframe2`` XSLT.
+
+For each input file the stage:
+
+1. Validates the filename, encoding, XML syntax, and minimum content
+   (Boundary 1 — :mod:`bffi_pipeline.validation.marcxml`).
+2. Runs the XSLT to produce raw BIBFRAME RDF/XML, parameterising
+   ``baseuri`` so the Work and Instance URIs carry the Helmet bib ID.
+3. Post-processes the graph:
+   - injects ``bf:identifiedBy`` triples linking every ``bf:Work`` and
+     ``bf:Instance`` to the Helmet ``bf:Source`` URI, with the bare
+     numeric bib ID as ``rdf:value``;
+   - emits a ``bffi-prov:MarcConversion`` Activity (``prov:used`` =
+     source filename, ``bffi-prov:helmetBibId``, ``bffi-prov:converterVersion``);
+   - links the Work and Instance to the Activity via ``prov:wasGeneratedBy``;
+   - mints one ``bffi:AdminMetadata`` block per Work/Instance, populated
+     with the M2 initial-stamp fields (see ``docs/BUILD_PLAN.md`` M2 and
+     spec § 8).
+4. Validates the result against ``config/shapes/bibframe-conversion.shape.ttl``
+   (Boundary 2 — :mod:`bffi_pipeline.validation.bibframe`).
+5. Writes ``<output_dir>/bibframe/<helmet_id>.rdf`` atomically.
+
+A row is appended to ``<output_dir>/helmet-map.jsonl`` for every success
+and to ``<output_dir>/bibframe/_errors.jsonl`` for every typed failure.
+Re-runs skip files whose output already exists and is newer than the
+input; pass ``force=True`` to re-convert.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import uuid
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from functools import lru_cache
+from pathlib import Path
+from typing import Final
+
+from lxml import etree
+from rdflib import BNode, Graph, Literal, URIRef
+from rdflib.namespace import RDF, RDFS, XSD
+
+from bffi_pipeline import __version__ as PIPELINE_VERSION
+from bffi_pipeline.config import get_settings
+from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.validation.bibframe import BibframeShapeError, assert_conforms
+from bffi_pipeline.validation.marcxml import MarcXmlValidationError, validate
+
+_BASEURI: Final[str] = "http://urn.fi/URN:NBN:fi:bib:raw/"
+_HELMET_RECORD_NS: Final[str] = "http://urn.fi/URN:NBN:fi:bib:helmet/"
+_BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+_MARC2BIBFRAME2_DIR: Final[Path] = _BFFI_PIPELINE_REPO_ROOT / "third_party" / "marc2bibframe2"
+_XSLT_PATH: Final[Path] = _MARC2BIBFRAME2_DIR / "xsl" / "marc2bibframe2.xsl"
+
+
+# --- Public dataclasses ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HelmetMapRow:
+    """One row of ``helmet-map.jsonl`` per converted record."""
+
+    helmet_bib_id: str
+    source_file: str
+    raw_work_uri: str
+    raw_instance_uri: str
+    converted_at: str
+    marc2bibframe2_version: str
+
+
+@dataclass(frozen=True)
+class ConversionErrorRow:
+    """One row of ``_errors.jsonl`` per failed record."""
+
+    helmet_bib_id: str | None
+    filename: str
+    error_type: str
+    message: str
+
+
+@dataclass
+class ConversionSummary:
+    """Aggregate counts for an end-of-run report."""
+
+    succeeded: list[str] = field(default_factory=list)
+    skipped_idempotent: list[str] = field(default_factory=list)
+    failed: list[ConversionErrorRow] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return len(self.succeeded) + len(self.skipped_idempotent) + len(self.failed)
+
+    def render(self) -> str:
+        lines = [
+            f"MARCXML to BIBFRAME conversion summary ({self.total} input file(s))",
+            f"  succeeded: {len(self.succeeded)}",
+            f"  skipped (already converted): {len(self.skipped_idempotent)}",
+            f"  failed: {len(self.failed)}",
+        ]
+        if self.failed:
+            lines.append("Failures:")
+            lines.extend(
+                f"  - {row.filename}: [{row.error_type}] {row.message}" for row in self.failed
+            )
+        return "\n".join(lines)
+
+
+# --- Caching --------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _xslt() -> etree.XSLT:
+    if not _XSLT_PATH.exists():
+        raise RuntimeError(
+            f"marc2bibframe2 XSLT not found at {_XSLT_PATH}. "
+            "Run `git submodule update --init --recursive`."
+        )
+    return etree.XSLT(etree.parse(str(_XSLT_PATH)))
+
+
+@lru_cache(maxsize=1)
+def marc2bibframe2_version() -> str:
+    """Return the marc2bibframe2 commit SHA (and tag if reachable)."""
+    if not _MARC2BIBFRAME2_DIR.exists():
+        return "unknown"
+    try:
+        sha = subprocess.run(
+            ["git", "-C", str(_MARC2BIBFRAME2_DIR), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+    try:
+        tag = subprocess.run(
+            ["git", "-C", str(_MARC2BIBFRAME2_DIR), "describe", "--tags", "--always"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return f"{tag}+{sha[:12]}"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return sha
+
+
+# --- Conversion primitives ------------------------------------------------
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _run_xslt(tree: etree._ElementTree, helmet_id: str) -> etree._ElementTree:
+    """Run marc2bibframe2 on ``tree`` and return the resulting RDF/XML tree."""
+    result = _xslt()(
+        tree,
+        baseuri=etree.XSLT.strparam(_BASEURI),
+        idfield=etree.XSLT.strparam("001"),
+    )
+    if result is None:
+        raise RuntimeError(f"XSLT produced no output for {helmet_id}")
+    return result
+
+
+def _parse_to_graph(rdf_xml: bytes) -> Graph:
+    g = Graph()
+    g.parse(data=rdf_xml, format="xml")
+    return g
+
+
+def _find_root_resources(g: Graph) -> tuple[URIRef, URIRef]:
+    """Return ``(work_uri, instance_uri)`` from the XSLT-produced graph.
+
+    marc2bibframe2 emits exactly one ``bf:Work`` per record (the parent of
+    everything else); ``bf:hasInstance`` links to the primary ``bf:Instance``.
+    """
+    works = [s for s in g.subjects(RDF.type, V.BF.Work) if isinstance(s, URIRef)]
+    if not works:
+        raise RuntimeError("XSLT output contains no bf:Work")
+    if len(works) > 1:
+        raise RuntimeError(f"XSLT output contains {len(works)} bf:Work resources, expected 1")
+    work = works[0]
+    instances = [o for o in g.objects(work, V.BF.hasInstance) if isinstance(o, URIRef)]
+    if not instances:
+        raise RuntimeError("XSLT output contains no bf:Instance linked to the Work")
+    return work, instances[0]
+
+
+def _add_helmet_identifier(g: Graph, target: URIRef, helmet_id: str) -> None:
+    ident = BNode()
+    g.add((target, V.BF.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BF.Local))
+    g.add((ident, RDF.value, Literal(helmet_id)))
+    g.add((ident, V.BF.source, V.HELMET_SOURCE_URI))
+
+
+def _add_marc_conversion_activity(
+    g: Graph,
+    *,
+    work: URIRef,
+    instance: URIRef,
+    helmet_id: str,
+    source_file: Path,
+    converted_at: str,
+) -> URIRef:
+    activity = V.BIB[f"activity/marc-conv/{uuid.uuid4()}"]
+    g.add((activity, RDF.type, V.PROV.Activity))
+    g.add((activity, RDF.type, V.MarcConversion))
+    g.add((activity, V.PROV.startedAtTime, Literal(converted_at, datatype=XSD.dateTime)))
+    g.add((activity, V.PROV.endedAtTime, Literal(converted_at, datatype=XSD.dateTime)))
+    g.add((activity, V.PROV.wasAssociatedWith, V.AGENT_MARC2BIBFRAME2))
+    g.add((activity, V.PROV.used, URIRef(source_file.resolve().as_uri())))
+    g.add((activity, V.helmetBibId, Literal(helmet_id)))
+    g.add((activity, V.converterVersion, Literal(marc2bibframe2_version())))
+    g.add((work, V.PROV.wasGeneratedBy, activity))
+    g.add((instance, V.PROV.wasGeneratedBy, activity))
+    return activity
+
+
+def _admin_metadata_uri(target: URIRef, helmet_id: str) -> URIRef:
+    suffix = "raw-work" if target.endswith("#Work") else "raw-instance"
+    return V.BIB[f"adminmeta/{suffix}/{helmet_id}"]
+
+
+def _add_admin_metadata_block(
+    g: Graph,
+    *,
+    target: URIRef,
+    helmet_id: str,
+    activity: URIRef,
+    converted_at: str,
+) -> URIRef:
+    am = _admin_metadata_uri(target, helmet_id)
+    timestamp = Literal(converted_at, datatype=XSD.dateTime)
+    helmet_record = URIRef(f"{_HELMET_RECORD_NS}{helmet_id}")
+    pipeline_version_uri = V.BIB[f"gen-process/bffi-pipeline/v{PIPELINE_VERSION}"]
+
+    g.add((target, V.adminMetadata, am))
+    g.add((am, RDF.type, V.AdminMetadata))
+    g.add((am, V.adminMetadataFor, target))
+    g.add((am, V.descriptionCreationDate, timestamp))
+    g.add((am, V.dateGenerated, timestamp))
+    g.add((am, V.descriptionModifier, V.AGENT_MARC2BIBFRAME2))
+    g.add((am, V.generationProcess, pipeline_version_uri))
+    g.add((am, V.descriptionConventions, V.DESC_CONV_BFFI_1_0_0))
+    g.add((am, V.descriptionLevel, V.DESC_LEVEL_MINIMUM))
+    g.add((am, V.encodingLevel, V.ENC_LEVEL_AUTO))
+    g.add((am, V.descriptionAuthentication, V.AUTH_AUTO_MERGED))
+    g.add((am, V.recordingSource, V.RECORDING_SOURCE_HELMET))
+    g.add((am, V.metadataLicensor, V.METADATA_LICENSOR_CC0))
+    g.add((am, V.sourceMetadata, helmet_record))
+    g.add((am, V.PROV.wasGeneratedBy, activity))
+    return am
+
+
+def post_process(
+    g: Graph,
+    *,
+    helmet_id: str,
+    source_file: Path,
+    converted_at: str | None = None,
+) -> tuple[URIRef, URIRef]:
+    """Add Helmet identifiers, conversion provenance, and AdminMetadata blocks.
+
+    Returns ``(work_uri, instance_uri)`` for the side-effect graph. Mutates
+    ``g`` in place.
+    """
+    converted_at = converted_at or _utc_now()
+    work, instance = _find_root_resources(g)
+    _add_helmet_identifier(g, work, helmet_id)
+    _add_helmet_identifier(g, instance, helmet_id)
+    activity = _add_marc_conversion_activity(
+        g,
+        work=work,
+        instance=instance,
+        helmet_id=helmet_id,
+        source_file=source_file,
+        converted_at=converted_at,
+    )
+    _add_admin_metadata_block(
+        g,
+        target=work,
+        helmet_id=helmet_id,
+        activity=activity,
+        converted_at=converted_at,
+    )
+    _add_admin_metadata_block(
+        g,
+        target=instance,
+        helmet_id=helmet_id,
+        activity=activity,
+        converted_at=converted_at,
+    )
+    g.bind("bf", V.BF)
+    g.bind("bffi", V.BFFI)
+    g.bind("bffi-prov", V.BFFI_PROV)
+    g.bind("bib", V.BIB)
+    g.bind("prov", V.PROV)
+    g.bind("rdfs", RDFS)
+    return work, instance
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+# --- Driver ---------------------------------------------------------------
+
+
+def _is_output_fresh(input_path: Path, output_path: Path) -> bool:
+    return output_path.exists() and output_path.stat().st_mtime >= input_path.stat().st_mtime
+
+
+def _output_path_for(output_dir: Path, helmet_id: str) -> Path:
+    return output_dir / "bibframe" / f"{helmet_id}.rdf"
+
+
+def _iter_xml_files(input_dir: Path) -> Iterator[Path]:
+    yield from sorted(input_dir.glob("*.xml"))
+
+
+def _convert_one(
+    input_path: Path,
+    output_dir: Path,
+    *,
+    force: bool,
+) -> tuple[HelmetMapRow | None, str]:
+    """Convert one record. Returns ``(map_row, status)`` where status is one of
+    ``"ok"``, ``"skipped"``; raises typed errors on failure.
+
+    The caller catches errors and routes them to ``_errors.jsonl``.
+    """
+    validated = validate(input_path)
+    helmet_id = validated.helmet_bib_id
+    out = _output_path_for(output_dir, helmet_id)
+    if not force and _is_output_fresh(input_path, out):
+        return None, "skipped"
+
+    converted_at = _utc_now()
+    rdf_tree = _run_xslt(validated.tree, helmet_id)
+    rdf_bytes = etree.tostring(rdf_tree, xml_declaration=True, encoding="utf-8")
+    g = _parse_to_graph(rdf_bytes)
+    work, instance = post_process(
+        g,
+        helmet_id=helmet_id,
+        source_file=input_path,
+        converted_at=converted_at,
+    )
+    assert_conforms(g, source_path=input_path)
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    serialised = g.serialize(format="pretty-xml").encode("utf-8")
+    _atomic_write_bytes(out, serialised)
+
+    return (
+        HelmetMapRow(
+            helmet_bib_id=helmet_id,
+            source_file=input_path.name,
+            raw_work_uri=str(work),
+            raw_instance_uri=str(instance),
+            converted_at=converted_at,
+            marc2bibframe2_version=marc2bibframe2_version(),
+        ),
+        "ok",
+    )
+
+
+def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _dedupe_helmet_map(path: Path) -> None:
+    """Last-write-wins dedup on ``helmet_bib_id``. Rewrites atomically."""
+    if not path.exists():
+        return
+    seen: dict[str, dict[str, object]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        seen[row["helmet_bib_id"]] = row
+    rewritten = "\n".join(json.dumps(row, ensure_ascii=False) for row in seen.values()) + "\n"
+    _atomic_write_bytes(path, rewritten.encode("utf-8"))
+
+
+def run(
+    input_dir: Path,
+    *,
+    output_dir: Path | None = None,
+    force: bool = False,
+) -> ConversionSummary:
+    """Convert every ``*.xml`` file in ``input_dir`` and return a summary."""
+    output_dir = output_dir or get_settings().data_dir
+    summary = ConversionSummary()
+    helmet_map_path = output_dir / "helmet-map.jsonl"
+    errors_path = output_dir / "bibframe" / "_errors.jsonl"
+
+    for xml_path in _iter_xml_files(input_dir):
+        try:
+            map_row, status = _convert_one(xml_path, output_dir, force=force)
+        except MarcXmlValidationError as exc:
+            row = ConversionErrorRow(
+                helmet_bib_id=xml_path.stem if xml_path.stem.isdigit() else None,
+                filename=xml_path.name,
+                error_type=exc.error_type,
+                message=exc.message,
+            )
+            summary.failed.append(row)
+            _append_jsonl(errors_path, asdict(row))
+            continue
+        except BibframeShapeError as exc:
+            row = ConversionErrorRow(
+                helmet_bib_id=xml_path.stem if xml_path.stem.isdigit() else None,
+                filename=xml_path.name,
+                error_type="bibframe-shape",
+                message=exc.message,
+            )
+            summary.failed.append(row)
+            _append_jsonl(
+                errors_path,
+                {**asdict(row), "report_text": exc.report_text},
+            )
+            continue
+        except Exception as exc:
+            row = ConversionErrorRow(
+                helmet_bib_id=xml_path.stem if xml_path.stem.isdigit() else None,
+                filename=xml_path.name,
+                error_type="bibframe-conversion",
+                message=str(exc),
+            )
+            summary.failed.append(row)
+            _append_jsonl(errors_path, asdict(row))
+            continue
+
+        if status == "skipped":
+            summary.skipped_idempotent.append(xml_path.name)
+            continue
+
+        assert map_row is not None  # status=='ok' implies a map row
+        summary.succeeded.append(xml_path.name)
+        _append_jsonl(helmet_map_path, asdict(map_row))
+
+    _dedupe_helmet_map(helmet_map_path)
+    return summary
+
+
+__all__ = [
+    "ConversionErrorRow",
+    "ConversionSummary",
+    "HelmetMapRow",
+    "marc2bibframe2_version",
+    "post_process",
+    "run",
+]

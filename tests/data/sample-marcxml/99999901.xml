@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bibrecord xmlns="http://example.org/not-marcxml">
+  <title>This document is well-formed XML but does not conform to MARC21slim.xsd.</title>
+  <author>Test Author</author>
+</bibrecord>

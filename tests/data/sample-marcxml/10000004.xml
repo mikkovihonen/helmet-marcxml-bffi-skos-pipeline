@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+  <record>
+    <leader>00000ccm a2200000 a 4500</leader>
+    <controlfield tag="001">10000004</controlfield>
+    <controlfield tag="008">200315s2020    fi            000 0 fin d</controlfield>
+    <datafield tag="040" ind1=" " ind2=" ">
+      <subfield code="a">FI-Helmet</subfield>
+      <subfield code="b">fin</subfield>
+      <subfield code="c">FI-Helmet</subfield>
+    </datafield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Sibelius, Jean,</subfield>
+      <subfield code="d">1865-1957.</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Finlandia, op. 26 :</subfield>
+      <subfield code="b">sinfoninen runo /</subfield>
+      <subfield code="c">Jean Sibelius.</subfield>
+    </datafield>
+    <datafield tag="336" ind1=" " ind2=" ">
+      <subfield code="a">nuottikirjoitus</subfield>
+      <subfield code="b">ntm</subfield>
+      <subfield code="2">rdacontent</subfield>
+    </datafield>
+    <datafield tag="337" ind1=" " ind2=" ">
+      <subfield code="a">käytettävissä ilman laitetta</subfield>
+      <subfield code="b">n</subfield>
+      <subfield code="2">rdamedia</subfield>
+    </datafield>
+    <datafield tag="338" ind1=" " ind2=" ">
+      <subfield code="a">nide</subfield>
+      <subfield code="b">nc</subfield>
+      <subfield code="2">rdacarrier</subfield>
+    </datafield>
+  </record>
+</collection>

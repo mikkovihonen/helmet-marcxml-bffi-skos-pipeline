@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+  <record>
+    <leader>00000cam a2200000 a 4500</leader>
+    <controlfield tag="001">10000003</controlfield>
+    <controlfield tag="008">210610s2021    sw            000 1 swe d</controlfield>
+    <datafield tag="040" ind1=" " ind2=" ">
+      <subfield code="a">FI-Helmet</subfield>
+      <subfield code="b">swe</subfield>
+      <subfield code="c">FI-Helmet</subfield>
+    </datafield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Lindgren, Astrid,</subfield>
+      <subfield code="d">1907-2002.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Pippi Långstrump.</subfield>
+      <subfield code="l">Swedish.</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Pippi Långstrump /</subfield>
+      <subfield code="c">Astrid Lindgren ; illustrationer av Ingrid Vang Nyman.</subfield>
+    </datafield>
+    <datafield tag="336" ind1=" " ind2=" ">
+      <subfield code="a">teksti</subfield>
+      <subfield code="b">txt</subfield>
+      <subfield code="2">rdacontent</subfield>
+    </datafield>
+    <datafield tag="337" ind1=" " ind2=" ">
+      <subfield code="a">käytettävissä ilman laitetta</subfield>
+      <subfield code="b">n</subfield>
+      <subfield code="2">rdamedia</subfield>
+    </datafield>
+    <datafield tag="338" ind1=" " ind2=" ">
+      <subfield code="a">nide</subfield>
+      <subfield code="b">nc</subfield>
+      <subfield code="2">rdacarrier</subfield>
+    </datafield>
+    <datafield tag="700" ind1="1" ind2=" ">
+      <subfield code="a">Vang Nyman, Ingrid,</subfield>
+      <subfield code="e">illustratör.</subfield>
+    </datafield>
+  </record>
+</collection>

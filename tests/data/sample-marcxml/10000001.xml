@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+  <record>
+    <leader>00000cam a2200000 a 4500</leader>
+    <controlfield tag="001">10000001</controlfield>
+    <controlfield tag="008">230101s2023    fi            000 1 fin d</controlfield>
+    <datafield tag="040" ind1=" " ind2=" ">
+      <subfield code="a">FI-Helmet</subfield>
+      <subfield code="b">fin</subfield>
+      <subfield code="c">FI-Helmet</subfield>
+    </datafield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Tolstoy, Leo,</subfield>
+      <subfield code="d">1828-1910.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Voĭna i mir.</subfield>
+      <subfield code="l">Finnish.</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Sota ja rauha /</subfield>
+      <subfield code="c">Leo Tolstoi ; suomentanut Esa Adrian.</subfield>
+    </datafield>
+    <datafield tag="336" ind1=" " ind2=" ">
+      <subfield code="a">teksti</subfield>
+      <subfield code="b">txt</subfield>
+      <subfield code="2">rdacontent</subfield>
+    </datafield>
+    <datafield tag="337" ind1=" " ind2=" ">
+      <subfield code="a">käytettävissä ilman laitetta</subfield>
+      <subfield code="b">n</subfield>
+      <subfield code="2">rdamedia</subfield>
+    </datafield>
+    <datafield tag="338" ind1=" " ind2=" ">
+      <subfield code="a">nide</subfield>
+      <subfield code="b">nc</subfield>
+      <subfield code="2">rdacarrier</subfield>
+    </datafield>
+    <datafield tag="700" ind1="1" ind2=" ">
+      <subfield code="a">Adrian, Esa,</subfield>
+      <subfield code="e">kääntäjä.</subfield>
+    </datafield>
+  </record>
+</collection>

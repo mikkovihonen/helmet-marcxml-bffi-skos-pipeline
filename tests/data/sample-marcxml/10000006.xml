@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+  <record>
+    <leader>00000cas a2200000 a 4500</leader>
+    <controlfield tag="001">10000006</controlfield>
+    <controlfield tag="008">230101c20239999fi xx p     0   a0fin d</controlfield>
+    <datafield tag="040" ind1=" " ind2=" ">
+      <subfield code="a">FI-Helmet</subfield>
+      <subfield code="b">fin</subfield>
+      <subfield code="c">FI-Helmet</subfield>
+    </datafield>
+    <datafield tag="110" ind1="2" ind2=" ">
+      <subfield code="a">Helsingin yliopisto.</subfield>
+    </datafield>
+    <datafield tag="245" ind1="0" ind2="0">
+      <subfield code="a">Tieteessä tapahtuu.</subfield>
+    </datafield>
+    <datafield tag="336" ind1=" " ind2=" ">
+      <subfield code="a">teksti</subfield>
+      <subfield code="b">txt</subfield>
+      <subfield code="2">rdacontent</subfield>
+    </datafield>
+    <datafield tag="337" ind1=" " ind2=" ">
+      <subfield code="a">käytettävissä ilman laitetta</subfield>
+      <subfield code="b">n</subfield>
+      <subfield code="2">rdamedia</subfield>
+    </datafield>
+    <datafield tag="338" ind1=" " ind2=" ">
+      <subfield code="a">nide</subfield>
+      <subfield code="b">nc</subfield>
+      <subfield code="2">rdacarrier</subfield>
+    </datafield>
+  </record>
+</collection>

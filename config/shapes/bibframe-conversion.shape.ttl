@@ -1,0 +1,88 @@
+# Boundary 2 — SHACL shapes for the post-XSLT BIBFRAME graph.
+#
+# Validates the marc2bibframe2 output *after* the M2 post-processor has added
+# Helmet identifiers, the MarcConversion provenance Activity, and the initial
+# AdminMetadata block. Failures emit `error_type: "bibframe-shape"` per
+# docs/BUILD_PLAN.md M2.
+#
+# Intentionally narrow: we want to catch egregious conversion errors (no Work,
+# no Instance, missing Helmet identifier, missing AdminMetadata) without
+# pre-empting downstream property-routing decisions that are M3's job.
+
+@prefix sh:        <http://www.w3.org/ns/shacl#> .
+@prefix bf:        <http://id.loc.gov/ontologies/bibframe/> .
+@prefix bffi:      <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+@prefix prov:      <http://www.w3.org/ns/prov#> .
+@prefix rdf:       <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:      <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:       <http://www.w3.org/2001/XMLSchema#> .
+
+# Note: "graph contains at least one bf:Work / bf:Instance" is enforced in
+# stages.marc_to_bf._find_root_resources before the shape runs — SHACL's
+# targetClass-based shapes can't express that absence directly.
+
+# --- Every Work and Instance must carry a Helmet bf:identifiedBy ----------
+bffi:HelmetIdShape
+    a sh:NodeShape ;
+    sh:targetClass bf:Work, bf:Instance ;
+    sh:property [
+        sh:path bf:identifiedBy ;
+        sh:minCount 1 ;
+        sh:message "bf:Work / bf:Instance lacks bf:identifiedBy." ;
+        sh:qualifiedValueShape [
+            sh:property [
+                sh:path bf:source ;
+                sh:hasValue <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
+            ] ;
+            sh:property [
+                sh:path rdf:value ;
+                sh:minCount 1 ;
+                sh:datatype xsd:string ;
+            ] ;
+        ] ;
+        sh:qualifiedMinCount 1 ;
+    ] .
+
+# --- Every Work and Instance must carry an AdminMetadata block ------------
+bffi:AdminMetadataLinkShape
+    a sh:NodeShape ;
+    sh:targetClass bf:Work, bf:Instance ;
+    sh:property [
+        sh:path bffi:adminMetadata ;
+        sh:minCount 1 ;
+        sh:message "bf:Work / bf:Instance lacks bffi:adminMetadata link." ;
+    ] .
+
+# --- AdminMetadata blocks must carry the M2 mandatory fields --------------
+bffi:AdminMetadataM2Shape
+    a sh:NodeShape ;
+    sh:targetClass bffi:AdminMetadata ;
+    sh:property [
+        sh:path bffi:adminMetadataFor ;
+        sh:minCount 1 ;
+        sh:message "AdminMetadata missing back-link bffi:adminMetadataFor." ;
+    ] ;
+    sh:property [
+        sh:path bffi:descriptionCreationDate ;
+        sh:minCount 1 ;
+        sh:datatype xsd:dateTime ;
+    ] ;
+    sh:property [
+        sh:path bffi:dateGenerated ;
+        sh:minCount 1 ;
+        sh:datatype xsd:dateTime ;
+    ] ;
+    sh:property [ sh:path bffi:descriptionModifier ;       sh:minCount 1 ] ;
+    sh:property [ sh:path bffi:descriptionConventions ;    sh:minCount 1 ] ;
+    sh:property [ sh:path bffi:descriptionLevel ;          sh:minCount 1 ] ;
+    sh:property [ sh:path bffi:encodingLevel ;             sh:minCount 1 ] ;
+    sh:property [ sh:path bffi:descriptionAuthentication ; sh:minCount 1 ] ;
+    sh:property [ sh:path bffi:generationProcess ;         sh:minCount 1 ] ;
+    sh:property [ sh:path bffi:metadataLicensor ;          sh:minCount 1 ] ;
+    sh:property [ sh:path bffi:recordingSource ;           sh:minCount 1 ] ;
+    sh:property [ sh:path bffi:sourceMetadata ;            sh:minCount 1 ] ;
+    sh:property [
+        sh:path prov:wasGeneratedBy ;
+        sh:minCount 1 ;
+        sh:message "AdminMetadata missing spine link prov:wasGeneratedBy." ;
+    ] .
