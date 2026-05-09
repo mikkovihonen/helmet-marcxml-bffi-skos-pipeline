@@ -1,9 +1,13 @@
 # Sample MARCXML — synthetic
 
 These records are **synthetic**, hand-authored to exercise the M2 pipeline
-on a known mix of valid and broken inputs while real Helmet records are
-still pending (see `docs/external-dependencies.md` Ask 1). M2 is "developed
-against synthetic" but **not "done"** until real records replace these.
+on a known mix of valid and broken inputs. They remain in place even
+after real Helmet records arrived because they cover failure modes
+(Latin-1 encoding, XSD violations, missing 245) that no real catalogue
+record reproduces. The M2 integration test asserts on this exact set.
+
+For the cataloguer-curated **real** Helmet records (Ask 1, received
+2026-05-09), see `curated/` in this directory.
 
 | Filename       | Purpose                                                           |
 |----------------|-------------------------------------------------------------------|

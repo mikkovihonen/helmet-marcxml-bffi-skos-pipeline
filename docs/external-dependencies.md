@@ -34,6 +34,48 @@ The list to request:
 14. A record for an aggregate work / collection.
 15. A "deliberately problematic" record — one the cataloguer finds embarrassing for any reason (cataloguing oddity, missing fields, encoding quirks). Stress-tests the validation boundaries.
 
+### Status (2026-05-09): partially fulfilled
+
+Cataloguers returned **13 bib IDs** — fixtures committed under
+`tests/data/sample-marcxml/curated/` (see `curated/README.md` for the
+full slot mapping and per-record notes). The mapping below is **inferred
+from MARCXML content**, since per-record case notes were not supplied
+alongside the IDs; confirming with cataloguers before the gold set
+freezes is recommended.
+
+| Slot | Bib ID | Inferred fit |
+|------|--------|--------------|
+| 1 — Finnish original monograph | `2628274` | Liisa Louhela, *Mies joka kantoi aurinkoa sylissään* |
+| 2 — FI ↔ SV translation pair | — | **Outstanding** (needs two paired bibs) |
+| 3 — Russian → Finnish | `2371438` | Pushkin selection, two translators |
+| 4 — English → Finnish | `2372028` | Kate Morton, *Kellontekijän tytär* |
+| 5 — Common-title collision pair | — | **Outstanding** (needs two paired bibs) |
+| 6 — Adaptation pair | `2564382` | *Natural light* (film) ← Závada Pál novel |
+| 7 — Abridgement | `2360958` | *Sagor från Mumindalen* ← Tove Jansson novels |
+| 8 — Music recording (sound) | `2452306` | Steven Wilson, *Get all you deserve* |
+| 9 — Notated music / score | `2616222` | Mozart piano works, Edition Peters |
+| 10 — Cartographic resource | — | **Outstanding** |
+| 11 — Serial / continuing | — | **Outstanding** |
+| 12 — Corporate body creator | `2484550` | Big Country, *Out beyond the river* (`110 2`) |
+| 13 — Multiple co-creators | `1059592` *(secondary)* | Three editors of equal billing |
+| 14 — Aggregate / collection | `2620193` | Dickens essay collection in Finnish |
+| 15 — Deliberately problematic | `1769634`, `2602288`, `2576727` | Trilingual original; Cyrillic `880`; PS5 game |
+
+**Follow-up to request from cataloguers:**
+
+1. **Slots 2, 5, 10, 11** — four unfilled slots. Slots 2 and 5 each need
+   a *paired* bib ID; the gold-set value comes from the relationship
+   (same Work / colliding title) and is impossible to construct from a
+   single record.
+2. **Per-record one-sentence case notes** — the original ask included
+   "a one-sentence note on why it's interesting" per record. These were
+   not supplied. Without them the slot mapping in
+   `tests/data/sample-marcxml/curated/README.md` is the maintainer's
+   inference, not authoritative cataloguer judgement.
+3. **Expected outcomes for adjacency cases** — for `2564382`/`2360958`
+   we need the source-novel bib IDs to be confirmed as separate Works
+   in the gold set (and added to the corpus if not already present).
+
 ## Ask 2 — Reconciliation seed batch (~15 records, before M9)
 
 Records chosen to develop and test agent and subject reconciliation:
