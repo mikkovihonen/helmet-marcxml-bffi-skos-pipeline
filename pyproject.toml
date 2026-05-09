@@ -62,6 +62,7 @@ ignore = ["PLR0913"]
 # function bodies on purpose so the rest of the CLI does not pay the
 # multi-second import cost.
 "src/bffi_pipeline/stages/embeddings.py" = ["PLC0415"]
+"src/bffi_pipeline/eval/embed_benchmark.py" = ["PLC0415"]
 
 [tool.mypy]
 python_version = "3.11"

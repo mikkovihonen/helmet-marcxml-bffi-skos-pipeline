@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.eval import embed_benchmark
 from bffi_pipeline.stages import bf_to_bffi, embeddings, marc_to_bf, workkey
 
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
@@ -209,6 +210,56 @@ def embed_command(
     typer.echo(build_result.render())
     stats = embeddings.query_candidates(target, top_k=top_k, cross_block=cross_block)
     typer.echo(stats.render())
+
+
+@app.command("embed-benchmark")
+def embed_benchmark_command(
+    models: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--model",
+            help=(
+                "HuggingFace model name; pass multiple times to compare. "
+                "Defaults to BGE-M3 / multilingual-e5-large / jina-v3."
+            ),
+        ),
+    ] = None,
+    gold_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--gold-path",
+            help="Path to gold/gold.jsonl; defaults to repo gold/ directory.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    device: Annotated[
+        str,
+        typer.Option(
+            "--device",
+            help="PyTorch device: mps (Apple Silicon), cuda, or cpu.",
+        ),
+    ] = embeddings.DEFAULT_DEVICE,
+    batch_size: Annotated[
+        int,
+        typer.Option(
+            "--batch-size",
+            help="Embedding batch size.",
+        ),
+    ] = embeddings.DEFAULT_BATCH_SIZE,
+) -> None:
+    """Compare embedding models on the gold set's same_work / different_work gap (M5 / M12)."""
+    candidate_models = tuple(models) if models else embed_benchmark.DEFAULT_MODELS
+    results = embed_benchmark.benchmark_models(
+        models=candidate_models,
+        gold_path=gold_path,
+        device=device,
+        batch_size=batch_size,
+    )
+    typer.echo(embed_benchmark.render_comparison(results))
 
 
 @app.command("embed-stats")
