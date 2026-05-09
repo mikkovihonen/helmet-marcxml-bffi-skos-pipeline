@@ -10,7 +10,7 @@ import typer
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.eval import embed_benchmark
 from bffi_pipeline.provenance import writer as prov_writer
-from bffi_pipeline.stages import bf_to_bffi, embeddings, judge, marc_to_bf, workkey
+from bffi_pipeline.stages import bf_to_bffi, embeddings, judge, marc_to_bf, merge, workkey
 
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
 provenance_app = typer.Typer(help="Provenance graph maintenance (M7).", no_args_is_help=True)
@@ -431,6 +431,75 @@ def judge_command(
             progress_callback=_on_progress,
             concurrency=concurrency,
         )
+    typer.echo(result.render())
+
+
+@app.command("merge")
+def merge_command(
+    decisions_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--decisions-path",
+            help="M6 judge-decisions.jsonl; defaults to <BFFI_DATA_DIR>/judge-decisions.jsonl.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    bffi_corpus_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--bffi-corpus-dir",
+            help="Directory holding bffi/*.ttl + bibframe/*.rdf; defaults to BFFI_DATA_DIR.",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-path",
+            "-o",
+            help="canonical.ttl path; defaults to <BFFI_DATA_DIR>/canonical.ttl.",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    map_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--map-path",
+            help="canonical-map.jsonl path; defaults to <BFFI_DATA_DIR>/canonical-map.jsonl.",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    helmet_map_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--helmet-map-path",
+            help="M2 helmet-map.jsonl; defaults to <BFFI_DATA_DIR>/helmet-map.jsonl.",
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """Apply judge decisions to mint canonical Works (M8)."""
+    result = merge.apply_merge(
+        decisions_path,
+        bffi_corpus_dir,
+        output_path=output_path,
+        map_path=map_path,
+        helmet_map_path=helmet_map_path,
+    )
     typer.echo(result.render())
 
 
