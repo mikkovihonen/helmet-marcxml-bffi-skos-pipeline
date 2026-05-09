@@ -366,6 +366,39 @@ def judge_command(
             help="Wipe the output JSONL and checkpoint and re-run from scratch.",
         ),
     ] = False,
+    provenance: Annotated[
+        bool,
+        typer.Option(
+            "--provenance/--no-provenance",
+            help=(
+                "Emit per-decision bffi-prov:WorkMergeDecision Activities to "
+                "<BFFI_DATA_DIR>/provenance.ttl (spec § 8). On by default; the "
+                "off-switch is for local development."
+            ),
+        ),
+    ] = True,
+    provenance_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--provenance-path",
+            help="Path to provenance.ttl; defaults to <BFFI_DATA_DIR>/provenance.ttl.",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    concurrency: Annotated[
+        int,
+        typer.Option(
+            "--concurrency",
+            help=(
+                "Pairs to judge in parallel. Default 1 (Ollama serial); vllm-mlx "
+                "production runs sweep {4, 8, 16, 32} per spec § 11. Output JSONL "
+                "stays in input order; the checkpoint advances contiguously."
+            ),
+            min=1,
+        ),
+    ] = judge.DEFAULT_CONCURRENCY,
 ) -> None:
     """Run the cascade judge over M5's escalate-band candidate pairs (M6)."""
     settings = get_settings()
@@ -374,15 +407,30 @@ def judge_command(
     def _on_progress(snapshot: judge.JudgeBatchProgress) -> None:
         typer.echo(snapshot.render())
 
-    result = judge.judge_batch(
-        candidates_path,
-        target_output,
-        bffi_corpus_dir=bffi_corpus_dir,
-        resume=not restart,
-        primary_model=primary_model,
-        fallback_model=fallback_model,
-        progress_callback=_on_progress,
-    )
+    if provenance:
+        with prov_writer.ProvenanceWriter(provenance_path) as writer:
+            result = judge.judge_batch(
+                candidates_path,
+                target_output,
+                bffi_corpus_dir=bffi_corpus_dir,
+                resume=not restart,
+                primary_model=primary_model,
+                fallback_model=fallback_model,
+                progress_callback=_on_progress,
+                provenance_writer=writer,
+                concurrency=concurrency,
+            )
+    else:
+        result = judge.judge_batch(
+            candidates_path,
+            target_output,
+            bffi_corpus_dir=bffi_corpus_dir,
+            resume=not restart,
+            primary_model=primary_model,
+            fallback_model=fallback_model,
+            progress_callback=_on_progress,
+            concurrency=concurrency,
+        )
     typer.echo(result.render())
 
 

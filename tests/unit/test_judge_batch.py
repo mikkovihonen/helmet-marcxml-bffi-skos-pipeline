@@ -16,6 +16,7 @@ from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.provenance.writer import ProvenanceWriter
 from bffi_pipeline.stages import judge
 from bffi_pipeline.stages.judge import (
     CHECKPOINT_INTERVAL,
@@ -520,3 +521,137 @@ def test_missing_candidates_file_raises(tmp_path: Path) -> None:
 def test_constants_match_expected_layout() -> None:
     assert DECISIONS_FILENAME == "judge-decisions.jsonl"
     assert CHECKPOINT_INTERVAL == 100
+
+
+# --- Provenance integration (M6 phase 2b ↔ M7) ---------------------------
+
+
+def test_provenance_writer_emits_one_activity_per_cascade_step(tmp_path: Path) -> None:
+    """A pair that runs both primary AND fallback should produce TWO Activities."""
+    candidates = tmp_path / "candidates.jsonl"
+    out = tmp_path / "decisions.jsonl"
+    prov_path = tmp_path / "provenance.ttl"
+    _write_candidates(candidates, [_candidate(WORK_A, WORK_B)])
+    decisions = {
+        (WORK_A, WORK_B): _outcome(_make_decision(), used_cascade=True),
+    }
+
+    with ProvenanceWriter(prov_path) as writer:
+        judge_batch(
+            candidates,
+            out,
+            work_records=_records(),
+            cascade=_scripted_cascade(decisions),
+            provenance_writer=writer,
+        )
+
+    g = Graph()
+    g.parse(str(prov_path), format="turtle")
+    activities = list(g.subjects(V.RDF.type, V.WorkMergeDecision))
+    assert len(activities) == 2
+    stages = sorted(str(o) for _, _, o in g.triples((None, V.stage, None)))
+    assert stages == sorted(["llm-judge-primary", "llm-judge-second-opinion"])
+
+
+def test_provenance_writer_emits_software_agent_once_per_model(tmp_path: Path) -> None:
+    candidates = tmp_path / "candidates.jsonl"
+    out = tmp_path / "decisions.jsonl"
+    prov_path = tmp_path / "provenance.ttl"
+    _write_candidates(
+        candidates,
+        [
+            _candidate(WORK_A, WORK_B),
+            _candidate(WORK_A, WORK_C),
+        ],
+    )
+    decisions = {
+        (WORK_A, WORK_B): _outcome(_make_decision(), used_cascade=True),
+        (WORK_A, WORK_C): _outcome(_make_decision(), used_cascade=True),
+    }
+
+    with ProvenanceWriter(prov_path) as writer:
+        judge_batch(
+            candidates,
+            out,
+            work_records=_records(),
+            cascade=_scripted_cascade(decisions),
+            provenance_writer=writer,
+        )
+
+    g = Graph()
+    g.parse(str(prov_path), format="turtle")
+    agents = list(g.subjects(V.RDF.type, V.PROV.SoftwareAgent))
+    # Two pairs, each with primary+fallback → 2 distinct model URIs total.
+    assert len(agents) == 2
+
+
+def test_concurrency_preserves_input_order_in_output_jsonl(tmp_path: Path) -> None:
+    """Per spec, output rows must match input order even when judging in parallel."""
+    candidates = tmp_path / "candidates.jsonl"
+    out = tmp_path / "decisions.jsonl"
+    rows_in = [_candidate(WORK_A, WORK_B), _candidate(WORK_A, WORK_C), _candidate(WORK_B, WORK_C)]
+    _write_candidates(candidates, rows_in)
+
+    decisions = {
+        (WORK_A, WORK_B): _outcome(_make_decision(matching=["a-b"])),
+        (WORK_A, WORK_C): _outcome(_make_decision(matching=["a-c"])),
+        (WORK_B, WORK_C): _outcome(_make_decision(matching=["b-c"])),
+    }
+    judge_batch(
+        candidates,
+        out,
+        work_records=_records(),
+        cascade=_scripted_cascade(decisions),
+        concurrency=4,
+    )
+    rows_out = [
+        json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    assert [(r["work_a"], r["work_b"]) for r in rows_out] == [
+        (WORK_A, WORK_B),
+        (WORK_A, WORK_C),
+        (WORK_B, WORK_C),
+    ]
+    assert {r["matching_fields"][0] for r in rows_out} == {"a-b", "a-c", "b-c"}
+
+
+def test_concurrency_zero_or_negative_raises(tmp_path: Path) -> None:
+    candidates = tmp_path / "candidates.jsonl"
+    out = tmp_path / "decisions.jsonl"
+    _write_candidates(candidates, [_candidate(WORK_A, WORK_B)])
+    with pytest.raises(ValueError, match="concurrency"):
+        judge_batch(
+            candidates,
+            out,
+            work_records=_records(),
+            cascade=_scripted_cascade({(WORK_A, WORK_B): _outcome(_make_decision())}),
+            concurrency=0,
+        )
+
+
+def test_provenance_writer_records_cache_hit_flag(tmp_path: Path) -> None:
+    candidates = tmp_path / "candidates.jsonl"
+    out = tmp_path / "decisions.jsonl"
+    prov_path = tmp_path / "provenance.ttl"
+    _write_candidates(candidates, [_candidate(WORK_A, WORK_B)])
+    decisions = {
+        (WORK_A, WORK_B): _outcome(_make_decision(), primary_cache_hit=True),
+    }
+
+    with ProvenanceWriter(prov_path) as writer:
+        judge_batch(
+            candidates,
+            out,
+            work_records=_records(),
+            cascade=_scripted_cascade(decisions),
+            provenance_writer=writer,
+        )
+
+    g = Graph()
+    g.parse(str(prov_path), format="turtle")
+    cache_hit_values = {str(o) for _, _, o in g.triples((None, V.cacheHit, None))}
+    assert "true" in cache_hit_values
+    # Exactly one cacheHit triple (only the primary step ran for this pair).
+    triples = list(g.triples((None, V.cacheHit, None)))
+    assert len(triples) == 1
+    assert triples[0][2] == Literal(True)

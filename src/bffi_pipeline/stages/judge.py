@@ -60,6 +60,7 @@ from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.provenance.writer import ProvenanceWriter
 
 # --- Constants ------------------------------------------------------------
 
@@ -297,7 +298,10 @@ class JudgeCache:
 
     def __init__(self, path: Path | str):
         self._path = path
-        self._conn = sqlite3.connect(str(path))
+        # check_same_thread=False so the cache can be shared across worker
+        # threads in the M6 concurrent batch driver. SQLite serialises
+        # writes through its own write lock; concurrent reads are fine.
+        self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.execute(self._SCHEMA)
         self._conn.commit()
 
@@ -830,6 +834,7 @@ CHECKPOINT_INTERVAL: Final[int] = 100
 ESCALATE_BAND: Final[str] = "escalate"
 DECISIONS_FILENAME: Final[str] = "judge-decisions.jsonl"
 CHECKPOINT_SUFFIX: Final[str] = ".checkpoint"
+DEFAULT_CONCURRENCY: Final[int] = 1
 
 
 def _checkpoint_path_for(output_path: Path) -> Path:
@@ -907,6 +912,43 @@ def _write_checkpoint(path: Path, ckpt: JudgeCheckpoint) -> None:
 CascadeFn = Callable[..., JudgeOutcome]
 
 
+def _emit_provenance(
+    writer: ProvenanceWriter,
+    row: dict[str, Any],
+    outcome: JudgeOutcome,
+    seen_models: set[str],
+) -> None:
+    """Log every cascade step in ``outcome`` as a separate WorkMergeDecision.
+
+    Per spec § 8 / docs/local-inference.md the cascade's primary and
+    second-opinion calls each become their own ``prov:Activity`` with
+    distinct ``bffi-prov:stage`` tags so a SPARQL query can ask
+    "which decisions did the 32 B alone make?" vs "which got a 72 B
+    second opinion?". Software-agent blocks are emitted once per
+    model_id (caller tracks the seen set across the batch run).
+    """
+    inputs = (row["work_a"], row["work_b"])
+    similarity = float(row.get("similarity", 0.0))
+    for step in outcome.steps:
+        if step.model_name not in seen_models:
+            writer.add_software_agent(model_id=step.model_name)
+            seen_models.add(step.model_name)
+        writer.add_merge_decision(
+            inputs=inputs,
+            decision=step.decision.decision,
+            confidence=step.decision.confidence,
+            embedding_similarity=similarity,
+            rationale=step.decision.rationale,
+            matching_fields=step.decision.matching_fields,
+            diverging_fields=step.decision.diverging_fields,
+            prompt_hash=prompt_hash(),
+            raw_response=step.decision.model_dump_json(),
+            model_id=step.model_name,
+            stage=step.stage,
+            cache_hit=step.cache_hit,
+        )
+
+
 def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair retry + checkpoint write; splitting fragments state.
     candidates_path: Path | None = None,
     output_path: Path | None = None,
@@ -922,6 +964,8 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
     cascade: CascadeFn | None = None,
     progress_callback: Callable[[JudgeBatchProgress], None] | None = None,
     decision_callback: Callable[[dict[str, Any], JudgeOutcome], None] | None = None,
+    provenance_writer: ProvenanceWriter | None = None,
+    concurrency: int = DEFAULT_CONCURRENCY,
     sleep: Callable[[float], None] = time.sleep,
 ) -> JudgeBatchResult:
     """Run the cascade over every escalate-band pair from M5.
@@ -931,9 +975,12 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
     checkpoint; ``resume=False`` blows away both the output JSONL and
     its checkpoint sibling before starting.
 
-    ``decision_callback`` is the hook phase 2b's provenance writer
-    will subscribe to: it receives the raw candidate row and the
-    ``JudgeOutcome`` (with all cascade steps) for every decided pair.
+    ``decision_callback`` is a generic per-pair hook used by tests and
+    custom integrations. ``provenance_writer`` is the spec § 8
+    integration: when supplied, every cascade step is logged as a
+    discrete ``bffi-prov:WorkMergeDecision`` Activity (so a primary +
+    second-opinion pair produces two Activities), and each distinct
+    model gets a ``prov:SoftwareAgent`` block emitted once.
     """
     settings = get_settings()
     candidates_path = candidates_path or (settings.data_dir / "embed-candidates.jsonl")
@@ -954,6 +1001,8 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
     own_cache = cache is None
     if own_cache:
         cache = JudgeCache(default_cache_path())
+
+    seen_models: set[str] = set()
 
     started = time.monotonic()
 
@@ -985,67 +1034,77 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
                 output_path.unlink()
             write_mode = "w"
 
-    try:
-        with output_path.open(write_mode, encoding="utf-8") as fh:
-            for idx in range(start_idx, total):
-                row = candidates[idx]
-                a = work_records.get(row["work_a"])
-                b = work_records.get(row["work_b"])
-                if a is None or b is None:
-                    decision = _uncertain_decision(
-                        f"missing WorkRecord for {row['work_a']} or {row['work_b']}; "
-                        "M2 + M3 must run before M6."
-                    )
-                    outcome = JudgeOutcome(final=decision, steps=[])
-                else:
-                    outcome = cascade_fn(
-                        a,
-                        b,
-                        row["similarity"],
-                        primary_model=primary_model,
-                        fallback_model=fallback_model,
-                        primary_chain=primary_chain,
-                        fallback_chain=fallback_chain,
-                        cache=cache,
-                        sleep=sleep,
-                    )
+    if concurrency < 1:
+        raise ValueError(f"concurrency must be ≥ 1, got {concurrency!r}")
 
-                fh.write(_json.dumps(_serialise_decision(row, outcome), ensure_ascii=False) + "\n")
-                fh.flush()
+    def _judge_one(idx: int) -> tuple[dict[str, Any], JudgeOutcome]:
+        row = candidates[idx]
+        a = work_records.get(row["work_a"]) if work_records else None
+        b = work_records.get(row["work_b"]) if work_records else None
+        if a is None or b is None:
+            return row, JudgeOutcome(
+                final=_uncertain_decision(
+                    f"missing WorkRecord for {row['work_a']} or {row['work_b']}; "
+                    "M2 + M3 must run before M6."
+                ),
+                steps=[],
+            )
+        return row, cascade_fn(
+            a,
+            b,
+            row["similarity"],
+            primary_model=primary_model,
+            fallback_model=fallback_model,
+            primary_chain=primary_chain,
+            fallback_chain=fallback_chain,
+            cache=cache,
+            sleep=sleep,
+        )
 
-                if decision_callback is not None:
-                    decision_callback(row, outcome)
+    def _record_outcome(
+        idx: int,
+        row: dict[str, Any],
+        outcome: JudgeOutcome,
+        fh: Any,
+    ) -> None:
+        nonlocal cache_hits, fresh_calls, cascade_used
+        fh.write(_json.dumps(_serialise_decision(row, outcome), ensure_ascii=False) + "\n")
+        fh.flush()
 
-                if outcome.used_cascade:
-                    cascade_used += 1
-                for step in outcome.steps:
-                    if step.cache_hit:
-                        cache_hits += 1
-                    else:
-                        fresh_calls += 1
-                decision_counts[outcome.final.decision] = (
-                    decision_counts.get(outcome.final.decision, 0) + 1
-                )
+        if decision_callback is not None:
+            decision_callback(row, outcome)
+        if provenance_writer is not None:
+            _emit_provenance(provenance_writer, row, outcome, seen_models)
 
-                completed = idx + 1
-                if completed % CHECKPOINT_INTERVAL == 0 or completed == total:
-                    elapsed = time.monotonic() - started
-                    avg = elapsed / max(1, completed - start_idx)
-                    remaining = max(0, total - completed)
-                    eta_seconds = remaining * avg if avg > 0 else None
+        if outcome.used_cascade:
+            cascade_used += 1
+        for step in outcome.steps:
+            if step.cache_hit:
+                cache_hits += 1
+            else:
+                fresh_calls += 1
+        decision_counts[outcome.final.decision] = decision_counts.get(outcome.final.decision, 0) + 1
 
-                    _write_checkpoint(
-                        checkpoint_path,
-                        JudgeCheckpoint(
-                            start_time=start_time_iso,
-                            last_completed_idx=idx,
-                            total_pairs=total,
-                            cache_hits=cache_hits,
-                            fresh_calls=fresh_calls,
-                            cascade_used=cascade_used,
-                        ),
-                    )
-                    progress = JudgeBatchProgress(
+        completed = idx + 1
+        if completed % CHECKPOINT_INTERVAL == 0 or completed == total:
+            elapsed = time.monotonic() - started
+            avg = elapsed / max(1, completed - start_idx)
+            remaining = max(0, total - completed)
+            eta_seconds = remaining * avg if avg > 0 else None
+            _write_checkpoint(
+                checkpoint_path,
+                JudgeCheckpoint(
+                    start_time=start_time_iso,
+                    last_completed_idx=idx,
+                    total_pairs=total,
+                    cache_hits=cache_hits,
+                    fresh_calls=fresh_calls,
+                    cascade_used=cascade_used,
+                ),
+            )
+            if progress_callback is not None:
+                progress_callback(
+                    JudgeBatchProgress(
                         completed=completed,
                         total=total,
                         cache_hits=cache_hits,
@@ -1054,8 +1113,28 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
                         elapsed_seconds=elapsed,
                         eta_seconds=eta_seconds,
                     )
-                    if progress_callback is not None:
-                        progress_callback(progress)
+                )
+
+    try:
+        with output_path.open(write_mode, encoding="utf-8") as fh:
+            if concurrency == 1:
+                for idx in range(start_idx, total):
+                    row, outcome = _judge_one(idx)
+                    _record_outcome(idx, row, outcome, fh)
+            else:
+                # Submit/drain in fixed-size chunks so output JSONL stays in input
+                # order and the checkpoint can rely on `last_completed_idx` being
+                # contiguous. Reuses one thread pool across chunks.
+                from concurrent.futures import ThreadPoolExecutor
+
+                with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                    for chunk_start in range(start_idx, total, concurrency):
+                        chunk_end = min(chunk_start + concurrency, total)
+                        idxs = list(range(chunk_start, chunk_end))
+                        futures = [pool.submit(_judge_one, idx) for idx in idxs]
+                        for offset, future in enumerate(futures):
+                            row, outcome = future.result()
+                            _record_outcome(idxs[offset], row, outcome, fh)
     finally:
         if own_cache and cache is not None:
             cache.close()
