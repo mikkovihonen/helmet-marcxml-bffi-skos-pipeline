@@ -232,7 +232,7 @@ bffi:Expression rdfs:label "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
 - `skosmos:sparqlDialect "JenaText"` enables the `text:query` predicate Skosmos uses for fast label search; without it, search becomes painfully slow at scale. Verify `jena-text` is enabled in the Fuseki image.
 - `skosmos:language` order doubles as the display-language priority. `"fi", "sv", "en"` matches Finland's official languages plus an international fallback; `skosmos:defaultLanguage "fi"` is the committed default.
 - To display Works with their Expressions hierarchically, model the link with `skos:narrower`/`skos:broader` *in addition* to `bffi:hasExpression`/`bffi:expressionOf`. This is handled automatically by the Skosify overlay below.
-- Both Fuseki (Jena 5.x) and Skosmos (3.x) versions are pinned in `docker-compose.yml`; see `docs/BUILD_PLAN.md` M10/M11 for the chosen point releases and the rationale.
+- Both Fuseki (`stain/jena-fuseki:5.0.0`) and Skosmos (`ghcr.io/natlibfi/skosmos:3.2`) are pinned in `docker-compose.yml`; see `docs/BUILD_PLAN.md` M10/M11 for the rationale.
 
 ---
 

@@ -1,7 +1,6 @@
 # Fuseki + Skosmos for the BFFI pipeline.
 # Fuseki is pinned per docs/ci-strategy.md.
-# Skosmos pin is a deferred decision (see CLAUDE.md "Deferred decisions") and is
-# expected to land in M11 along with config/skosmos-config.ttl.
+# Skosmos pinned to 3.2; config/skosmos-config.ttl lands in M11.
 
 services:
   fuseki:
@@ -18,8 +17,7 @@ services:
     restart: unless-stopped
 
   skosmos:
-    # TODO(M11): pin to a specific Skosmos 3.x point release.
-    image: ghcr.io/natlibfi/skosmos:3
+    image: ghcr.io/natlibfi/skosmos:3.2
     container_name: bffi-skosmos
     ports:
       - "9090:8080"

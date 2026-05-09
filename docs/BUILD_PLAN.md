@@ -405,7 +405,7 @@ Each entity type queries its primary authority first, falling back only on miss.
 ### M11 — Skosmos config
 
 - [ ] `config/skosmos-config.ttl` per spec §4 with the two `skosmos:indexShowClass` entries.
-- [ ] **Pin Skosmos to a specific 3.x release** in `docker-compose.yml`. Document the chosen version in the runbook.
+- [x] **Pin Skosmos to a specific 3.x release** in `docker-compose.yml`. Pinned to `ghcr.io/natlibfi/skosmos:3.2`; document in the runbook.
 - [ ] **Configure language priority:** `skosmos:language "fi", "sv", "en"` and `skosmos:defaultLanguage "fi"`. Every test/sample record should carry Finnish labels at minimum.
 - [ ] Verified: hierarchy view shows Works with Expressions nested below them.
 - [ ] Search works in Finnish, Swedish, and English.

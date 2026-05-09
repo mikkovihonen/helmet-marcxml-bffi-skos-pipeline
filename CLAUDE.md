@@ -43,10 +43,6 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - **Type strictness:** `mypy --strict` on all of `src/`. Pydantic v2 for cross-module data. `dataclass(frozen=True)` for internal value objects.
 - **Tests against fixtures, not network:** Unit tests never hit the API or Fuseki. Integration tests are tagged; LLM-dependent tests carry an additional `requires_llm` mark and are excluded from CI.
 
-## Deferred decisions
-
-- **Skosmos point release.** `docker-compose.yml` (M0/M11) needs to pin Skosmos to a specific 3.x release rather than tracking `latest`. Fuseki is pinned to `stain/jena-fuseki:5.0.0` in `docs/ci-strategy.md`; the matching Skosmos pin is not yet chosen. Update `docs/marcxml-to-bffi-skosmos-pipeline.md` § 4 and `docs/BUILD_PLAN.md` M11 once the choice is made.
-
 ## Workflow rules
 
 - Read `docs/BUILD_PLAN.md` before starting any milestone. Each milestone has an explicit definition of done; don't move on until it's met.
