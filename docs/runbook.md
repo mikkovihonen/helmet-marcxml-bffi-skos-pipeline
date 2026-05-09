@@ -1,9 +1,9 @@
 # Production runbook
 
 End-to-end recipe for running the BFFI pipeline against the
-~800 k-record Helmet corpus on the M5 Max. Pre-M10 milestones
-(M0-M7) are committed; M8-M11 will extend this document with merge
-+ load + Skosmos config when those milestones land.
+~800 k-record Helmet corpus on the M5 Max. M0-M11 are committed;
+the surface-level checks of the Skosmos UI (M11) are user-side
+smoke checks documented at the bottom of this file.
 
 This is the *canonical* sequence — start here, not from individual
 milestone notes.
@@ -101,7 +101,53 @@ LLM_BASE_URL=http://localhost:8000/v1 \
 #   is one bffi-prov:WorkMergeDecision Activity), and
 #   <BFFI_DATA_DIR>/judge-cache.sqlite (post-validation cache).
 
-# 6. M7 — periodic provenance compaction (every ~90 days).
+# 6. M8 — apply judge decisions, mint canonical Works.
+bffi-pipeline merge
+# → writes <BFFI_DATA_DIR>/canonical.ttl with merged Works
+#   (one bf:identifiedBy per absorbed Helmet record + one
+#   bffi:adminMetadata block per canonical Work),
+#   <BFFI_DATA_DIR>/canonical-map.jsonl (canonical URI → raw URIs +
+#   Helmet bib_ids, sorted for byte-stable diffs), and
+#   <BFFI_DATA_DIR>/canonical-conflicts.jsonl when the judge
+#   produced contradictory same/different decisions for the same
+#   group (those Works are NOT silently merged — they're flagged
+#   for human review).
+
+# 7. M9 — reconcile creators against KANTO + VIAF (with LLM picker).
+LLM_BASE_URL=http://localhost:11434/v1 \
+    bffi-pipeline reconcile
+# → walks canonical.ttl, queries Finto's Skosmos REST for KANTO,
+#   falls back to VIAF for non-Finnish authors not in KANTO, runs
+#   the four-tier decision (lexical-direct ≥0.95, llm-pick when
+#   ambiguous, fallback with needs-review tag when LLM uncertain
+#   or confidence <0.80, no-candidate when nothing clears the 0.70
+#   floor), writes back bffi:creator on the canonical Work +
+#   bumps AdminMetadata, appends bffi-prov:Reconciliation
+#   Activities to provenance.ttl. (Subject reconciliation across
+#   YSO/KAUNO/MUSO is a follow-up — see BUILD_PLAN M9 phase 3.)
+
+# 8. M10 phase 1 — Skosify the canonical graph.
+bffi-pipeline skosify
+# → writes <BFFI_DATA_DIR>/canonical-skosified.ttl: bffi:Work +
+#   skos:Concept dual-typing, bffi:hasExpression preserved alongside
+#   the inferred skos:narrower / skos:broader, AdminMetadata +
+#   provenance back-links survive intact.
+
+# 9. M10 phase 2 — load into Fuseki, run Boundary-5 smoke ASKs.
+docker compose up -d   # if not already running
+bffi-pipeline load
+# → uploads canonical-skosified.ttl + bffi-admin-vocabulary.ttl into
+#   the bffi-works named graph, provenance.ttl into the provenance
+#   graph, and runs all four smoke ASKs from
+#   config/shapes/post-load-smoke.rq. On failure, the bffi-works
+#   graph is rolled back (DELETE'd) and the CLI exits non-zero.
+#
+# Quick lookup once loaded:
+bffi-pipeline lookup-helmet 2371438
+# → "canonical Work: <uri> — 'Aatelisrosvo Dubrovskij'"
+#   "  expression:   <uri> — '...'"
+
+# 10. M7 — periodic provenance compaction (every ~90 days).
 bffi-pipeline provenance compact --older-than 90d
 # → strips bffi-prov:rawResponse from old Activities, refreshes
 #   <BFFI_DATA_DIR>/provenance-meta.ttl#lastCompactedAt. CLI startup
@@ -111,6 +157,48 @@ bffi-pipeline provenance compact --older-than 90d
 Each `bffi-pipeline ...` invocation runs the stale-provenance check
 at startup; the warning fires once `provenance.ttl` exists *and* the
 last compaction is missing or older than 90 days.
+
+## M11 — Skosmos UI smoke checklist
+
+After `docker compose up -d` (with the M11 config volume mount in
+`docker-compose.yml`) and a successful `bffi-pipeline load`, open the
+UI at http://localhost:9090 and walk through:
+
+- **Vocabulary picker**: the "BFFI Works" / "Suomalaiset auktoriteettiteokset
+  ja -ekspressiot" / "Finska auktoritetsverk och uttryck" entry is
+  visible (one of the three depending on UI language).
+- **Default language**: the UI lands on Finnish first; the language
+  switcher at top-right shows fi / sv / en in that order.
+- **Type filter**: the "Type" dropdown lists exactly two custom types,
+  "Teos / Verk / Work" and "Ekspressio / Uttryck / Expression".
+- **Hierarchy**: open any canonical Work — its Expressions appear
+  nested below it under the "Narrower concepts" heading (driven by
+  the `skos:narrower` triples Skosify lifts from `bffi:hasExpression`).
+- **Helmet identifier**: scroll the Work's resource page; the
+  `bf:identifiedBy` block lists each absorbed Helmet bib ID with the
+  Helmet source URI rendered as a clickable label, not a dangling
+  URI (the overlay's bf:Source declaration with multilingual labels).
+- **Search**:
+  - Search "Sota ja rauha" (Finnish form) — finds the canonical Work
+    even if the cataloguer originally entered another translation.
+  - Switch UI language to English, search "War and Peace" — Skosmos
+    returns the same canonical Work (since the Russian-original
+    Pushkin / Tolstoy work was merged across translations in M8).
+  - Switch to Swedish, search "Krig och fred" (Swedish form) —
+    finds the Work (when a Swedish Expression was merged in).
+- **Foreign vs native diacritics** (M9 fold rule): search "Häme"
+  finds Finnish Häme records; search "Hame" returns nothing similar
+  (we preserve native åäö). Search "Tolstoï" returns the same as
+  "Tolstoi" (foreign diacritic folded).
+
+If any of those fail, log a bug and check:
+- the Boundary-5 ASK queries from `bffi-pipeline load` — re-run with
+  `--fuseki-url` pointed at your dataset and inspect output.
+- the Fuseki dataset at http://localhost:3030/bffi/sparql via the
+  Fuseki UI (`http://localhost:3030/`) — does the bffi-works graph
+  exist? Does `SELECT * WHERE { GRAPH ?g { ?s ?p ?o } }` show data?
+- `jena-text` is enabled in the Fuseki config (required by
+  `skosmos:sparqlDialect "JenaText"`).
 
 ## --concurrency tuning sweep (one-time, before the production batch)
 
@@ -152,14 +240,21 @@ Once production data is flowing:
 
 ## What's still missing
 
-This runbook stops at M7. The end-to-end "Skosmos UI shows the
-canonical Works" path needs:
+The end-to-end pipeline through M11 is committed. Outstanding work:
 
-- **M8** — apply judge decisions to mint canonical Work URIs and
-  union `bf:identifiedBy` sets.
-- **M9** — reconcile against KANTO / VIAF / YSO / KAUNO / MUSO.
-- **M10** — Skosify overlay + Fuseki load.
-- **M11** — Skosmos config + verified UI.
+- **M9 phase 3** — subject reconciliation across YSO / KAUNO / MUSO.
+  Phase 1 + 2 wired creators only; gated on an M8 extension to
+  carry `bffi:subject` + `bffi:genreForm` triples to the canonical
+  Work. Once that lands, the existing `decide_reconciliation` /
+  `apply_reconciliation` paths route by `kind` to the right Finto
+  vocab via the `_KIND_TO_FINTO_VOCAB` map.
+- **M12 full eval harness** — `eval/harness.py` runs the M6 cascade
+  against gold pairs and reports per-category accuracy + confusion
+  matrix; `eval/grow.py` queries Fuseki for human-overridden
+  decisions and proposes new gold cases. Both unblocked now that
+  M6 + M10 ship.
+- **M13** — README, LICENSE, architecture diagram, contributor
+  onboarding doc.
 
-Update this runbook as each lands. Pinned versions stay in the table
-above so the runbook is the one place the production stack is named.
+Pinned versions stay in the table above so the runbook is the one
+place the production stack is named.

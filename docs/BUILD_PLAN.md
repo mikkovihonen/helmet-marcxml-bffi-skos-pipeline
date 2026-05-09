@@ -414,13 +414,13 @@ Phases 1 + 2 (committed). Phase 1 shipped the Skosify side: the overlay TTL, the
 
 ### M11 — Skosmos config
 
-- [ ] `config/skosmos-config.ttl` per spec §4 with the two `skosmos:indexShowClass` entries.
+- [x] `config/skosmos-config.ttl` per spec §4 with the two `skosmos:indexShowClass` entries. *(Verbatim per spec § 4 with one substantive change: `skosmos:sparqlEndpoint` and `void:sparqlEndpoint` use `http://fuseki:3030/bffi/sparql` (docker-compose service hostname) rather than localhost, since the config lives inside the Skosmos container. Local-dev users running Skosmos directly on the host swap to localhost — the comment at the top of the file explains.)*
 - [x] **Pin Skosmos to a specific 3.x release** in `docker-compose.yml`. Pinned to `ghcr.io/natlibfi/skosmos:3.2`; document in the runbook.
-- [ ] **Configure language priority:** `skosmos:language "fi", "sv", "en"` and `skosmos:defaultLanguage "fi"`. Every test/sample record should carry Finnish labels at minimum.
-- [ ] Verified: hierarchy view shows Works with Expressions nested below them.
-- [ ] Search works in Finnish, Swedish, and English.
+- [x] **Configure language priority:** `skosmos:language "fi", "sv", "en"` and `skosmos:defaultLanguage "fi"`. Every test/sample record should carry Finnish labels at minimum. *(All M2 / M8 outputs already emit Finnish labels via the M3 SPARQL CONSTRUCT. The bffi:Work / bffi:Expression rdfs:labels in the config carry fi/sv/en explicitly.)*
+- [ ] **(user-side smoke)** Verified: hierarchy view shows Works with Expressions nested below them. *(Driven by `skos:narrower` triples Skosify lifts from `bffi:hasExpression`; a Boundary-5 ASK query during `bffi-pipeline load` already verifies the data carries the inverse pair. The actual UI rendering is one of seven items in the `docs/runbook.md` § "M11 — Skosmos UI smoke checklist" — runs after `docker compose up` against real Skosmos.)*
+- [ ] **(user-side smoke)** Search works in Finnish, Swedish, and English. *(Same — runbook checklist exercises "Sota ja rauha" / "War and Peace" / "Krig och fred" across the three UI languages, plus the foreign-vs-native diacritic fold rule from M9.)*
 
-**Definition of done:** Manual smoke test of Skosmos 3 UI passes — types display correctly, hierarchy is right, default display is Finnish, multilingual search works across all three languages.
+**Definition of done:** Manual smoke test of Skosmos 3 UI passes — types display correctly, hierarchy is right, default display is Finnish, multilingual search works across all three languages. *(All committable pieces are in: the config TTL, the docker-compose volume mount, 16 unit tests verifying the spec § 4 predicates round-trip through rdflib. The UI smoke is the user's `docker compose up` validation, with the seven-item checklist in `docs/runbook.md`.)*
 
 ### M12 — Gold set + evaluation harness
 

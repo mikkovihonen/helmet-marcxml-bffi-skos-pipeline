@@ -1,0 +1,94 @@
+# config/skosmos-config.ttl
+#
+# Skosmos vocabulary configuration for the BFFI authority graph
+# (M11). Mounted into the Skosmos container at /var/www/html/config.ttl
+# by docker-compose.yml. Companion to
+# docs/marcxml-to-bffi-skosmos-pipeline.md § 4.
+#
+# Note on hostnames: this file lives INSIDE the Skosmos container, so
+# the SPARQL endpoint URL uses the docker-compose service name
+# `fuseki` rather than `localhost`. A user running Skosmos directly
+# on the host (no Docker) should swap `http://fuseki:3030/...` for
+# `http://localhost:3030/...` here.
+
+@prefix skosmos: <http://purl.org/net/skosmos#> .
+@prefix void:    <http://rdfs.org/ns/void#> .
+@prefix dc:      <http://purl.org/dc/terms/> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+@prefix bffi:    <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+@prefix isothes: <http://purl.org/iso25964/skos-thes#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix :        <#> .
+
+# ---------------------------------------------------------------------------
+# Type labels — Skosmos requires rdfs:label on every custom type so
+# the type filter in the UI shows human-readable names. The
+# rdfs:subClassOf skos:Concept declarations also live in
+# config/overlay/bffi-skos-overlay.ttl; restating them here keeps the
+# Skosmos config self-contained for users who load Skosmos config
+# without first parsing the bffi-works graph.
+# ---------------------------------------------------------------------------
+
+bffi:Work       rdfs:label      "Work"@en, "Teos"@fi, "Verk"@sv ;
+                rdfs:subClassOf skos:Concept .
+
+bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
+                rdfs:subClassOf skos:Concept .
+
+# ---------------------------------------------------------------------------
+# Subject categorisation entry — referenced by the vocabulary's
+# dc:subject so the Skosmos sidebar can group vocabularies by topic.
+# ---------------------------------------------------------------------------
+
+:catBibliographic a skosmos:Category ;
+    rdfs:label "Bibliographic data"@en,
+               "Kirjastoaineisto"@fi,
+               "Bibliografisk data"@sv .
+
+# ---------------------------------------------------------------------------
+# Fuseki backend — stays on the docker-compose `fuseki` service.
+# ---------------------------------------------------------------------------
+
+:bibframeEndpoint a void:Dataset ;
+    void:sparqlEndpoint <http://fuseki:3030/bffi/sparql> .
+
+# ---------------------------------------------------------------------------
+# The vocabulary entry. Per spec § 4:
+#  - void:uriSpace MUST match the canonical Work URI prefix exactly,
+#    otherwise Skosmos won't recognise internal links.
+#  - skosmos:language order doubles as the display-language priority;
+#    "fi", "sv", "en" matches Finland's official languages plus an
+#    international fallback.
+#  - skosmos:sparqlDialect "JenaText" enables the text:query predicate
+#    Skosmos uses for fast label search; without it, search becomes
+#    painfully slow at scale. Verify `jena-text` is enabled in the
+#    Fuseki image (it is in stain/jena-fuseki:5.0.0).
+#  - The two skosmos:indexShowClass entries are the user-facing type
+#    filter committed in BUILD_PLAN M11.
+# ---------------------------------------------------------------------------
+
+:bffiWorks a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "Finnish Authority Works and Expressions"@en,
+                      "Suomalaiset auktoriteettiteokset ja -ekspressiot"@fi,
+                      "Finska auktoritetsverk och uttryck"@sv ;
+    skosmos:shortName "bffi-works"@en ;
+    dc:subject        :catBibliographic ;
+    void:uriSpace     "http://urn.fi/URN:NBN:fi:bib:work:" ;
+
+    skosmos:language        "fi", "sv", "en" ;
+    skosmos:defaultLanguage "fi" ;
+
+    skosmos:sparqlGraph     <http://urn.fi/URN:NBN:fi:bib:graph:bffi-works> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+
+    # The two custom types the user can filter by from the type dropdown.
+    skosmos:indexShowClass  bffi:Work ;
+    skosmos:indexShowClass  bffi:Expression ;
+
+    # Group view — Works clustered with their Expressions via
+    # skos:narrower (lifted from bffi:hasExpression by the Skosify overlay).
+    skosmos:groupClass      isothes:ConceptGroup ;
+
+    skosmos:showTopConcepts       true ;
+    skosmos:fullAlphabeticalIndex true .

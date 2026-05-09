@@ -25,9 +25,10 @@ services:
       - fuseki
     environment:
       SPARQL_ENDPOINT: http://fuseki:3030/bffi/query
-    # config/skosmos-config.ttl is produced in M11; uncomment then.
-    # volumes:
-    #   - ./config/skosmos-config.ttl:/var/www/html/config.ttl:ro
+    volumes:
+      # M11: vocabulary config per docs/marcxml-to-bffi-skosmos-pipeline.md § 4.
+      # The container reads /var/www/html/config.ttl on startup.
+      - ./config/skosmos-config.ttl:/var/www/html/config.ttl:ro
     restart: unless-stopped
 
 volumes:
