@@ -1,0 +1,65 @@
+# config/overlay/bffi-skos-overlay.ttl
+#
+# Skosify overlay file. Loaded *alongside* the canonical BFFI Turtle
+# (M8 output) so the Skosify RDFS-inference pass dual-types every
+# bffi:Work / bffi:Expression as skos:Concept and lifts
+# bffi:hasExpression / bffi:expressionOf to skos:narrower / skos:broader,
+# WITHOUT destroying the BFFI types.
+#
+# Companion to docs/marcxml-to-bffi-skosmos-pipeline.md § 5
+# ("overlay-plus-inference"). The destructive Skosify [types] mappings
+# would force conversion updates every time BFFI evolves; the overlay
+# approach absorbs new BFFI subclasses with a one-line addition here.
+
+@prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+@prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ---------------------------------------------------------------------------
+# BFFI classes ⊑ skos:Concept — Skosify's RDFS pass adds the
+# rdf:type skos:Concept on every instance, but the bffi:Work /
+# bffi:Expression typing remains.
+# ---------------------------------------------------------------------------
+
+bffi:Work       rdfs:subClassOf skos:Concept ;
+                rdfs:label "Work"@en, "Teos"@fi, "Verk"@sv .
+
+bffi:Expression rdfs:subClassOf skos:Concept ;
+                rdfs:label "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv .
+
+# ---------------------------------------------------------------------------
+# Hierarchical relations ⊑ SKOS — the Skosmos hierarchy view follows
+# skos:narrower / skos:broader, so M10 needs Works to expose Expressions
+# under skos:narrower in addition to bffi:hasExpression.
+# ---------------------------------------------------------------------------
+
+bffi:hasExpression rdfs:subPropertyOf skos:narrower ;
+                   rdfs:label "has expression"@en, "ekspressio"@fi, "uttryck"@sv .
+
+bffi:expressionOf  rdfs:subPropertyOf skos:broader ;
+                   rdfs:label "expression of"@en, "ekspressio teoksesta"@fi,
+                              "uttryck för verk"@sv .
+
+# ---------------------------------------------------------------------------
+# Helmet source URI — declared as a real entity so bf:identifiedBy
+# triples on Works and Expressions resolve to a labeled resource in
+# Skosmos rather than a dangling URI.
+#
+# Helmet is the joint catalog of the public libraries of Helsinki,
+# Espoo, Vantaa, and Kauniainen. The underlying ILS is Sierra, but
+# that is implementation detail and is NOT preserved in the data —
+# provenance attributes records to Helmet, not Sierra.
+#
+# The source is dual-typed bf:Source + bffi:Source per spec § 5 and
+# `docs/lkd.rdf` line 609 (`bffi:Source` is `owl:equivalentClass` of
+# `bf:Source`); BFFI-native consumers and BIBFRAME consumers both see
+# a typed entity.
+# ---------------------------------------------------------------------------
+
+<http://urn.fi/URN:NBN:fi:bib:source:helmet>
+    a            bf:Source, bffi:Source ;
+    rdfs:label   "Helmet"@en, "Helmet"@fi, "Helmet"@sv ;
+    bf:code      "helmet-bib" ;
+    rdfs:comment "Joint catalog of the public libraries of Helsinki, Espoo, Vantaa, and Kauniainen. Underlying ILS is Sierra; this is implementation detail and not preserved in the data."@en ,
+                 "Helsingin, Espoon, Vantaan ja Kauniaisten kunnankirjastojen yhteinen aineistorekisteri."@fi .

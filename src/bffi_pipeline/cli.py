@@ -18,6 +18,7 @@ from bffi_pipeline.stages import (
     marc_to_bf,
     merge,
     reconcile,
+    skosify_run,
     workkey,
 )
 
@@ -597,6 +598,81 @@ def reconcile_command(
     finally:
         http_client.close()
     typer.echo(summary.render())
+
+
+@app.command("skosify")
+def skosify_command(
+    canonical_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--canonical-path",
+            "-i",
+            help="Path to canonical.ttl; defaults to <BFFI_DATA_DIR>/canonical.ttl.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-path",
+            "-o",
+            help=(
+                "Path to canonical-skosified.ttl; "
+                "defaults to <BFFI_DATA_DIR>/canonical-skosified.ttl."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    overlay_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--overlay-path",
+            help=(
+                "Path to bffi-skos-overlay.ttl; defaults to "
+                "config/overlay/bffi-skos-overlay.ttl in the repo."
+            ),
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config-path",
+            help="Path to bffi.cfg; defaults to config/bffi.cfg in the repo.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Re-run Skosify even when the existing output is newer than the inputs.",
+        ),
+    ] = False,
+) -> None:
+    """Run Skosify with the BFFI overlay to produce dual-typed output (M10 phase 1)."""
+    result = skosify_run.run(
+        canonical_path,
+        output_path=output_path,
+        overlay_path=overlay_path,
+        config_path=config_path,
+        force=force,
+    )
+    typer.echo(result.render())
 
 
 # --- bffi-pipeline provenance ... -----------------------------------------

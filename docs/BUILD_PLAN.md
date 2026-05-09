@@ -364,16 +364,19 @@ Phases 1 + 2 (committed) ship the full creator-reconciliation pipeline against K
 
 ### M10 — Skosify overlay + Fuseki load
 
-- [ ] `config/overlay/bffi-skos-overlay.ttl` and `config/bffi.cfg` per spec §5.
-- [ ] **`config/bffi-admin-vocabulary.ttl`** per spec § 8 "AdminMetadata view" — stable URIs for shared value-class instances (Agents dual-typed `prov:SoftwareAgent, bffi:Agent`; `bffi:GenerationProcess`; `bffi:DescriptionAuthentication` for `auto-merged` / `needs-review` / `verified`; `bffi:DescriptionConventions`; `bffi:DescriptionLevel`; `bffi:EncodingLevel`; `bffi:MetadataLicensor` for CC0; `bffi:RecordingSource` for Helmet). Loaded alongside the overlay.
-- [ ] **Declare the Helmet source URI in the overlay file** so it's resolvable as a real entity in Skosmos:
+Phase 1 (committed) ships the Skosify side: the overlay TTL, the bffi.cfg config, the dual-typing run, the `bffi-pipeline skosify` CLI subcommand. Phase 2 (next commit) adds the Fuseki load via SPARQL Graph Store Protocol, the Boundary-5 post-load smoke ASK queries with rollback, and the `bffi-pipeline lookup-helmet` SELECT helper.
+
+- [x] `config/overlay/bffi-skos-overlay.ttl` and `config/bffi.cfg` per spec §5. *(Overlay declares Work/Expression as subClassOf skos:Concept and lifts hasExpression/expressionOf to skos:narrower/skos:broader; the bffi.cfg keeps `[types]` empty to avoid Skosify's destructive class rewriting and keeps `cleanup_*` off so the AdminMetadata block + provenance back-links survive intact.)*
+- [x] **`config/bffi-admin-vocabulary.ttl`** per spec § 8 "AdminMetadata view" — stable URIs for shared value-class instances (Agents dual-typed `prov:SoftwareAgent, bffi:Agent`; `bffi:GenerationProcess`; `bffi:DescriptionAuthentication` for `auto-merged` / `needs-review` / `verified`; `bffi:DescriptionConventions`; `bffi:DescriptionLevel`; `bffi:EncodingLevel`; `bffi:MetadataLicensor` for CC0; `bffi:RecordingSource` for Helmet). Loaded alongside the overlay. *(File pre-existed; phase 2 wires it into the Fuseki load alongside the skosified canonical graph.)*
+- [x] **Declare the Helmet source URI in the overlay file** so it's resolvable as a real entity in Skosmos:
   ```turtle
-  <http://urn.fi/URN:NBN:fi:bib:source:helmet> a bf:Source ;
+  <http://urn.fi/URN:NBN:fi:bib:source:helmet> a bf:Source, bffi:Source ;
       rdfs:label "Helmet"@en, "Helmet"@fi, "Helmet"@sv ;
       bf:code "helmet-bib" ;
       rdfs:comment "Joint catalog of the public libraries of Helsinki, Espoo, Vantaa, and Kauniainen. Underlying ILS is Sierra; this is implementation detail and not preserved in the data."@en .
   ```
-- [ ] `src/bffi_pipeline/stages/skosify_run.py` shells out to Skosify with the overlay, producing dual-typed output.
+  *(Dual-typed `bf:Source, bffi:Source` per spec § 5 / `docs/lkd.rdf` line 609; resolvable for both BIBFRAME-side `bf:identifiedBy` consumers and BFFI-native consumers.)*
+- [x] `src/bffi_pipeline/stages/skosify_run.py` shells out to Skosify with the overlay, producing dual-typed output. *(Programmatic call to `skosify.skosify(canonical, overlay, **bffi_cfg)` rather than a subprocess shell-out — same API, easier to test. Idempotent re-run skips when output is newer than every input. CLI: `bffi-pipeline skosify --canonical-path ... --output-path ... --force`. 9 unit tests cover dual-typing on Works + Expressions, bffi:hasExpression → skos:narrower lift (with the BFFI predicate preserved), AdminMetadata survival, idempotency, and the FileNotFoundError when canonical.ttl is absent.)*
 - [ ] `src/bffi_pipeline/stages/load.py` uploads to Fuseki via SPARQL Graph Store Protocol. Loads main data and `config/bffi-admin-vocabulary.ttl` into the configured `bffi-works` graph; provenance Activities into the provenance graph.
 - [ ] **Pin Fuseki version** in `docker-compose.yml` to a specific Apache Jena 5.x release (e.g., `stain/jena-fuseki:5.0.0`). Verify `jena-text` is enabled. Document the chosen version in the runbook.
 - [ ] **Boundary 5 validation (post-load smoke tests).** Run all `ASK` queries from `config/shapes/post-load-smoke.rq` against Fuseki immediately after load. All must return `true`:
