@@ -58,10 +58,11 @@ ignore = ["PLR0913"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR2004"]
-# Heavy ML imports (sentence_transformers, faiss, numpy) are deferred to
-# function bodies on purpose so the rest of the CLI does not pay the
-# multi-second import cost.
+# Heavy ML imports (sentence_transformers, faiss, numpy) and the LangChain
+# client are deferred to function bodies on purpose so the rest of the CLI
+# does not pay the multi-second import cost.
 "src/bffi_pipeline/stages/embeddings.py" = ["PLC0415"]
+"src/bffi_pipeline/stages/judge.py" = ["PLC0415"]
 "src/bffi_pipeline/eval/embed_benchmark.py" = ["PLC0415"]
 
 [tool.mypy]

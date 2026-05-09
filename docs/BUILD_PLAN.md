@@ -280,25 +280,27 @@ The gold-set-independent structural pieces are committed; the sub-tasks marked *
 
 **This is the throughput-bound stage.** Read `docs/local-inference.md` before starting. Plan the production run as a multi-night batch job.
 
-- [ ] `prompts/judge_v1.txt` containing the system prompt + few-shot block from spec §7. **Tune the few-shots specifically for the chosen model** — Qwen3 responds differently to few-shot phrasing than Claude does. Iterate against the gold set.
-- [ ] `src/bffi_pipeline/stages/judge.py` with `WorkRecord`, `WorkMatchDecision`, and `judge_pair`. Read prompt from file; hash at startup.
-- [ ] Use `langchain-openai` `ChatOpenAI` pointed at `LLM_BASE_URL`. Pass `temperature=0`, `seed=42`. Use `with_structured_output(WorkMatchDecision, method="json_schema")`.
-- [ ] **Validate JSON output reliability before mass running.** Open-source models occasionally produce malformed JSON even with schema-constrained generation. Wrap calls with retry-on-parse-error (max 2 retries) and log permanent failures as `decision="uncertain"` with the parse error in the rationale. Don't crash the run on a bad parse.
-- [ ] **Boundary 4 validation (semantic post-validators).** Add `@model_validator(mode="after")` to `WorkMatchDecision` enforcing: `decision="uncertain"` requires `confidence ≤ 0.7`; `decision="same_work"` requires non-empty `matching_fields`; rationale ≥ 20 chars and not containing stub phrases (`"i don't know"`, `"unable to determine"`, `"n/a"`). Validation failures share the retry path with JSON parse failures. **Validation-failed responses must not be cached** — caching cements bad outputs across re-runs.
-- [ ] SQLite cache for repeated calls keyed on `(model, prompt_hash, record_a_canonical, record_b_canonical)`. Cache writes happen only after both structural and semantic validation pass.
-- [ ] Implement the **two-model cascade**: `judge_pair` takes a model name; `cascade_judge` runs primary first, then fallback for `uncertain` or low-confidence `same_work`. Both decisions logged to provenance with distinct stage names.
-- [ ] Add a `--server vllm-mlx` mode that uses concurrent requests for the production batch. Ollama mode stays serial.
-- [ ] **Tune `--concurrency` for vllm-mlx** as a one-time benchmark sub-task: sweep concurrent request counts in `{4, 8, 16, 32}` against a fixed 1000-pair sample, measure throughput, pick the value that maximizes throughput without OOM. Record the chosen value in the runbook.
-- [ ] **Failure recovery via three layered mechanisms:**
-  - SQLite cache as primary — keyed on the tuple above, transactional commits per pair.
-  - Checkpoint file at `<output_path>.checkpoint` written every 100 pairs recording `{start_time, last_completed_idx, total_pairs, cache_hits, fresh_calls}`. On startup, read it to report "resuming from pair X of Y, ETA …".
-  - Inside `judge_pair`, wrap the LLM call with exponential-backoff retry (5s → 30s → 120s) for connection errors. After 3 retries exhaust, log `decision="uncertain"` and continue. **Never crash a multi-day run on a single bad pair.**
-- [ ] CLI flags: `--resume` (default, auto-resume from checkpoint+cache), `--restart` (force redo).
-- [ ] Progress reporting every 100 pairs with rolling average latency and ETA (e.g., `"12,400 / 50,000 pairs · 4.2s/pair · ETA 43h 28m · 8,200 cache hits"`).
-- [ ] Unit tests on schema validation (no LLM calls) — confidence bounds, decision enum, required fields, malformed-JSON retry logic, **and the semantic validators**.
-- [ ] Integration test (marked `@pytest.mark.requires_llm`) on five gold-set cases: translation, adaptation, common-title collision, transliteration variant, uncertainty case.
+Phase 1 (the per-pair judge — schema, retry, cache, cascade) is committed; phase 2 (the batch driver — checkpoint, vllm-mlx concurrent mode, CLI subcommand, provenance Turtle emission) is open.
 
-**Definition of done:** Judge produces structured decisions on all gray-zone candidates from M5; cascade works; cache hits produce identical output to fresh calls; gold-set per-category accuracy is reported and acceptable. Production run plan is documented in `docs/runbook.md`.
+- [x] `prompts/judge_v1.txt` containing the system prompt + few-shot block from spec §7. **Tune the few-shots specifically for the chosen model** — Qwen3 responds differently to few-shot phrasing than Claude does. Iterate against the gold set. *(Initial two-shot block committed; few-shot tuning against gold pairs is the user's M5-Max work.)*
+- [x] `src/bffi_pipeline/stages/judge.py` with `WorkRecord`, `WorkMatchDecision`, and `judge_pair`. Read prompt from file; hash at startup.
+- [x] Use `langchain-openai` `ChatOpenAI` pointed at `LLM_BASE_URL`. Pass `temperature=0`, `seed=42`. Use `with_structured_output(WorkMatchDecision, method="json_schema")`.
+- [x] **Validate JSON output reliability before mass running.** Open-source models occasionally produce malformed JSON even with schema-constrained generation. Wrap calls with retry-on-parse-error (max 2 retries) and log permanent failures as `decision="uncertain"` with the parse error in the rationale. Don't crash the run on a bad parse.
+- [x] **Boundary 4 validation (semantic post-validators).** Add `@model_validator(mode="after")` to `WorkMatchDecision` enforcing: `decision="uncertain"` requires `confidence ≤ 0.7`; `decision="same_work"` requires non-empty `matching_fields`; rationale ≥ 20 chars and not containing stub phrases (`"i don't know"`, `"unable to determine"`, `"n/a"`). Validation failures share the retry path with JSON parse failures. **Validation-failed responses must not be cached** — caching cements bad outputs across re-runs.
+- [x] SQLite cache for repeated calls keyed on `(model, prompt_hash, record_a_canonical, record_b_canonical)`. Cache writes happen only after both structural and semantic validation pass. *(Custom `JudgeCache` rather than `langchain-community`'s `SQLiteCache` — the LangChain cache fires before validation.)*
+- [x] Implement the **two-model cascade**: `judge_pair` takes a model name; `cascade_judge` runs primary first, then fallback for `uncertain` or low-confidence `same_work`. Both decisions logged to provenance with distinct stage names. *(`CascadeStep`/`JudgeOutcome` carry the per-step decisions for the future provenance writer; the Turtle emission itself ships in phase 2.)*
+- [ ] Add a `--server vllm-mlx` mode that uses concurrent requests for the production batch. Ollama mode stays serial. *(Phase 2.)*
+- [ ] **Tune `--concurrency` for vllm-mlx** as a one-time benchmark sub-task: sweep concurrent request counts in `{4, 8, 16, 32}` against a fixed 1000-pair sample, measure throughput, pick the value that maximizes throughput without OOM. Record the chosen value in the runbook. *(Phase 2.)*
+- [x] **Failure recovery via three layered mechanisms:** *(Two of three landed; the checkpoint file lives in the batch driver.)*
+  - [x] SQLite cache as primary — keyed on the tuple above, transactional commits per pair.
+  - [ ] Checkpoint file at `<output_path>.checkpoint` written every 100 pairs recording `{start_time, last_completed_idx, total_pairs, cache_hits, fresh_calls}`. On startup, read it to report "resuming from pair X of Y, ETA …". *(Phase 2.)*
+  - [x] Inside `judge_pair`, wrap the LLM call with exponential-backoff retry (5s → 30s → 120s) for connection errors. After 3 retries exhaust, log `decision="uncertain"` and continue. **Never crash a multi-day run on a single bad pair.**
+- [ ] CLI flags: `--resume` (default, auto-resume from checkpoint+cache), `--restart` (force redo). *(Phase 2.)*
+- [ ] Progress reporting every 100 pairs with rolling average latency and ETA (e.g., `"12,400 / 50,000 pairs · 4.2s/pair · ETA 43h 28m · 8,200 cache hits"`). *(Phase 2.)*
+- [x] Unit tests on schema validation (no LLM calls) — confidence bounds, decision enum, required fields, malformed-JSON retry logic, **and the semantic validators**. *(29 tests in `tests/unit/test_judge.py` covering all three Boundary-4 validators, validation/connection retry layers, cache hits, cascade routing, and a "validation-failed responses are not cached" assertion.)*
+- [x] Integration test (marked `@pytest.mark.requires_llm`) on five gold-set cases: translation, adaptation, common-title collision, transliteration variant, uncertainty case. *(`tests/integration/test_judge_live.py` lifts one case per category from `gold/gold.jsonl` and asserts at most one wrong decision out of five — uncertain counts as a soft pass per spec § 9. Excluded from CI by `-m "not requires_llm"`.)*
+
+**Definition of done:** Judge produces structured decisions on all gray-zone candidates from M5; cascade works; cache hits produce identical output to fresh calls; gold-set per-category accuracy is reported and acceptable. Production run plan is documented in `docs/runbook.md`. *(Phase 1 ships the per-pair judge: structured decisions, cache-hit identity, and the live-cascade gold-set test all verified. The "all gray-zone candidates from M5" batch driver and the production runbook are phase 2.)*
 
 ### M7 — Provenance logging
 
