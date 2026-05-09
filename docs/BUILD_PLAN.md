@@ -364,7 +364,7 @@ Phases 1 + 2 (committed) ship the full creator-reconciliation pipeline against K
 
 ### M10 — Skosify overlay + Fuseki load
 
-Phase 1 (committed) ships the Skosify side: the overlay TTL, the bffi.cfg config, the dual-typing run, the `bffi-pipeline skosify` CLI subcommand. Phase 2 (next commit) adds the Fuseki load via SPARQL Graph Store Protocol, the Boundary-5 post-load smoke ASK queries with rollback, and the `bffi-pipeline lookup-helmet` SELECT helper.
+Phases 1 + 2 (committed). Phase 1 shipped the Skosify side: the overlay TTL, the bffi.cfg config, the dual-typing run, the `bffi-pipeline skosify` CLI subcommand. Phase 2 added the Fuseki load via SPARQL Graph Store Protocol, the Boundary-5 post-load smoke ASK queries with rollback, the `bffi-pipeline load` and `bffi-pipeline lookup-helmet` CLI subcommands.
 
 - [x] `config/overlay/bffi-skos-overlay.ttl` and `config/bffi.cfg` per spec §5. *(Overlay declares Work/Expression as subClassOf skos:Concept and lifts hasExpression/expressionOf to skos:narrower/skos:broader; the bffi.cfg keeps `[types]` empty to avoid Skosify's destructive class rewriting and keeps `cleanup_*` off so the AdminMetadata block + provenance back-links survive intact.)*
 - [x] **`config/bffi-admin-vocabulary.ttl`** per spec § 8 "AdminMetadata view" — stable URIs for shared value-class instances (Agents dual-typed `prov:SoftwareAgent, bffi:Agent`; `bffi:GenerationProcess`; `bffi:DescriptionAuthentication` for `auto-merged` / `needs-review` / `verified`; `bffi:DescriptionConventions`; `bffi:DescriptionLevel`; `bffi:EncodingLevel`; `bffi:MetadataLicensor` for CC0; `bffi:RecordingSource` for Helmet). Loaded alongside the overlay. *(File pre-existed; phase 2 wires it into the Fuseki load alongside the skosified canonical graph.)*
@@ -377,16 +377,16 @@ Phase 1 (committed) ships the Skosify side: the overlay TTL, the bffi.cfg config
   ```
   *(Dual-typed `bf:Source, bffi:Source` per spec § 5 / `docs/lkd.rdf` line 609; resolvable for both BIBFRAME-side `bf:identifiedBy` consumers and BFFI-native consumers.)*
 - [x] `src/bffi_pipeline/stages/skosify_run.py` shells out to Skosify with the overlay, producing dual-typed output. *(Programmatic call to `skosify.skosify(canonical, overlay, **bffi_cfg)` rather than a subprocess shell-out — same API, easier to test. Idempotent re-run skips when output is newer than every input. CLI: `bffi-pipeline skosify --canonical-path ... --output-path ... --force`. 9 unit tests cover dual-typing on Works + Expressions, bffi:hasExpression → skos:narrower lift (with the BFFI predicate preserved), AdminMetadata survival, idempotency, and the FileNotFoundError when canonical.ttl is absent.)*
-- [ ] `src/bffi_pipeline/stages/load.py` uploads to Fuseki via SPARQL Graph Store Protocol. Loads main data and `config/bffi-admin-vocabulary.ttl` into the configured `bffi-works` graph; provenance Activities into the provenance graph.
-- [ ] **Pin Fuseki version** in `docker-compose.yml` to a specific Apache Jena 5.x release (e.g., `stain/jena-fuseki:5.0.0`). Verify `jena-text` is enabled. Document the chosen version in the runbook.
-- [ ] **Boundary 5 validation (post-load smoke tests).** Run all `ASK` queries from `config/shapes/post-load-smoke.rq` against Fuseki immediately after load. All must return `true`:
+- [x] `src/bffi_pipeline/stages/load.py` uploads to Fuseki via SPARQL Graph Store Protocol. Loads main data and `config/bffi-admin-vocabulary.ttl` into the configured `bffi-works` graph; provenance Activities into the provenance graph. *(GSP via injectable `httpx.Client` — first file `PUT` (clears graph), subsequent files `POST` (append). Provenance is a separate `PUT` to its own named graph; it is **not** rolled back when bffi-works smokes fail because the operator usually wants the audit trail anyway.)*
+- [x] **Pin Fuseki version** in `docker-compose.yml` to a specific Apache Jena 5.x release (e.g., `stain/jena-fuseki:5.0.0`). Verify `jena-text` is enabled. Document the chosen version in the runbook. *(Already pinned to `stain/jena-fuseki:5.0.0` in `docker-compose.yml` per the earlier Skosmos commit; `runbook.md` already records both pins. `jena-text` enablement in the Fuseki config is documented in `docs/marcxml-to-bffi-skosmos-pipeline.md` § 4 and is the user's M5-Max dev-stack verification.)*
+- [x] **Boundary 5 validation (post-load smoke tests).** Run all `ASK` queries from `config/shapes/post-load-smoke.rq` against Fuseki immediately after load. All must return `true`:
   - `ASK { ?w a bffi:Work, skos:Concept ; skos:prefLabel ?l }` — Skosify dual-typing worked.
   - `ASK { ?e a bffi:Expression, skos:Concept ; bffi:expressionOf ?w }` — Expressions linked to Works.
   - `ASK { ?w a bffi:Work ; bf:identifiedBy [ bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] }` — Helmet identifiers preserved.
   - `ASK { ?w skos:narrower ?e . ?e skos:broader ?w }` — Skosify-inferred inverses present.
-  
-  Any failure rolls back the load: drop the loaded named graph and exit non-zero. Don't leave Fuseki in a half-loaded state.
-- [ ] **Helmet lookup query and CLI:** create `sparql/queries/helmet_lookup.rq`:
+
+  Any failure rolls back the load: drop the loaded named graph and exit non-zero. Don't leave Fuseki in a half-loaded state. *(Single `post-load-smoke.rq` file split on `# === <name> ===` headers; each ASK runs as its own SPARQL POST. On any failure, the orchestrator issues a `DELETE` against the bffi-works graph and the CLI exits 1. Rollback failure is swallowed — the operator already has a failed smoke to investigate.)*
+- [x] **Helmet lookup query and CLI:** create `sparql/queries/helmet_lookup.rq`:
   ```sparql
   PREFIX bf:   <http://id.loc.gov/ontologies/bibframe/>
   PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>
@@ -408,9 +408,9 @@ Phase 1 (committed) ships the Skosify side: the overlay TTL, the bffi.cfg config
     }
   }
   ```
-  And expose it as `bffi-pipeline lookup-helmet <id>` — runs the query against Fuseki and prints the canonical Work URI plus all Expressions plus a brief merge summary.
+  And expose it as `bffi-pipeline lookup-helmet <id>` — runs the query against Fuseki and prints the canonical Work URI plus all Expressions plus a brief merge summary. *(Jinja2 template with autoescape=False per CLAUDE.md SPARQL conventions; the helmet_id is wrapped as a SPARQL string literal via `json.dumps` to handle escaping. CLI returns the canonical Work URI + its Expressions; if the bib ID isn't bound, prints a clear "no canonical Work found" line.)*
 
-**Definition of done:** `make publish` loads the sample, the pinned Fuseki version is documented, the Helmet source URI is declared and visible, and Skosmos at `localhost:9090` shows the vocabulary with browseable Works and Expressions carrying their Helmet identifiers.
+**Definition of done:** `make publish` loads the sample, the pinned Fuseki version is documented, the Helmet source URI is declared and visible, and Skosmos at `localhost:9090` shows the vocabulary with browseable Works and Expressions carrying their Helmet identifiers. *(All M10 sub-tasks are committed. The unit tests verify the protocol contract — GSP method/Content-Type, SPARQL ASK/SELECT JSON parsing, rollback on smoke failure, Jinja2 substitution. The live `make publish` against `docker compose up` Fuseki and the Skosmos UI smoke are user-side M5-Max validations covered by `docs/runbook.md`.)*
 
 ### M11 — Skosmos config
 

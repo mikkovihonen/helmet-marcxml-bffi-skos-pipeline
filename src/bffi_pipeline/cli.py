@@ -15,6 +15,7 @@ from bffi_pipeline.stages import (
     bf_to_bffi,
     embeddings,
     judge,
+    load,
     marc_to_bf,
     merge,
     reconcile,
@@ -673,6 +674,90 @@ def skosify_command(
         force=force,
     )
     typer.echo(result.render())
+
+
+@app.command("load")
+def load_command(
+    skosified_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--skosified-path",
+            help=(
+                "Path to canonical-skosified.ttl from M10 phase 1; "
+                "defaults to <BFFI_DATA_DIR>/canonical-skosified.ttl."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    admin_vocab_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--admin-vocab-path",
+            help=(
+                "Path to bffi-admin-vocabulary.ttl; "
+                "defaults to config/bffi-admin-vocabulary.ttl in the repo."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    provenance_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--provenance-path",
+            help="Path to provenance.ttl; defaults to <BFFI_DATA_DIR>/provenance.ttl.",
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    fuseki_url: Annotated[
+        str | None,
+        typer.Option(
+            "--fuseki-url",
+            help="Fuseki dataset endpoint; defaults to FUSEKI_URL from settings.",
+        ),
+    ] = None,
+) -> None:
+    """Load skosified data + provenance into Fuseki and run Boundary-5 smokes (M10)."""
+    result = load.run(
+        skosified_path=skosified_path,
+        admin_vocab_path=admin_vocab_path,
+        provenance_path=provenance_path,
+        fuseki_url=fuseki_url,
+    )
+    typer.echo(result.render())
+    if not result.success:
+        raise typer.Exit(code=1)
+
+
+@app.command("lookup-helmet")
+def lookup_helmet_command(
+    helmet_id: Annotated[
+        str,
+        typer.Argument(
+            help="The Helmet bibliographic record ID to look up.",
+        ),
+    ],
+    fuseki_url: Annotated[
+        str | None,
+        typer.Option(
+            "--fuseki-url",
+            help="Fuseki dataset endpoint; defaults to FUSEKI_URL from settings.",
+        ),
+    ] = None,
+) -> None:
+    """Resolve a Helmet bib ID to its canonical Work + Expressions (M10)."""
+    target_url = fuseki_url or get_settings().fuseki_url
+    with httpx.Client(timeout=30.0) as client:
+        rows = load.lookup_helmet_id(client, helmet_id, fuseki_url=target_url)
+    typer.echo(load.render_helmet_lookup(rows))
 
 
 # --- bffi-pipeline provenance ... -----------------------------------------

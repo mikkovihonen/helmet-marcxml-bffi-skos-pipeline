@@ -1,0 +1,45 @@
+# Boundary 5 post-load smoke tests (M10).
+#
+# Run all four ASK queries against Fuseki immediately after a load. ALL
+# must return true. Any failure rolls back: drop the bffi-works graph
+# and exit non-zero. Never leave Fuseki in a half-loaded state.
+#
+# Queries are separated by `# === <name> ===` headers; the loader splits
+# on those markers and runs each query as a separate HTTP request.
+
+# === Skosify dual-typing ===
+PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+ASK {
+    ?w a bffi:Work, skos:Concept ;
+       skos:prefLabel ?l .
+}
+
+# === Expressions linked to Works ===
+PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+ASK {
+    ?e a bffi:Expression, skos:Concept ;
+       bffi:expressionOf ?w .
+}
+
+# === Helmet identifiers preserved on canonical Works ===
+PREFIX bf:   <http://id.loc.gov/ontologies/bibframe/>
+PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>
+
+ASK {
+    ?w a bffi:Work ;
+       bf:identifiedBy [
+           bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet>
+       ] .
+}
+
+# === Skosify-inferred SKOS inverses (narrower/broader) ===
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+ASK {
+    ?w skos:narrower ?e .
+    ?e skos:broader  ?w .
+}

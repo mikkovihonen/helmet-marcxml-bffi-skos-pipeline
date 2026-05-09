@@ -1,0 +1,32 @@
+# Helmet bib ID → canonical Work + Expressions (M10).
+#
+# Joins through the bf:identifiedBy structure on the canonical Work
+# (and on each Expression that carries its own Helmet identifier in
+# the future). Driven by the bffi-pipeline lookup-helmet CLI; the
+# {{ helmet_id }} placeholder is substituted via Jinja2
+# (autoescape=False per CLAUDE.md SPARQL conventions) with a
+# proper SPARQL string literal at call time.
+
+PREFIX bf:   <http://id.loc.gov/ontologies/bibframe/>
+PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+SELECT ?canonicalWork ?canonicalLabel ?expression ?expressionLabel WHERE {
+    ?canonicalWork a bffi:Work ;
+                   bf:identifiedBy [
+                       a bf:Local ;
+                       rdf:value {{ helmet_id }} ;
+                       bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet>
+                   ] .
+
+    OPTIONAL {
+        ?canonicalWork skos:prefLabel ?canonicalLabel .
+    }
+
+    OPTIONAL {
+        ?expression bffi:expressionOf ?canonicalWork .
+        OPTIONAL { ?expression skos:prefLabel ?expressionLabel . }
+    }
+}
+ORDER BY ?expression
