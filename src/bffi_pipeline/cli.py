@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages import bf_to_bffi, marc_to_bf, workkey
+from bffi_pipeline.stages import bf_to_bffi, embeddings, marc_to_bf, workkey
 
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
 
@@ -122,6 +122,124 @@ def workkey_stats_command(
     """Report Stage-1 block-size distribution (M4)."""
     graph = workkey.load_corpus(path)
     stats = workkey.compute_blocks(graph)
+    typer.echo(stats.render())
+
+
+@app.command("embed")
+def embed_command(
+    corpus_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--corpus-dir",
+            "-i",
+            help="Data directory with bffi/ and bibframe/ subdirs; defaults to BFFI_DATA_DIR.",
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            "-o",
+            help=(
+                "Directory for embeddings.faiss and embeddings.idmap.json; "
+                "defaults to BFFI_DATA_DIR."
+            ),
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    model_name: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            help="HuggingFace model name (default BAAI/bge-m3).",
+        ),
+    ] = embeddings.DEFAULT_MODEL,
+    device: Annotated[
+        str,
+        typer.Option(
+            "--device",
+            help="PyTorch device: mps (Apple Silicon), cuda, or cpu.",
+        ),
+    ] = embeddings.DEFAULT_DEVICE,
+    batch_size: Annotated[
+        int,
+        typer.Option(
+            "--batch-size",
+            help="Embedding batch size (M5 Max saturates at 64-128).",
+        ),
+    ] = embeddings.DEFAULT_BATCH_SIZE,
+    top_k: Annotated[
+        int,
+        typer.Option(
+            "--top-k",
+            help="Top-k neighbours per Work for candidate-pair generation.",
+        ),
+    ] = embeddings.DEFAULT_TOP_K,
+    cross_block: Annotated[
+        bool,
+        typer.Option(
+            "--cross-block",
+            help="Keep candidate pairs whose Stage-1 blocking keys differ.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Rebuild the index even when persisted files are newer than inputs.",
+        ),
+    ] = False,
+) -> None:
+    """Build the FAISS HNSW index and emit candidate pairs (M5)."""
+    target = output_dir or get_settings().data_dir
+    build_result = embeddings.build_index(
+        corpus_dir,
+        output_dir=target,
+        model_name=model_name,
+        device=device,
+        batch_size=batch_size,
+        force=force,
+    )
+    typer.echo(build_result.render())
+    stats = embeddings.query_candidates(target, top_k=top_k, cross_block=cross_block)
+    typer.echo(stats.render())
+
+
+@app.command("embed-stats")
+def embed_stats_command(
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            "-o",
+            help="Directory holding embeddings.faiss + idmap; defaults to BFFI_DATA_DIR.",
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        typer.Option("--top-k", help="Top-k neighbours per Work."),
+    ] = embeddings.DEFAULT_TOP_K,
+    cross_block: Annotated[
+        bool,
+        typer.Option(
+            "--cross-block",
+            help="Keep candidate pairs whose Stage-1 blocking keys differ.",
+        ),
+    ] = False,
+) -> None:
+    """Report band counts and similarity distribution from the persisted index (M5)."""
+    target = output_dir or get_settings().data_dir
+    stats = embeddings.query_candidates(target, top_k=top_k, cross_block=cross_block)
     typer.echo(stats.render())
 
 

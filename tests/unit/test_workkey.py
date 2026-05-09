@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from bffi_pipeline.stages.workkey import compute_blocking_key
+from bffi_pipeline.blocking import compute_blocking_key
 
 # -- Stability + structure ------------------------------------------------
 

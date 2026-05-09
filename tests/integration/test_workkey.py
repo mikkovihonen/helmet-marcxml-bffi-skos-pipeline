@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from bffi_pipeline.blocking import compute_blocking_key
 from bffi_pipeline.stages.bf_to_bffi import run as run_m3
 from bffi_pipeline.stages.marc_to_bf import run as run_m2
 from bffi_pipeline.stages.workkey import (
-    compute_blocking_key,
     compute_blocks,
     extract_blocking_inputs,
     load_corpus,
