@@ -46,14 +46,46 @@ def test_lexical_similarity_is_case_insensitive() -> None:
     assert lexical_similarity("Tolstoy, Leo", "TOLSTOY, LEO") == pytest.approx(1.0)
 
 
-def test_lexical_similarity_folds_diacritics() -> None:
-    """Tolstoï vs Tolstoi must match after NFKD-fold (combining diaeresis dropped)."""
+def test_lexical_similarity_folds_foreign_diacritics() -> None:
+    """``ï`` is a foreign diacritic from cross-script romanization;
+    cataloguer-supplied variants like ``Tolstoï`` must match KANTO's
+    ``Tolstoi`` form."""
     assert lexical_similarity("Tolstoï", "Tolstoi") == pytest.approx(1.0)
 
 
-def test_lexical_similarity_handles_finnish_combining_marks() -> None:
-    """Hämeenlinna vs Hameenlinna: just diacritic difference → exact match."""
-    assert lexical_similarity("Hämeenlinna", "Hameenlinna") == pytest.approx(1.0)
+def test_lexical_similarity_folds_german_umlaut() -> None:
+    """A German source's ``Müller`` must match a Finnish-cataloguer
+    transcription of ``Muller`` because ``ü`` is foreign to Finnish."""
+    assert lexical_similarity("Müller", "Muller") == pytest.approx(1.0)
+
+
+def test_lexical_similarity_folds_french_acute() -> None:
+    assert lexical_similarity("LINDGRÉN, Astrid", "Lindgren, Astrid") == pytest.approx(1.0)
+
+
+def test_lexical_similarity_preserves_finnish_a_with_diaeresis() -> None:
+    """``Häme`` (region) and ``hame`` (skirt) are distinct lexemes —
+    they must NOT match at lexical similarity 1.0."""
+    assert lexical_similarity("Häme", "hame") < 1.0
+    assert lexical_similarity("Hämeenlinna", "Hameenlinna") < 1.0
+
+
+def test_lexical_similarity_preserves_finnish_o_with_diaeresis() -> None:
+    """``Yrjö`` (a Finnish given name) and ``Yrjo`` (gibberish) are
+    distinct — ``ö`` is native and must not be folded."""
+    assert lexical_similarity("Yrjö", "Yrjo") < 1.0
+
+
+def test_lexical_similarity_preserves_swedish_a_with_ring() -> None:
+    """``Ångström`` (Swedish surname) preserves both ``Å`` and ``ö``."""
+    assert lexical_similarity("Ångström", "Angstrom") < 1.0
+
+
+def test_lexical_similarity_native_diacritics_match_themselves() -> None:
+    """Same Finnish word with same orthography still matches 1.0 after
+    selective fold (case + whitespace insensitivity still apply)."""
+    assert lexical_similarity("Häme", "HÄME") == pytest.approx(1.0)
+    assert lexical_similarity("Hämeenlinna ", " Hämeenlinna") == pytest.approx(1.0)
 
 
 def test_lexical_similarity_disjoint_strings_score_low() -> None:

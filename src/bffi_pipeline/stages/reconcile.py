@@ -29,7 +29,6 @@ tests against Finto.
 
 from __future__ import annotations
 
-import unicodedata
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -43,6 +42,7 @@ from rdflib import Graph, Literal, URIRef
 from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF
 
+from bffi_pipeline.blocking import fold_diacritics
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import logger as P
 from bffi_pipeline.provenance import vocab as V
@@ -174,19 +174,26 @@ class ReconciliationSummary:
 
 
 def _normalise_for_similarity(s: str) -> str:
-    """NFKD + drop combining marks + casefold + collapse whitespace."""
-    decomposed = unicodedata.normalize("NFKD", s)
-    no_marks = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return " ".join(no_marks.split()).casefold()
+    """Selectively fold diacritics + casefold + collapse internal whitespace.
+
+    Delegates the diacritic step to
+    :func:`bffi_pipeline.blocking.fold_diacritics`, which preserves
+    native Finnish / Swedish ``åäö`` (where the diacritic carries
+    lexemic meaning — ``Häme`` vs ``hame``) and folds every other Latin
+    diacritic (``ï``, ``ñ``, ``ü``, ``é``, …) so cataloguer input still
+    matches KANTO's preferred label when the cataloguer dropped a
+    foreign mark.
+    """
+    return " ".join(fold_diacritics(s).split()).casefold()
 
 
 def lexical_similarity(a: str, b: str) -> float:
     """Return a 0-1 similarity score between two cataloguing strings.
 
-    Uses :class:`difflib.SequenceMatcher` after a normalisation pass that
-    folds case, diacritics, and internal whitespace. Production may
-    swap to ``rapidfuzz`` later — the contract is "0=disjoint, 1=equal
-    after normalisation".
+    Uses :class:`difflib.SequenceMatcher` after a normalisation pass
+    that selectively folds non-native diacritics, casefolds, and
+    collapses whitespace. Production may swap to ``rapidfuzz`` later —
+    the contract is "0=disjoint, 1=equal after normalisation".
     """
     return SequenceMatcher(None, _normalise_for_similarity(a), _normalise_for_similarity(b)).ratio()
 

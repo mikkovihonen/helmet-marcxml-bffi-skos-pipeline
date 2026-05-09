@@ -14,12 +14,24 @@ The key is the concatenation of three normalised tokens:
   stop-word list — articles in fi / sv / en / de / fr / it / es);
 * a short **content type** code (e.g. ``txt``, ``ntm``).
 
-All tokens are normalised by NFKD-decomposing, dropping combining marks
-(accent fold), case-folding, and stripping non-alphanumerics. Diacritics
-are folded here on purpose — at blocking time we want
-``Tolstoï`` / ``Tolstoy`` / ``Толстой`` to land in the same bucket so
-M5 / M6 can examine them. Diacritics remain *preserved* in canonical
-URI minting (``uris.py``); the two stages serve different goals.
+All tokens are normalised by case-folding, stripping non-alphanumerics,
+and applying :func:`fold_diacritics` — a *selective* combining-mark
+fold that **preserves native åäö** (Finnish / Swedish, both cases) but
+folds every other Latin diacritic. Native diacritics carry lexemic
+meaning in Finnish cataloguer-supplied input (``Häme`` vs ``hame``,
+``Hämeenlinna`` vs ``Hameenlinna``, ``Yrjö`` vs ``Yrjo``); folding
+them at Stage 1 would mash unrelated topics into one block.
+
+Other diacritics (``é``, ``ï``, ``ñ``, ``ü``, ``ç``, …) are foreign
+to Finnish cataloguers, may be inconsistently transcribed across
+source records, and are folded so e.g. ``Müller`` / ``Muller`` and
+``LINDGRÉN`` / ``Lindgren`` block together.
+
+Cross-script transliteration variants (``Tolstoï`` vs ``Tolstoy`` vs
+``Толстой``) are *not* bridged at Stage 1; that's M5's job via the
+HNSW embedding index, which is multilingual and handles Cyrillic ↔
+Latin natively. Diacritics remain *preserved* in canonical URI
+minting (``uris.py``); the three stages serve different goals.
 """
 
 from __future__ import annotations
@@ -76,15 +88,46 @@ _TITLE_STOP_WORDS: Final[frozenset[str]] = frozenset(
 )
 
 
-def _accent_fold(s: str) -> str:
-    """NFKD decompose; drop combining marks. ``Tolstoï`` -> ``Tolstoi``."""
-    nfkd = unicodedata.normalize("NFKD", s)
-    return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+#: Native Finnish / Swedish diacritics. Preserved by :func:`fold_diacritics`
+#: because their presence carries lexemic meaning (``Häme`` vs ``hame``).
+#: KANTO and other Finto authorities use proper orthography for these
+#: characters, so cataloguer-supplied input matches authority labels
+#: only when åäö are kept.
+_NATIVE_DIACRITICS: Final[frozenset[str]] = frozenset("åäöÅÄÖ")
+
+
+def fold_diacritics(s: str) -> str:
+    """Selectively fold Latin diacritics; preserve Finnish / Swedish åäö.
+
+    NFC-normalises the input, then walks character-by-character: native
+    åäö (case-insensitive) pass through untouched; every other character
+    is NFKD-decomposed and its combining marks dropped. Examples:
+
+    - ``Häme`` → ``Häme`` (``ä`` protected — distinct from ``hame``)
+    - ``Hämeenlinna`` → ``Hämeenlinna`` (both ``ä`` protected)
+    - ``Ångström`` → ``Ångström`` (``Å`` and ``ö`` protected)
+    - ``Tolstoï`` → ``Tolstoi`` (``ï`` not native; combining diaeresis dropped)
+    - ``Müller`` → ``Muller`` (``ü`` not native; folded)
+    - ``LINDGRÉN`` → ``LINDGREN`` (``É`` not native; folded)
+
+    Non-decomposable Latin letters (``ø``, ``þ``, ``Ł``, ``ß``) are
+    not affected by this step; ``ß`` becomes ``ss`` only when the
+    caller subsequently casefolds.
+    """
+    nfc = unicodedata.normalize("NFC", s)
+    out: list[str] = []
+    for ch in nfc:
+        if ch in _NATIVE_DIACRITICS:
+            out.append(ch)
+            continue
+        decomposed = unicodedata.normalize("NFKD", ch)
+        out.append("".join(c for c in decomposed if not unicodedata.combining(c)))
+    return "".join(out)
 
 
 def _normalize_token(s: str) -> str:
-    """Accent-fold, casefold, drop everything that isn't alphanumeric."""
-    folded = _accent_fold(s).casefold()
+    """Selectively-fold diacritics, casefold, drop everything that isn't alphanumeric."""
+    folded = fold_diacritics(s).casefold()
     return "".join(ch for ch in folded if ch.isalnum())
 
 
@@ -141,4 +184,4 @@ def compute_blocking_key(work: dict[str, str | None]) -> str:
     return _KEY_SEPARATOR.join((surname, title_word, content))
 
 
-__all__ = ["compute_blocking_key"]
+__all__ = ["compute_blocking_key", "fold_diacritics"]

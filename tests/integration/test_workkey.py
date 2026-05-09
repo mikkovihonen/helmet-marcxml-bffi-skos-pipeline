@@ -29,7 +29,7 @@ _EXPECTED_KEYS = {
     "10000003": "lindgren|pippi|txt",
     "10000004": "sibelius|finlandia|ntm",
     "10000005": "oksanen|puhdistus|txt",
-    "10000006": "helsingin|tieteessa|txt",
+    "10000006": "helsingin|tieteessä|txt",
 }
 
 

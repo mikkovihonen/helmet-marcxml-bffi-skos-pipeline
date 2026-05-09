@@ -58,28 +58,60 @@ def test_distinct_surnames_yield_different_keys() -> None:
 @pytest.mark.parametrize(
     ("creator_a", "creator_b"),
     [
-        # Diacritic-only differences collapse — these are the transliteration
-        # variants accent folding can resolve at Stage 1. Variants that differ
-        # by an actual letter ("Tolstoy" vs "Tolstoï") are not caught here;
-        # the M5 embedding stage owns cross-block recall for those.
+        # Foreign-diacritic + case differences collapse: cataloguers may
+        # transcribe `ï`, `É`, etc. inconsistently across source records,
+        # and these variants must still block together.
         ("Tolstoï, Leo,", "Tolstoi, Leo,"),
         ("Tolstoy, Leo,", "TOLSTOY, LEO,"),
-        ("Linna, Väinö,", "Linna, Vaino,"),
         ("Lindgren, Astrid,", "LINDGRÉN, Astrid,"),
     ],
 )
-def test_accent_and_case_folded_surnames_share_a_block(creator_a: str, creator_b: str) -> None:
+def test_foreign_diacritic_and_case_folded_surnames_share_a_block(
+    creator_a: str, creator_b: str
+) -> None:
     base = {"title": "Sota ja rauha", "content_type": "txt"}
     a = compute_blocking_key({**base, "creator": creator_a})
     b = compute_blocking_key({**base, "creator": creator_b})
     assert a == b
 
 
-def test_accent_folding_in_title() -> None:
+def test_native_diacritics_in_title_are_preserved() -> None:
+    """Finnish ``ä`` carries lexemic meaning — ``Tieteessä`` (in science)
+    must not block together with the gibberish ``Tieteessa`` (no real word).
+    """
     base = {"creator": "Helsingin yliopisto", "content_type": "txt"}
     a = compute_blocking_key({**base, "title": "Tieteessä tapahtuu"})
     b = compute_blocking_key({**base, "title": "Tieteessa tapahtuu"})
+    assert a != b
+
+
+def test_native_diacritic_titles_block_together_when_identical() -> None:
+    """Two records that both use the proper Finnish form share a block."""
+    base = {"creator": "Helsingin yliopisto", "content_type": "txt"}
+    a = compute_blocking_key({**base, "title": "Tieteessä tapahtuu"})
+    b = compute_blocking_key({**base, "title": "tieteessä tapahtuu"})  # case difference only
     assert a == b
+    assert "tieteessa" not in a  # the ä is preserved in the key
+    assert "tieteessä" in a
+
+
+def test_finnish_skirt_vs_region_do_not_share_a_block() -> None:
+    """The user-supplied canonical example: ``Häme`` (region) vs ``hame``
+    (skirt) are different lexemes; their blocks must not collide."""
+    base = {"creator": "Anon, A,", "content_type": "txt"}
+    region = compute_blocking_key({**base, "title": "Häme"})
+    skirt = compute_blocking_key({**base, "title": "Hame"})
+    assert region != skirt
+
+
+def test_native_diacritics_in_surnames_are_preserved() -> None:
+    """``Yrjö`` and ``Yrjo`` are different surnames; KANTO disambiguates
+    these too. Even at the coarser blocking-key resolution we don't want
+    them in the same block."""
+    base = {"title": "Sota ja rauha", "content_type": "txt"}
+    real = compute_blocking_key({**base, "creator": "Yrjö, Anna,"})
+    folded = compute_blocking_key({**base, "creator": "Yrjo, Anna,"})
+    assert real != folded
 
 
 # -- Title stop-word skipping ---------------------------------------------
