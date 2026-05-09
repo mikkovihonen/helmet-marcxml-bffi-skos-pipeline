@@ -34,6 +34,32 @@ HumanReview: URIRef = BFFI_PROV.HumanReview
 helmetBibId: URIRef = BFFI_PROV.helmetBibId
 converterVersion: URIRef = BFFI_PROV.converterVersion
 
+# --- bffi-prov predicates emitted by M6 (WorkMergeDecision) ---------------
+
+stage: URIRef = BFFI_PROV.stage
+decision: URIRef = BFFI_PROV.decision
+confidence: URIRef = BFFI_PROV.confidence
+embeddingSimilarity: URIRef = BFFI_PROV.embeddingSimilarity
+rationale: URIRef = BFFI_PROV.rationale
+matchingField: URIRef = BFFI_PROV.matchingField
+divergingField: URIRef = BFFI_PROV.divergingField
+promptHash: URIRef = BFFI_PROV.promptHash
+promptSource: URIRef = BFFI_PROV.promptSource
+rawResponse: URIRef = BFFI_PROV.rawResponse
+modelId: URIRef = BFFI_PROV.modelId
+provider: URIRef = BFFI_PROV.provider
+temperature: URIRef = BFFI_PROV.temperature
+seed: URIRef = BFFI_PROV.seed
+cacheHit: URIRef = BFFI_PROV.cacheHit
+
+# --- bffi-prov predicates emitted by M7 (HumanReview) --------------------
+
+reviewNote: URIRef = BFFI_PROV.reviewNote
+
+# --- Compaction sentinel (provenance-meta graph) -------------------------
+
+lastCompactedAt: URIRef = BFFI_PROV.lastCompactedAt
+
 # --- Stable agent / process URIs (defined in config/bffi-admin-vocabulary.ttl)
 
 AGENT_MARC2BIBFRAME2: URIRef = BIB["agent/marc2bibframe2"]
@@ -90,18 +116,35 @@ __all__ = [
     "WorkMergeDecision",
     "adminMetadata",
     "adminMetadataFor",
+    "cacheHit",
+    "confidence",
     "converterVersion",
     "dateGenerated",
+    "decision",
     "descriptionAuthentication",
     "descriptionChangeDate",
     "descriptionConventions",
     "descriptionCreationDate",
     "descriptionLevel",
     "descriptionModifier",
+    "divergingField",
+    "embeddingSimilarity",
     "encodingLevel",
     "generationProcess",
     "helmetBibId",
+    "lastCompactedAt",
+    "matchingField",
     "metadataLicensor",
+    "modelId",
+    "promptHash",
+    "promptSource",
+    "provider",
+    "rationale",
+    "rawResponse",
     "recordingSource",
+    "reviewNote",
+    "seed",
     "sourceMetadata",
+    "stage",
+    "temperature",
 ]

@@ -304,14 +304,14 @@ Phases 1 + 2a (per-pair judge plus batch driver, checkpoint, resume / restart, p
 
 ### M7 — Provenance logging
 
-- [ ] `src/bffi_pipeline/provenance/vocab.py` defines PROV and bffi-prov namespaces, the `WorkMergeDecision` and `HumanReview` classes.
-- [ ] `src/bffi_pipeline/provenance/logger.py` with `log_merge_decision` per spec §8 and `log_review` for human overrides.
-- [ ] Provenance writes to a separate named graph `<BFFI_GRAPH_BASE>provenance`, with clear graph separation from the published authority data.
-- [ ] **CLI subcommand `bffi-pipeline provenance compact --older-than 90d`** removes `bffi-prov:rawResponse` literals from Activity records older than the threshold, keeping the structured fields. Stores the date of last compaction in a small `<BFFI_GRAPH_BASE>provenance-meta` graph as `bffi-prov:lastCompactedAt`.
-- [ ] **Stale-provenance warning at CLI startup:** every `bffi-pipeline ...` invocation queries `bffi-prov:lastCompactedAt`; if older than 90 days (or absent), print a warning to stderr. Don't block the command, just nag.
-- [ ] Unit test: a mock decision produces triples that round-trip through rdflib and contain all required fields. Compaction unit test verifies that structured fields survive and `rawResponse` is removed for old records.
+- [x] `src/bffi_pipeline/provenance/vocab.py` defines PROV and bffi-prov namespaces, the `WorkMergeDecision` and `HumanReview` classes. *(Extended in M7 to add the per-decision predicates — stage, decision, confidence, embeddingSimilarity, rationale, matchingField/divergingField, promptHash/promptSource, rawResponse, modelId/provider/temperature/seed, cacheHit, reviewNote, lastCompactedAt.)*
+- [x] `src/bffi_pipeline/provenance/logger.py` with `log_merge_decision` per spec §8 and `log_review` for human overrides. *(Plus `log_software_agent` so each model URI gets a `prov:SoftwareAgent` block.)*
+- [x] Provenance writes to a separate named graph `<BFFI_GRAPH_BASE>provenance`, with clear graph separation from the published authority data. *(Persisted as `<BFFI_DATA_DIR>/provenance.ttl` until M10 routes it into Fuseki; the named-graph URI is the subject of the meta sentinel so the M10 loader can attach the right graph.)*
+- [x] **CLI subcommand `bffi-pipeline provenance compact --older-than 90d`** removes `bffi-prov:rawResponse` literals from Activity records older than the threshold, keeping the structured fields. Stores the date of last compaction in a small `<BFFI_GRAPH_BASE>provenance-meta` graph as `bffi-prov:lastCompactedAt`. *(Implemented as a Typer sub-app; `compact_provenance()` does the work and `write_last_compacted_at()` refreshes the sentinel even when zero literals match.)*
+- [x] **Stale-provenance warning at CLI startup:** every `bffi-pipeline ...` invocation queries `bffi-prov:lastCompactedAt`; if older than 90 days (or absent), print a warning to stderr. Don't block the command, just nag. *(Wired into the root Typer callback; suppressed silently when `provenance.ttl` does not exist so early-milestone runs stay quiet.)*
+- [x] Unit test: a mock decision produces triples that round-trip through rdflib and contain all required fields. Compaction unit test verifies that structured fields survive and `rawResponse` is removed for old records. *(19 tests in `tests/unit/test_provenance.py`: vocab predicates, logger required-predicate set, canonical wasGeneratedBy/wasDerivedFrom on same_work, review chain via wasInformedBy, writer Turtle round-trip + append-on-restart, meta read/write, compaction strips old rawResponse and refreshes the sentinel, stale-warning fires/silences correctly.)*
 
-**Definition of done:** Every judge call writes a complete provenance record. Negative decisions are logged identically. Compaction subcommand works and the staleness warning fires when expected.
+**Definition of done:** Every judge call writes a complete provenance record. Negative decisions are logged identically. Compaction subcommand works and the staleness warning fires when expected. *(Provenance infrastructure complete; the M6 batch driver hook — passing `ProvenanceWriter.add_merge_decision` as the existing `decision_callback` — lands in M6 phase 2b.)*
 
 ### M8 — Merge application
 

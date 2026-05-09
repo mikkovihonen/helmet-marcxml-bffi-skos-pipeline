@@ -9,14 +9,25 @@ import typer
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.eval import embed_benchmark
+from bffi_pipeline.provenance import writer as prov_writer
 from bffi_pipeline.stages import bf_to_bffi, embeddings, judge, marc_to_bf, workkey
 
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
+provenance_app = typer.Typer(help="Provenance graph maintenance (M7).", no_args_is_help=True)
+app.add_typer(provenance_app, name="provenance")
 
 
 @app.callback()
 def _root() -> None:
-    """Root callback so subcommands attach cleanly."""
+    """Root callback so subcommands attach cleanly.
+
+    Runs the stale-provenance warning per spec § 8 / BUILD_PLAN M7
+    every invocation; suppressed silently when no provenance file
+    exists (early-milestone or first-run case).
+    """
+    warning = prov_writer.stale_provenance_warning()
+    if warning is not None:
+        typer.echo(warning, err=True)
 
 
 @app.command("marc-to-bf")
@@ -373,6 +384,59 @@ def judge_command(
         progress_callback=_on_progress,
     )
     typer.echo(result.render())
+
+
+# --- bffi-pipeline provenance ... -----------------------------------------
+
+
+def _parse_age_spec(spec: str) -> int:
+    """Parse a duration like ``"90d"`` / ``"30d"`` / a bare number into days."""
+    text = spec.strip().lower()
+    if not text:
+        raise typer.BadParameter("--older-than must be a duration like '90d'.")
+    if text.endswith("d"):
+        text = text[:-1]
+    try:
+        days = int(text)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"--older-than {spec!r} is not a recognised duration; use '90d' or a bare integer."
+        ) from exc
+    if days < 0:
+        raise typer.BadParameter("--older-than must be non-negative.")
+    return days
+
+
+@provenance_app.command("compact")
+def provenance_compact_command(
+    older_than: Annotated[
+        str,
+        typer.Option(
+            "--older-than",
+            help="Strip rawResponse from Activities older than this; e.g. '90d'.",
+        ),
+    ] = f"{prov_writer.COMPACTION_AGE_DAYS}d",
+    provenance_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--path",
+            help="Path to provenance.ttl; defaults to <BFFI_DATA_DIR>/provenance.ttl.",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """Strip stale rawResponse literals and refresh lastCompactedAt (M7)."""
+    days = _parse_age_spec(older_than)
+    removed = prov_writer.compact_provenance(
+        older_than_days=days,
+        provenance_path=provenance_path,
+    )
+    typer.echo(
+        f"compaction complete: removed {removed} bffi-prov:rawResponse literal(s) "
+        f"older than {days}d"
+    )
 
 
 if __name__ == "__main__":
