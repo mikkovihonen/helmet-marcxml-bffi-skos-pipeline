@@ -29,15 +29,20 @@ tests against Finto.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+import hashlib
+import re
+import time
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
+from functools import lru_cache
 from pathlib import Path
-from typing import Final, Protocol
+from typing import Any, Final, Protocol
 from typing import Literal as LiteralType
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from rdflib import Graph, Literal, URIRef
 from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF
@@ -111,14 +116,77 @@ class AuthorityCandidate:
     lexical_similarity: float
 
 
-@dataclass(frozen=True)
-class PickerDecision:
-    """LLM-picker output: either a chosen URI or ``uncertain``."""
+#: Stub phrases the picker rationale must NOT contain. Mirrors the M6
+#: judge's policy — a hand-wavy rationale that doesn't cite candidate
+#: fields can't be cached or trusted.
+PICKER_STUB_PHRASES: Final[tuple[str, ...]] = (
+    "i don't know",
+    "unable to determine",
+    "n/a",
+    "not sure",
+)
 
-    chosen_uri: str | None
-    confidence: float
-    rationale: str
+#: Maximum confidence allowed when ``decision="uncertain"``. Same value
+#: as the M6 judge's UNCERTAIN_MAX_CONFIDENCE so cataloguers see one
+#: coherent policy across stages.
+PICKER_UNCERTAIN_MAX_CONFIDENCE: Final[float] = 0.7
+
+#: Minimum rationale length, in characters.
+PICKER_MIN_RATIONALE_CHARS: Final[int] = 20
+
+
+class PickerDecision(BaseModel):
+    """LLM-picker structured output: chosen URI or ``"uncertain"``.
+
+    Pydantic validators enforce Boundary-4-style coherence:
+    ``decision="chose"`` requires a non-null ``chosen_uri``;
+    ``decision="uncertain"`` requires confidence ≤ 0.7; the rationale
+    must be substantive and free of stub phrases.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     decision: LiteralType["chose", "uncertain"]
+    chosen_uri: str | None = None
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="0.0-1.0. Use <0.7 when uncertain; reserve >0.9 for clear matches.",
+    )
+    rationale: str = Field(
+        min_length=PICKER_MIN_RATIONALE_CHARS,
+        description=(
+            "2-4 sentences citing specific candidate fields (URI, prefLabel, "
+            "dates) that drove the decision. Never introduce facts not present "
+            "in the inputs."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _chose_requires_uri(self) -> PickerDecision:
+        if self.decision == "chose" and not self.chosen_uri:
+            raise ValueError("decision='chose' requires a non-null chosen_uri")
+        return self
+
+    @model_validator(mode="after")
+    def _coherent_uncertain(self) -> PickerDecision:
+        if self.decision == "uncertain" and self.confidence > PICKER_UNCERTAIN_MAX_CONFIDENCE:
+            raise ValueError(
+                f"decision='uncertain' is incoherent with "
+                f"confidence > {PICKER_UNCERTAIN_MAX_CONFIDENCE}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _rationale_is_substantive(self) -> PickerDecision:
+        text = self.rationale.strip()
+        if len(text) < PICKER_MIN_RATIONALE_CHARS:
+            raise ValueError(f"rationale shorter than {PICKER_MIN_RATIONALE_CHARS} characters")
+        lowered = text.lower()
+        for phrase in PICKER_STUB_PHRASES:
+            if re.search(rf"\b{re.escape(phrase)}\b", lowered):
+                raise ValueError(f"rationale contains stub phrase: {phrase!r}")
+        return self
 
 
 ReconciliationStage = LiteralType[
@@ -232,12 +300,254 @@ class StubPicker:
         key = (request.work_uri, request.literal)
         if key not in self.decisions:
             return PickerDecision(
+                decision="uncertain",
                 chosen_uri=None,
                 confidence=0.5,
-                rationale="StubPicker default: no decision wired for this request",
-                decision="uncertain",
+                rationale="StubPicker default: no decision wired for this request.",
             )
         return self.decisions[key]
+
+
+# --- LangChain-backed picker ---------------------------------------------
+
+
+#: Picker prompt source. Hashed at startup so reconciliation provenance
+#: pins the exact prompt that produced each decision.
+PICKER_PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[3] / "prompts" / "picker_v1.txt"
+_PICKER_SECTION_RE: Final[re.Pattern[str]] = re.compile(r"^### (\w+)\s*$", re.MULTILINE)
+
+#: Validation retry: same shape as the M6 judge — max 2 retries on
+#: parse / Boundary-4 failures (3 attempts total).
+PICKER_MAX_VALIDATION_RETRIES: Final[int] = 2
+
+#: Connection retry: 5 / 30 / 120 seconds backoff (3 retries, 4 attempts).
+PICKER_MAX_CONNECTION_RETRIES: Final[int] = 3
+PICKER_CONNECTION_BACKOFF_SECONDS: Final[tuple[float, ...]] = (5.0, 30.0, 120.0)
+
+
+@lru_cache(maxsize=1)
+def picker_prompt_text() -> str:
+    """Return the raw ``prompts/picker_v1.txt`` contents."""
+    if not PICKER_PROMPT_PATH.is_file():
+        raise FileNotFoundError(f"Picker prompt not found at {PICKER_PROMPT_PATH!s}.")
+    return PICKER_PROMPT_PATH.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def picker_prompt_hash() -> str:
+    """SHA-256 of :func:`picker_prompt_text`. Logged with each reconciliation."""
+    return "sha256:" + hashlib.sha256(picker_prompt_text().encode("utf-8")).hexdigest()[:16]
+
+
+@lru_cache(maxsize=1)
+def _parse_picker_prompt_sections() -> dict[str, str]:
+    """Split ``picker_v1.txt`` into ``SYSTEM`` / ``EXAMPLES`` / ``USER`` blocks."""
+    raw = picker_prompt_text()
+    sections: dict[str, str] = {}
+    matches = list(_PICKER_SECTION_RE.finditer(raw))
+    if not matches:
+        raise ValueError(f"No '### SECTION' markers found in {PICKER_PROMPT_PATH!s}.")
+    for i, m in enumerate(matches):
+        name = m.group(1)
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        sections[name] = raw[start:end].strip()
+    for required in ("SYSTEM", "EXAMPLES", "USER"):
+        if required not in sections:
+            raise ValueError(
+                f"{PICKER_PROMPT_PATH!s} is missing required '### {required}' section."
+            )
+    return sections
+
+
+def _format_candidates_for_prompt(candidates: list[AuthorityCandidate]) -> str:
+    """Render the candidate list in the line-by-line format the prompt expects."""
+    if not candidates:
+        return "(no candidates were returned by the authority client)"
+    return "\n".join(
+        f"  {i}. uri={c.uri} prefLabel={c.pref_label!r} "
+        f"lexical_similarity={c.lexical_similarity:.3f}"
+        for i, c in enumerate(candidates, start=1)
+    )
+
+
+def _is_picker_connection_error(exc: BaseException) -> bool:
+    """Mirror :func:`bffi_pipeline.stages.judge._is_connection_error` for the picker."""
+    name = type(exc).__name__
+    if name in {
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "ReadError",
+        "RemoteProtocolError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "Timeout",
+    }:
+        return True
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None and cause is not exc:
+        return _is_picker_connection_error(cause)
+    return False
+
+
+def _build_picker_chain(
+    *,
+    model_name: str,
+    base_url: str,
+    api_key: str,
+    temperature: float = 0.0,
+    seed: int = 42,
+) -> Any:
+    """Compose ``ChatOpenAI(...).with_structured_output(PickerDecision)``."""
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_openai import ChatOpenAI
+    from pydantic import SecretStr
+
+    sections = _parse_picker_prompt_sections()
+    template = ChatPromptTemplate.from_messages(
+        [
+            ("system", sections["SYSTEM"] + "\n\n" + sections["EXAMPLES"]),
+            ("user", sections["USER"]),
+        ]
+    )
+    llm = ChatOpenAI(
+        base_url=base_url,
+        api_key=SecretStr(api_key),
+        model=model_name,
+        temperature=temperature,
+        seed=seed,
+    )
+    return template | llm.with_structured_output(PickerDecision, method="json_schema")
+
+
+def _picker_uncertain(reason: str) -> PickerDecision:
+    """Build a fall-through 'uncertain' decision when the chain can't produce one."""
+    cleaned = reason.strip() or "no error message available"
+    lowered = cleaned.lower()
+    for phrase in PICKER_STUB_PHRASES:
+        if re.search(rf"\b{re.escape(phrase)}\b", lowered):
+            cleaned = re.sub(
+                rf"\b{re.escape(phrase)}\b",
+                "[stub phrase elided]",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+    rationale = f"Picker fell through to uncertain after retries exhausted: {cleaned}"
+    return PickerDecision(
+        decision="uncertain",
+        chosen_uri=None,
+        confidence=0.0,
+        rationale=rationale,
+    )
+
+
+@dataclass
+class LangChainLLMPicker:
+    """Production picker that calls the local Qwen3 cascade via LangChain.
+
+    Phase-1 callers passed a ``StubPicker``; the production CLI builds
+    one of these. Validation-failure retry (max 2) and connection-error
+    retry (5 / 30 / 120 s, max 3) mirror the M6 judge's policies so
+    cataloguers see one consistent failure-handling story across stages.
+
+    The picker also enforces a *post-parse* check: the LLM's
+    ``chosen_uri`` must be one of the URIs the authority client actually
+    returned. A pick of an out-of-set URI falls through to ``uncertain``
+    with the offending URI in the rationale, never silently bound to a
+    bad authority.
+    """
+
+    model_name: str | None = None
+    chain: Any = None
+    sleep: Callable[[float], None] = time.sleep
+
+    def _resolved_chain(self) -> Any:
+        if self.chain is not None:
+            return self.chain
+        settings = get_settings()
+        return _build_picker_chain(
+            model_name=self.model_name or settings.llm_model_primary,
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+        )
+
+    def pick(
+        self,
+        *,
+        request: EntityRequest,
+        candidates: list[AuthorityCandidate],
+    ) -> PickerDecision:
+        if not candidates:
+            return PickerDecision(
+                decision="uncertain",
+                chosen_uri=None,
+                confidence=0.0,
+                rationale="No candidates supplied; nothing to pick from.",
+            )
+
+        chain = self._resolved_chain()
+        invoke_payload = {
+            "input_literal": request.literal,
+            "source_vocabulary": candidates[0].source_vocabulary,
+            "candidates": _format_candidates_for_prompt(candidates),
+        }
+
+        connection_attempts = 0
+        validation_attempts = 0
+        last_error = "unknown failure"
+
+        while True:
+            try:
+                raw = chain.invoke(invoke_payload)
+            except Exception as exc:
+                if _is_picker_connection_error(exc):
+                    if connection_attempts < PICKER_MAX_CONNECTION_RETRIES:
+                        self.sleep(PICKER_CONNECTION_BACKOFF_SECONDS[connection_attempts])
+                        connection_attempts += 1
+                        last_error = (
+                            f"connection error after {connection_attempts} retry(ies): {exc!s}"
+                        )
+                        continue
+                    last_error = (
+                        f"connection error after {PICKER_MAX_CONNECTION_RETRIES} retries "
+                        f"exhausted: {exc!s}"
+                    )
+                    break
+                last_error = f"unrecoverable LLM error: {exc!s}"
+                break
+
+            try:
+                if isinstance(raw, PickerDecision):
+                    decision = raw
+                else:
+                    decision = PickerDecision.model_validate(raw)
+            except (ValidationError, ValueError) as exc:
+                if validation_attempts < PICKER_MAX_VALIDATION_RETRIES:
+                    validation_attempts += 1
+                    last_error = f"validation failure (attempt {validation_attempts}): {exc!s}"
+                    continue
+                last_error = (
+                    f"validation failed after {PICKER_MAX_VALIDATION_RETRIES} retries: {exc!s}"
+                )
+                break
+
+            # Post-parse sanity check: the chosen URI must be in the candidate set.
+            if decision.decision == "chose":
+                allowed = {c.uri for c in candidates}
+                if decision.chosen_uri not in allowed:
+                    return PickerDecision(
+                        decision="uncertain",
+                        chosen_uri=None,
+                        confidence=0.0,
+                        rationale=(
+                            f"LLM picked {decision.chosen_uri!r} which is not in the "
+                            f"candidate URI set; falling through to uncertain."
+                        ),
+                    )
+            return decision
+
+        return _picker_uncertain(last_error)
 
 
 def decide_reconciliation(
@@ -692,6 +1002,13 @@ __all__ = [
     "LEXICAL_DIRECT_THRESHOLD",
     "LEXICAL_FLOOR",
     "LLM_CONFIDENCE_THRESHOLD",
+    "PICKER_CONNECTION_BACKOFF_SECONDS",
+    "PICKER_MAX_CONNECTION_RETRIES",
+    "PICKER_MAX_VALIDATION_RETRIES",
+    "PICKER_MIN_RATIONALE_CHARS",
+    "PICKER_PROMPT_PATH",
+    "PICKER_STUB_PHRASES",
+    "PICKER_UNCERTAIN_MAX_CONFIDENCE",
     "STAGE_FALLBACK",
     "STAGE_LEXICAL",
     "STAGE_LLM",
@@ -707,6 +1024,7 @@ __all__ = [
     "EntityRequest",
     "FintoSkosmosClient",
     "LLMPicker",
+    "LangChainLLMPicker",
     "PickerDecision",
     "ReconciliationOutcome",
     "ReconciliationStage",
@@ -717,5 +1035,7 @@ __all__ = [
     "apply_reconciliation",
     "decide_reconciliation",
     "lexical_similarity",
+    "picker_prompt_hash",
+    "picker_prompt_text",
     "reconcile_one",
 ]

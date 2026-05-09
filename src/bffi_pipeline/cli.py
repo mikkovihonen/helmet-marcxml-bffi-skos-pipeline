@@ -5,12 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.eval import embed_benchmark
 from bffi_pipeline.provenance import writer as prov_writer
-from bffi_pipeline.stages import bf_to_bffi, embeddings, judge, marc_to_bf, merge, workkey
+from bffi_pipeline.stages import (
+    bf_to_bffi,
+    embeddings,
+    judge,
+    marc_to_bf,
+    merge,
+    reconcile,
+    workkey,
+)
 
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
 provenance_app = typer.Typer(help="Provenance graph maintenance (M7).", no_args_is_help=True)
@@ -501,6 +510,93 @@ def merge_command(
         helmet_map_path=helmet_map_path,
     )
     typer.echo(result.render())
+
+
+@app.command("reconcile")
+def reconcile_command(
+    canonical_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--canonical-path",
+            "-i",
+            help="Path to canonical.ttl; defaults to <BFFI_DATA_DIR>/canonical.ttl.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-path",
+            "-o",
+            help="Where to write the reconciled Turtle. Defaults to overwriting --canonical-path.",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    primary_model: Annotated[
+        str | None,
+        typer.Option(
+            "--primary-model",
+            help="Override LLM_MODEL_PRIMARY for this run.",
+        ),
+    ] = None,
+    provenance: Annotated[
+        bool,
+        typer.Option(
+            "--provenance/--no-provenance",
+            help=(
+                "Append per-attempt bffi-prov:Reconciliation Activities to "
+                "<BFFI_DATA_DIR>/provenance.ttl. On by default."
+            ),
+        ),
+    ] = True,
+    provenance_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--provenance-path",
+            help="Path to provenance.ttl; defaults to <BFFI_DATA_DIR>/provenance.ttl.",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """Reconcile canonical Work creators against KANTO / VIAF (M9)."""
+    settings = get_settings()
+    target = output_path or canonical_path or (settings.data_dir / "canonical.ttl")
+
+    http_client = httpx.Client(timeout=10.0)
+    try:
+        client = reconcile.FintoSkosmosClient(http_client=http_client)
+        fallback = reconcile.ViafClient(http_client=http_client)
+        picker = reconcile.LangChainLLMPicker(model_name=primary_model)
+
+        if provenance:
+            with prov_writer.ProvenanceWriter(provenance_path) as writer:
+                summary, _outcomes = reconcile.apply_reconciliation(
+                    canonical_path,
+                    output_path=target,
+                    client=client,
+                    fallback_client=fallback,
+                    picker=picker,
+                    provenance_graph=writer.graph,
+                )
+        else:
+            summary, _outcomes = reconcile.apply_reconciliation(
+                canonical_path,
+                output_path=target,
+                client=client,
+                fallback_client=fallback,
+                picker=picker,
+            )
+    finally:
+        http_client.close()
+    typer.echo(summary.render())
 
 
 # --- bffi-pipeline provenance ... -----------------------------------------

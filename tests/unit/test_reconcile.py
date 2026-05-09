@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
+from pydantic import ValidationError
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
@@ -20,6 +22,7 @@ from bffi_pipeline.stages.reconcile import (
     LEXICAL_DIRECT_THRESHOLD,
     LEXICAL_FLOOR,
     LLM_CONFIDENCE_THRESHOLD,
+    PICKER_MAX_VALIDATION_RETRIES,
     STAGE_FALLBACK,
     STAGE_LEXICAL,
     STAGE_LLM,
@@ -27,12 +30,15 @@ from bffi_pipeline.stages.reconcile import (
     AuthorityCandidate,
     EntityRequest,
     FintoSkosmosClient,
+    LangChainLLMPicker,
     PickerDecision,
     StubAuthorityClient,
     StubPicker,
     apply_reconciliation,
     decide_reconciliation,
     lexical_similarity,
+    picker_prompt_hash,
+    picker_prompt_text,
 )
 
 # --- lexical_similarity ---------------------------------------------------
@@ -512,3 +518,246 @@ def test_apply_reconciliation_serialises_back_to_canonical_ttl(tmp_path: Path) -
     reloaded = Graph()
     reloaded.parse(str(canonical), format="turtle")
     assert (URIRef(WORK), V.BFFI.creator, URIRef("http://kanto/1")) in reloaded
+
+
+# --- PickerDecision schema (Pydantic validators) ------------------------
+
+
+def test_picker_decision_chose_requires_chosen_uri() -> None:
+
+    with pytest.raises(ValidationError, match="non-null chosen_uri"):
+        PickerDecision(
+            decision="chose",
+            chosen_uri=None,
+            confidence=0.95,
+            rationale="Plenty of detail here, more than twenty characters total.",
+        )
+
+
+def test_picker_decision_uncertain_with_high_confidence_is_rejected() -> None:
+
+    with pytest.raises(ValidationError, match="incoherent with confidence"):
+        PickerDecision(
+            decision="uncertain",
+            chosen_uri=None,
+            confidence=0.9,
+            rationale="Plenty of detail here, more than twenty characters total.",
+        )
+
+
+def test_picker_decision_short_rationale_is_rejected() -> None:
+
+    with pytest.raises(ValidationError, match=r"shorter than|at least 20"):
+        PickerDecision(
+            decision="uncertain",
+            chosen_uri=None,
+            confidence=0.5,
+            rationale="too short",
+        )
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["I don't know", "unable to determine", "n/a", "Not sure"],
+)
+def test_picker_decision_rationale_with_stub_phrase_is_rejected(phrase: str) -> None:
+
+    text = f"{phrase} but the candidate prefLabel matches the input."
+    with pytest.raises(ValidationError, match="stub phrase"):
+        PickerDecision(
+            decision="uncertain",
+            chosen_uri=None,
+            confidence=0.5,
+            rationale=text,
+        )
+
+
+def test_picker_decision_extra_fields_are_rejected() -> None:
+
+    with pytest.raises(ValidationError):
+        PickerDecision.model_validate(
+            {
+                "decision": "uncertain",
+                "chosen_uri": None,
+                "confidence": 0.5,
+                "rationale": "Plenty of detail here, more than twenty characters total.",
+                "extra_unknown_field": "should-be-rejected",
+            }
+        )
+
+
+# --- prompt + hash --------------------------------------------------------
+
+
+def test_picker_prompt_hash_is_stable_within_a_run() -> None:
+    assert picker_prompt_hash() == picker_prompt_hash()
+    assert picker_prompt_hash().startswith("sha256:")
+
+
+def test_picker_prompt_text_contains_required_sections() -> None:
+    text = picker_prompt_text()
+    assert "### SYSTEM" in text
+    assert "### EXAMPLES" in text
+    assert "### USER" in text
+    assert "{input_literal}" in text
+    assert "{candidates}" in text
+
+
+# --- LangChainLLMPicker (with a scripted chain) ---------------------------
+
+
+class _ScriptedChain:
+    """Test chain that returns a queued sequence of values or raises errors."""
+
+    def __init__(self, script: list[Any]) -> None:
+        self._iter = iter(script)
+        self.calls: list[dict[str, Any]] = []
+
+    def invoke(self, payload: dict[str, Any]) -> Any:
+        self.calls.append(payload)
+        try:
+            value = next(self._iter)
+        except StopIteration as exc:
+            raise AssertionError("Test chain ran past the end of its script") from exc
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+
+def _no_sleep(_seconds: float) -> None:
+    """Keep retry-with-backoff tests fast."""
+
+
+def _good_pick(uri: str = "http://kanto/1") -> PickerDecision:
+    return PickerDecision(
+        decision="chose",
+        chosen_uri=uri,
+        confidence=0.92,
+        rationale="Candidate prefLabel matches the input modulo a transcription variant.",
+    )
+
+
+def test_langchain_picker_returns_decision_on_happy_path() -> None:
+    chain = _ScriptedChain([_good_pick("http://kanto/1")])
+    picker = LangChainLLMPicker(chain=chain, sleep=_no_sleep)
+    out = picker.pick(
+        request=EntityRequest(
+            work_uri="http://example.org/w/1", literal="Tolstoy, Leo", kind="person"
+        ),
+        candidates=[
+            _candidate("http://kanto/1", "Tolstoy, Leo", 0.97),
+            _candidate("http://kanto/2", "Tolstoy, Aleksei", 0.84),
+        ],
+    )
+    assert out.decision == "chose"
+    assert out.chosen_uri == "http://kanto/1"
+
+
+def test_langchain_picker_validates_dict_responses() -> None:
+    """The chain may return a raw dict; the picker must Pydantic-validate it."""
+    raw = {
+        "decision": "chose",
+        "chosen_uri": "http://kanto/1",
+        "confidence": 0.91,
+        "rationale": "Candidate prefLabel matches the input modulo a transcription variant.",
+    }
+    picker = LangChainLLMPicker(chain=_ScriptedChain([raw]), sleep=_no_sleep)
+    out = picker.pick(
+        request=EntityRequest(
+            work_uri="http://example.org/w/1", literal="Tolstoy, Leo", kind="person"
+        ),
+        candidates=[_candidate("http://kanto/1", "Tolstoy, Leo", 0.97)],
+    )
+    assert out.decision == "chose"
+
+
+def test_langchain_picker_rejects_uri_outside_candidate_set() -> None:
+    """Defence-in-depth: an LLM picking a URI we never showed it must NOT bind."""
+    chain = _ScriptedChain([_good_pick("http://kanto/HALLUCINATED")])
+    picker = LangChainLLMPicker(chain=chain, sleep=_no_sleep)
+    out = picker.pick(
+        request=EntityRequest(
+            work_uri="http://example.org/w/1", literal="Tolstoy, Leo", kind="person"
+        ),
+        candidates=[
+            _candidate("http://kanto/1", "Tolstoy, Leo", 0.97),
+        ],
+    )
+    assert out.decision == "uncertain"
+    assert out.chosen_uri is None
+    assert "not in the candidate URI set" in out.rationale
+
+
+def test_langchain_picker_validation_retry_recovers_after_one_bad_response() -> None:
+    bad = {
+        "decision": "chose",
+        "chosen_uri": None,  # violates _chose_requires_uri
+        "confidence": 0.95,
+        "rationale": "Plenty of detail here, more than twenty characters total.",
+    }
+    good = _good_pick("http://kanto/1")
+    chain = _ScriptedChain([bad, good])
+    picker = LangChainLLMPicker(chain=chain, sleep=_no_sleep)
+    out = picker.pick(
+        request=EntityRequest(
+            work_uri="http://example.org/w/1", literal="Tolstoy, Leo", kind="person"
+        ),
+        candidates=[_candidate("http://kanto/1", "Tolstoy, Leo", 0.97)],
+    )
+    assert out.decision == "chose"
+    assert out.chosen_uri == "http://kanto/1"
+    assert len(chain.calls) == 2
+
+
+def test_langchain_picker_validation_failure_after_max_retries_lands_uncertain() -> None:
+    bad = {
+        "decision": "chose",
+        "chosen_uri": None,
+        "confidence": 0.95,
+        "rationale": "Plenty of detail here, more than twenty characters total.",
+    }
+    chain = _ScriptedChain([bad] * (PICKER_MAX_VALIDATION_RETRIES + 1))
+    picker = LangChainLLMPicker(chain=chain, sleep=_no_sleep)
+    out = picker.pick(
+        request=EntityRequest(
+            work_uri="http://example.org/w/1", literal="Tolstoy, Leo", kind="person"
+        ),
+        candidates=[_candidate("http://kanto/1", "Tolstoy, Leo", 0.97)],
+    )
+    assert out.decision == "uncertain"
+    assert "validation failed" in out.rationale.lower()
+
+
+class _ConnError(Exception):
+    """Stub whose class name fools _is_picker_connection_error."""
+
+
+_ConnError.__name__ = "ConnectError"
+
+
+def test_langchain_picker_connection_error_lands_uncertain_after_retries() -> None:
+    chain = _ScriptedChain([_ConnError("boom")] * 5)
+    picker = LangChainLLMPicker(chain=chain, sleep=_no_sleep)
+    out = picker.pick(
+        request=EntityRequest(
+            work_uri="http://example.org/w/1", literal="Tolstoy, Leo", kind="person"
+        ),
+        candidates=[_candidate("http://kanto/1", "Tolstoy, Leo", 0.97)],
+    )
+    assert out.decision == "uncertain"
+    assert "connection error" in out.rationale.lower()
+
+
+def test_langchain_picker_returns_uncertain_when_no_candidates() -> None:
+    """Don't bother the LLM when there's nothing to pick from."""
+    picker = LangChainLLMPicker(
+        chain=_ScriptedChain([AssertionError("Chain must NOT run on empty candidate set")]),
+        sleep=_no_sleep,
+    )
+    out = picker.pick(
+        request=EntityRequest(
+            work_uri="http://example.org/w/1", literal="Tolstoy, Leo", kind="person"
+        ),
+        candidates=[],
+    )
+    assert out.decision == "uncertain"

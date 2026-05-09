@@ -63,6 +63,7 @@ ignore = ["PLR0913"]
 # does not pay the multi-second import cost.
 "src/bffi_pipeline/stages/embeddings.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/judge.py" = ["PLC0415"]
+"src/bffi_pipeline/stages/reconcile.py" = ["PLC0415"]
 "src/bffi_pipeline/eval/embed_benchmark.py" = ["PLC0415"]
 
 [tool.mypy]
