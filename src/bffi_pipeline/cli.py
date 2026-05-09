@@ -9,7 +9,7 @@ import typer
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.eval import embed_benchmark
-from bffi_pipeline.stages import bf_to_bffi, embeddings, marc_to_bf, workkey
+from bffi_pipeline.stages import bf_to_bffi, embeddings, judge, marc_to_bf, workkey
 
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
 
@@ -292,6 +292,87 @@ def embed_stats_command(
     target = output_dir or get_settings().data_dir
     stats = embeddings.query_candidates(target, top_k=top_k, cross_block=cross_block)
     typer.echo(stats.render())
+
+
+@app.command("judge")
+def judge_command(
+    candidates_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--candidates-path",
+            "-i",
+            help="M5 embed-candidates.jsonl; defaults to <BFFI_DATA_DIR>/embed-candidates.jsonl.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-path",
+            "-o",
+            help="Per-pair decisions JSONL; defaults to <BFFI_DATA_DIR>/judge-decisions.jsonl.",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    bffi_corpus_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--bffi-corpus-dir",
+            help=(
+                "Directory holding bffi/*.ttl + bibframe/*.rdf so the judge can resolve "
+                "Work URIs to WorkRecord; defaults to BFFI_DATA_DIR."
+            ),
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    primary_model: Annotated[
+        str | None,
+        typer.Option(
+            "--primary-model",
+            help="Override LLM_MODEL_PRIMARY for this run.",
+        ),
+    ] = None,
+    fallback_model: Annotated[
+        str | None,
+        typer.Option(
+            "--fallback-model",
+            help="Override LLM_MODEL_FALLBACK for this run.",
+        ),
+    ] = None,
+    restart: Annotated[
+        bool,
+        typer.Option(
+            "--restart",
+            help="Wipe the output JSONL and checkpoint and re-run from scratch.",
+        ),
+    ] = False,
+) -> None:
+    """Run the cascade judge over M5's escalate-band candidate pairs (M6)."""
+    settings = get_settings()
+    target_output = output_path or (settings.data_dir / judge.DECISIONS_FILENAME)
+
+    def _on_progress(snapshot: judge.JudgeBatchProgress) -> None:
+        typer.echo(snapshot.render())
+
+    result = judge.judge_batch(
+        candidates_path,
+        target_output,
+        bffi_corpus_dir=bffi_corpus_dir,
+        resume=not restart,
+        primary_model=primary_model,
+        fallback_model=fallback_model,
+        progress_callback=_on_progress,
+    )
+    typer.echo(result.render())
 
 
 if __name__ == "__main__":

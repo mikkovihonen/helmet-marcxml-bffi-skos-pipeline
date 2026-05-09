@@ -41,6 +41,7 @@ cheap and never opens a network socket.
 from __future__ import annotations
 
 import hashlib
+import json as _json
 import re
 import sqlite3
 import time
@@ -53,8 +54,12 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from rdflib import Graph, URIRef
+from rdflib import Literal as RdfLiteral
+from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.provenance import vocab as V
 
 # --- Constants ------------------------------------------------------------
 
@@ -102,6 +107,11 @@ MIN_RATIONALE_CHARS: Final[int] = 20
 
 #: Default cache filename under ``BFFI_DATA_DIR``.
 CACHE_FILENAME: Final[str] = "judge-cache.sqlite"
+
+#: LoC URI prefixes used to short-code language and content-type values
+#: (matches the bffi:language / bffi:content URIs M3 emits).
+_LANG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
+_CONTENT_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/contentTypes/"
 
 # --- Schemas --------------------------------------------------------------
 
@@ -618,8 +628,472 @@ def cascade_judge(
             cache.close()
 
 
+# --- Phase 2: BFFI graph → WorkRecord -------------------------------------
+
+
+def _first_pref_label(graph: Graph, subject: URIRef) -> str | None:
+    for o in graph.objects(subject, V.SKOS.prefLabel):
+        if isinstance(o, RdfLiteral):
+            return str(o)
+    return None
+
+
+def _strip_loc_prefix(uri: str, prefix: str) -> str | None:
+    if uri.startswith(prefix):
+        tail = uri[len(prefix) :]
+        return tail or None
+    return uri.rsplit("/", 1)[-1] if "/" in uri else uri
+
+
+def _primary_creator(graph: Graph, work: URIRef) -> tuple[str | None, str | None]:
+    """Return ``(creator_label, creator_uri)`` for ``work``'s primary contribution."""
+    for contrib in graph.objects(work, V.BFFI.contribution):
+        if V.BFFI.PrimaryContribution not in set(graph.objects(contrib, RDF.type)):
+            continue
+        for agent in graph.objects(contrib, V.BFFI.agent):
+            if not isinstance(agent, URIRef):
+                continue
+            for label in graph.objects(agent, RDFS.label):
+                if isinstance(label, RdfLiteral):
+                    return str(label), str(agent)
+            return None, str(agent)
+    return None, None
+
+
+def _expression_summary(graph: Graph, work: URIRef) -> tuple[str | None, str | None, list[str]]:
+    """Return (language, content_type, variant_titles) for ``work``'s expressions."""
+    expression_language: str | None = None
+    content_type: str | None = None
+    variant_titles: list[str] = []
+    for expr in graph.objects(work, V.BFFI.hasExpression):
+        if not isinstance(expr, URIRef):
+            continue
+        if expression_language is None:
+            for lang in graph.objects(expr, V.BFFI.language):
+                if isinstance(lang, URIRef):
+                    expression_language = _strip_loc_prefix(str(lang), _LANG_URI_PREFIX)
+                    break
+        if content_type is None:
+            for ct in graph.objects(expr, V.BFFI.content):
+                if isinstance(ct, URIRef):
+                    content_type = _strip_loc_prefix(str(ct), _CONTENT_URI_PREFIX)
+                    break
+        for var in graph.objects(expr, V.SKOS.altLabel):
+            if isinstance(var, RdfLiteral):
+                variant_titles.append(str(var))
+    return expression_language, content_type, variant_titles
+
+
+def _origin_date(graph: Graph, work: URIRef) -> str | None:
+    for date in graph.objects(work, V.BFFI.originDate):
+        return str(date)
+    return None
+
+
+def extract_work_records(graph: Graph) -> dict[str, WorkRecord]:
+    """Walk the combined BFFI + BIBFRAME graph and return ``Work URI → WorkRecord``.
+
+    The judge's view of a Work is richer than the embedder's: it splits
+    *original* and *expression* language, captures variant titles, and
+    keeps ``date_of_origin`` (from ``bffi:originDate``). Stage-isolation
+    rules forbid importing the M4 / M5 extractors, so this is a
+    parallel implementation rather than a delegation.
+    """
+    records: dict[str, WorkRecord] = {}
+    for work in graph.subjects(RDF.type, V.BFFI.Work):
+        if not isinstance(work, URIRef):
+            continue
+        creator, creator_uri = _primary_creator(graph, work)
+        expression_language, content_type, variant_titles = _expression_summary(graph, work)
+        records[str(work)] = WorkRecord(
+            record_id=str(work),
+            creator=creator,
+            creator_uri=creator_uri,
+            preferred_title=_first_pref_label(graph, work),
+            variant_titles=variant_titles,
+            original_language=expression_language,  # default: assume mono until M9 splits
+            expression_language=expression_language,
+            content_type=content_type,
+            date_of_origin=_origin_date(graph, work),
+            publication_year=None,
+        )
+    return records
+
+
+# --- Phase 2: batch driver -----------------------------------------------
+
+
+@dataclass(frozen=True)
+class JudgeBatchProgress:
+    """Snapshot of an in-flight ``judge_batch`` run."""
+
+    completed: int
+    total: int
+    cache_hits: int
+    fresh_calls: int
+    cascade_used: int
+    elapsed_seconds: float
+    eta_seconds: float | None
+
+    @property
+    def avg_seconds_per_pair(self) -> float | None:
+        return self.elapsed_seconds / self.completed if self.completed else None
+
+    def render(self) -> str:
+        avg = self.avg_seconds_per_pair
+        if avg is None:
+            return f"{self.completed:,} / {self.total:,} pairs"
+        if self.eta_seconds is None:
+            eta = "ETA --"
+        else:
+            hours, remainder = divmod(int(self.eta_seconds), 3600)
+            minutes = remainder // 60
+            eta = f"ETA {hours}h {minutes:02d}m"
+        return (
+            f"{self.completed:,} / {self.total:,} pairs · "
+            f"{avg:.1f}s/pair · {eta} · "
+            f"{self.cache_hits:,} cache hits · "
+            f"{self.fresh_calls:,} fresh calls"
+        )
+
+
+@dataclass
+class JudgeCheckpoint:
+    """Persistent checkpoint state mirrored on disk between 100-pair flushes."""
+
+    start_time: str
+    last_completed_idx: int
+    total_pairs: int
+    cache_hits: int
+    fresh_calls: int
+    cascade_used: int
+
+    def to_json(self) -> str:
+        return _json.dumps(
+            {
+                "start_time": self.start_time,
+                "last_completed_idx": self.last_completed_idx,
+                "total_pairs": self.total_pairs,
+                "cache_hits": self.cache_hits,
+                "fresh_calls": self.fresh_calls,
+                "cascade_used": self.cascade_used,
+            },
+            indent=2,
+        )
+
+    @classmethod
+    def from_json(cls, raw: str) -> JudgeCheckpoint:
+        data = _json.loads(raw)
+        return cls(
+            start_time=data["start_time"],
+            last_completed_idx=int(data["last_completed_idx"]),
+            total_pairs=int(data["total_pairs"]),
+            cache_hits=int(data["cache_hits"]),
+            fresh_calls=int(data["fresh_calls"]),
+            cascade_used=int(data.get("cascade_used", 0)),
+        )
+
+
+@dataclass
+class JudgeBatchResult:
+    """End-of-run summary for ``judge_batch``."""
+
+    total_pairs: int
+    completed: int
+    cache_hits: int
+    fresh_calls: int
+    cascade_used: int
+    decision_counts: dict[str, int] = field(default_factory=dict)
+    elapsed_seconds: float = 0.0
+    output_path: str = ""
+    checkpoint_path: str = ""
+
+    def render(self) -> str:
+        lines = [
+            "M6 judge batch complete",
+            f"  total candidates: {self.total_pairs:,}",
+            f"  completed:        {self.completed:,}",
+            f"  cache hits:       {self.cache_hits:,}",
+            f"  fresh calls:      {self.fresh_calls:,}",
+            f"  cascade used:     {self.cascade_used:,}",
+            f"  elapsed:          {self.elapsed_seconds / 60:.1f} min",
+            f"  output JSONL:     {self.output_path}",
+        ]
+        if self.decision_counts:
+            lines.append("  decision counts:")
+            for label in ("same_work", "different_work", "uncertain"):
+                lines.append(f"    {label:<16s} {self.decision_counts.get(label, 0):>8,}")
+        return "\n".join(lines)
+
+
+CHECKPOINT_INTERVAL: Final[int] = 100
+ESCALATE_BAND: Final[str] = "escalate"
+DECISIONS_FILENAME: Final[str] = "judge-decisions.jsonl"
+CHECKPOINT_SUFFIX: Final[str] = ".checkpoint"
+
+
+def _checkpoint_path_for(output_path: Path) -> Path:
+    return output_path.with_name(output_path.name + CHECKPOINT_SUFFIX)
+
+
+def _serialise_decision(
+    pair: dict[str, Any],
+    outcome: JudgeOutcome,
+) -> dict[str, Any]:
+    """Build the per-row JSONL payload written to ``output_path``."""
+    final = outcome.final
+    return {
+        "work_a": pair["work_a"],
+        "work_b": pair["work_b"],
+        "similarity": pair["similarity"],
+        "block_a": pair.get("block_a"),
+        "block_b": pair.get("block_b"),
+        "cross_block": pair.get("cross_block"),
+        "decision": final.decision,
+        "confidence": final.confidence,
+        "rationale": final.rationale,
+        "matching_fields": list(final.matching_fields),
+        "diverging_fields": list(final.diverging_fields),
+        "used_cascade": outcome.used_cascade,
+        "cascade": [
+            {
+                "stage": step.stage,
+                "model": step.model_name,
+                "decision": step.decision.decision,
+                "confidence": step.decision.confidence,
+                "cache_hit": step.cache_hit,
+                "latency_seconds": step.latency_seconds,
+            }
+            for step in outcome.steps
+        ],
+    }
+
+
+def _load_candidate_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Load M5's ``embed-candidates.jsonl`` keeping only the escalate band."""
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Candidates JSONL not found at {path!s}. Run `bffi-pipeline embed` first."
+        )
+    rows: list[dict[str, Any]] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = _json.loads(line)
+        except _json.JSONDecodeError as exc:
+            raise ValueError(f"Bad JSON at {path!s}:{line_no}: {exc}") from exc
+        if row.get("band") != ESCALATE_BAND:
+            continue
+        rows.append(row)
+    return rows
+
+
+def _load_checkpoint(path: Path) -> JudgeCheckpoint | None:
+    if not path.is_file():
+        return None
+    try:
+        return JudgeCheckpoint.from_json(path.read_text(encoding="utf-8"))
+    except (ValueError, KeyError):
+        return None
+
+
+def _write_checkpoint(path: Path, ckpt: JudgeCheckpoint) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(ckpt.to_json(), encoding="utf-8")
+    tmp.replace(path)
+
+
+CascadeFn = Callable[..., JudgeOutcome]
+
+
+def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair retry + checkpoint write; splitting fragments state.
+    candidates_path: Path | None = None,
+    output_path: Path | None = None,
+    *,
+    bffi_corpus_dir: Path | None = None,
+    work_records: dict[str, WorkRecord] | None = None,
+    resume: bool = True,
+    primary_model: str | None = None,
+    fallback_model: str | None = None,
+    primary_chain: ChainLike | None = None,
+    fallback_chain: ChainLike | None = None,
+    cache: JudgeCache | None = None,
+    cascade: CascadeFn | None = None,
+    progress_callback: Callable[[JudgeBatchProgress], None] | None = None,
+    decision_callback: Callable[[dict[str, Any], JudgeOutcome], None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> JudgeBatchResult:
+    """Run the cascade over every escalate-band pair from M5.
+
+    Inputs / outputs default under ``BFFI_DATA_DIR``. ``resume=True``
+    (the default) skips past ``last_completed_idx`` recorded in the
+    checkpoint; ``resume=False`` blows away both the output JSONL and
+    its checkpoint sibling before starting.
+
+    ``decision_callback`` is the hook phase 2b's provenance writer
+    will subscribe to: it receives the raw candidate row and the
+    ``JudgeOutcome`` (with all cascade steps) for every decided pair.
+    """
+    settings = get_settings()
+    candidates_path = candidates_path or (settings.data_dir / "embed-candidates.jsonl")
+    output_path = output_path or (settings.data_dir / DECISIONS_FILENAME)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = _checkpoint_path_for(output_path)
+
+    cascade_fn: CascadeFn = cascade if cascade is not None else cascade_judge
+
+    candidates = _load_candidate_jsonl(candidates_path)
+    total = len(candidates)
+
+    if work_records is None:
+        if bffi_corpus_dir is None:
+            bffi_corpus_dir = settings.data_dir
+        work_records = _load_work_records_from_corpus(bffi_corpus_dir)
+
+    own_cache = cache is None
+    if own_cache:
+        cache = JudgeCache(default_cache_path())
+
+    started = time.monotonic()
+
+    start_idx = 0
+    cache_hits = 0
+    fresh_calls = 0
+    cascade_used = 0
+    decision_counts: dict[str, int] = {}
+
+    if not resume:
+        if output_path.exists():
+            output_path.unlink()
+        if checkpoint_path.exists():
+            checkpoint_path.unlink()
+        start_time_iso = datetime.now(UTC).isoformat()
+        write_mode = "w"
+    else:
+        existing = _load_checkpoint(checkpoint_path)
+        if existing is not None and existing.total_pairs == total:
+            start_idx = existing.last_completed_idx + 1
+            cache_hits = existing.cache_hits
+            fresh_calls = existing.fresh_calls
+            cascade_used = existing.cascade_used
+            start_time_iso = existing.start_time
+            write_mode = "a"
+        else:
+            start_time_iso = datetime.now(UTC).isoformat()
+            if output_path.exists():
+                output_path.unlink()
+            write_mode = "w"
+
+    try:
+        with output_path.open(write_mode, encoding="utf-8") as fh:
+            for idx in range(start_idx, total):
+                row = candidates[idx]
+                a = work_records.get(row["work_a"])
+                b = work_records.get(row["work_b"])
+                if a is None or b is None:
+                    decision = _uncertain_decision(
+                        f"missing WorkRecord for {row['work_a']} or {row['work_b']}; "
+                        "M2 + M3 must run before M6."
+                    )
+                    outcome = JudgeOutcome(final=decision, steps=[])
+                else:
+                    outcome = cascade_fn(
+                        a,
+                        b,
+                        row["similarity"],
+                        primary_model=primary_model,
+                        fallback_model=fallback_model,
+                        primary_chain=primary_chain,
+                        fallback_chain=fallback_chain,
+                        cache=cache,
+                        sleep=sleep,
+                    )
+
+                fh.write(_json.dumps(_serialise_decision(row, outcome), ensure_ascii=False) + "\n")
+                fh.flush()
+
+                if decision_callback is not None:
+                    decision_callback(row, outcome)
+
+                if outcome.used_cascade:
+                    cascade_used += 1
+                for step in outcome.steps:
+                    if step.cache_hit:
+                        cache_hits += 1
+                    else:
+                        fresh_calls += 1
+                decision_counts[outcome.final.decision] = (
+                    decision_counts.get(outcome.final.decision, 0) + 1
+                )
+
+                completed = idx + 1
+                if completed % CHECKPOINT_INTERVAL == 0 or completed == total:
+                    elapsed = time.monotonic() - started
+                    avg = elapsed / max(1, completed - start_idx)
+                    remaining = max(0, total - completed)
+                    eta_seconds = remaining * avg if avg > 0 else None
+
+                    _write_checkpoint(
+                        checkpoint_path,
+                        JudgeCheckpoint(
+                            start_time=start_time_iso,
+                            last_completed_idx=idx,
+                            total_pairs=total,
+                            cache_hits=cache_hits,
+                            fresh_calls=fresh_calls,
+                            cascade_used=cascade_used,
+                        ),
+                    )
+                    progress = JudgeBatchProgress(
+                        completed=completed,
+                        total=total,
+                        cache_hits=cache_hits,
+                        fresh_calls=fresh_calls,
+                        cascade_used=cascade_used,
+                        elapsed_seconds=elapsed,
+                        eta_seconds=eta_seconds,
+                    )
+                    if progress_callback is not None:
+                        progress_callback(progress)
+    finally:
+        if own_cache and cache is not None:
+            cache.close()
+
+    return JudgeBatchResult(
+        total_pairs=total,
+        completed=total,
+        cache_hits=cache_hits,
+        fresh_calls=fresh_calls,
+        cascade_used=cascade_used,
+        decision_counts=decision_counts,
+        elapsed_seconds=time.monotonic() - started,
+        output_path=str(output_path),
+        checkpoint_path=str(checkpoint_path),
+    )
+
+
+def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, WorkRecord]:
+    """Read all BFFI Turtle + BIBFRAME RDF/XML under ``corpus_dir`` and extract."""
+    g = Graph()
+    bffi_dir = corpus_dir / "bffi"
+    bibframe_dir = corpus_dir / "bibframe"
+    if bffi_dir.is_dir():
+        for path in sorted(bffi_dir.glob("*.ttl")):
+            g.parse(str(path), format="turtle")
+    if bibframe_dir.is_dir():
+        for path in sorted(bibframe_dir.glob("*.rdf")):
+            if not path.name.startswith("_"):
+                g.parse(str(path), format="xml")
+    return extract_work_records(g)
+
+
 __all__ = [
+    "CHECKPOINT_INTERVAL",
+    "CHECKPOINT_SUFFIX",
     "CONNECTION_BACKOFF_SECONDS",
+    "DECISIONS_FILENAME",
+    "ESCALATE_BAND",
     "FALLBACK_CONFIDENCE_THRESHOLD",
     "MAX_CONNECTION_RETRIES",
     "MAX_VALIDATION_RETRIES",
@@ -628,12 +1102,17 @@ __all__ = [
     "STAGE_SECOND_OPINION",
     "STUB_PHRASES",
     "CascadeStep",
+    "JudgeBatchProgress",
+    "JudgeBatchResult",
     "JudgeCache",
+    "JudgeCheckpoint",
     "JudgeOutcome",
     "WorkMatchDecision",
     "WorkRecord",
     "cascade_judge",
     "default_cache_path",
+    "extract_work_records",
+    "judge_batch",
     "judge_pair",
     "prompt_hash",
     "prompt_text",
