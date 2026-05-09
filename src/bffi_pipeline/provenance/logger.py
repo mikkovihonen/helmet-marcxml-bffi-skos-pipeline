@@ -180,8 +180,64 @@ def log_review(
     return activity
 
 
+def log_reconciliation(
+    g: Graph,
+    *,
+    work_uri: str,
+    input_literal: str,
+    source_vocabulary: str,
+    stage: str,
+    chosen_authority_uri: str | None,
+    candidates: Iterable[tuple[str, float]],
+    confidence: float,
+    rationale: str,
+    started_at: datetime | None = None,
+    ended_at: datetime | None = None,
+    activity_uri: URIRef | None = None,
+) -> URIRef:
+    """Mint a ``bffi-prov:Reconciliation`` Activity per spec § 6 / BUILD_PLAN M9.
+
+    The four ``stage`` values (``"reconciliation-lexical"``,
+    ``"reconciliation-llm"``, ``"reconciliation-fallback"``,
+    ``"reconciliation-no-candidate"``) feed downstream filters; one
+    ``Activity`` is logged per reconciliation attempt regardless of
+    outcome so the negative cases (no candidate, fallback, …) stay
+    auditable.
+
+    ``candidates`` is an iterable of ``(authority_uri, lexical_similarity)``
+    pairs covering the full top-k pool the decision was drawn from.
+    """
+    activity = activity_uri or V.BIB[f"reconcile/{ULID()}"]
+    started = started_at or _now()
+    ended = ended_at or started
+
+    g.add((activity, V.RDF.type, V.PROV.Activity))
+    g.add((activity, V.RDF.type, V.Reconciliation))
+    g.add((activity, V.PROV.startedAtTime, Literal(started.isoformat(), datatype=V.XSD.dateTime)))
+    g.add((activity, V.PROV.endedAtTime, Literal(ended.isoformat(), datatype=V.XSD.dateTime)))
+    g.add((activity, V.PROV.used, URIRef(work_uri)))
+    g.add((activity, V.stage, Literal(stage)))
+    g.add((activity, V.inputLiteral, Literal(input_literal)))
+    g.add((activity, V.sourceVocabulary, Literal(source_vocabulary)))
+    g.add((activity, V.confidence, Literal(confidence, datatype=V.XSD.decimal)))
+    g.add((activity, V.rationale, Literal(rationale)))
+    if chosen_authority_uri is not None:
+        g.add((activity, V.chosenAuthorityUri, URIRef(chosen_authority_uri)))
+    for cand_uri, lex in candidates:
+        g.add((activity, V.candidateAuthorityUri, URIRef(cand_uri)))
+        g.add(
+            (
+                URIRef(cand_uri),
+                V.lexicalSimilarity,
+                Literal(lex, datatype=V.XSD.decimal),
+            )
+        )
+    return activity
+
+
 __all__ = [
     "log_merge_decision",
+    "log_reconciliation",
     "log_review",
     "log_software_agent",
     "model_agent_uri",

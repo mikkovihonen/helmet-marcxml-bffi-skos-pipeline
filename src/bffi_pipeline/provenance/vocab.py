@@ -28,6 +28,7 @@ SKOS = Namespace("http://www.w3.org/2004/02/skos/core#")
 MarcConversion: URIRef = BFFI_PROV.MarcConversion
 WorkMergeDecision: URIRef = BFFI_PROV.WorkMergeDecision
 HumanReview: URIRef = BFFI_PROV.HumanReview
+Reconciliation: URIRef = BFFI_PROV.Reconciliation
 
 # --- bffi-prov predicates emitted by M2 -----------------------------------
 
@@ -55,6 +56,23 @@ cacheHit: URIRef = BFFI_PROV.cacheHit
 # --- bffi-prov predicates emitted by M7 (HumanReview) --------------------
 
 reviewNote: URIRef = BFFI_PROV.reviewNote
+
+# --- bffi-prov predicates emitted by M9 (Reconciliation) -----------------
+
+chosenAuthorityUri: URIRef = BFFI_PROV.chosenAuthorityUri
+candidateAuthorityUri: URIRef = BFFI_PROV.candidateAuthorityUri
+sourceVocabulary: URIRef = BFFI_PROV.sourceVocabulary
+lexicalSimilarity: URIRef = BFFI_PROV.lexicalSimilarity
+inputLiteral: URIRef = BFFI_PROV.inputLiteral
+
+# --- BFFI-side AdminMetadata predicates added by M9 ----------------------
+
+sourceConsulted: URIRef = BFFI.sourceConsulted
+
+# --- Stable AdminMetadata authentication-state URIs (M9) -----------------
+
+AUTH_NEEDS_REVIEW: URIRef = BIB["auth/needs-review"]
+AUTH_VERIFIED: URIRef = BIB["auth/verified"]
 
 # --- Compaction sentinel (provenance-meta graph) -------------------------
 
@@ -94,6 +112,8 @@ AdminMetadata: URIRef = BFFI.AdminMetadata
 __all__ = [
     "AGENT_MARC2BIBFRAME2",
     "AUTH_AUTO_MERGED",
+    "AUTH_NEEDS_REVIEW",
+    "AUTH_VERIFIED",
     "BF",
     "BFFI",
     "BFFI_PROV",
@@ -113,10 +133,13 @@ __all__ = [
     "AdminMetadata",
     "HumanReview",
     "MarcConversion",
+    "Reconciliation",
     "WorkMergeDecision",
     "adminMetadata",
     "adminMetadataFor",
     "cacheHit",
+    "candidateAuthorityUri",
+    "chosenAuthorityUri",
     "confidence",
     "converterVersion",
     "dateGenerated",
@@ -132,7 +155,9 @@ __all__ = [
     "encodingLevel",
     "generationProcess",
     "helmetBibId",
+    "inputLiteral",
     "lastCompactedAt",
+    "lexicalSimilarity",
     "matchingField",
     "metadataLicensor",
     "modelId",
@@ -144,7 +169,9 @@ __all__ = [
     "recordingSource",
     "reviewNote",
     "seed",
+    "sourceConsulted",
     "sourceMetadata",
+    "sourceVocabulary",
     "stage",
     "temperature",
 ]
