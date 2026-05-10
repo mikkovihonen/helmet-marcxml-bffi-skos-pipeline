@@ -66,20 +66,28 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://www.yso.fi/onto/yso/",
         languages=("fi", "sv", "en", "se"),
     ),
-    # YSO-Paikat (places) shares the YSO concept namespace —
-    # ``http://www.yso.fi/onto/yso/p104995`` is "Lontoo" in places,
-    # ``.../p12279`` is "äidit" in YSO general topics. We load the
-    # places dump into the SAME Fuseki named graph as YSO so the
+    # YSO-Paikat (places) and YSO-Aika (time periods) share the YSO
+    # concept namespace — ``http://www.yso.fi/onto/yso/p104995`` is
+    # "Lontoo" in places, ``.../p6201062019`` is "2010-luku" in time,
+    # ``.../p12279`` is "äidit" in YSO general topics. We load both
+    # auxiliary dumps into the SAME Fuseki named graph as YSO so the
     # existing Skosmos ``:yso`` vocab entry (uriSpace + sparqlGraph
-    # both equal to the YSO URI namespace) renders place URIs as
-    # labelled clickable concepts without a separate Skosmos vocab,
-    # and so M9 tier-0 finds place prefLabels via the same SPARQL
-    # query as topic prefLabels.
+    # both equal to the YSO URI namespace) renders place + temporal
+    # URIs as labelled clickable concepts without separate Skosmos
+    # vocabs, and so M9 tier-0 finds their prefLabels via the same
+    # SPARQL query as topic prefLabels. Cataloguer MARC ``$2 yso/fin``
+    # tagging is the same across all three sub-vocabularies.
     FintoVocab(
         vocab_id="yso-paikat",
         dump_url="https://api.finto.fi/download/yso-paikat/yso-paikat-skos.ttl",
         graph_uri="http://www.yso.fi/onto/yso/",
         languages=("fi", "sv", "en"),
+    ),
+    FintoVocab(
+        vocab_id="yso-aika",
+        dump_url="https://api.finto.fi/download/yso-aika/yso-aika-skos.ttl",
+        graph_uri="http://www.yso.fi/onto/yso/",
+        languages=("fi", "sv"),
     ),
     FintoVocab(
         vocab_id="finaf",

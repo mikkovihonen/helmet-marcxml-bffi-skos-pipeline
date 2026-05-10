@@ -304,6 +304,7 @@ def test_canonical_vocab_list_covers_expected_authority_vocabularies() -> None:
     assert {v.vocab_id for v in FINTO_VOCABS} == {
         "yso",
         "yso-paikat",
+        "yso-aika",
         "finaf",
         "kauno",
         "muso",
