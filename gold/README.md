@@ -13,13 +13,13 @@ the seed used to:
 
 ## Status
 
-- **13 cases** committed (target per spec § 9: 50–100; bootstrap is
+- **15 cases** committed (target per spec § 9: 50–100; bootstrap is
   intentionally smaller).
-- **31% holdout** (4 of 13), hand-marked per case via the `holdout`
+- **33% holdout** (5 of 15), hand-marked per case via the `holdout`
   field — *not* hash-derived.
-- **7 categories** covered: translation, transliteration, adaptation,
-  abridgement, music-recording-vs-notated, cross-genre, and
-  same-author-different-titles.
+- **8 categories** covered: translation, transliteration, adaptation,
+  abridgement, music-recording-vs-notated, cross-genre,
+  same-author-different-titles, and subject-as-name-discrimination.
 - **Common-title-collision and edition-revision categories are not yet
   populated** — these need real Helmet pairs that the cataloguer Ask 1
   / Ask 2 didn't surface (Slot 5 in `docs/external-dependencies.md`
@@ -36,6 +36,7 @@ the seed used to:
 | music-recording-vs-notated | 1 | 0 |
 | same-author-different-titles | 2 | 1 |
 | cross-genre-different-work | 4 | 1 |
+| subject-as-name-discrimination | 2 | 1 |
 
 Spec § 9 asks for at least 2–3 holdouts per category. The bootstrap
 set does **not** yet satisfy this — the loader's
@@ -45,21 +46,22 @@ past ~50 cases (post-M6 / first production run with human overrides).
 
 ## Sources
 
-- **Real-record pairs** (10 of 13) cite their `helmet_bib_id` on each
+- **Real-record pairs** (11 of 15) cite their `helmet_bib_id` on each
   side. Most are drawn from the cataloguer-curated dev sample
   (`tests/data/sample-marcxml/curated/`) plus three additional
   Pushkin and Morton records (1690010, 2080863, 2297829, 2099930,
   2293686) sourced from the production corpus at
   `helmet-sierra-data-tools/output/marcxml/` to anchor the
-  `same_work` and `same-author-different-titles` cases.
+  `same_work`, `same-author-different-titles`, and
+  `subject-as-name-discrimination` cases.
 - **Synthesized records** are tagged `"synthesized": true` on the
   affected side. Used only where the corresponding real bib was not
   found in the corpus — replace with real records as they appear.
-  Three cases currently carry a synthesized side: `gs-0003`
+  Cases currently carrying a synthesized side: `gs-0003`
   (transliteration), `gs-0004` (Morton English original), `gs-0005`
   (Závada source novel for the *Natural light* film), `gs-0006`
   (Tove Jansson source novel for the Moomin children's-book
-  abridgement).
+  abridgement), `gs-0014` (second Pekurinen biography placeholder).
 
 ## Format
 

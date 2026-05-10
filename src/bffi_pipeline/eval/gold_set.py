@@ -43,6 +43,15 @@ GoldCategory = Literal[
     "music-recording-vs-notated",
     "same-author-different-titles",
     "cross-genre-different-work",
+    # Pair where a person appears as MARC 6XX subject on at least one
+    # side. Tests whether the M6 judge over-weights shared subject
+    # tokens — biographies of the same person are different works at
+    # RDA level. Surfaced by the M9 Agent6XX walker fix that routes
+    # marc2bibframe2 ``#Agent6(00|10|11)-N`` URI fragments through
+    # KANTO instead of YSO; gold cases here exercise the upstream
+    # judge's discrimination on text features the walker fix does
+    # NOT touch (Agent6XX routing is post-M6).
+    "subject-as-name-discrimination",
 ]
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
