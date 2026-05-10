@@ -119,52 +119,58 @@ def construct_bffi(source: Graph) -> Graph:
 # --- Post-processing ------------------------------------------------------
 
 
-def _language_tag_for(source: Graph) -> str | None:
-    """Pick a BCP-47 tag from ``bf:language`` URIs on the main ``bf:Work``.
+def _candidate_languages(source: Graph) -> frozenset[str]:
+    """Return BCP-47 candidate codes from the main ``bf:Work``'s ``bf:language``.
 
-    Two filters keep us off false-positive language codes:
-
-    1. Subjects must be URIRef-typed ``bf:Work`` and not appear as the
-       object of ``bf:associatedResource`` — i.e. only the main Work
-       counts. marc2bibframe2 emits a separate ``Note otx`` blank-node
-       ("original-text-version") that carries ``bf:language`` for the
-       *translated-from* language; that's not what we want to tag the
-       Expression's prefLabel with.
-    2. Among the main-Work languages, apply the committed display
-       priority ``fi → sv → en``. Set iteration order is otherwise
-       implementation-defined and produced flaky tags on records with
-       multiple ``bf:language`` triples.
-
-    Languages outside ``fi/sv/en`` (e.g. ``rus``) leave the prefLabel
-    untagged — the Boundary-3 shape flags those records.
+    Only walks URIRef-typed ``bf:Work`` subjects that aren't referenced
+    via ``bf:associatedResource`` — i.e. only the main Work counts.
+    marc2bibframe2 emits a separate ``Note otx`` sub-node carrying
+    ``bf:language`` for the *translated-from* language (MARC 041 $h);
+    aggregate records emit ``bf:language`` on contained Works too.
+    Both pollute downstream language detection if not filtered.
     """
     contained: set[URIRef] = {
         o
         for _, _, o in source.triples((None, V.BF.associatedResource, None))
         if isinstance(o, URIRef)
     }
-    seen: set[str] = set()
+    codes: set[str] = set()
     for work in source.subjects(RDF.type, V.BF.Work):
         if not isinstance(work, URIRef) or work in contained:
             continue
         for lang in source.objects(work, V.BF.language):
             if isinstance(lang, URIRef) and str(lang).startswith(_LANG_URI_PREFIX):
-                seen.add(str(lang)[len(_LANG_URI_PREFIX) :])
-    # Display priority committed in CLAUDE.md: fi > sv > en.
-    for code3 in ("fin", "swe", "eng"):
-        if code3 in seen:
-            return _LANG_3_TO_2[code3]
-    return None
+                code3 = str(lang)[len(_LANG_URI_PREFIX) :]
+                if code3 in _LANG_3_TO_2:
+                    codes.add(_LANG_3_TO_2[code3])
+                elif code3 == "rus":
+                    codes.add("ru")
+    return frozenset(codes)
 
 
-def _retag_pref_labels(graph: Graph, lang: str) -> None:
-    """Replace any untagged ``skos:prefLabel`` literal with one tagged ``lang``."""
+def _retag_pref_labels(graph: Graph, candidates: frozenset[str]) -> None:
+    """Replace untagged ``skos:prefLabel`` literals with split + per-language ones.
+
+    For each untagged ``skos:prefLabel`` literal, runs
+    :func:`bffi_pipeline.title_lang.tag_title` against the cataloguer's
+    declared language candidates. Emits one labeled prefLabel per
+    confidently-detected segment (or one fallback label on the whole
+    string when splitting / detection didn't help).
+    """
+    from bffi_pipeline.title_lang import tag_title
+
     to_remove: list[tuple[URIRef, URIRef, Literal]] = []
     to_add: list[tuple[URIRef, URIRef, Literal]] = []
     for s, _, o in graph.triples((None, SKOS_prefLabel, None)):
-        if isinstance(o, Literal) and not o.language and isinstance(s, URIRef):
-            to_remove.append((s, SKOS_prefLabel, o))
-            to_add.append((s, SKOS_prefLabel, Literal(str(o), lang=lang)))
+        if not isinstance(o, Literal) or o.language or not isinstance(s, URIRef):
+            continue
+        tagged = tag_title(str(o), candidates)
+        if not tagged:
+            continue
+        to_remove.append((s, SKOS_prefLabel, o))
+        for seg in tagged:
+            literal = Literal(seg.text, lang=seg.lang) if seg.lang else Literal(seg.text)
+            to_add.append((s, SKOS_prefLabel, literal))
     for triple in to_remove:
         graph.remove(triple)
     for triple in to_add:
@@ -173,9 +179,9 @@ def _retag_pref_labels(graph: Graph, lang: str) -> None:
 
 def post_process(bffi_graph: Graph, source: Graph) -> Graph:
     """Mutate ``bffi_graph`` in place: tag prefLabels, bind namespaces."""
-    lang = _language_tag_for(source)
-    if lang:
-        _retag_pref_labels(bffi_graph, lang)
+    candidates = _candidate_languages(source)
+    if candidates:
+        _retag_pref_labels(bffi_graph, candidates)
     bffi_graph.bind("bf", V.BF)
     bffi_graph.bind("bffi", V.BFFI)
     bffi_graph.bind("bib", V.BIB)

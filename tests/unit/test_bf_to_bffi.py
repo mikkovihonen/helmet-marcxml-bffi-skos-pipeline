@@ -224,25 +224,29 @@ def test_pref_label_picks_main_work_language_not_contained_work() -> None:
     assert label.language == "sv"
 
 
-def test_pref_label_priority_fi_over_sv_over_en() -> None:
-    """A bilingual Finnish-Swedish record (both languages on the main Work)
-    tags prefLabel with `fi` per the committed display priority."""
-    source = Graph()
-    source.parse(
-        data=textwrap.dedent(
-            f"""
-            @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
-            <{BF_WORK}> a bf:Work ;
-                bf:title    [ bf:mainTitle "Bilingual title" ] ;
-                bf:language <http://id.loc.gov/vocabulary/languages/swe> ,
-                            <http://id.loc.gov/vocabulary/languages/eng> ,
-                            <http://id.loc.gov/vocabulary/languages/fin> .
-            """
-        ).strip(),
-        format="turtle",
-    )
-    bffi = construct_bffi(source)
-    post_process(bffi, source)
-    label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
-    assert isinstance(label, Literal)
-    assert label.language == "fi"
+def test_pref_label_picks_language_via_lingua_when_multiple_candidates() -> None:
+    """When the main Work declares multiple languages, the per-segment
+    Lingua detector picks the language whose model fits the text best.
+    'Sota ja rauha' is unambiguously Finnish; 'War and Peace' is
+    English; both should tag correctly even if the same record
+    declares all three of fi/sv/en."""
+    for title, expected in [("Sota ja rauha", "fi"), ("War and Peace", "en")]:
+        source = Graph()
+        source.parse(
+            data=textwrap.dedent(
+                f"""
+                @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+                <{BF_WORK}> a bf:Work ;
+                    bf:title    [ bf:mainTitle "{title}" ] ;
+                    bf:language <http://id.loc.gov/vocabulary/languages/swe> ,
+                                <http://id.loc.gov/vocabulary/languages/eng> ,
+                                <http://id.loc.gov/vocabulary/languages/fin> .
+                """
+            ).strip(),
+            format="turtle",
+        )
+        bffi = construct_bffi(source)
+        post_process(bffi, source)
+        label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
+        assert isinstance(label, Literal)
+        assert label.language == expected, f"{title!r} should be {expected}, got {label.language}"
