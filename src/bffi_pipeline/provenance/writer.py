@@ -51,10 +51,12 @@ COMPACTION_AGE_DAYS: Final[int] = 90
 
 
 def default_provenance_path() -> Path:
+    """Return ``<BFFI_DATA_DIR>/provenance.ttl`` from the live Settings."""
     return get_settings().data_dir / PROVENANCE_FILENAME
 
 
 def default_provenance_meta_path() -> Path:
+    """Return ``<BFFI_DATA_DIR>/provenance-meta.ttl`` from the live Settings."""
     return get_settings().data_dir / PROVENANCE_META_FILENAME
 
 
@@ -103,17 +105,24 @@ class ProvenanceWriter:
     # --- Activity / agent emission ---------------------------------------
 
     def add_software_agent(self, **kwargs: Any) -> URIRef:
+        """Append one ``prov:SoftwareAgent`` block.
+
+        See :func:`provenance.logger.log_software_agent` for the field set.
+        """
         return P.log_software_agent(self.graph, **kwargs)
 
     def add_merge_decision(self, **kwargs: Any) -> URIRef:
+        """Append one ``bffi-prov:WorkMergeDecision`` Activity. Returns its URI."""
         return P.log_merge_decision(self.graph, **kwargs)
 
     def add_review(self, **kwargs: Any) -> URIRef:
+        """Append one ``bffi-prov:HumanReview`` Activity. Returns its URI."""
         return P.log_review(self.graph, **kwargs)
 
     # --- Persistence -----------------------------------------------------
 
     def flush(self) -> None:
+        """Serialise the in-memory graph to ``self.path`` atomically."""
         _atomic_serialize(self.graph, self.path)
 
     def __enter__(self) -> ProvenanceWriter:

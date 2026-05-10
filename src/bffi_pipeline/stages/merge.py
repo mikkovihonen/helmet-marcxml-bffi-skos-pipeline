@@ -207,6 +207,7 @@ class SubjectTarget:
 
     @property
     def is_resolved(self) -> bool:
+        """True iff the cataloguer pre-resolved this target with a ``$0`` authority URI."""
         return self.uri is not None
 
 
@@ -323,6 +324,13 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
 
 @dataclass(frozen=True)
 class HelmetMapEntry:
+    """One row from M2's ``helmet-map.jsonl``.
+
+    Joins a raw Work URI to its source Helmet bib_id and the M2
+    conversion timestamp; M8 reads this to seed
+    ``bffi:descriptionCreationDate`` on each canonical Work.
+    """
+
     raw_work_uri: str
     helmet_bib_id: str
     converted_at: str
@@ -350,6 +358,13 @@ def _load_helmet_map(path: Path) -> dict[str, HelmetMapEntry]:
 
 @dataclass
 class CanonicalEntry:
+    """One row of ``canonical-map.jsonl``.
+
+    Captures the canonical Work URI plus the raw Works and Helmet
+    bib_ids it absorbed at merge time. Joined with ``helmet-map.jsonl``
+    this gives O(1) Helmet bib_id → canonical Work URI lookup.
+    """
+
     canonical_work_uri: str
     raw_work_uris: list[str]
     helmet_bib_ids: list[str]
@@ -616,6 +631,7 @@ class MergeResult:
     conflicts_path: str
 
     def render(self) -> str:
+        """Format the merge result as paste-ready text for the merge CLI."""
         return "\n".join(
             (
                 "M8 merge complete",

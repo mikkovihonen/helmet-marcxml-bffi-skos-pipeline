@@ -68,9 +68,11 @@ class BffiSummary:
 
     @property
     def total(self) -> int:
+        """Total number of input files seen, excluding shape-only flags."""
         return len(self.converted) + len(self.skipped_idempotent) + len(self.errored)
 
     def render(self) -> str:
+        """Format this summary as paste-ready text for the bf-to-bffi CLI."""
         lines = [
             f"BIBFRAME to BFFI conversion summary ({self.total} input file(s))",
             f"  converted: {len(self.converted)}",

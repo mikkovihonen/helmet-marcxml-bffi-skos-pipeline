@@ -103,6 +103,7 @@ class GoldSplit:
 
     @property
     def total(self) -> int:
+        """Total number of cases across both halves of the split."""
         return len(self.training) + len(self.holdout)
 
 

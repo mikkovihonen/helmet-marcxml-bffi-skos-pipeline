@@ -99,6 +99,7 @@ class ModelBenchmarkResult:
     pair_scores: list[PairScore] = field(default_factory=list)
 
     def render(self) -> str:
+        """Format this result as paste-ready text for the benchmark CLI."""
         lines = [
             f"Model: {self.model_name}",
             f"  cases:               {self.n_cases}",

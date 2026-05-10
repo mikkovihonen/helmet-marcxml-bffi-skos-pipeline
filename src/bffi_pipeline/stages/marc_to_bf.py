@@ -91,9 +91,11 @@ class ConversionSummary:
 
     @property
     def total(self) -> int:
+        """Total number of input files seen across all outcomes."""
         return len(self.succeeded) + len(self.skipped_idempotent) + len(self.failed)
 
     def render(self) -> str:
+        """Format this summary as paste-ready text for the marc-to-bf CLI."""
         lines = [
             f"MARCXML to BIBFRAME conversion summary ({self.total} input file(s))",
             f"  succeeded: {len(self.succeeded)}",

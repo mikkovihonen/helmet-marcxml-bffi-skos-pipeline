@@ -1,9 +1,9 @@
 # Production runbook
 
 End-to-end recipe for running the BFFI pipeline against the
-~800 k-record Helmet corpus on the M5 Max. M0-M11 are committed;
+~800 k-record Helmet corpus on the M5 Max. M0-M12 are committed;
 the surface-level checks of the Skosmos UI (M11) are user-side
-smoke checks documented at the bottom of this file.
+smoke checks documented near the bottom of this file.
 
 This is the *canonical* sequence — start here, not from individual
 milestone notes.
@@ -113,18 +113,23 @@ bffi-pipeline merge
 #   group (those Works are NOT silently merged — they're flagged
 #   for human review).
 
-# 7. M9 — reconcile creators against KANTO + VIAF (with LLM picker).
+# 7. M9 — reconcile creators + subjects against KANTO / VIAF / YSO /
+#    KAUNO / MUSO (with LLM picker).
 LLM_BASE_URL=http://localhost:11434/v1 \
     bffi-pipeline reconcile
-# → walks canonical.ttl, queries Finto's Skosmos REST for KANTO,
-#   falls back to VIAF for non-Finnish authors not in KANTO, runs
-#   the four-tier decision (lexical-direct ≥0.95, llm-pick when
-#   ambiguous, fallback with needs-review tag when LLM uncertain
-#   or confidence <0.80, no-candidate when nothing clears the 0.70
-#   floor), writes back bffi:creator on the canonical Work +
-#   bumps AdminMetadata, appends bffi-prov:Reconciliation
-#   Activities to provenance.ttl. (Subject reconciliation across
-#   YSO/KAUNO/MUSO is a follow-up — see BUILD_PLAN M9 phase 3.)
+# → walks canonical.ttl, queries Finto's Skosmos REST for KANTO
+#   (creators), YSO (subjects), KAUNO (genre/form), and MUSO (music
+#   form), falls back to VIAF for non-Finnish authors not in KANTO,
+#   runs the four-tier decision per kind (lexical-direct ≥0.95,
+#   llm-pick when ambiguous, fallback with needs-review tag when LLM
+#   uncertain or confidence <0.80, no-candidate when nothing clears
+#   the 0.70 floor), writes back bffi:creator / bffi:subject /
+#   bffi:genreForm on the canonical Work + bumps AdminMetadata,
+#   appends bffi-prov:Reconciliation Activities to provenance.ttl.
+#
+# Filter to a subset of kinds with --kinds:
+#   bffi-pipeline reconcile --kinds creators        # KANTO + VIAF only
+#   bffi-pipeline reconcile --kinds subjects,genres # YSO + KAUNO + MUSO
 
 # 8. M10 phase 1 — Skosify the canonical graph.
 bffi-pipeline skosify
@@ -152,6 +157,24 @@ bffi-pipeline provenance compact --older-than 90d
 # → strips bffi-prov:rawResponse from old Activities, refreshes
 #   <BFFI_DATA_DIR>/provenance-meta.ttl#lastCompactedAt. CLI startup
 #   prints a stderr nag once that sentinel is older than 90 days.
+
+# 11. M12 — gold-set evaluation (manual, on M5 Max, before any PR
+#     touching prompts/, gold/, judge.py, or eval/). Output is
+#     paste-ready for the PR template.
+make eval LABEL=qwen3-32b-prompt-v3
+# → writes eval-runs/qwen3-32b-prompt-v3.json (gitignored) and
+#   prints aggregate / decided / per-category / high-confidence
+#   accuracy + median latency. Compare against the previous
+#   main-branch run; per-category regression > 10 points is a
+#   blocker.
+
+# 12. M12 — gold-set growth from human-overridden judge decisions
+#     (run monthly once production data is flowing).
+bffi-pipeline grow-gold
+# → reads provenance + bffi-works graphs from Fuseki, writes
+#   gold/grow-candidates.jsonl (one row per override). Cataloguer
+#   reviews, fills in `category`, and hand-merges promoted cases
+#   into gold/gold.jsonl.
 ```
 
 Each `bffi-pipeline ...` invocation runs the stale-provenance check
@@ -240,21 +263,19 @@ Once production data is flowing:
 
 ## What's still missing
 
-The end-to-end pipeline through M11 is committed. Outstanding work:
+The end-to-end pipeline through M12 is committed. Outstanding work:
 
-- **M9 phase 3** — subject reconciliation across YSO / KAUNO / MUSO.
-  Phase 1 + 2 wired creators only; gated on an M8 extension to
-  carry `bffi:subject` + `bffi:genreForm` triples to the canonical
-  Work. Once that lands, the existing `decide_reconciliation` /
-  `apply_reconciliation` paths route by `kind` to the right Finto
-  vocab via the `_KIND_TO_FINTO_VOCAB` map.
-- **M12 full eval harness** — `eval/harness.py` runs the M6 cascade
-  against gold pairs and reports per-category accuracy + confusion
-  matrix; `eval/grow.py` queries Fuseki for human-overridden
-  decisions and proposes new gold cases. Both unblocked now that
-  M6 + M10 ship.
-- **M13** — README, LICENSE, architecture diagram, contributor
-  onboarding doc.
+- **Cataloguer-driven gold-set growth.** `gold/gold.jsonl` carries
+  the bootstrap 13 cases; spec § 9 targets 50–100 stratified by
+  category with ≥ 2 holdout per category. `bffi-pipeline grow-gold`
+  proposes candidates from Fuseki overrides; promoting them into
+  `gold/gold.jsonl` is cataloguer work and not codeable.
+- **M11 user-side smoke** — the seven-item Skosmos UI checklist
+  below requires `docker compose up` against real Skosmos and a
+  loaded Fuseki dataset. Run before declaring a corpus loaded.
+- **`--concurrency` sweep** — pick the production value (see the
+  sweep section above) and update the example command sequence
+  with the chosen number.
 
 Pinned versions stay in the table above so the runbook is the one
 place the production stack is named.

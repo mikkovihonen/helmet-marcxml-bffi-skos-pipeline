@@ -110,6 +110,7 @@ class IndexBuildResult:
     idmap_path: str
 
     def render(self) -> str:
+        """Format the build result as paste-ready text for the embed CLI."""
         return (
             f"FAISS HNSW build complete\n"
             f"  works:               {self.n_works}\n"
@@ -150,6 +151,7 @@ class EmbedStats:
     total_pairs: int = 0
 
     def render(self) -> str:
+        """Format the embed-stats report as paste-ready text."""
         lines = [
             "Stage-2 embedding statistics",
             f"  works:        {self.n_works}",
@@ -210,6 +212,7 @@ def embedding_input_string(work: WorkEmbeddingInput) -> str:
     """
 
     def part(label: str, value: str | None) -> str:
+        """Render one ``label: value`` segment, leaving empty values as ``label:``."""
         return f"{label}: {(value or '').strip()}"
 
     return " | ".join(

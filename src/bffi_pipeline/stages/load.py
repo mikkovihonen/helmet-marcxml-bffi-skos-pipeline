@@ -80,6 +80,7 @@ class LoadResult:
     success: bool = False
 
     def render(self) -> str:
+        """Format this result as paste-ready text for the load CLI."""
         lines = [
             "M10 load complete" if self.success else "M10 load FAILED",
             f"  fuseki:                {self.fuseki_url}",

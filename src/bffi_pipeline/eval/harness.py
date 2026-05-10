@@ -217,6 +217,7 @@ class EvalSummary:
     failures: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self, *, indent: int | None = 2) -> str:
+        """Serialise the summary to JSON; default indentation reads cleanly in PR diffs."""
         return json.dumps(asdict(self), indent=indent, ensure_ascii=False)
 
 

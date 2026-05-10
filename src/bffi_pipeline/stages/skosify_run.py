@@ -54,6 +54,7 @@ class SkosifyResult:
     output_path: str
 
     def render(self) -> str:
+        """Format this result as paste-ready text for the skosify CLI."""
         if self.skipped_idempotent:
             return (
                 "Skosify skipped — output is newer than the inputs (canonical, "

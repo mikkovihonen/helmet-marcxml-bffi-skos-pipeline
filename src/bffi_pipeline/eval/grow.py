@@ -220,6 +220,7 @@ class GrowResult:
     output_path: str
 
     def render(self) -> str:
+        """Format this result as paste-ready text for the grow CLI."""
         return (
             f"M12 grow complete\n"
             f"  candidates written:      {self.candidates_written:,}\n"

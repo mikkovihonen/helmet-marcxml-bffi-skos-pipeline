@@ -235,6 +235,7 @@ class ReconciliationSummary:
     total: int = 0
 
     def render(self) -> str:
+        """Format the reconciliation summary as paste-ready text for the reconcile CLI."""
         return "\n".join(
             (
                 "M9 reconciliation complete",
@@ -291,7 +292,9 @@ class LLMPicker(Protocol):
         *,
         request: EntityRequest,
         candidates: list[AuthorityCandidate],
-    ) -> PickerDecision: ...
+    ) -> PickerDecision:
+        """Pick the authority URI for ``request`` from ``candidates``, or return ``uncertain``."""
+        ...
 
 
 @dataclass
@@ -306,6 +309,7 @@ class StubPicker:
         request: EntityRequest,
         candidates: list[AuthorityCandidate],
     ) -> PickerDecision:
+        """Look up a wired decision for ``(work_uri, literal)``; default to ``uncertain``."""
         key = (request.work_uri, request.literal)
         if key not in self.decisions:
             return PickerDecision(
@@ -487,6 +491,7 @@ class LangChainLLMPicker:
         request: EntityRequest,
         candidates: list[AuthorityCandidate],
     ) -> PickerDecision:
+        """Invoke the configured chain with retries and the candidate-set sanity check."""
         if not candidates:
             return PickerDecision(
                 decision="uncertain",
@@ -659,7 +664,9 @@ class AuthorityClient(Protocol):
 
     def query(
         self, *, request: EntityRequest, top_k: int = DEFAULT_TOP_K
-    ) -> list[AuthorityCandidate]: ...
+    ) -> list[AuthorityCandidate]:
+        """Return up to ``top_k`` candidates for ``request`` from this authority."""
+        ...
 
 
 _KIND_TO_FINTO_VOCAB: Final[dict[AuthorityKind, str]] = {
@@ -693,6 +700,7 @@ class FintoSkosmosClient:
         request: EntityRequest,
         top_k: int = DEFAULT_TOP_K,
     ) -> list[AuthorityCandidate]:
+        """Hit Finto's ``/search`` endpoint for ``request.kind``-mapped vocab; cache by day."""
         vocab = _KIND_TO_FINTO_VOCAB.get(request.kind)
         if vocab is None:
             return []
@@ -751,6 +759,7 @@ class ViafClient:
         request: EntityRequest,
         top_k: int = DEFAULT_TOP_K,
     ) -> list[AuthorityCandidate]:
+        """Hit VIAF's AutoSuggest endpoint; only persons / corporate bodies route here."""
         if request.kind not in {"person", "corporate_body"}:
             return []
         try:
@@ -798,6 +807,7 @@ class StubAuthorityClient:
         request: EntityRequest,
         top_k: int = DEFAULT_TOP_K,
     ) -> list[AuthorityCandidate]:
+        """Look up a wired candidate list for ``(kind, literal)``; default to empty."""
         return list(self.fixtures.get((request.kind, request.literal), []))[:top_k]
 
 

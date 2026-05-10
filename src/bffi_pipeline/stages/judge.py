@@ -212,6 +212,11 @@ class JudgeOutcome:
 
     @property
     def used_cascade(self) -> bool:
+        """True iff the second-opinion model was invoked.
+
+        Second-opinion fires when the primary returned ``uncertain`` or
+        a ``same_work`` decision below the cascade-confidence threshold.
+        """
         return any(s.stage == STAGE_SECOND_OPINION for s in self.steps)
 
 
@@ -312,10 +317,12 @@ class JudgeCache:
         self.close()
 
     def close(self) -> None:
+        """Close the underlying SQLite connection (idempotent)."""
         with suppress(sqlite3.ProgrammingError):
             self._conn.close()
 
     def get(self, key: str) -> WorkMatchDecision | None:
+        """Return the cached decision for ``key`` or ``None`` if not present."""
         row = self._conn.execute(
             "SELECT decision FROM judge_cache WHERE cache_key = ?",
             (key,),
@@ -332,6 +339,12 @@ class JudgeCache:
         model_name: str,
         prompt_hash_value: str,
     ) -> None:
+        """Insert-or-replace the cached decision for ``key``.
+
+        ``model_name`` and ``prompt_hash_value`` are committed alongside
+        the decision for audit; never silently re-cache a decision under
+        a different model or prompt.
+        """
         self._conn.execute(
             "INSERT OR REPLACE INTO judge_cache "
             "(cache_key, model_name, prompt_hash, decision, created_at) "
@@ -348,6 +361,7 @@ class JudgeCache:
 
 
 def default_cache_path() -> Path:
+    """Return ``<BFFI_DATA_DIR>/judge-cache.sqlite`` from the live Settings."""
     return get_settings().data_dir / CACHE_FILENAME
 
 
@@ -741,9 +755,11 @@ class JudgeBatchProgress:
 
     @property
     def avg_seconds_per_pair(self) -> float | None:
+        """Average time per completed pair, or ``None`` before the first one finishes."""
         return self.elapsed_seconds / self.completed if self.completed else None
 
     def render(self) -> str:
+        """Format this progress sample as a one-line CLI status string."""
         avg = self.avg_seconds_per_pair
         if avg is None:
             return f"{self.completed:,} / {self.total:,} pairs"
@@ -773,6 +789,7 @@ class JudgeCheckpoint:
     cascade_used: int
 
     def to_json(self) -> str:
+        """Serialise this checkpoint to JSON for the on-disk mirror."""
         return _json.dumps(
             {
                 "start_time": self.start_time,
@@ -787,6 +804,7 @@ class JudgeCheckpoint:
 
     @classmethod
     def from_json(cls, raw: str) -> JudgeCheckpoint:
+        """Reconstruct a checkpoint from the JSON-on-disk mirror."""
         data = _json.loads(raw)
         return cls(
             start_time=data["start_time"],
@@ -813,6 +831,7 @@ class JudgeBatchResult:
     checkpoint_path: str = ""
 
     def render(self) -> str:
+        """Format the batch result as paste-ready text for the judge CLI."""
         lines = [
             "M6 judge batch complete",
             f"  total candidates: {self.total_pairs:,}",

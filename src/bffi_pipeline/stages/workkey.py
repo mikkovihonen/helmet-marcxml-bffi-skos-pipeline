@@ -149,13 +149,16 @@ class BlockingStats:
 
     @property
     def block_count(self) -> int:
+        """Number of distinct blocking keys (= number of blocks)."""
         return len(self.blocks)
 
     @property
     def size_distribution(self) -> Counter[int]:
+        """Histogram of block sizes, mapping ``size`` → number of blocks of that size."""
         return Counter(len(works) for works in self.blocks.values())
 
     def render(self) -> str:
+        """Format the stats as paste-ready text for the workkey-stats CLI."""
         lines = [
             "Stage-1 blocking-key statistics",
             f"  works:  {self.total_works}",

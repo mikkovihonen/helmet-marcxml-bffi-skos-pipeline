@@ -440,14 +440,14 @@ Phases 1 + 2 + 3 (committed) ship the eval harness, the CI workflow, and the gol
 
 ### M13 — Documentation + handoff
 
-- [ ] `LICENSE` file with Apache License 2.0 text. Add `Copyright (c) <year> University Of Helsinki (The National Library Of Finland)` at top, matching NLF convention.
-- [ ] `README.md` in English, covering: what this is, NLF pro bono context, prerequisites (M5 Max + 128 GB + Ollama setup), how to run on a sample, how to run on real data, license note.
-- [ ] Inline docstrings on every public function in `src/`. Docstrings in English.
-- [ ] One end-to-end runbook in `docs/runbook.md` (English): from a fresh directory of MARCXML files to live Skosmos display, including expected timings on M5 Max, the chosen pinned versions, and the chosen vllm-mlx concurrency value from M6 tuning.
-- [ ] Architecture diagram (mermaid in README is fine) showing the stages and their inputs/outputs.
-- [ ] `pyproject.toml` carries `license = "Apache-2.0"` and `authors`.
+- [x] `LICENSE` file with Apache License 2.0 text. Add `Copyright (c) <year> University Of Helsinki (The National Library Of Finland)` at top, matching NLF convention. *(Apache 2.0 verbatim with the NLF copyright header at line 1.)*
+- [x] `README.md` in English, covering: what this is, NLF pro bono context, prerequisites (M5 Max + 128 GB + Ollama setup), how to run on a sample, how to run on real data, license note. *(Sections: elevator pitch + NLF context; mermaid architecture diagram; prerequisites + one-time install; sample-data quickstart; production-run pointer to runbook; repo layout; testing/CI/eval; operating constraints; committed identifiers; license. Replaces the original meta-doc README that described the documentation package.)*
+- [x] Inline docstrings on every public function in `src/`. Docstrings in English. *(AST audit reports zero undocumented public symbols across ``src/bffi_pipeline``. Private helpers are intentionally undocumented — CLAUDE.md says default to writing no comments unless the WHY is non-obvious; for boilerplate ``render()`` / property accessors the docstrings are tight one-liners that just name the shape so the audit is satisfiable without bloat.)*
+- [x] One end-to-end runbook in `docs/runbook.md` (English): from a fresh directory of MARCXML files to live Skosmos display, including expected timings on M5 Max, the chosen pinned versions, and the chosen vllm-mlx concurrency value from M6 tuning. *(Updated for M9 phase 3 + M12 — adds the ``--kinds`` filter to the reconcile step, adds ``make eval`` + ``bffi-pipeline grow-gold`` as steps 11-12, prunes the "what's still missing" list down to cataloguer-driven gold growth + the ``--concurrency`` sweep.)*
+- [x] Architecture diagram (mermaid in README is fine) showing the stages and their inputs/outputs. *(Mermaid flowchart in README.md groups the M2-M11 stages into Convert / Cluster / Reconcile / Publish bundles and shows the provenance + eval graphs feeding off M6/M9 → M12.)*
+- [x] `pyproject.toml` carries `license = "Apache-2.0"` and `authors`. *(Already set since M0; verified.)*
 
-**Definition of done:** A new contributor can clone the repo, follow the README, and produce a working Skosmos 3 instance from the sample data within an hour. The repo is in the shape NLF would expect for an upstream contribution.
+**Definition of done:** A new contributor can clone the repo, follow the README, and produce a working Skosmos 3 instance from the sample data within an hour. The repo is in the shape NLF would expect for an upstream contribution. *(All committable docs are in: LICENSE + project README with architecture diagram + the canonical end-to-end runbook + every public src/ symbol carries an English docstring + Apache 2.0 / CC0 + .github CI workflow + PR template. The "within an hour" claim is best-effort against the M5 Max profile; the runbook calls out the model-download cost (Qwen3 32B + 72B is the long pole, not the pipeline code).)*
 
 ---
 
