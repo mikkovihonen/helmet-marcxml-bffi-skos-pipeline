@@ -246,6 +246,9 @@ class CanonicalWorkInputs:
     """``bffi:genreForm`` targets; M9 phase 3 reconciles unresolved ones."""
     contribution_targets: list[ContributionTarget] = field(default_factory=list)
     """``bffi:PrimaryContribution`` blocks; M9 reconciles their agents against KANTO/VIAF."""
+    expression_labels: list[tuple[str, str, str | None]] = field(default_factory=list)
+    """List of (expression_uri, label_text, lang) tuples to propagate onto canonical
+    Expressions so Skosmos surfaces them with prefLabels."""
 
 
 def _first_pref_label(graph: Graph, subject: URIRef) -> str | None:
@@ -365,6 +368,24 @@ def _subject_targets(graph: Graph, work: URIRef, predicate: URIRef) -> list[Subj
     return out
 
 
+def _expression_labels(graph: Graph, work: URIRef) -> list[tuple[str, str, str | None]]:
+    """Collect ``skos:prefLabel`` literals on each ``bffi:hasExpression`` target.
+
+    Returns ``[(expression_uri, label_text, lang), ...]``; multiple labels
+    per Expression (different languages) produce multiple entries. M8
+    re-asserts these on the canonical so Skosmos's UI shows labelled
+    Expressions in the Work → Expression hierarchy view.
+    """
+    out: list[tuple[str, str, str | None]] = []
+    for expr in graph.objects(work, V.BFFI.hasExpression):
+        if not isinstance(expr, URIRef):
+            continue
+        for label in graph.objects(expr, V.SKOS.prefLabel):
+            if isinstance(label, RdfLiteral):
+                out.append((str(expr), str(label), label.language))
+    return out
+
+
 def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
     """Walk the combined BFFI + BIBFRAME graph and return per-Work merge inputs."""
     out: dict[str, CanonicalWorkInputs] = {}
@@ -387,6 +408,7 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
             subject_targets=subjects,
             genre_form_targets=genres,
             contribution_targets=contributions,
+            expression_labels=_expression_labels(graph, work),
         )
     return out
 
@@ -551,6 +573,39 @@ def _propagate_subject_targets(
             g.add((node, V.BF.source, Literal(target.source)))
 
 
+def _propagate_expressions(
+    g: Graph,
+    *,
+    canonical_uri: URIRef,
+    members: list[CanonicalWorkInputs],
+) -> None:
+    """Re-assert Expression typing + bffi:hasExpression / expressionOf + prefLabel.
+
+    The typing and link triples make M10's Skosify dual-type
+    Expressions as ``skos:Concept``. The prefLabel literal is what
+    Skosmos surfaces in the Work → Expression hierarchy view; without
+    it the UI renders Expressions with empty labels.
+    """
+    seen_exprs: set[str] = set()
+    seen_labels: set[tuple[str, str, str | None]] = set()
+    for member in members:
+        for expr_uri in member.expression_uris:
+            if expr_uri in seen_exprs:
+                continue
+            seen_exprs.add(expr_uri)
+            expr = URIRef(expr_uri)
+            g.add((expr, RDF.type, V.BFFI.Expression))
+            g.add((canonical_uri, V.BFFI.hasExpression, expr))
+            g.add((expr, V.BFFI.expressionOf, canonical_uri))
+        for expr_uri, label_text, lang in member.expression_labels:
+            key = (expr_uri, label_text, lang)
+            if key in seen_labels:
+                continue
+            seen_labels.add(key)
+            literal = Literal(label_text, lang=lang) if lang else Literal(label_text)
+            g.add((URIRef(expr_uri), V.SKOS.prefLabel, literal))
+
+
 def _propagate_primary_contributions(
     g: Graph,
     *,
@@ -620,20 +675,7 @@ def _emit_canonical_work(
             g.add((ident, RDF.value, Literal(bib_id)))
             g.add((ident, V.BF.source, V.HELMET_SOURCE_URI))
 
-    # Rewrite expressionOf: every absorbed Expression now points at the canonical Work.
-    # Also re-assert the bffi:Expression typing on the canonical so M10's
-    # Skosify run can dual-type Expressions as skos:Concepts (the typing
-    # only existed in the per-record BFFI Turtles, not in canonical.ttl).
-    seen_exprs: set[str] = set()
-    for member in members:
-        for expr_uri in member.expression_uris:
-            if expr_uri in seen_exprs:
-                continue
-            seen_exprs.add(expr_uri)
-            expr = URIRef(expr_uri)
-            g.add((expr, RDF.type, V.BFFI.Expression))
-            g.add((canonical_uri, V.BFFI.hasExpression, expr))
-            g.add((expr, V.BFFI.expressionOf, canonical_uri))
+    _propagate_expressions(g, canonical_uri=canonical_uri, members=members)
 
     # Provenance back-links to absorbed raw Works.
     raw_uris_sorted = sorted(m.work_uri for m in members)

@@ -725,3 +725,45 @@ def test_absorbed_expressions_are_typed_bffi_expression_on_canonical(tmp_path: P
     assert URIRef(EXPR_A) in typed
     assert URIRef(EXPR_B) in typed
     assert URIRef(EXPR_C) in typed
+
+
+def test_absorbed_expression_prefLabels_are_propagated_to_canonical(tmp_path: Path) -> None:
+    """Skosmos surfaces Expressions in the Work → Expression hierarchy via skos:prefLabel.
+
+    Without prefLabel propagation Skosmos's narrower endpoint returns
+    entries with `prefLabel: None`. M8 re-asserts the labels (with
+    their language tags) on the canonical from each member's
+    ``expression_labels`` list.
+    """
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_labels=[(EXPR_A, "Sota ja rauha", "fi")],
+    )
+    records[WORK_B] = CanonicalWorkInputs(
+        work_uri=WORK_B,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Война и мир",
+        expression_uris=[EXPR_B],
+        helmet_identifiers=[("http://example.org/ident/b1", "222")],
+        # Two languages on the same Expression — both should propagate.
+        expression_labels=[
+            (EXPR_B, "Война и мир", "ru"),
+            (EXPR_B, "War and Peace", "en"),
+        ],
+    )
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=records,
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    expr_a_labels = {(str(o), o.language) for o in g.objects(URIRef(EXPR_A), V.SKOS.prefLabel)}
+    expr_b_labels = {(str(o), o.language) for o in g.objects(URIRef(EXPR_B), V.SKOS.prefLabel)}
+    assert expr_a_labels == {("Sota ja rauha", "fi")}
+    assert expr_b_labels == {("Война и мир", "ru"), ("War and Peace", "en")}
