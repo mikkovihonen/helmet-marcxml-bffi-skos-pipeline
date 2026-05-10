@@ -140,8 +140,8 @@ cp .env.example .env
 # Local LLM server (host-native, NOT in Docker — Docker on Apple Silicon doesn't expose Metal/MLX)
 brew install ollama
 ollama serve &                                # runs on :11434
-ollama pull qwen3:32b-instruct-q4_K_M         # primary judge (~18 GB)
-ollama pull qwen3:72b-instruct-q4_K_M         # cascade fallback (~40 GB)
+ollama pull qwen3:32b-q4_K_M         # primary judge (~18 GB)
+ollama pull qwen2.5:72b-instruct-q4_K_M         # cascade fallback (~40 GB)
 
 # Triple store + UI (Docker is fine for these — no GPU needed)
 docker compose up -d                          # starts Fuseki + Skosmos
@@ -167,8 +167,8 @@ BFFI_GRAPH_BASE=http://urn.fi/URN:NBN:fi:bib:graph:
 # Local LLM
 LLM_BASE_URL=http://localhost:11434/v1
 LLM_API_KEY=ollama                            # placeholder; Ollama ignores it
-LLM_MODEL_PRIMARY=qwen3:32b-instruct-q4_K_M
-LLM_MODEL_FALLBACK=qwen3:72b-instruct-q4_K_M
+LLM_MODEL_PRIMARY=qwen3:32b-q4_K_M
+LLM_MODEL_FALLBACK=qwen2.5:72b-instruct-q4_K_M
 
 # Triple store
 FUSEKI_URL=http://localhost:3030/bffi
@@ -323,7 +323,7 @@ All phases (1, 2a, 2b) are committed. The one outstanding sub-task is the `--con
   ```
   Joined with `helmet-map.jsonl` from M2, this gives O(1) Helmet ID → canonical Work URI lookup. *(Rows are written sorted by canonical URI so re-runs produce a byte-stable file.)*
 - [x] Idempotent: running merge twice is a no-op. Identifier sets are deduplicated. *(Verified by a byte-equality test: same `now=` and same inputs → identical `canonical.ttl`, `canonical-map.jsonl`, and `canonical-conflicts.jsonl`. Wall-clock `datetime.now()` is centralised on a single `now or datetime.now(UTC)` call so production runs land on one consistent timestamp.)*
-- [x] **Mint canonical-Work AdminMetadata.** Each canonical `bffi:Work` and each `bffi:Expression` produced at merge time gets a fresh `bffi:AdminMetadata` block via `bffi:adminMetadata`. Fields: `bffi:adminMetadataFor` (back-link), `bffi:descriptionCreationDate` = earliest absorbed M2 timestamp (from `helmet-map.jsonl`), `bffi:descriptionChangeDate` and `bffi:dateGenerated` = merge timestamp, `bffi:descriptionModifier` = the cascade winner (e.g., `<bib:agent/qwen3-32b-instruct>` or `<bib:agent/qwen3-72b-instruct>`), `bffi:descriptionAuthentication` = `<bib:auth/auto-merged>`, `bffi:descriptionLevel` = `<bib:desc-level/minimum>`, `bffi:encodingLevel` = `<bib:enc-level/auto>`, `bffi:generationProcess` = `<bib:gen-process/bffi-pipeline/v<version>>`, `bffi:descriptionConventions` = `<bib:desc-conv/bffi-1.0.0>`, `bffi:metadataLicensor` = `<bib:metadata-licensor/cc0>`, `bffi:recordingSource` = `<bib:recording-source/helmet>`, `bffi:sourceMetadata` = the union of absorbed Helmet record URIs (matching `canonical-map.jsonl`). Spine link: `prov:wasGeneratedBy` = the latest `bffi-prov:WorkMergeDecision` Activity URI for this Work. See spec § 8 "AdminMetadata view". *(Spine link to the latest `bffi-prov:WorkMergeDecision` is deferred — the merge stage can't trivially reach into the provenance Turtle to pull the matching Activity URI without M10's Fuseki, and the BFFI-side AdminMetadata view is layered alongside the PROV-O graph rather than the source-of-truth. The other 13 predicates are committed; the spine link gets added when M10 routes both graphs into Fuseki.)*
+- [x] **Mint canonical-Work AdminMetadata.** Each canonical `bffi:Work` and each `bffi:Expression` produced at merge time gets a fresh `bffi:AdminMetadata` block via `bffi:adminMetadata`. Fields: `bffi:adminMetadataFor` (back-link), `bffi:descriptionCreationDate` = earliest absorbed M2 timestamp (from `helmet-map.jsonl`), `bffi:descriptionChangeDate` and `bffi:dateGenerated` = merge timestamp, `bffi:descriptionModifier` = the cascade winner (e.g., `<bib:agent/qwen3-32b>` or `<bib:agent/qwen2.5-72b-instruct>`), `bffi:descriptionAuthentication` = `<bib:auth/auto-merged>`, `bffi:descriptionLevel` = `<bib:desc-level/minimum>`, `bffi:encodingLevel` = `<bib:enc-level/auto>`, `bffi:generationProcess` = `<bib:gen-process/bffi-pipeline/v<version>>`, `bffi:descriptionConventions` = `<bib:desc-conv/bffi-1.0.0>`, `bffi:metadataLicensor` = `<bib:metadata-licensor/cc0>`, `bffi:recordingSource` = `<bib:recording-source/helmet>`, `bffi:sourceMetadata` = the union of absorbed Helmet record URIs (matching `canonical-map.jsonl`). Spine link: `prov:wasGeneratedBy` = the latest `bffi-prov:WorkMergeDecision` Activity URI for this Work. See spec § 8 "AdminMetadata view". *(Spine link to the latest `bffi-prov:WorkMergeDecision` is deferred — the merge stage can't trivially reach into the provenance Turtle to pull the matching Activity URI without M10's Fuseki, and the BFFI-side AdminMetadata view is layered alongside the PROV-O graph rather than the source-of-truth. The other 13 predicates are committed; the spine link gets added when M10 routes both graphs into Fuseki.)*
 - [x] Unit tests cover: chain merging (A=B, B=C → A=B=C); conflict handling (A=B, A≠C, B=C — flag for review, don't merge silently); identifier accumulation; idempotency; AdminMetadata block presence and `sourceMetadata` count = absorbed-record count. *(18 tests in `tests/unit/test_merge.py`. Conflict groups land in `canonical-conflicts.jsonl` — explicitly excluded from `canonical.ttl` and `canonical-map.jsonl`. Four extra tests cover the M9 phase-3 extension: URI subjects dedupe across absorbed members, blank-node subjects with the same `(label, source)` key collapse to one canonical bnode, the `bffi:genreForm` predicate is preserved, and byte-stability holds in the presence of the new blank nodes.)*
 - [x] **Propagate `bffi:subject` + `bffi:genreForm` to the canonical Work (M9 phase-3 prereq).** Each member's URI-resolved targets dedupe by URI; unresolved targets dedupe by `(label, source)` and emit one blank node on the canonical with a deterministic SHA-1-based BNode identifier so re-runs stay byte-stable. Ordering inside the predicate is `(label, source)` lexical so rdflib's serialisation is stable. The blank nodes carry forward `rdfs:label` + `bf:source`, ready for M9 phase 3 to bind authority URIs and bridge via `prov:specializationOf`.
 

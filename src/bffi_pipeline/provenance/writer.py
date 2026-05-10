@@ -77,7 +77,7 @@ class ProvenanceWriter:
     exception::
 
         with ProvenanceWriter() as writer:
-            writer.add_software_agent(model_id="qwen3:32b-instruct-q4_K_M", ...)
+            writer.add_software_agent(model_id="qwen3:32b-q4_K_M", ...)
             writer.add_merge_decision(...)
         # Turtle file written on scope exit.
 

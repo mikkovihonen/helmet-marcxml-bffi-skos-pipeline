@@ -83,8 +83,8 @@ cd helmet-marcxml-bffi-skos-pipeline
 uv sync                                    # fetches every pinned dep
 cp .env.example .env                       # carries the committed LLM defaults
 brew install --cask ollama && open -a Ollama
-ollama pull qwen3:32b-instruct-q4_K_M      # primary judge (~20 GB)
-ollama pull qwen3:72b-instruct-q4_K_M      # cascade fallback (~40 GB)
+ollama pull qwen3:32b-q4_K_M               # primary judge (~20 GB)
+ollama pull qwen2.5:72b-instruct-q4_K_M    # cascade fallback (~40 GB; Qwen3 has no 72B size)
 docker compose up -d                       # Fuseki + Skosmos
 ```
 

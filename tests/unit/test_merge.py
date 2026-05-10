@@ -82,8 +82,8 @@ def _decision_row(
     decision: str = "same_work",
     confidence: float = 0.95,
     used_cascade: bool = False,
-    primary_model: str = "qwen3:32b-instruct-q4_K_M",
-    fallback_model: str = "qwen3:72b-instruct-q4_K_M",
+    primary_model: str = "qwen3:32b-q4_K_M",
+    fallback_model: str = "qwen2.5:72b-instruct-q4_K_M",
 ) -> dict[str, Any]:
     cascade: list[dict[str, Any]] = [
         {
@@ -361,7 +361,7 @@ def test_merged_admin_metadata_modifier_is_cascade_winning_agent(tmp_path: Path)
                 WORK_B,
                 decision="same_work",
                 used_cascade=True,
-                fallback_model="qwen3:72b-instruct-q4_K_M",
+                fallback_model="qwen2.5:72b-instruct-q4_K_M",
             )
         ],
     )
@@ -372,7 +372,7 @@ def test_merged_admin_metadata_modifier_is_cascade_winning_agent(tmp_path: Path)
     merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
     block = _admin_block(g, merged)
     modifiers = {str(o) for o in g.objects(block, V.descriptionModifier)}
-    assert any("qwen3-72b-instruct" in m for m in modifiers)
+    assert any("qwen2.5-72b-instruct" in m for m in modifiers)
 
 
 # --- Expression rewriting ------------------------------------------------

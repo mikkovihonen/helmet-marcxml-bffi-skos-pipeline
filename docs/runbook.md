@@ -15,8 +15,8 @@ milestone notes.
 | `marc2bibframe2` | `third_party/marc2bibframe2` (git submodule) | M2 |
 | Embedding model | `BAAI/bge-m3` (1024-dim, multilingual) | M5; benchmark via `bffi-pipeline embed-benchmark` |
 | FAISS HNSW | `M=32`, `efConstruction=200`, `efSearch=64`, IP metric on L2-normalised vectors | M5 |
-| LLM primary | `qwen3:32b-instruct-q4_K_M` (Ollama) / equivalent MLX 4-bit | M6 |
-| LLM fallback | `qwen3:72b-instruct-q4_K_M` | M6 cascade |
+| LLM primary | `qwen3:32b-q4_K_M` (Ollama) / equivalent MLX 4-bit | M6 |
+| LLM fallback | `qwen2.5:72b-instruct-q4_K_M` | M6 cascade — Qwen3 has no 72B size; cascade steps to previous-gen 72B |
 | Fuseki | `stain/jena-fuseki:5.0.0` | M10 (`docker-compose.yml`) |
 | Skosmos | `ghcr.io/natlibfi/skosmos:3.2` | M11 |
 
@@ -24,8 +24,8 @@ Override via environment / `.env`:
 
 ```
 LLM_BASE_URL=http://localhost:11434/v1     # Ollama default
-LLM_MODEL_PRIMARY=qwen3:32b-instruct-q4_K_M
-LLM_MODEL_FALLBACK=qwen3:72b-instruct-q4_K_M
+LLM_MODEL_PRIMARY=qwen3:32b-q4_K_M
+LLM_MODEL_FALLBACK=qwen2.5:72b-instruct-q4_K_M
 BFFI_DATA_DIR=./data
 ```
 

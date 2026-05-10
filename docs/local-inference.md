@@ -18,16 +18,18 @@ open -a Ollama                      # starts the background service on :11434
 Pull the two judge models (~20 GB and ~40 GB on disk; first-pull takes 10-30 min on a fast connection):
 
 ```bash
-ollama pull qwen3:32b-instruct-q4_K_M    # primary judge
-ollama pull qwen3:72b-instruct-q4_K_M    # cascade fallback
+ollama pull qwen3:32b-q4_K_M             # primary judge
+ollama pull qwen2.5:72b-instruct-q4_K_M  # cascade fallback (Qwen3 has no 72B size)
 ```
+
+Note on the cascade fallback: Qwen3 sizes go `0.6b / 1.7b / 14b / 32b / 235b` — no 72B. The cascade therefore steps to the previous-generation Qwen2.5 72B, which is still Apache 2.0 and similar quality. If you want a same-generation cascade, use `qwen3:235b` instead, but that needs a much larger memory envelope than the 128 GB M5 Max.
 
 Verify the OpenAI-compatible endpoint is up:
 
 ```bash
 curl -s http://localhost:11434/v1/models | jq '.data[].id'
-# → "qwen3:32b-instruct-q4_K_M"
-# → "qwen3:72b-instruct-q4_K_M"
+# → "qwen3:32b-q4_K_M"
+# → "qwen2.5:72b-instruct-q4_K_M"
 ```
 
 Configure the pipeline. Copy `.env.example` to `.env` (first time only) and edit if your install differs:
@@ -37,8 +39,8 @@ cp .env.example .env
 # .env carries the committed defaults:
 #   LLM_BASE_URL=http://localhost:11434/v1
 #   LLM_API_KEY=ollama
-#   LLM_MODEL_PRIMARY=qwen3:32b-instruct-q4_K_M
-#   LLM_MODEL_FALLBACK=qwen3:72b-instruct-q4_K_M
+#   LLM_MODEL_PRIMARY=qwen3:32b-q4_K_M
+#   LLM_MODEL_FALLBACK=qwen2.5:72b-instruct-q4_K_M
 ```
 
 The `LLM_API_KEY` value is unused by Ollama but the `langchain-openai` client requires a non-empty string. Any literal works; `ollama` is the convention.

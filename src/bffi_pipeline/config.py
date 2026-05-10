@@ -51,11 +51,11 @@ class Settings(BaseSettings):
     )
     llm_api_key: str = Field(default="ollama", alias="LLM_API_KEY")
     llm_model_primary: str = Field(
-        default="qwen3:32b-instruct-q4_K_M",
+        default="qwen3:32b-q4_K_M",
         alias="LLM_MODEL_PRIMARY",
     )
     llm_model_fallback: str = Field(
-        default="qwen3:72b-instruct-q4_K_M",
+        default="qwen2.5:72b-instruct-q4_K_M",
         alias="LLM_MODEL_FALLBACK",
     )
 

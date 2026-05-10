@@ -19,16 +19,16 @@ from bffi_pipeline.provenance import writer as W
 
 def test_software_agent_uri_sanitises_ollama_tags() -> None:
     """Ollama tags use ':' which is reserved in URI path segments."""
-    uri = P.model_agent_uri("qwen3:32b-instruct-q4_K_M")
+    uri = P.model_agent_uri("qwen3:32b-q4_K_M")
     assert ":" not in uri.split("/")[-1]
-    assert uri.endswith("agent/qwen3-32b-instruct-q4_K_M")
+    assert uri.endswith("agent/qwen3-32b-q4_K_M")
 
 
 def test_log_software_agent_emits_full_block() -> None:
     g = Graph()
     agent = P.log_software_agent(
         g,
-        model_id="qwen3:32b-instruct-q4_K_M",
+        model_id="qwen3:32b-q4_K_M",
         label="Qwen3 32B Instruct (MLX 4-bit)",
         provider="Alibaba (Qwen team)",
         temperature=0.0,
@@ -78,7 +78,7 @@ def test_log_merge_decision_emits_all_required_predicates() -> None:
         diverging_fields=["preferred_title"],
         prompt_hash="sha256:9a1f7c3e",
         raw_response='{"decision":"same_work"}',
-        model_id="qwen3:32b-instruct-q4_K_M",
+        model_id="qwen3:32b-q4_K_M",
         stage="llm-judge-primary",
     )
     seen = {p for _, p, _ in g.triples((activity, None, None))}
@@ -98,7 +98,7 @@ def test_log_merge_decision_is_typed_as_activity_and_workmergedecision() -> None
         diverging_fields=["creator", "content_type"],
         prompt_hash="sha256:abc",
         raw_response='{"decision":"different_work"}',
-        model_id="qwen3:72b-instruct-q4_K_M",
+        model_id="qwen2.5:72b-instruct-q4_K_M",
         stage="llm-judge-second-opinion",
     )
     types = {str(o) for _, _, o in g.triples((activity, V.RDF.type, None))}
@@ -120,7 +120,7 @@ def test_same_work_links_canonical_back_to_activity() -> None:
         diverging_fields=[],
         prompt_hash="sha256:abc",
         raw_response="{}",
-        model_id="qwen3:32b-instruct-q4_K_M",
+        model_id="qwen3:32b-q4_K_M",
         stage="llm-judge-primary",
         canonical=canonical,
     )
@@ -142,7 +142,7 @@ def test_different_work_does_not_link_canonical() -> None:
         diverging_fields=["creator"],
         prompt_hash="sha256:abc",
         raw_response="{}",
-        model_id="qwen3:32b-instruct-q4_K_M",
+        model_id="qwen3:32b-q4_K_M",
         stage="llm-judge-primary",
         canonical="http://example.org/canonical/x",
     )
@@ -168,7 +168,7 @@ def test_log_review_chains_via_was_informed_by() -> None:
         diverging_fields=[],
         prompt_hash="sha256:abc",
         raw_response="{}",
-        model_id="qwen3:32b-instruct-q4_K_M",
+        model_id="qwen3:32b-q4_K_M",
         stage="llm-judge-primary",
     )
     review = P.log_review(
@@ -191,7 +191,7 @@ def test_provenance_writer_round_trips_via_turtle(tmp_path: Path) -> None:
     out = tmp_path / "provenance.ttl"
     with W.ProvenanceWriter(out) as writer:
         writer.add_software_agent(
-            model_id="qwen3:32b-instruct-q4_K_M",
+            model_id="qwen3:32b-q4_K_M",
             label="Qwen3 32B Instruct (MLX 4-bit)",
         )
         writer.add_merge_decision(
@@ -204,7 +204,7 @@ def test_provenance_writer_round_trips_via_turtle(tmp_path: Path) -> None:
             diverging_fields=[],
             prompt_hash="sha256:abc",
             raw_response="{}",
-            model_id="qwen3:32b-instruct-q4_K_M",
+            model_id="qwen3:32b-q4_K_M",
             stage="llm-judge-primary",
         )
     assert out.is_file()
@@ -227,7 +227,7 @@ def test_provenance_writer_appends_to_existing_file(tmp_path: Path) -> None:
             diverging_fields=["creator"],
             prompt_hash="sha256:abc",
             raw_response="{}",
-            model_id="qwen3:32b-instruct-q4_K_M",
+            model_id="qwen3:32b-q4_K_M",
             stage="llm-judge-primary",
         )
     with W.ProvenanceWriter(out) as writer:
@@ -241,7 +241,7 @@ def test_provenance_writer_appends_to_existing_file(tmp_path: Path) -> None:
             diverging_fields=[],
             prompt_hash="sha256:abc",
             raw_response="{}",
-            model_id="qwen3:32b-instruct-q4_K_M",
+            model_id="qwen3:32b-q4_K_M",
             stage="llm-judge-primary",
         )
     g = Graph()
@@ -285,7 +285,7 @@ def _seed_decision(
         diverging_fields=[],
         prompt_hash="sha256:abc",
         raw_response='{"raw":"old"}',
-        model_id="qwen3:32b-instruct-q4_K_M",
+        model_id="qwen3:32b-q4_K_M",
         stage="llm-judge-primary",
         started_at=started_at,
         ended_at=started_at + timedelta(seconds=4),

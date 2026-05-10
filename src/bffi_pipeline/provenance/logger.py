@@ -42,7 +42,7 @@ def _now() -> datetime:
 def _safe_agent_segment(model_id: str) -> str:
     """Sanitise ``model_id`` for use in an URI segment.
 
-    Ollama tags use ``:`` (``"qwen3:32b-instruct-q4_K_M"``) which is reserved
+    Ollama tags use ``:`` (``"qwen3:32b-q4_K_M"``) which is reserved
     in URI path segments per RFC 3986; the spec § 8 helper replaces it with
     ``-`` and we follow.
     """
