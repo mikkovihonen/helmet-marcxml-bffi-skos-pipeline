@@ -36,6 +36,15 @@ CONSTRUCT {
            rdf:value       ?identValue ;
            bf:source       ?identSource .
 }
+# Note: bf:role propagation (URI form for cataloguer $4 + blank-node-
+# with-rdfs:label form for $e free-text) is handled in
+# bffi_pipeline.stages.bf_to_bffi._propagate_non_primary_roles
+# because rdflib's SPARQL CONSTRUCT incorrectly binds variables
+# inside nested OPTIONALs in this case (observed: a CONSTRUCT clause
+# `?otherContrib bf:role ?role` emits with ?role bound to
+# ?otherAgent even when the source has zero bf:role triples). Doing
+# the propagation in the Python post-process keeps the SPARQL simple
+# and the binding correct.
 WHERE {
   ?bfWork a bf:Work .
 

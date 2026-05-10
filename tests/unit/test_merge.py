@@ -1031,3 +1031,69 @@ def test_walker_filters_primary_contributions_from_expression_propagation() -> N
     [ec] = out
     assert ec.agent_label == "Adrian, Esa"
     assert ec.role_uri == "http://id.loc.gov/vocabulary/relators/trl"
+
+
+def test_walker_captures_blank_node_role_label_from_marc2bibframe2() -> None:
+    """marc2bibframe2 emits ``bf:role [a bf:Role; rdfs:label "johtaja"]``
+    when the MARC source has $e text without $4 — that's the dominant
+    pattern in Helmet (Finnish-language $e). The walker must capture
+    the rdfs:label as ``role_label`` so the propagator can re-emit
+    the same blank-node-role shape on canonical."""
+    g = Graph()
+    g.parse(
+        data=dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{WORK_A}> a bffi:Work ;
+                bffi:hasExpression <{EXPR_A}> .
+
+            <{EXPR_A}> a bffi:Expression ;
+                bffi:contribution [
+                    a bffi:Contribution ;
+                    bffi:agent [ rdfs:label "Hogwood, Christopher" ] ;
+                    bf:role [ a bf:Role ; rdfs:label "johtaja" ]
+                ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    [ec] = _expression_contributions(g, URIRef(WORK_A))
+    assert ec.role_uri is None
+    assert ec.role_label == "johtaja"
+
+
+def test_canonical_expression_emits_blank_node_role_with_label(tmp_path: Path) -> None:
+    """The propagator must re-emit a free-text role (no relator URI)
+    as ``bf:role [a bf:Role; rdfs:label "..."]`` so Skosmos surfaces
+    the cataloguer-supplied role text on the canonical Expression."""
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_contributions=[
+            ExpressionContribution(
+                expression_uri=EXPR_A,
+                role_label="cembalo",
+                agent_uri="http://urn.fi/URN:NBN:fi:bib:raw/aaa#Agent700-26",
+                agent_label="Hogwood, Christopher",
+            ),
+        ],
+    )
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="different_work")],
+        work_records=records,
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    [contrib] = list(g.objects(URIRef(EXPR_A), V.BFFI.contribution))
+    [role] = list(g.objects(contrib, V.BF.role))
+    # Role is a blank node typed bf:Role with rdfs:label
+    assert (role, V.RDF.type, V.BF.Role) in g
+    assert (role, V.RDFS.label, Literal("cembalo")) in g

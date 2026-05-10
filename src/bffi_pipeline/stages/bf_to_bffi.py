@@ -196,6 +196,105 @@ def _retag_pref_labels(
         graph.add(triple)
 
 
+def _propagate_non_primary_roles(bffi_graph: Graph, source: Graph) -> None:
+    """Copy ``bf:role`` from source ``bf:Contribution`` blocks onto the
+    fresh ``bffi:Contribution`` blank nodes the M3 SPARQL CONSTRUCT
+    minted.
+
+    The SPARQL CONSTRUCT that mints non-primary contributions
+    (``bf_to_bffi_expression.rq``) drops ``bf:role`` triples — partly
+    because role pass-through inside nested OPTIONALs runs into a
+    rdflib variable-binding edge case, partly because the source role
+    is often a labelled blank node we'd have to re-emit with its
+    typing. Doing the copy in Python keeps the SPARQL simple and
+    handles both shapes the cataloguer's MARC produces:
+
+    - **URI form** (MARC ``$4`` controlled relator code): copy the
+      URI through verbatim as ``bf:role <relators/X>``.
+    - **Blank-node form** (MARC ``$e`` free-text — the dominant
+      Helmet pattern, ``"kääntäjä"`` / ``"johtaja"`` / etc.):
+      mint a fresh blank node typed ``bf:Role`` with
+      ``rdfs:label`` carrying the cataloguer's text.
+
+    Match-up: each source ``bf:Contribution`` carries one
+    ``bf:agent`` URI; the M3 CONSTRUCT mints exactly one
+    ``bffi:Contribution`` per source contribution and routes the
+    same agent URI under ``bffi:agent``. Joining on
+    (Expression URI, agent URI) gives a 1:1 source ↔ output mapping
+    even when the cataloguer entered the same agent multiple times
+    in different roles (each 700 occurrence becomes its own source
+    contribution).
+    """
+    # Build agent URI -> queue of source roles, so we can find the role
+    # for each output contribution by matching on agent URI. The agent
+    # URI is the join key (no 1:1 stable identity between source vs
+    # output blank-node Contribution identifiers).
+    source_role_by_agent = _index_source_roles_by_agent(source)
+    if not source_role_by_agent:
+        return
+
+    # Walk output bffi:Contribution blocks and assign one source role
+    # per (Contribution, agent) pair. Pop from the per-agent queue so
+    # a cataloguer-supplied "Hogwood, Christopher" entered three times
+    # with three distinct roles (johtaja / cembalo / urut) routes one
+    # role to each minted output contribution rather than fanning the
+    # same role across all three.
+    for contrib in bffi_graph.subjects(RDF.type, V.BFFI.Contribution):
+        if V.BFFI.PrimaryContribution in set(bffi_graph.objects(contrib, RDF.type)):
+            continue
+        for agent in bffi_graph.objects(contrib, V.BFFI.agent):
+            if not isinstance(agent, URIRef):
+                continue
+            roles = source_role_by_agent.get(agent)
+            if not roles:
+                continue
+            _emit_role_on_contribution(bffi_graph, contrib, *roles.pop(0))
+            break
+
+
+def _index_source_roles_by_agent(
+    source: Graph,
+) -> dict[URIRef, list[tuple[URIRef | None, str | None]]]:
+    """Walk source non-primary contributions and queue ``(role_uri, role_label)``
+    per agent URI. The order of insertion matches the source-graph
+    iteration order, which is stable within a single rdflib parse."""
+    out: dict[URIRef, list[tuple[URIRef | None, str | None]]] = {}
+    for src_contrib in source.subjects(RDF.type, V.BF.Contribution):
+        if V.BF.PrimaryContribution in set(source.objects(src_contrib, RDF.type)):
+            continue
+        for agent in source.objects(src_contrib, V.BF.agent):
+            if not isinstance(agent, URIRef):
+                continue
+            for role in source.objects(src_contrib, V.BF.role):
+                role_uri = role if isinstance(role, URIRef) else None
+                role_label: str | None = None
+                if role_uri is None:
+                    for lab in source.objects(role, RDFS.label):
+                        if isinstance(lab, Literal):
+                            role_label = str(lab)
+                            break
+                out.setdefault(agent, []).append((role_uri, role_label))
+    return out
+
+
+def _emit_role_on_contribution(
+    graph: Graph,
+    contrib: URIRef | BNode | Node,
+    role_uri: URIRef | None,
+    role_label: str | None,
+) -> None:
+    """Add the role triple(s) onto ``contrib`` — URI form when
+    ``role_uri`` is set, blank-node-with-label form when only
+    ``role_label`` is set, nothing if both are ``None``."""
+    if role_uri is not None:
+        graph.add((contrib, V.BF.role, role_uri))
+    elif role_label is not None:
+        role_node = BNode()
+        graph.add((contrib, V.BF.role, role_node))
+        graph.add((role_node, RDF.type, V.BF.Role))
+        graph.add((role_node, RDFS.label, Literal(role_label)))
+
+
 def _emit_helmet_identifiers(graph: Graph) -> None:
     """For every Work / Expression with a Helmet ``bf:identifiedBy`` link,
     emit a flat ``dct:identifier`` literal in Sierra-style display form
@@ -315,6 +414,7 @@ def post_process(
     if candidates:
         _retag_pref_labels(bffi_graph, candidates, llm_detector=llm_detector)
     _emit_helmet_identifiers(bffi_graph)
+    _propagate_non_primary_roles(bffi_graph, source)
     _emit_extracted_contributions(bffi_graph, source, contrib_extractor=contrib_extractor)
     bffi_graph.bind("bf", V.BF)
     bffi_graph.bind("bffi", V.BFFI)

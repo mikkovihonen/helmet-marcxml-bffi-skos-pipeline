@@ -40,6 +40,7 @@ from typing import Literal as LiteralType
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib import Literal as RdfLiteral
 from rdflib.namespace import DCTERMS, RDF
+from rdflib.term import Node
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.helmet import format_sierra_bib_id
@@ -236,19 +237,27 @@ class ExpressionContribution:
     """One non-primary ``bffi:Contribution`` block from a raw Expression.
 
     Captures everything M8 needs to re-emit the block on the
-    corresponding canonical Expression: the role URI (``bf:role``),
-    plus the agent in either URI form (``agent_uri``, e.g. for
-    marc2bibframe2-emitted 700-fielded contributions like
-    ``http://urn.fi/.../#Agent700-24``) or blank-node form
-    (``agent_label`` only, used by the M3 contributor-extraction
-    cascade for LLM-extracted agents not yet reconciled). Both forms
-    coexist in real Helmet data; the propagator handles each.
+    corresponding canonical Expression. Role and agent each have two
+    expression forms in real Helmet data and the dataclass carries
+    both:
+
+    - **Role**: ``role_uri`` for canonical MARC relator URIs (e.g.
+      ``http://id.loc.gov/vocabulary/relators/cnd`` — emitted by the
+      M3 contributor-extraction cascade); ``role_label`` for the
+      cataloguer's free-text $e form that marc2bibframe2 emits as a
+      blank-node ``bf:Role`` with ``rdfs:label`` (e.g. "johtaja",
+      "cembalo", "urut" — Finnish text the cataloguer supplied).
+    - **Agent**: ``agent_uri`` for marc2bibframe2-minted local URIs
+      like ``http://urn.fi/.../#Agent700-24``; ``agent_label`` for
+      the M3 cascade's blank-node-with-label form (LLM-extracted
+      names not yet reconciled).
     """
 
     expression_uri: str
-    role_uri: str | None
-    agent_uri: str | None
-    agent_label: str | None
+    role_uri: str | None = None
+    role_label: str | None = None
+    agent_uri: str | None = None
+    agent_label: str | None = None
 
 
 @dataclass
@@ -440,50 +449,67 @@ def _expression_labels(graph: Graph, work: URIRef) -> list[tuple[str, str, str |
     return out
 
 
+def _read_role(graph: Graph, contrib: Node) -> tuple[str | None, str | None]:
+    """Return ``(role_uri, role_label)`` from a contribution's ``bf:role``.
+
+    Two shapes coexist: a controlled-vocabulary URI (M3 cascade emits
+    these as ``<relators/cnd>`` etc.); a blank node typed ``bf:Role``
+    with an ``rdfs:label`` (marc2bibframe2's lift of MARC $e free-text).
+    URI form takes precedence; the first one wins.
+    """
+    for role in graph.objects(contrib, V.BF.role):
+        if isinstance(role, URIRef):
+            return str(role), None
+        for lab in graph.objects(role, V.RDFS.label):
+            if isinstance(lab, RdfLiteral):
+                return None, str(lab)
+    return None, None
+
+
+def _read_agent(graph: Graph, contrib: Node) -> tuple[str | None, str | None]:
+    """Return ``(agent_uri, agent_label)`` from a contribution's ``bffi:agent``."""
+    for agent in graph.objects(contrib, V.BFFI.agent):
+        agent_uri = str(agent) if isinstance(agent, URIRef) else None
+        agent_label: str | None = None
+        for lab in graph.objects(agent, V.RDFS.label):
+            if isinstance(lab, RdfLiteral):
+                agent_label = str(lab)
+                break
+        return agent_uri, agent_label
+    return None, None
+
+
 def _expression_contributions(graph: Graph, work: URIRef) -> list[ExpressionContribution]:
     """Collect non-primary ``bffi:Contribution`` blocks on each Expression
     linked to ``work`` via ``bffi:hasExpression``.
 
-    For each such contribution: extracts the ``bf:role`` URI (when
-    present) and the agent — either as a URI (700-fielded form) or as
-    a blank node identified by its ``rdfs:label`` (M3 cascade form).
-    A contribution typed as ``bffi:PrimaryContribution`` is filtered
-    out — those are propagated separately by
-    :func:`_propagate_primary_contributions` onto the canonical Work.
-
-    Skipped: contributions whose agent has neither a URI nor a label
-    (no information to propagate, would emit an empty agent block).
+    For each: extracts the ``bf:role`` (URI or blank-node-with-label)
+    and the agent (URI or blank-node-with-label). A contribution
+    typed as ``bffi:PrimaryContribution`` is filtered out — those go
+    on the canonical Work via :func:`_propagate_primary_contributions`.
+    Contributions whose agent carries neither a URI nor a label are
+    dropped (no information to propagate).
     """
     out: list[ExpressionContribution] = []
     for expr in graph.objects(work, V.BFFI.hasExpression):
         if not isinstance(expr, URIRef):
             continue
         for contrib in graph.objects(expr, V.BFFI.contribution):
-            types = set(graph.objects(contrib, RDF.type))
-            if V.BFFI.PrimaryContribution in types:
+            if V.BFFI.PrimaryContribution in set(graph.objects(contrib, RDF.type)):
                 continue
-            role_uri: str | None = None
-            for role in graph.objects(contrib, V.BF.role):
-                if isinstance(role, URIRef):
-                    role_uri = str(role)
-                    break
-            for agent in graph.objects(contrib, V.BFFI.agent):
-                agent_uri = str(agent) if isinstance(agent, URIRef) else None
-                agent_label: str | None = None
-                for lab in graph.objects(agent, V.RDFS.label):
-                    if isinstance(lab, RdfLiteral):
-                        agent_label = str(lab)
-                        break
-                if agent_uri is None and agent_label is None:
-                    continue
-                out.append(
-                    ExpressionContribution(
-                        expression_uri=str(expr),
-                        role_uri=role_uri,
-                        agent_uri=agent_uri,
-                        agent_label=agent_label,
-                    )
+            role_uri, role_label = _read_role(graph, contrib)
+            agent_uri, agent_label = _read_agent(graph, contrib)
+            if agent_uri is None and agent_label is None:
+                continue
+            out.append(
+                ExpressionContribution(
+                    expression_uri=str(expr),
+                    role_uri=role_uri,
+                    role_label=role_label,
+                    agent_uri=agent_uri,
+                    agent_label=agent_label,
                 )
+            )
     return out
 
 
@@ -698,7 +724,7 @@ def _propagate_expressions(
     """
     seen_exprs: set[str] = set()
     seen_labels: set[tuple[str, str, str | None]] = set()
-    seen_contribs: set[tuple[str, str, str, str]] = set()
+    seen_contribs: set[tuple[str, str, str, str, str]] = set()
     for member in members:
         for expr_uri in member.expression_uris:
             if expr_uri in seen_exprs:
@@ -721,6 +747,7 @@ def _propagate_expressions(
                 ec.agent_uri or "",
                 ec.agent_label or "",
                 ec.role_uri or "",
+                ec.role_label or "",
             )
             if key_t in seen_contribs:
                 continue
@@ -732,6 +759,17 @@ def _propagate_expressions(
             g.add((contrib_node, RDF.type, V.BFFI.Contribution))
             if ec.role_uri is not None:
                 g.add((contrib_node, V.BF.role, URIRef(ec.role_uri)))
+            elif ec.role_label is not None:
+                # Free-text role from the cataloguer's $e ("johtaja" /
+                # "cembalo" / etc.) — re-emit the marc2bibframe2 shape
+                # `bf:role [a bf:Role; rdfs:label "..."]` so Skosmos
+                # surfaces the cataloguer-supplied role text alongside
+                # any controlled-vocabulary URIs other contributions
+                # carry.
+                role_node = BNode(f"erol{digest}")
+                g.add((contrib_node, V.BF.role, role_node))
+                g.add((role_node, RDF.type, V.BF.Role))
+                g.add((role_node, V.RDFS.label, Literal(ec.role_label)))
             agent_node: URIRef | BNode
             if ec.agent_uri is not None:
                 agent_node = URIRef(ec.agent_uri)

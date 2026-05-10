@@ -404,3 +404,128 @@ def test_emitter_emits_new_contribution_when_extractor_returns_pure_relator() ->
     agent = next(bffi.objects(role_subject, V.BFFI.agent))
     label = next(bffi.objects(agent, V.RDFS.label))
     assert str(label) == "Tim Spector"
+
+
+def test_post_process_propagates_uri_role_to_bffi_contribution() -> None:
+    """Source MARC ``$4`` controlled relator → BIBFRAME ``bf:role <URI>``;
+    M3 must carry that URI through to the bffi:Contribution it mints."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            @prefix relators: <http://id.loc.gov/vocabulary/relators/> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title       [ a bf:Title ; bf:mainTitle "T" ] ;
+                bf:hasInstance <{BF_WORK}#Inst> ;
+                bf:contribution <{BF_WORK}#c1> .
+
+            <{BF_WORK}#Inst> a bf:Instance ;
+                bf:responsibilityStatement "trans by X" .
+
+            <{BF_WORK}#c1> a bf:Contribution ;
+                bf:agent <{BF_WORK}#a1> ;
+                bf:role  relators:trl .
+
+            <{BF_WORK}#a1> a bf:Person ; rdfs:label "Translator, Anna" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    [contrib] = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
+    assert (
+        contrib,
+        V.BF.role,
+        URIRef("http://id.loc.gov/vocabulary/relators/trl"),
+    ) in bffi
+
+
+def test_post_process_propagates_blank_node_role_label_with_typing() -> None:
+    """Source MARC ``$e`` free-text → BIBFRAME blank-node ``bf:role`` with
+    ``rdfs:label``; M3 must re-emit a fresh blank node typed ``bf:Role``
+    with the same label so Skosmos can render the cataloguer's
+    Finnish role text on the canonical Expression."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title       [ a bf:Title ; bf:mainTitle "T" ] ;
+                bf:hasInstance <{BF_WORK}#Inst> ;
+                bf:contribution <{BF_WORK}#c1> .
+
+            <{BF_WORK}#Inst> a bf:Instance ;
+                bf:responsibilityStatement "Hogwood ; cembalo" .
+
+            <{BF_WORK}#c1> a bf:Contribution ;
+                bf:agent <{BF_WORK}#a1> ;
+                bf:role  [ a bf:Role ; rdfs:label "cembalo" ] .
+
+            <{BF_WORK}#a1> a bf:Person ; rdfs:label "Hogwood, Chrtistopher" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    [contrib] = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
+    [role] = list(bffi.objects(contrib, V.BF.role))
+    # Role is a blank node typed bf:Role with the cataloguer's label
+    assert (role, RDF.type, V.BF.Role) in bffi
+    assert (role, V.RDFS.label, Literal("cembalo")) in bffi
+
+
+def test_post_process_routes_one_role_per_repeated_agent() -> None:
+    """Cataloguer enters ``700 $a Hogwood, Christopher`` three times,
+    once per instrument. Source has 3 distinct bf:Contributions sharing
+    one agent URI but each carrying a different role. The propagator
+    must route one role per output contribution (no fan-out, no
+    duplication)."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title       [ a bf:Title ; bf:mainTitle "T" ] ;
+                bf:hasInstance <{BF_WORK}#Inst> ;
+                bf:contribution <{BF_WORK}#c1>, <{BF_WORK}#c2>, <{BF_WORK}#c3> .
+
+            <{BF_WORK}#Inst> a bf:Instance ; bf:responsibilityStatement "Hogwood" .
+
+            <{BF_WORK}#c1> a bf:Contribution ;
+                bf:agent <{BF_WORK}#a1> ;
+                bf:role  [ a bf:Role ; rdfs:label "johtaja" ] .
+
+            <{BF_WORK}#c2> a bf:Contribution ;
+                bf:agent <{BF_WORK}#a1> ;
+                bf:role  [ a bf:Role ; rdfs:label "cembalo" ] .
+
+            <{BF_WORK}#c3> a bf:Contribution ;
+                bf:agent <{BF_WORK}#a1> ;
+                bf:role  [ a bf:Role ; rdfs:label "urut" ] .
+
+            <{BF_WORK}#a1> a bf:Person ; rdfs:label "Hogwood, Christopher" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    contribs = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
+    assert len(contribs) == 3
+    role_labels: set[str] = set()
+    for c in contribs:
+        for r in bffi.objects(c, V.BF.role):
+            for lab in bffi.objects(r, V.RDFS.label):
+                role_labels.add(str(lab))
+    assert role_labels == {"johtaja", "cembalo", "urut"}
