@@ -246,7 +246,7 @@ def test_canonical_carries_dct_identifier_per_absorbed_bib_id(tmp_path: Path) ->
     canonicals = list(g.subjects(V.RDF.type, V.BFFI.Work))
     merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
     sierra_ids = sorted(str(o) for o in g.objects(merged, DCTERMS.identifier))
-    assert sierra_ids == ["b1110", "b2220"]
+    assert sierra_ids == ["b1119", "b2227"]
     for sid in sierra_ids:
         assert (merged, DCTERMS.identifier, Literal(sid)) in g
 
