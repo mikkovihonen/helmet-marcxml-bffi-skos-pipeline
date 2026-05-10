@@ -215,8 +215,15 @@ class SubjectTarget:
 
     @property
     def is_resolved(self) -> bool:
-        """True iff the cataloguer pre-resolved this target with a ``$0`` authority URI."""
-        return self.uri is not None
+        """True iff this target is pre-resolved to an external authority
+        URI with no label / source carried locally — the cataloguer
+        supplied MARC 6XX ``$0`` and M10's Skosmos resolves the label
+        from the loaded authority graph (option 3b). Targets that have
+        a URI *and* carry their own label / source (the local
+        marc2bibframe2-minted ``Place651-37`` style — MARC ``$2 ysa``
+        without ``$0``) report ``False`` here so they go through the
+        reconciliation path even though they already have a URI."""
+        return self.uri is not None and self.label is None and self.source is None
 
 
 @dataclass(frozen=True)
@@ -402,35 +409,68 @@ def _helmet_identifiers(graph: Graph, work: URIRef) -> list[tuple[str, str]]:
     return out
 
 
+def _read_subject_label_and_source(graph: Graph, target: Node) -> tuple[str | None, str | None]:
+    """Pull ``rdfs:label`` and ``bf:source`` off a subject target.
+
+    Both shapes coexist in real data. ``rdfs:label`` is always a literal.
+    ``bf:source`` is a URIRef (`<…/subjectSchemes/ysa>`) on
+    marc2bibframe2's lift of MARC ``$2 ysa`` time-period and place
+    fields, but a literal (`"yso/fin"`) on the lift of MARC ``$2
+    yso/fin`` topical fields. We accept either, returning the URI form
+    as a string so the source-classification helper downstream can
+    pattern-match against either shape uniformly.
+    """
+    label: str | None = None
+    for lab in graph.objects(target, V.RDFS.label):
+        if isinstance(lab, RdfLiteral):
+            label = str(lab)
+            break
+    source: str | None = None
+    for src in graph.objects(target, V.BF.source):
+        if isinstance(src, URIRef):
+            source = str(src)
+            break
+        if isinstance(src, RdfLiteral):
+            source = str(src)
+            break
+    return label, source
+
+
 def _subject_targets(graph: Graph, work: URIRef, predicate: URIRef) -> list[SubjectTarget]:
     """Walk ``work``'s ``bffi:subject`` / ``bffi:genreForm`` targets.
 
-    Returns a :class:`SubjectTarget` per object with either:
-    - ``uri`` set (the cataloguer pre-resolved with MARC 6XX ``$0``); or
-    - ``label`` + ``source`` set (the target is a blank node carrying
-      an ``rdfs:label`` — what marc2bibframe2 emits for unresolved
-      MARC 6XX entries).
+    Returns a :class:`SubjectTarget` per object. Three shapes coexist
+    in production data:
 
-    Targets we can't classify (no URI and no label) are skipped — they
-    carry no useful information for either propagation or
-    reconciliation.
+    1. **Pre-resolved authority URI** (cataloguer supplied MARC ``$0``):
+       a URIRef in a public namespace like ``yso/`` or ``slm:``, with
+       no ``rdfs:label`` / ``bf:source`` of its own. Just propagate
+       the URI; M10's Skosmos resolves the label from the loaded
+       authority graph.
+    2. **Local marc2bibframe2-minted URI** (e.g. ``Place651-37`` for a
+       MARC 651 ``$2 ysa``): a URIRef in the per-record ``bib:raw/``
+       namespace, carrying its own ``rdfs:label`` ("Venäjä") and
+       ``bf:source`` (``<…/subjectSchemes/ysa>``) in the source
+       BIBFRAME. Capture all three so M9 can reconcile.
+    3. **Blank-node target** (the M3 SPARQL CONSTRUCT also
+       occasionally emits these for fields without ``$0`` or local
+       URI minting): label + source on the blank node, no URI.
+
+    Targets we can't classify (no URI and no label) are skipped.
     """
     out: list[SubjectTarget] = []
     for obj in graph.objects(work, predicate):
+        label, source = _read_subject_label_and_source(graph, obj)
         if isinstance(obj, URIRef):
-            out.append(SubjectTarget(uri=str(obj)))
+            uri = str(obj)
+            # Cases 1 + 2: URIRef target. If label / source are
+            # present (case 2: local YSA-style), carry them through
+            # so M9 can reconcile against a Finto authority. Without
+            # them (case 1: cataloguer-resolved YSO URI), just the
+            # URI.
+            out.append(SubjectTarget(uri=uri, label=label, source=source))
             continue
-        # Blank-node target — collect its label + source.
-        label: str | None = None
-        for lab in graph.objects(obj, V.RDFS.label):
-            if isinstance(lab, RdfLiteral):
-                label = str(lab)
-                break
-        source: str | None = None
-        for src in graph.objects(obj, V.BF.source):
-            if isinstance(src, RdfLiteral):
-                source = str(src)
-                break
+        # Case 3: blank node. Need at least a label or source to be useful.
         if label is None and source is None:
             continue
         out.append(SubjectTarget(label=label, source=source))
@@ -659,23 +699,42 @@ def _propagate_subject_targets(
 ) -> None:
     """Emit ``predicate`` triples on ``canonical_uri`` from each member's targets.
 
-    Resolved targets (the cataloguer supplied a ``$0`` URI in MARC 6XX)
-    dedupe across members by URI. Unresolved targets (blank-node with
-    ``rdfs:label`` + ``bf:source``) dedupe by ``(label, source)`` so the
-    same cataloguer subject string from N raw Works produces exactly one
-    blank node on the canonical — M9 phase 3 reconciles each one once.
+    Three target shapes (see :class:`SubjectTarget` docstring):
+
+    1. **Pre-resolved authority URI**: emit ``<canonical> predicate <uri>``;
+       no further triples on the URI (Skosmos resolves labels from the
+       loaded authority graph). Dedup across members by URI.
+    2. **Local marc2bibframe2-minted URI** (URI present, label/source
+       carried locally — MARC ``$2 ysa`` time/place fields):
+       propagate the URI AND re-emit its ``rdfs:label`` + ``bf:source``
+       so M9 has the metadata to reconcile against. Dedup by URI.
+    3. **Blank-node target**: mint a deterministic blank node, dedup
+       by ``(label, source)`` so the same cataloguer subject string
+       from N raw Works produces one blank node on the canonical;
+       M9 phase 3 reconciles each once.
     """
     seen_uris: set[str] = set()
     seen_blank_keys: set[tuple[str | None, str | None]] = set()
     blank_targets: list[SubjectTarget] = []
     for member in members:
         for target in getattr(member, attr):
-            if target.is_resolved:
-                assert target.uri is not None
+            if target.uri is not None:
                 if target.uri in seen_uris:
                     continue
                 seen_uris.add(target.uri)
-                g.add((canonical_uri, predicate, URIRef(target.uri)))
+                uri_node = URIRef(target.uri)
+                g.add((canonical_uri, predicate, uri_node))
+                # Case 2: the URI carries its own label / source. Copy
+                # them onto the canonical so M9 can reconcile (and
+                # Skosmos has fallback labels for the local URI even
+                # when no authority binding lands).
+                if target.label is not None:
+                    g.add((uri_node, V.RDFS.label, Literal(target.label)))
+                if target.source is not None:
+                    if target.source.startswith(("http://", "https://")):
+                        g.add((uri_node, V.BF.source, URIRef(target.source)))
+                    else:
+                        g.add((uri_node, V.BF.source, Literal(target.source)))
                 continue
             key = (target.label, target.source)
             if key in seen_blank_keys:

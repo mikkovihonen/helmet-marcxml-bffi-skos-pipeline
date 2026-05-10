@@ -857,61 +857,84 @@ def _iter_creator_requests(graph: Graph) -> Iterator[EntityRequest]:
                         break
 
 
-#: Maps the ``bf:source`` literal that marc2bibframe2 emits on unresolved
+#: Maps the ``bf:source`` value that marc2bibframe2 emits on unresolved
 #: 6XX targets to the reconciliation kind that selects the right Finto
-#: vocabulary. Anything not matched here defaults to ``"subject"`` (YSO),
-#: which is the broadest of the three subject vocabularies and the safest
-#: backstop when MARC ``$2`` is missing or unrecognised.
-_SOURCE_PREFIX_TO_KIND: Final[tuple[tuple[str, AuthorityKind], ...]] = (
+#: vocabulary. ``bf:source`` is sometimes a literal (e.g. ``"yso/fin"``
+#: from MARC ``$2 yso/fin``) and sometimes a URIRef (e.g.
+#: ``<http://id.loc.gov/vocabulary/subjectSchemes/ysa>`` from MARC
+#: ``$2 ysa``); we match against either by searching for the prefix
+#: token anywhere in the string. Anything not matched defaults to
+#: ``"subject"`` (YSO), the broadest of the three subject vocabularies
+#: and the safest backstop when ``$2`` is missing or unrecognised.
+#: ``ysa`` maps to ``"subject"`` so YSA-tagged terms route through
+#: the YSO reconciliation path — YSO inherited the YSA concepts as
+#: ``skos:prefLabel@fi`` during the 2014-2018 vocabulary merge.
+_SOURCE_TOKEN_TO_KIND: Final[tuple[tuple[str, AuthorityKind], ...]] = (
     ("yso", "subject"),
+    ("ysa", "subject"),
     ("kauno", "genre_form"),
     ("muso", "music_form"),
+    ("slm", "genre_form"),
 )
 
 
 def _classify_subject_source(source: str | None) -> AuthorityKind:
-    """Map a ``bf:source`` literal to the M9 authority kind."""
+    """Map a ``bf:source`` value (literal text or URI string) to a
+    reconciliation kind by token-substring match against the known
+    vocabulary identifiers."""
     if source is None:
         return "subject"
     lowered = source.casefold()
-    for prefix, kind in _SOURCE_PREFIX_TO_KIND:
-        if lowered.startswith(prefix):
+    for token, kind in _SOURCE_TOKEN_TO_KIND:
+        if token in lowered:
             return kind
     return "subject"
 
 
 def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
-    """Yield reconciliation requests for unresolved ``bffi:subject`` / ``bffi:genreForm``.
+    """Yield reconciliation requests for unresolved ``bffi:subject`` /
+    ``bffi:genreForm`` targets on canonical Works.
 
-    Walks canonical Works (``bffi:Work``) and emits one
-    :class:`EntityRequest` per blank-node subject/genreForm target that
-    carries an ``rdfs:label``. URI-valued targets are skipped — those
-    were pre-resolved by the cataloguer's MARC ``$0`` subfield and don't
-    need reconciliation.
+    Reconciles three target shapes (see :class:`SubjectTarget` in
+    :mod:`bffi_pipeline.stages.merge`):
 
-    Routing by ``bf:source``:
-    - ``yso*``   → ``subject`` (YSO)
-    - ``kauno*`` → ``genre_form`` (KAUNO)
-    - ``muso*``  → ``music_form`` (MUSO)
+    - **Blank-node target** with ``rdfs:label`` + optional ``bf:source``:
+      classic unresolved cataloguer-supplied subject.
+    - **Local marc2bibframe2-minted URI** (e.g.
+      ``http://urn.fi/.../#Place651-37``) carrying ``rdfs:label`` +
+      ``bf:source`` — the dominant pattern for MARC ``$2 ysa`` time
+      and place fields where the cataloguer didn't supply ``$0``.
+    - **Pre-resolved authority URI** (e.g. ``yso/p1018``) carries no
+      label / source on the canonical (Skosmos resolves from the
+      loaded authority graph). These are skipped — already bound.
+
+    Routing by ``bf:source`` (URI form like
+    ``<.../subjectSchemes/ysa>`` or literal ``"yso/fin"``):
+
+    - any ``yso*`` / ``ysa`` token → ``subject`` (YSO, with YSA-via-YSO inheritance)
+    - any ``kauno*`` token → ``genre_form`` (KAUNO)
+    - any ``muso*`` token → ``music_form`` (MUSO)
+    - any ``slm`` token → ``genre_form`` (SLM)
     - missing / unknown → ``subject`` (YSO default)
-
-    Resolution priority between predicates: any ``bffi:genreForm`` blank
-    node with ``yso*`` source still routes by source (i.e. YSO), because
-    cataloguer-supplied source vocabulary trumps the MARC tag the
-    pipeline used to mint the predicate. This keeps the request kind
-    aligned with the candidate set the authority client returns.
 
     Deduplication is *not* applied here — the apply step caches per
     ``(kind, literal)`` lookups, so two canonical Works asking for the
     same subject only hit Finto once.
     """
+    from bffi_pipeline.stages.load_finto import graph_uri_for_uri
+
     for work in graph.subjects(RDF.type, V.BFFI.Work):
         if not isinstance(work, URIRef):
             continue
         for predicate in (V.BFFI.subject, V.BFFI.genreForm):
             for target in graph.objects(work, predicate):
-                if isinstance(target, URIRef):
-                    continue  # pre-resolved by cataloguer; skip.
+                # Skip URIs that already resolve to an authority graph
+                # we have loaded locally (YSO/KANTO/KAUNO/MUSO/SLM via
+                # option 3b). They're already bound; their label
+                # propagation in M8 was just fallback context for
+                # Skosmos rendering, not a request for reconciliation.
+                if isinstance(target, URIRef) and graph_uri_for_uri(str(target)) is not None:
+                    continue
                 label_lit: RdfLiteral | None = None
                 for lab in graph.objects(target, V.RDFS.label):
                     if isinstance(lab, RdfLiteral):
@@ -921,6 +944,9 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
                     continue
                 source: str | None = None
                 for src in graph.objects(target, V.BF.source):
+                    if isinstance(src, URIRef):
+                        source = str(src)
+                        break
                     if isinstance(src, RdfLiteral):
                         source = str(src)
                         break
