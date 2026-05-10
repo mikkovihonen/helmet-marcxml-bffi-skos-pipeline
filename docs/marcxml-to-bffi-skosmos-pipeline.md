@@ -1207,7 +1207,7 @@ The build plan is structured as M0 → M13 with explicit definitions of done. On
 | M8 | Merge application | Union-find canonical Works; identifier-set union (`bf:identifiedBy` + Sierra-style `dct:identifier` per absorbed bib_id); multi-language `skos:prefLabel` union from M3 cascade; `canonical-map.jsonl`. |
 | M9 | Reconciliation | KANTO → VIAF / YSO / KAUNO / MUSO; four-tier decision logic. |
 | M10 | Skosify overlay + Fuseki load | Overlay-plus-inference; Helmet source URI declared; Boundary 5; `lookup-helmet` CLI. |
-| M11 | Skosmos config | Pinned Skosmos 3.x; `fi`/`sv`/`en` priority; overlay labels `dct:identifier` as "Helmet bib ID" for cataloguer reference. |
+| M11 | Skosmos config | Pinned Skosmos 3.x; `fi`/`sv`/`en` priority; overlay labels `dct:identifier` / `bffi:subject` / `bffi:genreForm` / `bffi:creator` for concept-page rendering; cross-vocabulary linking via Finto dumps (KANTO/YSO/KAUNO/MUSO/SLM) loaded into local Fuseki (option 3b — `bffi-pipeline load-finto` / `make refresh-finto`). |
 | M12 | Gold set + eval harness | 50–100 starter cases, 30 % hand-marked hold-out; eval not in CI. |
 | M13 | Documentation + handoff | Apache-2.0 LICENSE, README, runbook, architecture diagram. |
 
