@@ -129,6 +129,18 @@ def bf_to_bffi_command(
             ),
         ),
     ] = True,
+    llm_contrib_cascade: Annotated[
+        bool,
+        typer.Option(
+            "--llm-contrib-cascade/--no-llm-contrib-cascade",
+            help=(
+                "Run the MARC 245$c contributor-extraction cascade on records "
+                "whose 245$c contains capitalised name-tokens not covered by "
+                "100/700. Off by default — fire rate is ~13% on the corpus "
+                "and the M12 gold-set validation hasn't run yet."
+            ),
+        ),
+    ] = False,
     primary_model: Annotated[
         str | None,
         typer.Option(
@@ -148,11 +160,17 @@ def bf_to_bffi_command(
         from bffi_pipeline.title_lang_llm import LangChainTitleLangDetector
 
         detector = LangChainTitleLangDetector(model_name=primary_model)
+    contrib_extractor: object | None = None
+    if llm_contrib_cascade:
+        from bffi_pipeline.contrib_extract_llm import LangChainContribExtractor
+
+        contrib_extractor = LangChainContribExtractor(model_name=primary_model)
     summary = bf_to_bffi.run(
         bibframe_dir,
         output_dir=target,
         force=force,
         llm_detector=detector,
+        contrib_extractor=contrib_extractor,
     )
     typer.echo(summary.render())
     if summary.errored:

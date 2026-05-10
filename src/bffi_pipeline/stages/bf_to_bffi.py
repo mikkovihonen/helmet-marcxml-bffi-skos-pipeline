@@ -12,6 +12,7 @@ Counts and per-record validation reports go to
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Iterable, Iterator
@@ -20,14 +21,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final, cast
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
 from rdflib.term import Node
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.helmet import format_sierra_bib_id
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.uris import register_sparql_functions
+from bffi_pipeline.uris import mint_raw_expression_uri, register_sparql_functions
 from bffi_pipeline.validation.bffi import validate_graph
 
 _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
@@ -220,23 +221,96 @@ def _emit_helmet_identifiers(graph: Graph) -> None:
         graph.add(triple)
 
 
+def _emit_extracted_contributions(
+    bffi_graph: Graph,
+    source: Graph,
+    *,
+    contrib_extractor: object | None = None,
+) -> None:
+    """Run the heuristic + optional LLM cascade for MARC 245$c extraction.
+
+    Per main bf:Work in ``source``: read the responsibility-statement
+    text and existing 100/700 agent labels, gate on the heuristic, and
+    when ``contrib_extractor`` is provided escalate to the LLM. Each
+    new agent the LLM returns becomes a non-primary
+    ``bffi:Contribution`` block on the corresponding bffi:Expression
+    (mirroring the existing M3 routing rule that puts non-primary
+    contributions on the Expression). Transliteration-variant entries
+    are validated and preserved in the decision object but not yet
+    written to the graph — script-variant binding is M9 territory.
+
+    Re-runs against the same source produce byte-identical bffi_graph
+    output: blank nodes use SHA-1 of (work_uri, agent_name,
+    relator_code) so deterministic.
+    """
+    from bffi_pipeline.contrib_extract import (
+        ExtractionInputs,
+        extract_contributions,
+        gather_inputs,
+    )
+    from bffi_pipeline.contrib_extract_llm import (
+        RELATOR_URI_PREFIX,
+        ContribExtractor,
+    )
+
+    typed_extractor = cast("ContribExtractor | None", contrib_extractor)
+
+    contained: set[URIRef] = {
+        o
+        for _, _, o in source.triples((None, V.BF.associatedResource, None))
+        if isinstance(o, URIRef)
+    }
+    for work in source.subjects(RDF.type, V.BF.Work):
+        if not isinstance(work, URIRef) or work in contained:
+            continue
+        inputs: ExtractionInputs | None = gather_inputs(source, work)
+        if inputs is None:
+            continue
+        decision = extract_contributions(inputs, extractor=typed_extractor)
+        if decision is None or not decision.contributions:
+            continue
+
+        expr_uri = URIRef(mint_raw_expression_uri(str(work)))
+        for cand in decision.contributions:
+            if cand.relator_code is None:
+                # Transliteration variant — preserved in decision but
+                # not yet emitted; M9 script-variant binding will
+                # consume these once that path lands.
+                continue
+            seed = f"{expr_uri}|{cand.name}|{cand.relator_code}"
+            digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+            contrib_node = BNode(f"contrib{digest}")
+            agent_node = BNode(f"agent{digest}")
+            role_uri = URIRef(RELATOR_URI_PREFIX + cand.relator_code)
+            bffi_graph.add((expr_uri, V.BFFI.contribution, contrib_node))
+            bffi_graph.add((contrib_node, RDF.type, V.BFFI.Contribution))
+            bffi_graph.add((contrib_node, V.BFFI.agent, agent_node))
+            bffi_graph.add((contrib_node, V.BF.role, role_uri))
+            bffi_graph.add((agent_node, RDF.type, V.BFFI.Agent))
+            bffi_graph.add((agent_node, RDFS.label, Literal(cand.name)))
+
+
 def post_process(
     bffi_graph: Graph,
     source: Graph,
     *,
     llm_detector: object | None = None,
+    contrib_extractor: object | None = None,
 ) -> Graph:
     """Mutate ``bffi_graph`` in place: tag prefLabels, denormalise Helmet
-    identifiers for Skosmos display, bind namespaces.
+    identifiers for Skosmos display, optionally extract 245$c
+    contributors, bind namespaces.
 
-    ``llm_detector``, when supplied, is forwarded to
-    :func:`_retag_pref_labels`; the M3 ``bf-to-bffi`` CLI builds one
-    when ``--llm-title-cascade`` is set.
+    ``llm_detector`` enables the M3 title-language cascade;
+    ``contrib_extractor`` enables the M3 245$c contributor-extraction
+    cascade. Either / both can be ``None`` to keep that stage
+    graph-only.
     """
     candidates = _candidate_languages(source)
     if candidates:
         _retag_pref_labels(bffi_graph, candidates, llm_detector=llm_detector)
     _emit_helmet_identifiers(bffi_graph)
+    _emit_extracted_contributions(bffi_graph, source, contrib_extractor=contrib_extractor)
     bffi_graph.bind("bf", V.BF)
     bffi_graph.bind("bffi", V.BFFI)
     bffi_graph.bind("bib", V.BIB)
@@ -275,11 +349,17 @@ def _convert_one(
     output_path: Path,
     *,
     llm_detector: object | None = None,
+    contrib_extractor: object | None = None,
 ) -> Graph:
     source = Graph()
     source.parse(str(input_path), format="xml")
     bffi_graph = construct_bffi(source)
-    post_process(bffi_graph, source, llm_detector=llm_detector)
+    post_process(
+        bffi_graph,
+        source,
+        llm_detector=llm_detector,
+        contrib_extractor=contrib_extractor,
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_bytes(output_path, bffi_graph.serialize(format="turtle").encode("utf-8"))
     return bffi_graph
@@ -291,13 +371,16 @@ def run(
     output_dir: Path | None = None,
     force: bool = False,
     llm_detector: object | None = None,
+    contrib_extractor: object | None = None,
 ) -> BffiSummary:
     """Convert every ``<bibframe_dir>/<id>.rdf`` to a BFFI Turtle file.
 
     Pass ``llm_detector`` (a
     :class:`bffi_pipeline.title_lang_llm.TitleLangDetector`) to enable
-    the local-LLM cascade for ambiguous parallel-title records. Without
-    it, M3 stays graph-only.
+    the title-language cascade. Pass ``contrib_extractor`` (a
+    :class:`bffi_pipeline.contrib_extract_llm.ContribExtractor`) to
+    enable 245$c contributor extraction. Without either, M3 stays
+    graph-only.
     """
     base = output_dir or get_settings().data_dir
     bibframe_dir = bibframe_dir or (base / "bibframe")
@@ -312,7 +395,12 @@ def run(
             continue
 
         try:
-            graph = _convert_one(rdf_path, out_path, llm_detector=llm_detector)
+            graph = _convert_one(
+                rdf_path,
+                out_path,
+                llm_detector=llm_detector,
+                contrib_extractor=contrib_extractor,
+            )
         except Exception as exc:
             summary.errored.append((bib_id, str(exc)))
             continue
