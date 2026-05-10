@@ -369,7 +369,7 @@ Authority priority is committed:
 - **Fiction genre/form:** KAUNO.
 - **Music subjects/forms:** MUSO.
 
-Embed MARC 100/700 strings, retrieve top-k candidates from the relevant authority, let the LLM pick from the candidate list (only when lexical similarity is ambiguous; a single high-similarity hit goes through deterministically). The best work-key after all this is *not* a string — it's the URI of the canonical creator plus the URI of the original-language preferred title. That key is stable under language, transliteration, and edition variation. See `docs/BUILD_PLAN.md` M9 for the four-tier reconciliation decision logic (lexical / LLM-pick / fallback-with-review-flag / unreconciled).
+Embed MARC 100/700 strings, retrieve top-k candidates from the relevant authority, let the LLM pick from the candidate list (only when lexical similarity is ambiguous; a single high-similarity hit goes through deterministically). The best work-key after all this is *not* a string — it's the URI of the canonical creator plus the URI of the original-language preferred title. That key is stable under language, transliteration, and edition variation. See `docs/BUILD_PLAN.md` M9 for the five-tier reconciliation decision logic (tier-0 local-prefLabel-match / lexical / LLM-pick / fallback-with-review-flag / unreconciled). Tier-0 takes the canonical M11 option 3b authority graphs (YSO / KAUNO / SLM / MUSO) as the first port of call: an exact `skos:prefLabel` match against the locally-loaded graph binds deterministically with no `api.finto.fi` round-trip — the dominant path for YSA-tagged subject literals because YSO inherited the YSA prefLabels unchanged in the 2014-2018 vocabulary merge.
 
 ---
 
@@ -693,6 +693,7 @@ Every `bffi-pipeline ...` invocation reads this triple at startup; if the value 
 
 - `"llm-judge-primary"` — Qwen3 32B first-pass.
 - `"llm-judge-second-opinion"` — Qwen3 72B cascade re-run for `uncertain` or low-confidence `same_work` (cascade trigger: confidence < 0.85, see §6 / §11).
+- `"reconciliation-local"` — exact `skos:prefLabel` match against the locally-loaded Finto authority graph (M11 option 3b — YSO / KAUNO / SLM / MUSO); no `api.finto.fi` round-trip.
 - `"reconciliation-lexical"` — single high-similarity authority candidate accepted deterministically.
 - `"reconciliation-llm"` — LLM picked from a candidate list.
 - `"reconciliation-fallback"` — LLM `uncertain` or confidence < 0.80; took highest-lexical and set the canonical Work's AdminMetadata `bffi:descriptionAuthentication = <bib:auth/needs-review>`.
@@ -902,7 +903,7 @@ SELECT ?activity ?confidence ?rationale ?reviewNote WHERE {
 - **Log negative decisions too**, not just merges — when a cataloguer asks "why didn't these merge?", you need the answer.
 - **`bffi-prov:stage` vocabulary.** Each decision is tagged with the stage that produced it, so review queues, eval, and gold-set growth can filter precisely:
   - `"llm-judge-primary"` / `"llm-judge-second-opinion"` — the two-stage Qwen3 cascade (§7, §11).
-  - `"reconciliation-lexical"` / `"reconciliation-llm"` / `"reconciliation-fallback"` / `"reconciliation-no-candidate"` — the four-tier reconciliation logic in M9.
+  - `"reconciliation-local"` / `"reconciliation-lexical"` / `"reconciliation-llm"` / `"reconciliation-fallback"` / `"reconciliation-no-candidate"` — the five-tier reconciliation logic in M9 (tier-0 local prefLabel match against the M11 option 3b authority graphs precedes the four Finto-API tiers).
   - `"human-only"` — categories where the model's gold-set accuracy is unacceptable, routed straight to human review without an LLM decision (see §11).
   - `"human-review"` is reserved for `bffi-prov:HumanReview` Activities chained off an earlier decision via `prov:wasInformedBy`.
 
