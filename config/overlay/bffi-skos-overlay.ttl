@@ -43,6 +43,21 @@ bffi:expressionOf  rdfs:subPropertyOf skos:broader ;
                               "uttryck för verk"@sv .
 
 # ---------------------------------------------------------------------------
+# Reconciliation predicates surfaced as concept-page properties.
+#
+# Skosmos only renders predicates it has an rdfs:label for. M9 reconciles
+# canonical-Work creators / subjects / genre-forms onto Finto authority
+# URIs (KANTO/YSO/KAUNO/MUSO/SLM), and option 3b loads those vocabs into
+# our local Fuseki so Skosmos's vocabulary registry can resolve the URIs
+# to clickable, labelled links. The labels below are what Skosmos shows
+# as the section heading on each canonical-Work concept page.
+# ---------------------------------------------------------------------------
+
+bffi:subject   rdfs:label "Subject"@en, "Aihe"@fi, "Ämne"@sv .
+bffi:genreForm rdfs:label "Genre/form"@en, "Genre/muoto"@fi, "Genre/form"@sv .
+bffi:creator   rdfs:label "Creator"@en, "Tekijä"@fi, "Upphovsperson"@sv .
+
+# ---------------------------------------------------------------------------
 # Helmet source URI — declared as a real entity so bf:identifiedBy
 # triples on Works and Expressions resolve to a labeled resource in
 # Skosmos rather than a dangling URI.
