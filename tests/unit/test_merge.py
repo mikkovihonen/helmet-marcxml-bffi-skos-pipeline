@@ -26,11 +26,13 @@ from bffi_pipeline.contrib_variants import (
 )
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.merge import (
+    CanonicalEntry,
     CanonicalWorkInputs,
     ContributionTarget,
     ExpressionContribution,
     HelmetMapEntry,
     SubjectTarget,
+    _apply_contrib_variants,
     _expression_contributions,
     apply_merge,
 )
@@ -1246,3 +1248,77 @@ def test_merge_runs_cleanly_when_sidecar_is_missing(tmp_path: Path) -> None:
     g = Graph()
     g.parse(str(canonical_path), format="turtle")
     assert (None, V.SKOS.altLabel, None) not in g
+
+
+def test_merge_attaches_alt_label_on_primary_contribution_agent(tmp_path: Path) -> None:
+    """When the cascade flags a 245$c name as a variant of an agent
+    that lives in 100$a (primary contribution on the canonical Work,
+    not 700 on the Expression), the binding pass must walk the
+    canonical Work's contributions too. Otherwise Froberger /
+    Pattison-style variants — author name in 100, variant in 245$c —
+    silently drop their altLabel even though the canonical agent is
+    plainly there."""
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="different_work")],
+    )
+
+    # Append a variant claim against the (default) WORK_A canonical and
+    # re-run the binding pass directly.
+    sidecar = tmp_path / "contrib-variants.jsonl"
+    append_variant_claims(
+        sidecar,
+        [
+            ContribVariantClaim(
+                helmet_bib_id="111",
+                raw_work_uri=WORK_A,
+                variant_label="L. Tolstoi",
+                canonical_label="Tolstoy, Lev",
+                rationale="Latin transliteration variant of the canonical 100 author.",
+                prompt_hash="sha256:abc",
+                model_id="qwen3:8b-q4_K_M",
+                decided_at="2026-05-09T12:00:00+00:00",
+            ),
+        ],
+    )
+
+    # The default `_records()` fixture uses ``creator_uri=AGENT_TOLSTOY``
+    # but doesn't emit a primary contribution into the canonical
+    # graph (no contribution_targets). Add one so this test mirrors
+    # what `_propagate_primary_contributions` produces in production:
+    # canonical Work carries a bffi:contribution → bffi:agent with
+    # rdfs:label.
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    canonical_uri = next(
+        c
+        for c in g.subjects(V.RDF.type, V.BFFI.Work)
+        if WORK_A in [str(o) for o in g.objects(c, V.PROV.wasDerivedFrom)]
+    )
+    bnode_contrib = URIRef("urn:test:contrib")
+    bnode_agent = URIRef("urn:test:agent")
+    g.add((canonical_uri, V.BFFI.contribution, bnode_contrib))
+    g.add((bnode_contrib, V.RDF.type, V.BFFI.Contribution))
+    g.add((bnode_contrib, V.RDF.type, V.BFFI.PrimaryContribution))
+    g.add((bnode_contrib, V.BFFI.agent, bnode_agent))
+    g.add((bnode_agent, V.RDFS.label, Literal("Tolstoy, Lev")))
+
+    # Reconstruct CanonicalEntry list from the canonical-map.jsonl
+    map_path = tmp_path / "canonical-map.jsonl"
+    entries = []
+    for line in map_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        d = json.loads(line)
+        entries.append(
+            CanonicalEntry(
+                canonical_work_uri=d["canonical_work_uri"],
+                raw_work_uris=d["raw_work_uris"],
+                helmet_bib_ids=d["helmet_bib_ids"],
+                merged_at=d["merged_at"],
+            )
+        )
+
+    n = _apply_contrib_variants(g, variants_sidecar_path=sidecar, canonical_entries=entries)
+    assert n == 1
+    assert (bnode_agent, V.SKOS.altLabel, Literal("L. Tolstoi")) in g

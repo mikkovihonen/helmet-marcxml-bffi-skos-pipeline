@@ -1185,17 +1185,23 @@ def _apply_contrib_variants(
         canonical_node = URIRef(canonical_uri)
         canonical_lit = Literal(claim.canonical_label)
         variant_lit = Literal(claim.variant_label)
-        # Walk every Expression linked off the canonical Work and find
-        # agents on those Expressions whose rdfs:label matches.
+        # Walk every Contribution attached to the canonical Work
+        # itself (primary contributions — MARC 100$a) AND every
+        # Contribution attached to its Expressions (non-primary —
+        # MARC 700$a). Both shapes can carry the canonical agent the
+        # cascade matched against; missing either path drops a
+        # legitimate variant binding.
+        contrib_subjects: list[Node] = list(g.objects(canonical_node, V.BFFI.contribution))
         for expr in g.objects(canonical_node, V.BFFI.hasExpression):
-            for contrib in g.objects(expr, V.BFFI.contribution):
-                for agent in g.objects(contrib, V.BFFI.agent):
-                    if (agent, V.RDFS.label, canonical_lit) not in g:
-                        continue
-                    if (agent, V.SKOS.altLabel, variant_lit) in g:
-                        continue
-                    g.add((agent, V.SKOS.altLabel, variant_lit))
-                    added += 1
+            contrib_subjects.extend(g.objects(expr, V.BFFI.contribution))
+        for contrib in contrib_subjects:
+            for agent in g.objects(contrib, V.BFFI.agent):
+                if (agent, V.RDFS.label, canonical_lit) not in g:
+                    continue
+                if (agent, V.SKOS.altLabel, variant_lit) in g:
+                    continue
+                g.add((agent, V.SKOS.altLabel, variant_lit))
+                added += 1
     return added
 
 

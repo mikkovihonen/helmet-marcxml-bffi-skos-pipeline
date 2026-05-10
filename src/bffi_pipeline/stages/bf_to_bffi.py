@@ -35,7 +35,11 @@ from bffi_pipeline.contrib_variants import (
 )
 from bffi_pipeline.helmet import format_sierra_bib_id
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.uris import mint_raw_expression_uri, register_sparql_functions
+from bffi_pipeline.uris import (
+    mint_raw_expression_uri,
+    mint_raw_work_uri,
+    register_sparql_functions,
+)
 from bffi_pipeline.validation.bffi import validate_graph
 
 _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
@@ -424,7 +428,13 @@ def _emit_extracted_contributions(
                     pending_claims.append(
                         ContribVariantClaim(
                             helmet_bib_id=bib_id,
-                            raw_work_uri=str(work),
+                            # Mint the bffi:Work URI rather than passing
+                            # the source bf:Work URI: M8's binding pass
+                            # joins the sidecar against canonical-map
+                            # entries whose raw_work_uris are the bffi
+                            # form. Sending the source URI here would
+                            # produce a phantom-pointer mismatch.
+                            raw_work_uri=mint_raw_work_uri(str(work)),
                             variant_label=cand.name,
                             canonical_label=cand.transliteration_of,
                             relator_code_hint=cand.relator_code,
