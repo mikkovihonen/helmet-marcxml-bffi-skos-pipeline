@@ -1,10 +1,11 @@
-.PHONY: help convert eval publish test test-integration lint format
+.PHONY: help convert eval publish refresh-finto test test-integration lint format
 
 help:
 	@echo "Targets:"
 	@echo "  convert FILE=...   - run MARCXML to BFFI on a directory (M2-M10)"
 	@echo "  eval LABEL=<id>    - run gold-set evaluation locally on M5 Max (M12)"
 	@echo "  publish            - load to Fuseki and refresh Skosmos (M10)"
+	@echo "  refresh-finto      - download Finto vocab dumps + load into Fuseki (M11 3b)"
 	@echo "  test               - run pytest (excluding requires_llm)"
 	@echo "  test-integration   - run integration tests (Docker stack required)"
 	@echo "  lint               - ruff check + ruff format --check + mypy --strict"
@@ -23,6 +24,9 @@ eval:
 
 publish:
 	@echo "not implemented"
+
+refresh-finto:
+	uv run bffi-pipeline load-finto --force
 
 test:
 	uv run pytest tests/ -m "not requires_llm"

@@ -37,9 +37,18 @@ def graph() -> Graph:
 
 
 def _vocabulary_subject(g: Graph) -> URIRef:
-    """Return the unique node typed ``skosmos:Vocabulary`` in the config."""
-    candidates = list(g.subjects(RDF.type, SKOSMOS.Vocabulary))
-    assert len(candidates) == 1, "skosmos-config.ttl must declare exactly one Vocabulary node"
+    """Return the bffiWorks vocabulary node in the config — i.e. the
+    ``skosmos:Vocabulary`` whose ``void:uriSpace`` is the canonical
+    Helmet Work namespace. Other ``skosmos:Vocabulary`` declarations
+    (KANTO/YSO/KAUNO/MUSO/SLM, added for option 3b cross-vocab linking)
+    coexist with bffiWorks; matching by ``void:uriSpace`` lets us pin
+    the assertions to the right one without depending on resolved URIs."""
+    work_namespace = Literal("http://urn.fi/URN:NBN:fi:bib:work:")
+    candidates = [s for s, _, _ in g.triples((None, VOID.uriSpace, work_namespace))]
+    assert len(candidates) == 1, (
+        "skosmos-config.ttl must declare exactly one Vocabulary with "
+        "void:uriSpace = http://urn.fi/URN:NBN:fi:bib:work:"
+    )
     subject = candidates[0]
     assert isinstance(subject, URIRef)
     return subject
@@ -179,3 +188,64 @@ def test_subject_category_has_multilingual_label(graph: Graph) -> None:
     assert "fi" in languages
     assert "en" in languages
     assert "sv" in languages
+
+
+# --- Finto cross-vocabulary entries (option 3b) ------------------------
+#
+# Pinning the URI spaces is critical: every Finto-namespaced URI on a
+# bffi:Work concept page is routed through Skosmos's vocabulary
+# registry by ``void:uriSpace`` prefix matching. A typo here = no
+# label, no clickable link. The test pairs are the same strings the
+# load_finto stage uses as named-graph URIs in Fuseki, so any drift
+# between the two breaks the lookup silently.
+
+_FINTO_VOCAB_ASSERTIONS: list[tuple[str, str]] = [
+    ("yso", "http://www.yso.fi/onto/yso/"),
+    ("kanto", "http://urn.fi/URN:NBN:fi:au:finaf:"),
+    ("kauno", "http://www.yso.fi/onto/kauno/"),
+    ("muso", "http://www.yso.fi/onto/muso/"),
+    ("slm", "http://urn.fi/URN:NBN:fi:au:slm:"),
+]
+
+
+@pytest.mark.parametrize(("short_name", "uri_space"), _FINTO_VOCAB_ASSERTIONS)
+def test_finto_vocabulary_entries_carry_expected_uri_space_and_short_name(
+    graph: Graph, short_name: str, uri_space: str
+) -> None:
+    """Each Finto vocab declaration must have the canonical URI-space
+    and a matching short name. Skosmos uses the URI-space to route
+    every encountered URI to the right vocab."""
+    candidates = [s for s, _, _ in graph.triples((None, VOID.uriSpace, Literal(uri_space)))]
+    assert len(candidates) == 1, f"missing vocab entry for {short_name} ({uri_space!r})"
+    vocab = candidates[0]
+    short_names = {str(o) for _, _, o in graph.triples((vocab, SKOSMOS.shortName, None))}
+    assert short_name in short_names
+
+
+@pytest.mark.parametrize(("_short", "uri_space"), _FINTO_VOCAB_ASSERTIONS)
+def test_finto_vocabulary_entries_point_at_local_fuseki(
+    graph: Graph, _short: str, uri_space: str
+) -> None:
+    """3b loads each vocab dump into our own Fuseki under the URI-space
+    as the named graph. The vocab declaration must point at that exact
+    graph URI on our SPARQL endpoint, not at api.finto.fi — that's the
+    whole reason 3b exists."""
+    [vocab] = [s for s, _, _ in graph.triples((None, VOID.uriSpace, Literal(uri_space)))]
+    assert (vocab, SKOSMOS.sparqlEndpoint, URIRef("http://fuseki:3030/bffi/sparql")) in graph
+    assert (vocab, SKOSMOS.sparqlGraph, URIRef(uri_space)) in graph
+
+
+def test_finto_vocabulary_kanto_is_finnish_only(graph: Graph) -> None:
+    """KANTO carries Finnish labels only; the vocab entry must reflect
+    that or Skosmos UI sessions in en/sv will request languages KANTO
+    doesn't have and fall through silently."""
+    [kanto] = [
+        s
+        for s, _, _ in graph.triples(
+            (None, VOID.uriSpace, Literal("http://urn.fi/URN:NBN:fi:au:finaf:"))
+        )
+    ]
+    languages = sorted(
+        str(o) for o in graph.objects(kanto, SKOSMOS.language) if isinstance(o, Literal)
+    )
+    assert languages == ["fi"]

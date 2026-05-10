@@ -18,6 +18,7 @@ from bffi_pipeline.stages import (
     embeddings,
     judge,
     load,
+    load_finto,
     marc_to_bf,
     merge,
     reconcile,
@@ -912,6 +913,72 @@ def load_command(
     typer.echo(result.render())
     if not result.success:
         raise typer.Exit(code=1)
+
+
+@app.command("load-finto")
+def load_finto_command(
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "Where Finto dump TTLs are cached; defaults to <BFFI_DATA_DIR>. "
+                "The actual files land under <output-dir>/finto-dumps/."
+            ),
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    fuseki_url: Annotated[
+        str | None,
+        typer.Option(
+            "--fuseki-url",
+            help="Fuseki dataset endpoint; defaults to FUSEKI_URL from settings.",
+        ),
+    ] = None,
+    max_age_days: Annotated[
+        int,
+        typer.Option(
+            "--max-age-days",
+            help="Re-download a cached dump only if its mtime is older than this many days.",
+        ),
+    ] = 30,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Re-download every dump regardless of cache freshness.",
+        ),
+    ] = False,
+) -> None:
+    """Refresh the KANTO/YSO/KAUNO/MUSO/SLM named graphs in Fuseki.
+
+    Downloads the canonical Turtle dumps from api.finto.fi and PUTs each
+    into its named graph via SPARQL Graph Store Protocol. Skosmos's
+    per-vocab entries in `config/skosmos-config.ttl` point at the same
+    graph URIs, so labels light up on the next concept-page render.
+    """
+    settings = get_settings()
+    auth: tuple[str, str] | None = (
+        (settings.fuseki_user, settings.fuseki_password)
+        if settings.fuseki_user and settings.fuseki_password
+        else None
+    )
+    with httpx.Client(
+        timeout=httpx.Timeout(60.0, read=300.0),
+        follow_redirects=True,
+        headers={"User-Agent": load_finto.DEFAULT_USER_AGENT},
+        auth=auth,
+    ) as client:
+        summary = load_finto.run(
+            output_dir=output_dir,
+            fuseki_url=fuseki_url,
+            max_age_days=max_age_days,
+            force=force,
+            http_client=client,
+        )
+    typer.echo(summary.render())
 
 
 @app.command("lookup-helmet")

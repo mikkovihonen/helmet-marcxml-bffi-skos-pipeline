@@ -130,3 +130,89 @@ bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
 
     skosmos:showTopConcepts       true ;
     skosmos:fullAlphabeticalIndex true .
+
+# ---------------------------------------------------------------------------
+# Finto-hosted vocabularies (KANTO/YSO/KAUNO/MUSO/SLM) — option 3b.
+#
+# M9 reconciliation binds canonical-Work creators to KANTO and subjects/
+# genre-forms to YSO/KAUNO/MUSO/SLM URIs. To make those URIs render as
+# labelled, clickable links in the Skosmos UI, we load the canonical
+# Turtle dumps from api.finto.fi into our own Fuseki under each vocab's
+# concept-scheme URI as the named graph (run via `bffi-pipeline
+# load-finto` / `make refresh-finto`). The vocab declarations below tell
+# Skosmos how to route URIs in the matching `void:uriSpace` to the right
+# vocab page on our instance, and which named graph to query for labels.
+#
+# Per-vocab `skosmos:language` lists match each vocab's actual coverage
+# (KANTO is fi-only; YSO adds `se`/Sami; KAUNO adds `en`). The shared
+# Fuseki SPARQL endpoint + `JenaText` dialect mirror the bffiWorks vocab
+# above so every vocab gets fast `text:query` label search.
+# ---------------------------------------------------------------------------
+
+:yso a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "YSO — General Finnish Ontology"@en,
+                      "YSO — Yleinen suomalainen ontologia"@fi,
+                      "YSO — Allmän finländsk ontologi"@sv ;
+    skosmos:shortName "yso"@en ;
+    void:uriSpace     "http://www.yso.fi/onto/yso/" ;
+    skosmos:language        "fi", "sv", "en", "se" ;
+    skosmos:defaultLanguage "fi" ;
+    skosmos:sparqlGraph     <http://www.yso.fi/onto/yso/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:showTopConcepts       true ;
+    skosmos:fullAlphabeticalIndex true .
+
+:kanto a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "KANTO — Finnish national name authorities"@en,
+                      "KANTO — Kansalliset toimijatiedot"@fi ;
+    skosmos:shortName "kanto"@en ;
+    void:uriSpace     "http://urn.fi/URN:NBN:fi:au:finaf:" ;
+    skosmos:language        "fi" ;
+    skosmos:defaultLanguage "fi" ;
+    skosmos:sparqlGraph     <http://urn.fi/URN:NBN:fi:au:finaf:> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+:kauno a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "KAUNO — Ontology of fictive subjects"@en,
+                      "KAUNO — Fiktiivisen aineiston ontologia"@fi,
+                      "KAUNO — Ontologi för fiktiva ämnesord"@sv ;
+    skosmos:shortName "kauno"@en ;
+    void:uriSpace     "http://www.yso.fi/onto/kauno/" ;
+    skosmos:language        "fi", "sv", "en" ;
+    skosmos:defaultLanguage "fi" ;
+    skosmos:sparqlGraph     <http://www.yso.fi/onto/kauno/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:showTopConcepts       true ;
+    skosmos:fullAlphabeticalIndex true .
+
+:muso a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "MUSO — Music ontology"@en,
+                      "MUSO — Musiikin ontologia"@fi,
+                      "MUSO — Musikontologi"@sv ;
+    skosmos:shortName "muso"@en ;
+    void:uriSpace     "http://www.yso.fi/onto/muso/" ;
+    skosmos:language        "fi", "sv" ;
+    skosmos:defaultLanguage "fi" ;
+    skosmos:sparqlGraph     <http://www.yso.fi/onto/muso/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:showTopConcepts       true ;
+    skosmos:fullAlphabeticalIndex true .
+
+:slm a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "SLM — Finnish genre/form thesaurus"@en,
+                      "SLM — Suomalainen lajityyppi- ja muotosanasto"@fi,
+                      "SLM — Finsk genre- och formordlista"@sv ;
+    skosmos:shortName "slm"@en ;
+    void:uriSpace     "http://urn.fi/URN:NBN:fi:au:slm:" ;
+    skosmos:language        "fi", "sv" ;
+    skosmos:defaultLanguage "fi" ;
+    skosmos:sparqlGraph     <http://urn.fi/URN:NBN:fi:au:slm:> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:showTopConcepts       true ;
+    skosmos:fullAlphabeticalIndex true .
