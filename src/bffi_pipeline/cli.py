@@ -10,6 +10,8 @@ import typer
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.eval import embed_benchmark
+from bffi_pipeline.eval import grow as eval_grow
+from bffi_pipeline.eval import harness as eval_harness
 from bffi_pipeline.provenance import writer as prov_writer
 from bffi_pipeline.stages import (
     bf_to_bffi,
@@ -282,6 +284,96 @@ def embed_benchmark_command(
         batch_size=batch_size,
     )
     typer.echo(embed_benchmark.render_comparison(results))
+
+
+@app.command("eval")
+def eval_command(
+    run_label: Annotated[
+        str,
+        typer.Option(
+            "--run-label",
+            help=(
+                "Identifier for this run (e.g. 'qwen3-32b-prompt-v3'). Becomes the "
+                "filename stem under --output-dir and is recorded in the JSON summary."
+            ),
+        ),
+    ],
+    gold_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--gold-path",
+            help="Path to gold/gold.jsonl; defaults to repo gold/ directory.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help=("Directory for the JSON summary; defaults to <repo>/eval-runs (gitignored)."),
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """Score the gold set against the M6 judge and write a JSON summary (M12).
+
+    Eval is **not in CI** per spec § 9; this subcommand is invoked
+    locally on the M5 Max via ``make eval`` before any PR that touches
+    prompts / gold / judge code. The text rendering is paste-ready for
+    the PR description; the JSON file is the durable record.
+    """
+    summary, out_path = eval_harness.run_eval(
+        run_label=run_label,
+        gold_path=gold_path,
+        output_dir=output_dir,
+    )
+    typer.echo(eval_harness.render_text(summary))
+    typer.echo("")
+    typer.echo(f"Summary written to {out_path}")
+
+
+@app.command("grow-gold")
+def grow_gold_command(
+    fuseki_url: Annotated[
+        str | None,
+        typer.Option(
+            "--fuseki-url",
+            help="Fuseki dataset base URL; defaults to FUSEKI_URL.",
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-path",
+            help=(
+                "Where to write the candidate JSONL; defaults to "
+                "gold/grow-candidates.jsonl in the repo."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """Grow the gold set from human-overridden judge decisions (M12 phase 3).
+
+    Run monthly per spec § 9. Writes a JSONL of candidate cases the
+    cataloguer reviews — each row needs ``category`` filled in by hand
+    before being merged into ``gold/gold.jsonl``. New cases default to
+    ``holdout: false``; cataloguers flip the flag explicitly when a
+    case should join the eval set.
+    """
+    result = eval_grow.grow(
+        fuseki_url=fuseki_url,
+        output_path=output_path,
+    )
+    typer.echo(result.render())
 
 
 @app.command("embed-stats")

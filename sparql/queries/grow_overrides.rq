@@ -1,0 +1,97 @@
+# Gold-set growth: WorkMergeDecision Activities a cataloguer overrode
+# via a HumanReview. One row per (Activity, source-Work pair) so the
+# grow pipeline can synthesise a candidate gold case per override.
+#
+# The provenance graph is queried for the override chain; the
+# bffi-works graph is OPTIONAL-joined to lift creator + title +
+# language onto each side of the pair so cataloguers see the context
+# they need without round-tripping to Fuseki by hand. OPTIONALs keep
+# the query tolerant of compacted provenance and renamed/dropped
+# bffi-works graphs.
+#
+# The two source Works are pulled deterministically by sorting the
+# Activity's prov:used objects: a := lex-smallest, b := next. Without
+# this the binding pair is non-deterministic per run.
+#
+# Used by src/bffi_pipeline/eval/grow.py per spec § 9.
+
+PREFIX bf:        <http://id.loc.gov/ontologies/bibframe/>
+PREFIX bffi:      <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX bffi-prov: <http://urn.fi/URN:NBN:fi:schema:bffi-prov#>
+PREFIX prov:      <http://www.w3.org/ns/prov#>
+PREFIX rdf:       <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs:      <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos:      <http://www.w3.org/2004/02/skos/core#>
+
+SELECT
+  ?activity
+  ?decision
+  ?confidence
+  ?rationale
+  ?reviewDecision
+  ?reviewNote
+  ?workA ?creatorA ?titleA ?languageA ?bibIdA
+  ?workB ?creatorB ?titleB ?languageB ?bibIdB
+WHERE {
+  GRAPH <http://urn.fi/URN:NBN:fi:bib:graph:provenance> {
+    ?activity a bffi-prov:WorkMergeDecision ;
+              bffi-prov:decision   ?decision ;
+              bffi-prov:confidence ?confidence ;
+              bffi-prov:rationale  ?rationale .
+    ?review prov:wasInformedBy ?activity ;
+            a bffi-prov:HumanReview ;
+            bffi-prov:decision   "overridden" ;
+            bffi-prov:reviewNote ?reviewNote .
+    OPTIONAL { ?review bffi-prov:decision ?reviewDecision }
+
+    # Take the two source Works the LLM judged. Lex-sort them so
+    # ?workA / ?workB are stable across runs.
+    {
+      SELECT ?activity (MIN(?w) AS ?workA) (MAX(?w) AS ?workB)
+      WHERE {
+        ?activity prov:used ?w .
+      }
+      GROUP BY ?activity
+      HAVING (COUNT(DISTINCT ?w) >= 2)
+    }
+  }
+
+  # OPTIONAL-lift creator / title / language onto each side from the
+  # bffi-works graph. The raw Works carry an agent literal label and
+  # a skos:prefLabel (the work title) per M3.
+  OPTIONAL {
+    GRAPH <http://urn.fi/URN:NBN:fi:bib:graph:bffi-works> {
+      ?workA skos:prefLabel ?titleA .
+      OPTIONAL {
+        ?workA bffi:contribution ?contribA .
+        ?contribA a bffi:PrimaryContribution ;
+                  bffi:agent ?agentA .
+        ?agentA rdfs:label ?creatorA .
+      }
+      OPTIONAL { ?workA bffi:expressionLanguage ?languageA }
+      OPTIONAL {
+        ?workA bf:identifiedBy ?identA .
+        ?identA bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
+                rdf:value ?bibIdA .
+      }
+    }
+  }
+  OPTIONAL {
+    GRAPH <http://urn.fi/URN:NBN:fi:bib:graph:bffi-works> {
+      ?workB skos:prefLabel ?titleB .
+      OPTIONAL {
+        ?workB bffi:contribution ?contribB .
+        ?contribB a bffi:PrimaryContribution ;
+                  bffi:agent ?agentB .
+        ?agentB rdfs:label ?creatorB .
+      }
+      OPTIONAL { ?workB bffi:expressionLanguage ?languageB }
+      OPTIONAL {
+        ?workB bf:identifiedBy ?identB .
+        ?identB bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
+                rdf:value ?bibIdB .
+      }
+    }
+  }
+}
+ORDER BY ?activity

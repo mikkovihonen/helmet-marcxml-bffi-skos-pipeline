@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel in-progress runs when a new commit lands on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: lint + unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Install Python toolchain
+        run: uv sync --frozen
+      - name: ruff check
+        run: uv run ruff check src tests
+      - name: ruff format --check
+        run: uv run ruff format --check src tests
+      - name: mypy --strict
+        run: uv run mypy --strict src
+      - name: pytest tests/unit
+        run: uv run pytest tests/unit -v
+
+  integration:
+    name: integration tests (no LLM)
+    runs-on: ubuntu-24.04
+    # Fuseki is provisioned eagerly so future integration tests against
+    # the SPARQL Graph Store Protocol have a service to talk to. The
+    # pin matches docker-compose.yml per BUILD_PLAN M10.
+    services:
+      fuseki:
+        image: stain/jena-fuseki:5.0.0
+        ports:
+          - 3030:3030
+        env:
+          ADMIN_PASSWORD: admin
+          FUSEKI_DATASET_1: bffi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Install Python toolchain
+        run: uv sync --frozen
+      - name: pytest tests/integration (excluding requires_llm)
+        run: uv run pytest tests/integration -v -m "not requires_llm"

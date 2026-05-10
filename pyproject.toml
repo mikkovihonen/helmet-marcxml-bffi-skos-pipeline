@@ -66,6 +66,7 @@ ignore = ["PLR0913"]
 "src/bffi_pipeline/stages/reconcile.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/skosify_run.py" = ["PLC0415"]
 "src/bffi_pipeline/eval/embed_benchmark.py" = ["PLC0415"]
+"src/bffi_pipeline/eval/harness.py" = ["PLC0415"]
 
 [tool.mypy]
 python_version = "3.11"

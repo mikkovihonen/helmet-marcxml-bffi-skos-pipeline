@@ -3,7 +3,7 @@
 help:
 	@echo "Targets:"
 	@echo "  convert FILE=...   - run MARCXML to BFFI on a directory (M2-M10)"
-	@echo "  eval               - run gold-set evaluation locally on M5 Max (M12)"
+	@echo "  eval LABEL=<id>    - run gold-set evaluation locally on M5 Max (M12)"
 	@echo "  publish            - load to Fuseki and refresh Skosmos (M10)"
 	@echo "  test               - run pytest (excluding requires_llm)"
 	@echo "  test-integration   - run integration tests (Docker stack required)"
@@ -14,7 +14,12 @@ convert:
 	@echo "not implemented"
 
 eval:
-	@echo "not implemented"
+	@if [ -z "$(LABEL)" ]; then \
+		echo "Usage: make eval LABEL=<run-label>"; \
+		echo "  e.g. make eval LABEL=qwen3-32b-prompt-v3"; \
+		exit 2; \
+	fi
+	uv run bffi-pipeline eval --run-label "$(LABEL)"
 
 publish:
 	@echo "not implemented"
