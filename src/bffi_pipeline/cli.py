@@ -116,6 +116,25 @@ def bf_to_bffi_command(
             help="Reconvert records whose output is already newer than the input.",
         ),
     ] = False,
+    llm_title_cascade: Annotated[
+        bool,
+        typer.Option(
+            "--llm-title-cascade/--no-llm-title-cascade",
+            help=(
+                "Escalate ambiguous parallel-title records (e.g. 'X = Y = Z' with "
+                "all-Latin segments Lingua maps to the same language) to the local "
+                "Qwen3 cascade for per-segment language assignment. Off by default "
+                "to keep M3 graph-only and fast."
+            ),
+        ),
+    ] = False,
+    primary_model: Annotated[
+        str | None,
+        typer.Option(
+            "--primary-model",
+            help="Override LLM_MODEL_PRIMARY for the title-language cascade.",
+        ),
+    ] = None,
 ) -> None:
     """Convert BIBFRAME RDF/XML to BFFI Turtle (M3).
 
@@ -123,7 +142,17 @@ def bf_to_bffi_command(
     cause a non-zero exit; only hard errors do.
     """
     target = output_dir or get_settings().data_dir
-    summary = bf_to_bffi.run(bibframe_dir, output_dir=target, force=force)
+    detector: object | None = None
+    if llm_title_cascade:
+        from bffi_pipeline.title_lang_llm import LangChainTitleLangDetector
+
+        detector = LangChainTitleLangDetector(model_name=primary_model)
+    summary = bf_to_bffi.run(
+        bibframe_dir,
+        output_dir=target,
+        force=force,
+        llm_detector=detector,
+    )
     typer.echo(summary.render())
     if summary.errored:
         raise typer.Exit(code=1)

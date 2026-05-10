@@ -69,7 +69,9 @@ ignore = ["PLR0913"]
 "src/bffi_pipeline/eval/embed_benchmark.py" = ["PLC0415"]
 "src/bffi_pipeline/eval/harness.py" = ["PLC0415"]
 "src/bffi_pipeline/title_lang.py" = ["PLC0415"]
+"src/bffi_pipeline/title_lang_llm.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/bf_to_bffi.py" = ["PLC0415"]
+"src/bffi_pipeline/cli.py" = ["PLC0415"]
 
 [tool.mypy]
 python_version = "3.11"

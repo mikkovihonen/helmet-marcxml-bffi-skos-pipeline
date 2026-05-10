@@ -148,7 +148,12 @@ def _candidate_languages(source: Graph) -> frozenset[str]:
     return frozenset(codes)
 
 
-def _retag_pref_labels(graph: Graph, candidates: frozenset[str]) -> None:
+def _retag_pref_labels(
+    graph: Graph,
+    candidates: frozenset[str],
+    *,
+    llm_detector: object | None = None,
+) -> None:
     """Replace untagged ``skos:prefLabel`` literals with split + per-language ones.
 
     For each untagged ``skos:prefLabel`` literal, runs
@@ -156,15 +161,27 @@ def _retag_pref_labels(graph: Graph, candidates: frozenset[str]) -> None:
     declared language candidates. Emits one labeled prefLabel per
     confidently-detected segment (or one fallback label on the whole
     string when splitting / detection didn't help).
+
+    When ``llm_detector`` is supplied, the local-LLM cascade fires for
+    ambiguous titles where every Lingua segment came back the same
+    language despite the cataloguer declaring multiple — typically
+    Latin-script parallel titles ("Tšarka : the Russian charka =
+    venäläinen tšarkka = russkaja tšarka"). The detector's
+    per-segment assignment overrides Lingua's verdict.
     """
     from bffi_pipeline.title_lang import tag_title
+    from bffi_pipeline.title_lang_llm import TitleLangDetector
+
+    # The Protocol isn't runtime-checkable; trust the caller to pass the
+    # right shape (or None). The annotation casts for mypy's benefit.
+    typed_detector = cast("TitleLangDetector | None", llm_detector)
 
     to_remove: list[tuple[URIRef, URIRef, Literal]] = []
     to_add: list[tuple[URIRef, URIRef, Literal]] = []
     for s, _, o in graph.triples((None, SKOS_prefLabel, None)):
         if not isinstance(o, Literal) or o.language or not isinstance(s, URIRef):
             continue
-        tagged = tag_title(str(o), candidates)
+        tagged = tag_title(str(o), candidates, llm_detector=typed_detector)
         if not tagged:
             continue
         to_remove.append((s, SKOS_prefLabel, o))
@@ -177,11 +194,21 @@ def _retag_pref_labels(graph: Graph, candidates: frozenset[str]) -> None:
         graph.add(triple)
 
 
-def post_process(bffi_graph: Graph, source: Graph) -> Graph:
-    """Mutate ``bffi_graph`` in place: tag prefLabels, bind namespaces."""
+def post_process(
+    bffi_graph: Graph,
+    source: Graph,
+    *,
+    llm_detector: object | None = None,
+) -> Graph:
+    """Mutate ``bffi_graph`` in place: tag prefLabels, bind namespaces.
+
+    ``llm_detector``, when supplied, is forwarded to
+    :func:`_retag_pref_labels`; the M3 ``bf-to-bffi`` CLI builds one
+    when ``--llm-title-cascade`` is set.
+    """
     candidates = _candidate_languages(source)
     if candidates:
-        _retag_pref_labels(bffi_graph, candidates)
+        _retag_pref_labels(bffi_graph, candidates, llm_detector=llm_detector)
     bffi_graph.bind("bf", V.BF)
     bffi_graph.bind("bffi", V.BFFI)
     bffi_graph.bind("bib", V.BIB)
@@ -214,11 +241,16 @@ def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
         fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-def _convert_one(input_path: Path, output_path: Path) -> Graph:
+def _convert_one(
+    input_path: Path,
+    output_path: Path,
+    *,
+    llm_detector: object | None = None,
+) -> Graph:
     source = Graph()
     source.parse(str(input_path), format="xml")
     bffi_graph = construct_bffi(source)
-    post_process(bffi_graph, source)
+    post_process(bffi_graph, source, llm_detector=llm_detector)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_bytes(output_path, bffi_graph.serialize(format="turtle").encode("utf-8"))
     return bffi_graph
@@ -229,8 +261,15 @@ def run(
     *,
     output_dir: Path | None = None,
     force: bool = False,
+    llm_detector: object | None = None,
 ) -> BffiSummary:
-    """Convert every ``<bibframe_dir>/<id>.rdf`` to a BFFI Turtle file."""
+    """Convert every ``<bibframe_dir>/<id>.rdf`` to a BFFI Turtle file.
+
+    Pass ``llm_detector`` (a
+    :class:`bffi_pipeline.title_lang_llm.TitleLangDetector`) to enable
+    the local-LLM cascade for ambiguous parallel-title records. Without
+    it, M3 stays graph-only.
+    """
     base = output_dir or get_settings().data_dir
     bibframe_dir = bibframe_dir or (base / "bibframe")
     summary = BffiSummary()
@@ -244,7 +283,7 @@ def run(
             continue
 
         try:
-            graph = _convert_one(rdf_path, out_path)
+            graph = _convert_one(rdf_path, out_path, llm_detector=llm_detector)
         except Exception as exc:
             summary.errored.append((bib_id, str(exc)))
             continue

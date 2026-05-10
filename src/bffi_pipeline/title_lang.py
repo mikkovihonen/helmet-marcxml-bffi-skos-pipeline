@@ -46,7 +46,10 @@ import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from bffi_pipeline.title_lang_llm import TitleLangDetector
 
 #: RDA-style parallel-title separators (always space-padded). Try the
 #: most specific first so ``" -- "`` doesn't get partially matched by
@@ -192,19 +195,28 @@ def detect_segment_lang(text: str, candidates: frozenset[str]) -> tuple[str | No
     return None, best_conf
 
 
-def tag_title(text: str, candidates: frozenset[str]) -> list[TaggedSegment]:
+def tag_title(
+    text: str,
+    candidates: frozenset[str],
+    *,
+    llm_detector: TitleLangDetector | None = None,
+) -> list[TaggedSegment]:
     """Split + tag a cataloguer title string.
 
     Returns at minimum one ``TaggedSegment``. Multiple segments come
     back only when the title contains both:
     1. A script-boundary or RDA separator that splits cleanly, AND
     2. The resulting segments are confidently detected as *different*
-       languages (lingua agrees that the title actually carries
-       multiple languages).
+       languages (Lingua agrees that the title actually carries
+       multiple languages) — OR an ``llm_detector`` is supplied and
+       overrides Lingua's verdict for the ambiguous cases.
 
-    Otherwise we collapse to one segment with the whole-string
-    detection. This avoids the failure mode where lingua misclassifies
-    every segment of a 3-language title as the same wrong language.
+    When Lingua collapses (every segment maps to the same language) and
+    an ``llm_detector`` is supplied, the cascade fires: the LLM gets
+    the full title plus the candidate set and returns a per-segment
+    assignment that the caller trusts. Without an ``llm_detector``,
+    the same case falls back to the original full-string tag (avoids
+    emitting N copies of the same probably-wrong tag).
     """
     text = text.strip()
     if not text:
@@ -230,13 +242,18 @@ def tag_title(text: str, candidates: frozenset[str]) -> list[TaggedSegment]:
     ]
     non_none = {t.lang for t in tagged if t.lang is not None}
     all_share_one_lang = all(t.lang is not None for t in tagged) and len(non_none) == 1
-    if all_share_one_lang:
-        # Tšarka failure mode: every Latin segment confidently misclassifies
-        # to the same language. Splitting would emit N copies of the same
-        # (probably wrong) tag; emit the original full string instead.
-        lang, _ = detect_segment_lang(text, bounded)
-        return [TaggedSegment(text=text, lang=lang)]
-    return tagged
+    if not all_share_one_lang:
+        return tagged
+
+    # Tšarka failure mode: every Latin segment confidently misclassifies
+    # to the same language. Lingua's signal is unreliable here — escalate
+    # to the LLM cascade if available, else fall back to the original
+    # full string with whole-string detection.
+    if llm_detector is not None:
+        decision = llm_detector.detect(title=text, candidates=bounded)
+        return [TaggedSegment(text=seg.text, lang=seg.lang) for seg in decision.segments]
+    lang, _ = detect_segment_lang(text, bounded)
+    return [TaggedSegment(text=text, lang=lang)]
 
 
 __all__ = [
