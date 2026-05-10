@@ -272,10 +272,15 @@ def _emit_extracted_contributions(
 
         expr_uri = URIRef(mint_raw_expression_uri(str(work)))
         for cand in decision.contributions:
-            if cand.relator_code is None:
-                # Transliteration variant — preserved in decision but
-                # not yet emitted; M9 script-variant binding will
-                # consume these once that path lands.
+            if cand.transliteration_of is not None or cand.relator_code is None:
+                # Either flagged as a variant of an existing 100/700
+                # agent (transliteration_of set, possibly alongside a
+                # relator hint) or has no relator info at all. In both
+                # cases we skip emission: the variant case avoids
+                # propagating cataloguer typos as new agents, and M9
+                # script-variant binding will consume the
+                # transliteration pointer to share the canonical
+                # KANTO URI across both forms.
                 continue
             seed = f"{expr_uri}|{cand.name}|{cand.relator_code}"
             digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()

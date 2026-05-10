@@ -13,6 +13,11 @@ import textwrap
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF
 
+from bffi_pipeline.contrib_extract_llm import (
+    ContribCandidate,
+    ContribExtractDecision,
+    StubContribExtractor,
+)
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import construct_bffi, post_process
 from bffi_pipeline.uris import mint_raw_expression_uri, mint_raw_work_uri
@@ -293,3 +298,109 @@ def test_pref_label_picks_language_via_lingua_when_multiple_candidates() -> None
         label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
         assert isinstance(label, Literal)
         assert label.language == expected, f"{title!r} should be {expected}, got {label.language}"
+
+
+# --- 245$c contributor-extraction emitter --------------------------------
+
+
+def _build_source_with_245c(c_subfield: str, agent_label: str) -> Graph:
+    """Minimal BIBFRAME fixture with a 245$c text + one 700 agent label so
+    the contrib-extract heuristic + emitter have something to chew on."""
+    g = Graph()
+    g.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title       [ a bf:Title ; bf:mainTitle "Title" ] ;
+                bf:language    <http://id.loc.gov/vocabulary/languages/eng> ;
+                bf:hasInstance <{BF_WORK}#Instance> ;
+                bf:contribution <{BF_WORK}#contrib1> .
+
+            <{BF_WORK}#Instance> a bf:Instance ;
+                bf:responsibilityStatement "{c_subfield}" .
+
+            <{BF_WORK}#contrib1> a bf:Contribution ;
+                bf:agent <{BF_WORK}#agent1> .
+
+            <{BF_WORK}#agent1> a bf:Person ;
+                rdfs:label "{agent_label}" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    return g
+
+
+def test_emitter_skips_when_extractor_flags_transliteration_variant() -> None:
+    """Option (a): when the LLM tells us a 245$c name is a variant of an
+    existing 100/700 agent, don't propagate the typo'd form as a new
+    Contribution. The smoke surfaced this on Helmet record 1714651,
+    where 245$c read 'Anssi Karttunen' but 700 carried the canonical
+    'Karttunen, Assi'. M9 script-variant binding will consume the
+    transliteration pointer downstream."""
+    source = _build_source_with_245c(
+        "Anssi Karttunen, cembalo",
+        "Karttunen, Assi",
+    )
+    extractor = StubContribExtractor(
+        decisions={
+            "Anssi Karttunen, cembalo": ContribExtractDecision(
+                contributions=[
+                    ContribCandidate(
+                        name="Anssi Karttunen",
+                        relator_code="prf",
+                        transliteration_of="Karttunen, Assi",
+                    ),
+                ],
+                rationale=(
+                    "Both fields set: relator hint and variant pointer. "
+                    "Emitter must skip on transliteration_of."
+                ),
+            )
+        }
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source, contrib_extractor=extractor)
+    # No new Contribution should appear on the Expression beyond what
+    # the M3 CONSTRUCT propagated from the existing 700.
+    contributions_on_expr = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
+    role_triples = list(bffi.triples((None, V.BF.role, None)))
+    assert role_triples == []
+    # The pre-existing 700 contribution is still routed by the SPARQL
+    # CONSTRUCT (one entry); the cascade adds nothing.
+    assert len(contributions_on_expr) == 1
+
+
+def test_emitter_emits_new_contribution_when_extractor_returns_pure_relator() -> None:
+    """Mirror case: cascade returns a clean new-agent candidate (no
+    transliteration_of). Emitter writes a Contribution with bf:role and
+    a labelled bffi:Agent on the raw Expression."""
+    source = _build_source_with_245c(
+        "Some Composer ; with a foreword by Tim Spector",
+        "Some Composer",
+    )
+    extractor = StubContribExtractor(
+        decisions={
+            "Some Composer ; with a foreword by Tim Spector": ContribExtractDecision(
+                contributions=[
+                    ContribCandidate(name="Tim Spector", relator_code="aft"),
+                ],
+                rationale="Tim Spector introduced by 'foreword by'; relator aft.",
+            )
+        }
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source, contrib_extractor=extractor)
+    role_triples = list(bffi.triples((None, V.BF.role, None)))
+    assert len(role_triples) == 1
+    _, _, role_uri = role_triples[0]
+    assert str(role_uri) == "http://id.loc.gov/vocabulary/relators/aft"
+    # And the Agent node carries the LLM-supplied name as rdfs:label.
+    role_subject = role_triples[0][0]
+    agent = next(bffi.objects(role_subject, V.BFFI.agent))
+    label = next(bffi.objects(agent, V.RDFS.label))
+    assert str(label) == "Tim Spector"
