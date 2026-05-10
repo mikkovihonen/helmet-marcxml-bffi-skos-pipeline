@@ -70,3 +70,70 @@ def test_validate_rejects_missing_minimum_content() -> None:
 def test_marc_namespace_constant_matches_spec() -> None:
     # Pin the namespace literal so a typo elsewhere is caught here.
     assert MARC_NS == "http://www.loc.gov/MARC21/slim"
+
+
+def _write_minimal_record(
+    path: Path,
+    *,
+    leader: str,
+    include_33x: bool,
+    include_1xx: bool = True,
+) -> None:
+    """Write a minimal-but-valid MARCXML record with a configurable leader."""
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<record xmlns="http://www.loc.gov/MARC21/slim">',
+        f"<leader>{leader}</leader>",
+        '<controlfield tag="008">240101s2024    fi              fin  </controlfield>',
+    ]
+    if include_1xx:
+        parts.append(
+            '<datafield tag="100" ind1="1" ind2=" ">'
+            '<subfield code="a">Sibelius, Jean</subfield></datafield>'
+        )
+    parts.append(
+        '<datafield tag="245" ind1="1" ind2="0">'
+        '<subfield code="a">Some title</subfield></datafield>'
+    )
+    if include_33x:
+        parts.append(
+            '<datafield tag="336" ind1=" " ind2=" ">'
+            '<subfield code="a">notated music</subfield>'
+            '<subfield code="b">ntm</subfield>'
+            '<subfield code="2">rdacontent</subfield></datafield>'
+        )
+    parts.append("</record>")
+    path.write_text("".join(parts), encoding="utf-8")
+
+
+@pytest.mark.parametrize("record_type", ["c", "d", "i", "j"])
+def test_validate_exempts_music_records_from_33x_requirement(
+    tmp_path: Path, record_type: str
+) -> None:
+    """Music records (leader pos 6 in {c, d, i, j}) commonly lack 33X in
+    Helmet's Sierra export — that's a known cataloguing pattern, not a
+    validation failure. Boundary-1 must accept these without 33X."""
+    record_path = tmp_path / "12345678.xml"
+    leader = f"00000n{record_type}m  22000007a 4500"
+    _write_minimal_record(record_path, leader=leader, include_33x=False)
+    result = validate(record_path)
+    assert result.helmet_bib_id == "12345678"
+
+
+def test_validate_still_requires_33x_for_textual_records(tmp_path: Path) -> None:
+    """Textual works (record-type-code = 'a' / 'm' / 't' / etc.) keep
+    the 33X requirement. The relaxation is targeted at music only."""
+    record_path = tmp_path / "12345678.xml"
+    leader = "00000nam  22000007a 4500"  # 'a' = language material (textual)
+    _write_minimal_record(record_path, leader=leader, include_33x=False)
+    with pytest.raises(MarcXmlValidationError) as exc:
+        validate(record_path)
+    assert exc.value.error_type == "marcxml-content-minimum"
+    assert "336/337/338" in exc.value.message
+
+
+def test_validate_accepts_music_records_with_33x_too(tmp_path: Path) -> None:
+    """The exemption is permissive — music records WITH 33X still pass."""
+    record_path = tmp_path / "12345678.xml"
+    _write_minimal_record(record_path, leader="00000ncm  22000007a 4500", include_33x=True)
+    validate(record_path)  # should not raise

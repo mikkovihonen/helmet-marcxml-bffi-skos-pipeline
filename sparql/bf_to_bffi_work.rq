@@ -22,8 +22,7 @@ PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 CONSTRUCT {
   ?workURI a bffi:Work ;
            bffi:hasExpression  ?exprURI ;
-           bffi:contribution   [ a bffi:PrimaryContribution ;
-                                 bffi:agent ?primaryAgent ] ;
+           bffi:contribution   ?contrib ;
            bffi:subject        ?subject ;
            bffi:classification ?class ;
            bffi:originDate     ?originDate ;
@@ -31,6 +30,8 @@ CONSTRUCT {
            bffi:marcKey        ?marcKey ;
            skos:prefLabel      ?workLabel ;
            bf:identifiedBy     ?ident .
+  ?contrib a               bffi:PrimaryContribution ;
+           bffi:agent      ?primaryAgent .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -38,16 +39,31 @@ CONSTRUCT {
 WHERE {
   ?bfWork a bf:Work .
 
+  # Skip contained / related Works — those are external references the
+  # main Work points at via bf:associatedResource (MARC 700 ind2=2,
+  # 740, 776). They lack Helmet identifiers and shouldn't be minted as
+  # BFFI Works in this pipeline. Mirrors the SHACL targeting in
+  # config/shapes/bibframe-conversion.shape.ttl.
+  FILTER NOT EXISTS { ?ref bf:associatedResource ?bfWork }
+  FILTER(isIRI(?bfWork))
+
   BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:work:",
             arq:sha1(STR(?bfWork)))) AS ?workURI )
   BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:expression:",
             arq:sha1(STR(?bfWork)))) AS ?exprURI )
 
-  # Primary creator only (translators, editors -> Expression, see Pass 2)
+  # Primary creator only (translators, editors -> Expression, see Pass 2).
+  # ?contrib must be BIND'ed inside the OPTIONAL so it stays unbound when
+  # the source has no bf:PrimaryContribution-with-agent (e.g. a record
+  # with only MARC 700 added entries, no 1XX). An inline blank-node
+  # template `[ a … ]` would emit one empty [a bffi:PrimaryContribution]
+  # bnode per cross-product solution row from the other OPTIONALs below
+  # — that's the bug this BIND fixes.
   OPTIONAL {
     ?bfWork bf:contribution ?c .
     ?c a bf:PrimaryContribution ;
        bf:agent ?primaryAgent .
+    BIND(BNODE() AS ?contrib)
   }
   OPTIONAL { ?bfWork bf:subject        ?subject }
   OPTIONAL { ?bfWork bf:classification ?class }

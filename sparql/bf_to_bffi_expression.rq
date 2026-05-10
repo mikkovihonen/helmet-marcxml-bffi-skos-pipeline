@@ -25,18 +25,24 @@ CONSTRUCT {
            bffi:language     ?language ;
            bffi:content      ?contentType ;
            bffi:title        ?title ;
-           bffi:contribution [ a bffi:Contribution ;
-                               bffi:agent ?otherAgent ] ;
+           bffi:contribution ?otherContrib ;
            bffi:summary      ?summary ;
            bffi:note         ?note ;
            skos:prefLabel    ?exprLabel ;
            bf:identifiedBy   ?ident .
+  ?otherContrib a bffi:Contribution ;
+                bffi:agent ?otherAgent .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
 }
 WHERE {
   ?bfWork a bf:Work .
+
+  # Skip contained / related Works (see bf_to_bffi_work.rq for rationale).
+  FILTER NOT EXISTS { ?ref bf:associatedResource ?bfWork }
+  FILTER(isIRI(?bfWork))
+
   BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:work:",
             arq:sha1(STR(?bfWork)))) AS ?workURI )
   BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:expression:",
@@ -53,10 +59,14 @@ WHERE {
   # the predicate.
 
   # Non-primary contributions go here (translator, illustrator, editor).
+  # ?otherContrib is BIND'ed inside the OPTIONAL so it stays unbound
+  # when no non-primary contribution exists — the same pattern as the
+  # primary-contribution OPTIONAL in bf_to_bffi_work.rq.
   OPTIONAL {
     ?bfWork bf:contribution ?c .
     FILTER NOT EXISTS { ?c a bf:PrimaryContribution }
     ?c bf:agent ?otherAgent .
+    BIND(BNODE() AS ?otherContrib)
   }
 
   OPTIONAL {

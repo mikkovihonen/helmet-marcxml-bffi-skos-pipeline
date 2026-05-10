@@ -177,15 +177,33 @@ def _parse_to_graph(rdf_xml: bytes) -> Graph:
 def _find_root_resources(g: Graph) -> tuple[URIRef, URIRef]:
     """Return ``(work_uri, instance_uri)`` from the XSLT-produced graph.
 
-    marc2bibframe2 emits exactly one ``bf:Work`` per record (the parent of
-    everything else); ``bf:hasInstance`` links to the primary ``bf:Instance``.
+    marc2bibframe2 emits one ``bf:Work`` per record's main entry plus
+    additional ``bf:Work`` resources for "contained" / "related" works
+    referenced via MARC 700 ind2=2 (analytical added entry), 740
+    (added entry — uncontrolled name), 776 (additional physical form),
+    and similar. The contained Works come into the graph as the
+    *object* of ``bf:associatedResource`` triples on the main Work or
+    Instance; the main Work is the one whose only inbound reference is
+    ``bf:instanceOf`` from its Instance.
     """
-    works = [s for s in g.subjects(RDF.type, V.BF.Work) if isinstance(s, URIRef)]
-    if not works:
+    all_works = [s for s in g.subjects(RDF.type, V.BF.Work) if isinstance(s, URIRef)]
+    if not all_works:
         raise RuntimeError("XSLT output contains no bf:Work")
-    if len(works) > 1:
-        raise RuntimeError(f"XSLT output contains {len(works)} bf:Work resources, expected 1")
-    work = works[0]
+    contained: set[URIRef] = {
+        o for _, _, o in g.triples((None, V.BF.associatedResource, None)) if isinstance(o, URIRef)
+    }
+    main_works = [w for w in all_works if w not in contained]
+    if not main_works:
+        raise RuntimeError(
+            "XSLT output contains bf:Work resources but all of them are "
+            "referenced as bf:associatedResource — no main Work identifiable"
+        )
+    if len(main_works) > 1:
+        raise RuntimeError(
+            f"XSLT output contains {len(main_works)} candidate main bf:Work "
+            f"resources (out of {len(all_works)} total); expected exactly 1"
+        )
+    work = main_works[0]
     instances = [o for o in g.objects(work, V.BF.hasInstance) if isinstance(o, URIRef)]
     if not instances:
         raise RuntimeError("XSLT output contains no bf:Instance linked to the Work")

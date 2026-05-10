@@ -141,9 +141,34 @@ _RE_245: Final[re.Pattern[str]] = re.compile(r"^245$")
 _RE_008: Final[re.Pattern[str]] = re.compile(r"^008$")
 _RE_336_337_338: Final[re.Pattern[str]] = re.compile(r"^33[678]$")
 
+#: MARC leader position 6 codes for which the 33X RDA content/media/
+#: carrier triplet is commonly absent in Helmet's Sierra export. The
+#: leader's record-type-code already conveys the broad type, so we
+#: don't hard-skip these records over a missing 33X.
+#: - ``c``: Notated music
+#: - ``d``: Manuscript notated music
+#: - ``i``: Nonmusical sound recording
+#: - ``j``: Musical sound recording
+_LEADER_TYPES_WITHOUT_33X: Final[frozenset[str]] = frozenset({"c", "d", "i", "j"})
+
+
+#: Position of the record-type-code in the MARC leader (0-indexed).
+_LEADER_RECORD_TYPE_POS: Final[int] = 6
+
+
+def _leader_record_type(record: etree._Element) -> str | None:
+    """Return the MARC leader's record-type-code (position 6), or ``None``."""
+    leader_el = record.find(f"{{{MARC_NS}}}leader")
+    if leader_el is None or leader_el.text is None:
+        return None
+    leader = leader_el.text
+    if len(leader) <= _LEADER_RECORD_TYPE_POS:
+        return None
+    return leader[_LEADER_RECORD_TYPE_POS]
+
 
 def validate_minimum_content(path: Path, tree: etree._ElementTree) -> None:
-    """Require at least one 1XX/7XX, one 245, one 008, and one 336/337/338."""
+    """Require ≥1 1XX/7XX, ≥1 245, ≥1 008, and (for non-music records) ≥1 336/337/338."""
     record = tree.getroot()
     # Records may be wrapped in <collection>; if so, take the first record.
     if record.tag == f"{{{MARC_NS}}}collection":
@@ -156,6 +181,9 @@ def validate_minimum_content(path: Path, tree: etree._ElementTree) -> None:
             )
         record = first
 
+    record_type = _leader_record_type(record)
+    requires_33x = record_type not in _LEADER_TYPES_WITHOUT_33X
+
     missing = []
     if not _has_field(record, _RE_1XX_OR_7XX):
         missing.append("1XX/7XX (creator)")
@@ -163,7 +191,7 @@ def validate_minimum_content(path: Path, tree: etree._ElementTree) -> None:
         missing.append("245 (title)")
     if not _has_field(record, _RE_008):
         missing.append("008 (fixed-length data)")
-    if not _has_field(record, _RE_336_337_338):
+    if requires_33x and not _has_field(record, _RE_336_337_338):
         missing.append("336/337/338 (content/media/carrier type)")
     if missing:
         raise MarcXmlValidationError(

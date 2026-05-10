@@ -20,11 +20,41 @@
 # Note: "graph contains at least one bf:Work / bf:Instance" is enforced in
 # stages.marc_to_bf._find_root_resources before the shape runs — SHACL's
 # targetClass-based shapes can't express that absence directly.
+#
+# Targeting note (vs spec § 10): aggregate records (MARC 700 ind2=2,
+# 740, 776) produce additional bf:Work / bf:Instance resources for the
+# *contained* / *related* works. Those don't carry our pipeline's
+# Helmet identifier or AdminMetadata — they're external references the
+# main Work points at via bf:associatedResource. The Helmet-id and
+# AdminMetadata shapes therefore use SPARQL targeting to filter out
+# resources that appear as the object of bf:associatedResource.
+# Blank-node Works (marc2bibframe2's internal sub-component nodes) are
+# also excluded because they're never the object of our Helmet-id or
+# AdminMetadata triples.
 
-# --- Every Work and Instance must carry a Helmet bf:identifiedBy ----------
+# --- Every (main) Work and Instance must carry a Helmet bf:identifiedBy ---
 bffi:HelmetIdShape
     a sh:NodeShape ;
-    sh:targetClass bf:Work, bf:Instance ;
+    sh:target [
+        a sh:SPARQLTarget ;
+        sh:prefixes [
+            sh:declare [
+                sh:prefix "bf" ;
+                sh:namespace "http://id.loc.gov/ontologies/bibframe/"^^xsd:anyURI ;
+            ]
+        ] ;
+        sh:select """
+            SELECT ?this WHERE {
+                { ?this a bf:Work } UNION { ?this a bf:Instance }
+                FILTER(isIRI(?this))
+                FILTER NOT EXISTS { ?ref bf:associatedResource ?this }
+                FILTER NOT EXISTS {
+                    ?contained bf:hasInstance ?this .
+                    ?ref       bf:associatedResource ?contained .
+                }
+            }
+        """ ;
+    ] ;
     sh:property [
         sh:path bf:identifiedBy ;
         sh:minCount 1 ;
@@ -43,10 +73,29 @@ bffi:HelmetIdShape
         sh:qualifiedMinCount 1 ;
     ] .
 
-# --- Every Work and Instance must carry an AdminMetadata block ------------
+# --- Every (main) Work and Instance must carry an AdminMetadata block -----
 bffi:AdminMetadataLinkShape
     a sh:NodeShape ;
-    sh:targetClass bf:Work, bf:Instance ;
+    sh:target [
+        a sh:SPARQLTarget ;
+        sh:prefixes [
+            sh:declare [
+                sh:prefix "bf" ;
+                sh:namespace "http://id.loc.gov/ontologies/bibframe/"^^xsd:anyURI ;
+            ]
+        ] ;
+        sh:select """
+            SELECT ?this WHERE {
+                { ?this a bf:Work } UNION { ?this a bf:Instance }
+                FILTER(isIRI(?this))
+                FILTER NOT EXISTS { ?ref bf:associatedResource ?this }
+                FILTER NOT EXISTS {
+                    ?contained bf:hasInstance ?this .
+                    ?ref       bf:associatedResource ?contained .
+                }
+            }
+        """ ;
+    ] ;
     sh:property [
         sh:path bffi:adminMetadata ;
         sh:minCount 1 ;
