@@ -29,6 +29,7 @@ from bffi_pipeline.stages.reconcile import (
     STAGE_LLM,
     STAGE_NO_CANDIDATE,
     AuthorityCandidate,
+    AuthorityKind,
     EntityRequest,
     FintoSkosmosClient,
     LangChainLLMPicker,
@@ -855,6 +856,107 @@ def test_iter_subject_requests_treats_missing_source_as_subject() -> None:
     requests = list(_iter_subject_requests(g))
     assert len(requests) == 1
     assert requests[0].kind == "subject"
+
+
+@pytest.mark.parametrize(
+    ("fragment", "expected_kind"),
+    [
+        ("Agent600-22", "person"),  # MARC 600 Personal Name
+        ("Agent610-15", "corporate_body"),  # MARC 610 Corporate Body
+        ("Agent611-7", "corporate_body"),  # MARC 611 Meeting Name
+    ],
+)
+def test_iter_subject_requests_routes_marc_6xx_subject_names_to_kanto_kinds(
+    fragment: str, expected_kind: AuthorityKind
+) -> None:
+    """When a cataloguer uses MARC 600/610/611 (subject-as-name fields),
+    marc2bibframe2 mints a URI like ``<...#Agent600-22>`` carrying just
+    ``rdfs:label "Person, Name"``. The walker must route those to
+    ``person`` / ``corporate_body`` so tier-1 hits KANTO instead of
+    YSO — bf:source is absent on these targets, so the URI fragment
+    pattern is the only available signal."""
+    g = Graph()
+    work = URIRef(WORK)
+    g.add((work, RDF.type, V.BFFI.Work))
+    target = URIRef(f"http://urn.fi/URN:NBN:fi:bib:raw/test#{fragment}")
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, V.RDFS.label, Literal("Some, Person")))
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == expected_kind
+    assert requests[0].literal == "Some, Person"
+    # predicate_uri stays bffi:subject — the cataloguer's MARC tag
+    # decides the predicate; reconciliation picks the authority.
+    assert requests[0].predicate_uri == str(V.BFFI.subject)
+
+
+def test_apply_reconciliation_person_subject_binds_to_bffi_subject_not_creator() -> None:
+    """A successful KANTO bind for an Agent600 subject (Pekurinen as
+    subject of a biography) must land as ``bffi:subject``, never as
+    ``bffi:creator``. Cataloguer's MARC 600 chose the predicate; the
+    person-kind reconciliation just picks the right authority."""
+    g = Graph()
+    work = URIRef(WORK)
+    g.add((work, RDF.type, V.BFFI.Work))
+    admin = URIRef(ADMIN)
+    g.add((work, V.adminMetadata, admin))
+    g.add((admin, RDF.type, V.AdminMetadata))
+    g.add((admin, V.adminMetadataFor, work))
+    g.add(
+        (
+            admin,
+            V.descriptionChangeDate,
+            Literal("2026-05-01T00:00:00+00:00", datatype=V.XSD.dateTime),
+        )
+    )
+    g.add((admin, V.descriptionAuthentication, V.AUTH_AUTO_MERGED))
+    target = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/test#Agent600-22")
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, V.RDFS.label, Literal("Pekurinen, Arndt")))
+
+    kanto_uri = "http://urn.fi/URN:NBN:fi:au:finaf:000106424"
+    client = StubAuthorityClient(
+        fixtures={
+            ("person", "Pekurinen, Arndt"): [
+                _candidate(kanto_uri, "Pekurinen, Arndt, 1905-1941", 0.97),
+            ]
+        }
+    )
+    summary, _ = apply_reconciliation(
+        client=client,
+        picker=StubPicker(),
+        graph=g,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+    )
+    assert summary.lexical == 1
+    # Bound as subject, never as creator — the M9 dispatcher must use
+    # predicate_uri (set by the subject walker) to disambiguate.
+    assert (work, V.BFFI.subject, URIRef(kanto_uri)) in g
+    assert (work, V.BFFI.creator, URIRef(kanto_uri)) not in g
+
+
+def test_iter_subject_requests_does_not_misroute_non_subject_agent_fragments() -> None:
+    """Fragment names like ``#Agent100-X`` (primary creator),
+    ``#Agent700-X`` (added entry), ``#Place651-X`` (place subject)
+    must NOT be routed to person/corporate_body — only the 6XX
+    subject-as-name range. Agent100/700 are creator-walker territory
+    (separate path); Place651 stays a topical/place subject."""
+    g = Graph()
+    work = URIRef(WORK)
+    g.add((work, RDF.type, V.BFFI.Work))
+    place_target = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/test#Place651-31")
+    g.add((work, V.BFFI.subject, place_target))
+    g.add((place_target, V.RDFS.label, Literal("Helsinki")))
+    g.add(
+        (
+            place_target,
+            V.BF.source,
+            URIRef("http://id.loc.gov/vocabulary/subjectSchemes/yso"),
+        )
+    )
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "subject"  # routed via yso source token, not Agent fragment
 
 
 def test_apply_reconciliation_subject_path_links_authority_and_bridges_blank_node() -> None:

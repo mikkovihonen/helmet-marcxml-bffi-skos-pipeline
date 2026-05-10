@@ -906,6 +906,38 @@ def _classify_subject_source(source: str | None) -> AuthorityKind:
     return "subject"
 
 
+#: Subject-as-name URI patterns minted by marc2bibframe2 for MARC 6XX
+#: subject fields that name a person / corporate body / meeting. Frag
+#: ID convention: ``#Agent<MARC tag><sequence>-<index>``. MARC 600 →
+#: Personal Name; MARC 610 → Corporate Body; MARC 611 → Meeting Name.
+#: Detected from the URI fragment because canonical.ttl carries only
+#: ``rdfs:label`` on these targets — the upstream ``bf:Person`` /
+#: ``bf:Agent`` types and the ``bflc:marcKey`` ``"6XX..."`` pattern
+#: don't survive the M3→M8 propagation.
+_SUBJECT_AS_NAME_FRAGMENT_RE: Final[re.Pattern[str]] = re.compile(r"#Agent6(00|10|11)-\d+$")
+_AGENT_FRAGMENT_TO_KIND: Final[dict[str, AuthorityKind]] = {
+    "00": "person",  # MARC 600
+    "10": "corporate_body",  # MARC 610
+    "11": "corporate_body",  # MARC 611 (meetings) → KANTO conferences
+}
+
+
+def _classify_subject_target(target: URIRef | None, source: str | None) -> AuthorityKind:
+    """Decide kind for a subject-target node.
+
+    First checks for the ``Agent6XX`` URI-fragment pattern that
+    marc2bibframe2 emits for MARC 6XX subject-as-name fields — those
+    route to ``person`` / ``corporate_body`` so tier-1 hits KANTO
+    instead of YSO. Falls back to :func:`_classify_subject_source`
+    for everything else.
+    """
+    if target is not None:
+        match = _SUBJECT_AS_NAME_FRAGMENT_RE.search(str(target))
+        if match is not None:
+            return _AGENT_FRAGMENT_TO_KIND[match.group(1)]
+    return _classify_subject_source(source)
+
+
 def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
     """Yield reconciliation requests for unresolved ``bffi:subject`` /
     ``bffi:genreForm`` targets on canonical Works.
@@ -965,10 +997,11 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
                     if isinstance(src, RdfLiteral):
                         source = str(src)
                         break
+                target_uri = target if isinstance(target, URIRef) else None
                 yield EntityRequest(
                     work_uri=str(work),
                     literal=str(label_lit),
-                    kind=_classify_subject_source(source),
+                    kind=_classify_subject_target(target_uri, source),
                     predicate_uri=str(predicate),
                 )
 
@@ -1065,20 +1098,26 @@ def _link_canonical_subject(
 
 
 def _apply_canonical_link(graph: Graph, request: EntityRequest, chosen_uri: str) -> None:
-    """Dispatch the per-kind binding logic on a successful reconciliation."""
-    if request.kind in {"person", "corporate_body"}:
+    """Dispatch the per-kind binding logic on a successful reconciliation.
+
+    The dispatch hinges on whether the request came from the *creator*
+    walker (no ``predicate_uri`` set; reconciles MARC 100/700 agents
+    on the canonical's primary contribution) or the *subject* walker
+    (``predicate_uri`` set to ``bffi:subject`` / ``bffi:genreForm``;
+    reconciles MARC 6XX subject-as-name + topical/place/genre fields).
+    Same kind (``person`` / ``corporate_body``) routes through KANTO at
+    tier-1 in both cases — the predicate decides whether the bound URI
+    lands as ``bffi:creator`` or ``bffi:subject`` on the canonical.
+    """
+    if request.predicate_uri is None:
+        # Creator-walker request — kind must be person or corporate_body.
         _link_canonical_creator(graph, request.work_uri, chosen_uri)
         return
-    # Subject-side requests must carry their predicate. If a caller
-    # hand-built an EntityRequest without going through
-    # `_iter_subject_requests`, fall back to bffi:subject so we don't
-    # drop the binding silently.
-    predicate_uri = request.predicate_uri or str(V.BFFI.subject)
     _link_canonical_subject(
         graph,
         work_uri=request.work_uri,
         chosen_uri=chosen_uri,
-        predicate_uri=predicate_uri,
+        predicate_uri=request.predicate_uri,
         literal=request.literal,
     )
 
