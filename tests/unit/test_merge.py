@@ -233,6 +233,47 @@ def test_canonical_carries_one_identified_by_per_absorbed_record(tmp_path: Path)
     assert bib_ids == ["111", "222"]
 
 
+def test_canonical_unions_lang_tagged_pref_labels_across_members(tmp_path: Path) -> None:
+    """When raw Works carry M3-cascade prefLabels in multiple languages
+    (en/fi/ru on the Tšarka pattern), M8 unions the full set onto the
+    canonical Work — Skosmos picks the right per-language label for the
+    UI rather than collapsing to one."""
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        pref_labels=[("Sota ja rauha", "fi"), ("War and Peace", "en")],
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+    )
+    records[WORK_B] = CanonicalWorkInputs(
+        work_uri=WORK_B,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Война и мир",
+        pref_labels=[("Война и мир", "ru")],
+        expression_uris=[EXPR_B],
+        helmet_identifiers=[("http://example.org/ident/b1", "222")],
+    )
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=records,
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    canonicals = list(g.subjects(V.RDF.type, V.BFFI.Work))
+    merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
+    labels = {
+        (str(o), o.language) for o in g.objects(merged, V.SKOS.prefLabel) if isinstance(o, Literal)
+    }
+    assert labels == {
+        ("Sota ja rauha", "fi"),
+        ("War and Peace", "en"),
+        ("Война и мир", "ru"),
+    }
+
+
 def test_canonical_carries_dct_identifier_per_absorbed_bib_id(tmp_path: Path) -> None:
     """Each absorbed Helmet record contributes one Sierra-style
     ``dct:identifier`` ("b<id>0") on the canonical Work so cataloguers

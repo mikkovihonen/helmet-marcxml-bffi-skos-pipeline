@@ -238,6 +238,9 @@ class CanonicalWorkInputs:
     work_uri: str
     creator_uri: str | None
     pref_label: str | None
+    """A single prefLabel string used as the deterministic anchor for the
+    canonical Work URI mint. The full multi-language set lives in
+    :attr:`pref_labels` and is what the canonical Work surfaces to Skosmos."""
     expression_uris: list[str] = field(default_factory=list)
     helmet_identifiers: list[tuple[str, str]] = field(default_factory=list)
     """List of (identifier_uri, helmet_bib_id) pairs as found on bf:identifiedBy."""
@@ -250,6 +253,12 @@ class CanonicalWorkInputs:
     expression_labels: list[tuple[str, str, str | None]] = field(default_factory=list)
     """List of (expression_uri, label_text, lang) tuples to propagate onto canonical
     Expressions so Skosmos surfaces them with prefLabels."""
+    pref_labels: list[tuple[str, str | None]] = field(default_factory=list)
+    """List of (label_text, lang) tuples for *all* skos:prefLabel literals
+    on the raw Work. M3's title-language cascade emits one per parallel
+    title (e.g. en/fi/ru on the Tšarka pattern); M8 unions these across
+    absorbed members and propagates the full set onto the canonical Work
+    so Skosmos picks the right per-language label."""
 
 
 def _first_pref_label(graph: Graph, subject: URIRef) -> str | None:
@@ -257,6 +266,21 @@ def _first_pref_label(graph: Graph, subject: URIRef) -> str | None:
         if isinstance(o, RdfLiteral):
             return str(o)
     return None
+
+
+def _all_pref_labels(graph: Graph, subject: URIRef) -> list[tuple[str, str | None]]:
+    """Return the full set of ``(text, lang)`` prefLabels on ``subject``,
+    sorted deterministically so re-runs of M8 produce byte-identical
+    canonical.ttl. Untagged literals (``lang is None``) sort before any
+    language-tagged literal to keep the key total-order safe."""
+    return sorted(
+        (
+            (str(o), o.language)
+            for o in graph.objects(subject, V.SKOS.prefLabel)
+            if isinstance(o, RdfLiteral)
+        ),
+        key=lambda t: (t[1] or "", t[0]),
+    )
 
 
 def _primary_agent_uri(graph: Graph, work: URIRef) -> str | None:
@@ -410,6 +434,7 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
             genre_form_targets=genres,
             contribution_targets=contributions,
             expression_labels=_expression_labels(graph, work),
+            pref_labels=_all_pref_labels(graph, work),
         )
     return out
 
@@ -658,7 +683,16 @@ def _emit_canonical_work(
     """Add the canonical Work + AdminMetadata to ``g``. Returns (map row, merged_at)."""
     g.add((canonical_uri, RDF.type, V.BFFI.Work))
     g.add((canonical_uri, RDF.type, V.SKOS.Concept))
-    if pref_label is not None:
+    union_pref_labels: set[tuple[str, str | None]] = set()
+    for member in members:
+        union_pref_labels.update(member.pref_labels)
+    if union_pref_labels:
+        for text, lang in sorted(union_pref_labels, key=lambda t: (t[1] or "", t[0])):
+            literal = Literal(text, lang=lang) if lang else Literal(text)
+            g.add((canonical_uri, V.SKOS.prefLabel, literal))
+    elif pref_label is not None:
+        # Fallback for synthetic test fixtures that don't populate
+        # ``pref_labels`` — production always does, via ``_all_pref_labels``.
         g.add((canonical_uri, V.SKOS.prefLabel, Literal(pref_label)))
 
     # bf:identifiedBy: union all Helmet identifiers across members, dedup by bib_id.
