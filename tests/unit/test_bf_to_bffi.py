@@ -11,7 +11,7 @@ from __future__ import annotations
 import textwrap
 
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import RDF
+from rdflib.namespace import DCTERMS, RDF
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import construct_bffi, post_process
@@ -222,6 +222,49 @@ def test_pref_label_picks_main_work_language_not_contained_work() -> None:
     label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
     assert isinstance(label, Literal)
     assert label.language == "sv"
+
+
+def test_post_process_emits_sierra_style_dct_identifier_on_work_and_expression() -> None:
+    """Skosmos can't traverse the structured ``bf:Local`` blank node. M3
+    post-processing denormalises the Helmet bib ID onto every Work and
+    Expression as a flat ``dct:identifier`` literal so cataloguers can
+    copy a Sierra-style bib number ("b<id>0") straight from the concept
+    page into discussions. The bare numeric ID for this fixture is
+    "10000001"; in Sierra-style display form that's "b100000010" — the
+    trailing "0" stands in for the (undocumented) modulus-11 check
+    digit, which the Helmet OPAC accepts in lookups."""
+    source = _build_source()
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    for target in (EXPECTED_WORK, EXPECTED_EXPR):
+        idents = list(bffi.objects(target, DCTERMS.identifier))
+        assert Literal("b100000010") in idents, f"Sierra-style id missing on {target}"
+
+
+def test_post_process_does_not_emit_dct_identifier_for_non_helmet_sources() -> None:
+    """A ``bf:identifiedBy`` triple from a non-Helmet source must not produce a
+    Sierra-style ``dct:identifier`` — that form is Helmet/Sierra-specific."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:  <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title         [ bf:mainTitle "Untitled" ] ;
+                bf:identifiedBy  <#other-id> .
+
+            <#other-id> a bf:Local ;
+                rdf:value "FOREIGN-42" ;
+                bf:source <http://example.org/source/external> .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    assert not list(bffi.objects(EXPECTED_WORK, DCTERMS.identifier))
 
 
 def test_pref_label_picks_language_via_lingua_when_multiple_candidates() -> None:

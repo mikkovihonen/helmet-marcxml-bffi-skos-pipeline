@@ -39,9 +39,10 @@ from typing import Literal as LiteralType
 
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib import Literal as RdfLiteral
-from rdflib.namespace import RDF
+from rdflib.namespace import DCTERMS, RDF
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.helmet import format_sierra_bib_id
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.logger import model_agent_uri
 from bffi_pipeline.uris import mint_work_uri
@@ -674,6 +675,7 @@ def _emit_canonical_work(
             g.add((ident, RDF.type, V.BF.Local))
             g.add((ident, RDF.value, Literal(bib_id)))
             g.add((ident, V.BF.source, V.HELMET_SOURCE_URI))
+            g.add((canonical_uri, DCTERMS.identifier, Literal(format_sierra_bib_id(bib_id))))
 
     _propagate_expressions(g, canonical_uri=canonical_uri, members=members)
 
@@ -769,6 +771,7 @@ def _bind_prefixes(g: Graph) -> None:
     g.bind("bffi-prov", V.BFFI_PROV)
     g.bind("bf", V.BF)
     g.bind("bib", V.BIB)
+    g.bind("dct", DCTERMS)
     g.bind("prov", V.PROV)
     g.bind("skos", V.SKOS)
     g.bind("xsd", V.XSD)

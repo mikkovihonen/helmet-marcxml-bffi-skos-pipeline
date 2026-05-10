@@ -21,10 +21,11 @@ from pathlib import Path
 from typing import Final, cast
 
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import RDF, RDFS
+from rdflib.namespace import DCTERMS, RDF, RDFS
 from rdflib.term import Node
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.helmet import format_sierra_bib_id
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.uris import register_sparql_functions
 from bffi_pipeline.validation.bffi import validate_graph
@@ -194,13 +195,39 @@ def _retag_pref_labels(
         graph.add(triple)
 
 
+def _emit_helmet_identifiers(graph: Graph) -> None:
+    """For every Work / Expression with a Helmet ``bf:identifiedBy`` link,
+    emit a flat ``dct:identifier`` literal in Sierra-style display form
+    (e.g. ``"b100000010"``).
+
+    Skosmos can't traverse the structured ``bf:Local`` blank node to
+    render the identifier on the concept page; the flat predicate
+    surfaces a copy-pasteable bib number cataloguers reference in
+    Sierra and the Helmet OPAC. The structured ``bf:identifiedBy``
+    stays for BIBFRAME interop.
+    """
+    to_add: list[tuple[URIRef, URIRef, Literal]] = []
+    for s, _, ident in graph.triples((None, V.BF.identifiedBy, None)):
+        if not isinstance(s, URIRef):
+            continue
+        if (ident, V.BF.source, V.HELMET_SOURCE_URI) not in graph:
+            continue
+        bib_id = graph.value(ident, RDF.value)
+        if not isinstance(bib_id, Literal):
+            continue
+        to_add.append((s, DCTERMS.identifier, Literal(format_sierra_bib_id(str(bib_id)))))
+    for triple in to_add:
+        graph.add(triple)
+
+
 def post_process(
     bffi_graph: Graph,
     source: Graph,
     *,
     llm_detector: object | None = None,
 ) -> Graph:
-    """Mutate ``bffi_graph`` in place: tag prefLabels, bind namespaces.
+    """Mutate ``bffi_graph`` in place: tag prefLabels, denormalise Helmet
+    identifiers for Skosmos display, bind namespaces.
 
     ``llm_detector``, when supplied, is forwarded to
     :func:`_retag_pref_labels`; the M3 ``bf-to-bffi`` CLI builds one
@@ -209,9 +236,11 @@ def post_process(
     candidates = _candidate_languages(source)
     if candidates:
         _retag_pref_labels(bffi_graph, candidates, llm_detector=llm_detector)
+    _emit_helmet_identifiers(bffi_graph)
     bffi_graph.bind("bf", V.BF)
     bffi_graph.bind("bffi", V.BFFI)
     bffi_graph.bind("bib", V.BIB)
+    bffi_graph.bind("dct", DCTERMS)
     bffi_graph.bind("rdf", RDF)
     bffi_graph.bind("rdfs", RDFS)
     bffi_graph.bind("skos", V.SKOS)

@@ -13,6 +13,7 @@
 
 @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
 @prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+@prefix dct:  <http://purl.org/dc/terms/> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
@@ -63,3 +64,15 @@ bffi:expressionOf  rdfs:subPropertyOf skos:broader ;
     bf:code      "helmet-bib" ;
     rdfs:comment "Joint catalog of the public libraries of Helsinki, Espoo, Vantaa, and Kauniainen. Underlying ILS is Sierra; this is implementation detail and not preserved in the data."@en ,
                  "Helsingin, Espoon, Vantaan ja Kauniaisten kunnankirjastojen yhteinen aineistorekisteri."@fi .
+
+# ---------------------------------------------------------------------------
+# `dct:identifier` is denormalised onto every Work / Expression in M3
+# post-processing as a Sierra-style bib number (e.g. "b100000010"). The
+# rdfs:label here is what Skosmos renders as the property heading on the
+# concept page; without it cataloguers see the bare predicate URI. The
+# bib-number form itself is what they paste into Sierra discussions.
+# ---------------------------------------------------------------------------
+
+dct:identifier rdfs:label "Helmet bib ID"@en,
+                          "Helmet-tunniste"@fi,
+                          "Helmet-bib-id"@sv .

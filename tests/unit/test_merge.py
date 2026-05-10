@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from rdflib import Graph, URIRef
+from rdflib import Graph, Literal, URIRef
+from rdflib.namespace import DCTERMS
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.merge import (
@@ -230,6 +231,24 @@ def test_canonical_carries_one_identified_by_per_absorbed_record(tmp_path: Path)
         str(o) for ident in idents for _, _, o in g.triples((ident, V.RDF.value, None))
     )
     assert bib_ids == ["111", "222"]
+
+
+def test_canonical_carries_dct_identifier_per_absorbed_bib_id(tmp_path: Path) -> None:
+    """Each absorbed Helmet record contributes one Sierra-style
+    ``dct:identifier`` ("b<id>0") on the canonical Work so cataloguers
+    see every bib number that rolled into a merged Work, not just one."""
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    canonicals = list(g.subjects(V.RDF.type, V.BFFI.Work))
+    merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
+    sierra_ids = sorted(str(o) for o in g.objects(merged, DCTERMS.identifier))
+    assert sierra_ids == ["b1110", "b2220"]
+    for sid in sierra_ids:
+        assert (merged, DCTERMS.identifier, Literal(sid)) in g
 
 
 def test_identifiers_deduplicate_when_the_same_bib_id_appears_twice(tmp_path: Path) -> None:
