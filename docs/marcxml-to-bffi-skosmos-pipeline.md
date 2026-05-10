@@ -1199,15 +1199,15 @@ The build plan is structured as M0 → M13 with explicit definitions of done. On
 | M0 | Skeleton | Repo layout, lint/test skeleton green, `docker-compose.yml` runs Fuseki + Skosmos. |
 | M1 | URI minting + config | `src/bffi_pipeline/uris.py` deterministic minting; Pydantic Settings. |
 | M2 | MARCXML → BIBFRAME | XSLT wrapper; UTF-8-only; one-record-per-file `<id>.xml`; emits Helmet `bf:identifiedBy`; sidecar `helmet-map.jsonl`; Boundaries 1 & 2. |
-| M3 | BIBFRAME → BFFI | Two SPARQL CONSTRUCTs; preserves Helmet identifiers; Boundary 3; `skos:prefLabel` language tagging via Lingua, with optional local-LLM cascade for ambiguous parallel titles. |
+| M3 | BIBFRAME → BFFI | Two SPARQL CONSTRUCTs; preserves Helmet identifiers; Boundary 3; `skos:prefLabel` language tagging via Lingua, with optional local-LLM cascade for ambiguous parallel titles; surfaces Sierra-style Helmet bib ID via `dct:identifier`. |
 | M4 | Work-key blocking | Stage-1 deterministic blocking key. |
 | M5 | Embedding candidates | BGE-M3 (post-benchmark) + FAISS HNSW; persisted index; tightened thresholds. |
 | M6 | LLM judge | Qwen3 cascade; SQLite cache; checkpoint; Boundary 4 validators. |
 | M7 | Provenance logging | PROV-O + `bffi-prov` namespace; compaction subcommand; staleness warning. |
-| M8 | Merge application | Union-find canonical Works; identifier-set union; `canonical-map.jsonl`. |
+| M8 | Merge application | Union-find canonical Works; identifier-set union (`bf:identifiedBy` + Sierra-style `dct:identifier` per absorbed bib_id); `canonical-map.jsonl`. |
 | M9 | Reconciliation | KANTO → VIAF / YSO / KAUNO / MUSO; four-tier decision logic. |
 | M10 | Skosify overlay + Fuseki load | Overlay-plus-inference; Helmet source URI declared; Boundary 5; `lookup-helmet` CLI. |
-| M11 | Skosmos config | Pinned Skosmos 3.x; `fi`/`sv`/`en` priority. |
+| M11 | Skosmos config | Pinned Skosmos 3.x; `fi`/`sv`/`en` priority; overlay labels `dct:identifier` as "Helmet bib ID" for cataloguer reference. |
 | M12 | Gold set + eval harness | 50–100 starter cases, 30 % hand-marked hold-out; eval not in CI. |
 | M13 | Documentation + handoff | Apache-2.0 LICENSE, README, runbook, architecture diagram. |
 
