@@ -161,3 +161,88 @@ def test_pref_label_untagged_when_language_not_in_priority_set() -> None:
     label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
     assert isinstance(label, Literal)
     assert label.language is None
+
+
+def test_pref_label_picks_main_work_language_not_translated_from() -> None:
+    """marc2bibframe2 emits a `Note otx` sub-node whose `bf:language` carries
+    the *original* language (MARC 041 $h "translated from"). The main Work's
+    own `bf:language` is what describes the Expression's text. The post-process
+    must tag prefLabels from the main Work, not the otx sub-node."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix bflc: <http://id.loc.gov/ontologies/bflc/> .
+            @prefix res:  <http://id.loc.gov/vocabulary/resourceComponents/> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title    [ bf:mainTitle "Kellontekijän tytär" ] ;
+                bf:language <http://id.loc.gov/vocabulary/languages/fin> ;
+                bf:note     [ a bf:Note, res:otx ;
+                              bf:language <http://id.loc.gov/vocabulary/languages/eng> ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
+    assert isinstance(label, Literal)
+    # Without the main-Work filter, set iteration could pick `eng` and tag
+    # this Finnish title as `@en`. With the filter + fi>sv>en priority, fi.
+    assert label.language == "fi"
+
+
+def test_pref_label_picks_main_work_language_not_contained_work() -> None:
+    """Aggregate records (MARC 700 ind2=2) reference contained Works via
+    `bf:associatedResource`; those contained Works often have their own
+    `bf:language`. Tagging must ignore contained Works' languages."""
+    contained = "http://urn.fi/URN:NBN:fi:bib:raw/10000001#Work700-30"
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title    [ bf:mainTitle "Sagor från Mumindalen" ] ;
+                bf:language <http://id.loc.gov/vocabulary/languages/swe> ;
+                bf:associatedResource <{contained}> .
+
+            <{contained}> a bf:Work ;
+                bf:title    [ bf:mainTitle "The English original" ] ;
+                bf:language <http://id.loc.gov/vocabulary/languages/eng> .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
+    assert isinstance(label, Literal)
+    assert label.language == "sv"
+
+
+def test_pref_label_priority_fi_over_sv_over_en() -> None:
+    """A bilingual Finnish-Swedish record (both languages on the main Work)
+    tags prefLabel with `fi` per the committed display priority."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+            <{BF_WORK}> a bf:Work ;
+                bf:title    [ bf:mainTitle "Bilingual title" ] ;
+                bf:language <http://id.loc.gov/vocabulary/languages/swe> ,
+                            <http://id.loc.gov/vocabulary/languages/eng> ,
+                            <http://id.loc.gov/vocabulary/languages/fin> .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
+    assert isinstance(label, Literal)
+    assert label.language == "fi"

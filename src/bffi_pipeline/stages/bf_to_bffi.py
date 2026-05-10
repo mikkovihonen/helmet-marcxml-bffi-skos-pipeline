@@ -120,21 +120,40 @@ def construct_bffi(source: Graph) -> Graph:
 
 
 def _language_tag_for(source: Graph) -> str | None:
-    """Pick a BCP-47 tag from ``bf:language`` URIs in ``source``.
+    """Pick a BCP-47 tag from ``bf:language`` URIs on the main ``bf:Work``.
 
-    We take the first match in fi / sv / en (matching the committed
-    display priority). Other languages leave prefLabel untagged — the
-    Boundary-3 shape will flag those records.
+    Two filters keep us off false-positive language codes:
+
+    1. Subjects must be URIRef-typed ``bf:Work`` and not appear as the
+       object of ``bf:associatedResource`` — i.e. only the main Work
+       counts. marc2bibframe2 emits a separate ``Note otx`` blank-node
+       ("original-text-version") that carries ``bf:language`` for the
+       *translated-from* language; that's not what we want to tag the
+       Expression's prefLabel with.
+    2. Among the main-Work languages, apply the committed display
+       priority ``fi → sv → en``. Set iteration order is otherwise
+       implementation-defined and produced flaky tags on records with
+       multiple ``bf:language`` triples.
+
+    Languages outside ``fi/sv/en`` (e.g. ``rus``) leave the prefLabel
+    untagged — the Boundary-3 shape flags those records.
     """
+    contained: set[URIRef] = {
+        o
+        for _, _, o in source.triples((None, V.BF.associatedResource, None))
+        if isinstance(o, URIRef)
+    }
     seen: set[str] = set()
-    for lang in source.objects(predicate=V.BF.language):
-        if isinstance(lang, URIRef) and str(lang).startswith(_LANG_URI_PREFIX):
-            code3 = str(lang)[len(_LANG_URI_PREFIX) :]
-            seen.add(code3)
-    for code3 in seen:
-        if code3 in _LANG_3_TO_2:
+    for work in source.subjects(RDF.type, V.BF.Work):
+        if not isinstance(work, URIRef) or work in contained:
+            continue
+        for lang in source.objects(work, V.BF.language):
+            if isinstance(lang, URIRef) and str(lang).startswith(_LANG_URI_PREFIX):
+                seen.add(str(lang)[len(_LANG_URI_PREFIX) :])
+    # Display priority committed in CLAUDE.md: fi > sv > en.
+    for code3 in ("fin", "swe", "eng"):
+        if code3 in seen:
             return _LANG_3_TO_2[code3]
-    # Deterministic if multiple unmapped codes: pick first sorted.
     return None
 
 
