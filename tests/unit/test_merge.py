@@ -21,6 +21,7 @@ from rdflib import Graph, URIRef
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.merge import (
     CanonicalWorkInputs,
+    ContributionTarget,
     HelmetMapEntry,
     SubjectTarget,
     apply_merge,
@@ -568,3 +569,159 @@ def test_subject_propagation_byte_stable_across_runs(tmp_path: Path) -> None:
         now=fixed,
     )
     assert canonical2.read_bytes() == bytes_1
+
+
+# --- Contribution + Expression-typing propagation -----------------------
+
+
+AGENT_TOLSTOY_LABEL = "Tolstoy, Leo,"
+AGENT_DICKENS_LABEL = "Dickens, Charles,"
+
+
+def _records_with_contributions() -> dict[str, CanonicalWorkInputs]:
+    """Two members of one merge group, each carrying a primary contribution."""
+    return {
+        WORK_A: CanonicalWorkInputs(
+            work_uri=WORK_A,
+            creator_uri=AGENT_TOLSTOY,
+            pref_label="Sota ja rauha",
+            expression_uris=[EXPR_A],
+            helmet_identifiers=[("http://example.org/ident/a1", "111")],
+            contribution_targets=[
+                ContributionTarget(agent_uri=AGENT_TOLSTOY, agent_label=AGENT_TOLSTOY_LABEL),
+            ],
+        ),
+        WORK_B: CanonicalWorkInputs(
+            work_uri=WORK_B,
+            creator_uri=AGENT_TOLSTOY,
+            pref_label="Война и мир",
+            expression_uris=[EXPR_B],
+            helmet_identifiers=[("http://example.org/ident/b1", "222")],
+            contribution_targets=[
+                # Same agent across A and B → must dedupe to one canonical contrib.
+                ContributionTarget(agent_uri=AGENT_TOLSTOY, agent_label=AGENT_TOLSTOY_LABEL),
+                # Distinct agent only on B (e.g. translator credited as primary).
+                ContributionTarget(agent_uri=AGENT_DICKENS, agent_label=AGENT_DICKENS_LABEL),
+            ],
+        ),
+        WORK_C: CanonicalWorkInputs(
+            work_uri=WORK_C,
+            creator_uri=AGENT_TOLSTOY,
+            pref_label="War and Peace",
+            expression_uris=[EXPR_C],
+            helmet_identifiers=[("http://example.org/ident/c1", "333")],
+            contribution_targets=[
+                ContributionTarget(agent_uri=AGENT_TOLSTOY, agent_label=AGENT_TOLSTOY_LABEL),
+            ],
+        ),
+    }
+
+
+def test_canonical_carries_primary_contribution_with_agent_and_label(tmp_path: Path) -> None:
+    """M9 walks <canonical> bffi:contribution → PrimaryContribution → agent → rdfs:label."""
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_contributions(),
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    canonical = _merged_canonical(g)
+    contribs = list(g.objects(canonical, V.BFFI.contribution))
+    # Two distinct agents → two contributions (Tolstoy deduped across A and B).
+    assert len(contribs) == 2
+    for contrib in contribs:
+        types = set(g.objects(contrib, V.RDF.type))
+        assert V.BFFI.PrimaryContribution in types
+        agents = list(g.objects(contrib, V.BFFI.agent))
+        assert len(agents) == 1
+        agent = agents[0]
+        assert isinstance(agent, URIRef)
+        labels = list(g.objects(agent, V.RDFS.label))
+        assert len(labels) == 1
+
+
+def test_canonical_dedupes_contribution_by_agent_uri_across_members(tmp_path: Path) -> None:
+    """The same agent referenced by N absorbed Works produces one canonical contrib."""
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_contributions(),
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    canonical = _merged_canonical(g)
+    agents_seen: set[str] = set()
+    for contrib in g.objects(canonical, V.BFFI.contribution):
+        for agent in g.objects(contrib, V.BFFI.agent):
+            agents_seen.add(str(agent))
+    # Tolstoy is on both A and B; Dickens only on B. Two unique URIs.
+    assert agents_seen == {AGENT_TOLSTOY, AGENT_DICKENS}
+
+
+def test_singleton_canonical_propagates_its_one_contribution(tmp_path: Path) -> None:
+    """Singletons (no merge edge) still get their primary contribution propagated."""
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="different_work")],  # all singletons
+        work_records=_records_with_contributions(),
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    for c in g.subjects(V.RDF.type, V.BFFI.Work):
+        contribs = list(g.objects(c, V.BFFI.contribution))
+        assert contribs, f"canonical {c} has no contribution"
+
+
+def test_contribution_propagation_byte_stable_across_runs(tmp_path: Path) -> None:
+    """Deterministic blank-node IDs keep canonical.ttl byte-stable when contributions land."""
+    fixed = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+    canonical1, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_contributions(),
+        now=fixed,
+    )
+    bytes_1 = canonical1.read_bytes()
+    canonical2, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_contributions(),
+        now=fixed,
+    )
+    assert canonical2.read_bytes() == bytes_1
+
+
+def test_records_without_contributions_still_emit_canonical(tmp_path: Path) -> None:
+    """A Work with creator_uri/pref_label but no contribution_targets still merges cleanly."""
+    records = _records()  # the default fixture has no contribution_targets
+    _, map_path, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=records,
+    )
+    rows = [json.loads(line) for line in map_path.read_text().splitlines() if line.strip()]
+    assert len(rows) >= 1
+
+
+# --- Expression dual-typing on canonical -------------------------------
+
+
+def test_absorbed_expressions_are_typed_bffi_expression_on_canonical(tmp_path: Path) -> None:
+    """M10 phase 1 (Skosify) needs <expr> a bffi:Expression to dual-type as skos:Concept.
+
+    The typing exists in the per-record BFFI Turtles but not in
+    canonical.ttl until M8 re-asserts it during the expressionOf
+    rewrite.
+    """
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    typed = set(g.subjects(V.RDF.type, V.BFFI.Expression))
+    # All three Expressions (A absorbed, B absorbed, C singleton) should be typed.
+    assert URIRef(EXPR_A) in typed
+    assert URIRef(EXPR_B) in typed
+    assert URIRef(EXPR_C) in typed

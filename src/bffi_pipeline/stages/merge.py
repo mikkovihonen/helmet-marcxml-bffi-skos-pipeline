@@ -211,6 +211,25 @@ class SubjectTarget:
         return self.uri is not None
 
 
+@dataclass(frozen=True)
+class ContributionTarget:
+    """One ``bffi:PrimaryContribution`` to propagate to the canonical Work.
+
+    M9's creator reconciliation walks ``<canonical> bffi:contribution
+    [a bffi:PrimaryContribution; bffi:agent <uri>]`` and reads the
+    agent's ``rdfs:label``. Without these triples on the canonical, M9
+    has nothing to reconcile. M8 propagates them from the anchor raw
+    Work.
+
+    Only ``PrimaryContribution`` is propagated here — other
+    contributions (translators, illustrators, contained-work creators)
+    are left on the raw Works for downstream consumers that care.
+    """
+
+    agent_uri: str
+    agent_label: str
+
+
 @dataclass
 class CanonicalWorkInputs:
     """Per-Work data the merge step needs to mint a canonical Work URI."""
@@ -225,6 +244,8 @@ class CanonicalWorkInputs:
     """``bffi:subject`` targets; M9 phase 3 reconciles unresolved ones."""
     genre_form_targets: list[SubjectTarget] = field(default_factory=list)
     """``bffi:genreForm`` targets; M9 phase 3 reconciles unresolved ones."""
+    contribution_targets: list[ContributionTarget] = field(default_factory=list)
+    """``bffi:PrimaryContribution`` blocks; M9 reconciles their agents against KANTO/VIAF."""
 
 
 def _first_pref_label(graph: Graph, subject: URIRef) -> str | None:
@@ -242,6 +263,41 @@ def _primary_agent_uri(graph: Graph, work: URIRef) -> str | None:
             if isinstance(ag, URIRef):
                 return str(ag)
     return None
+
+
+def _primary_contribution_targets(graph: Graph, work: URIRef) -> list[ContributionTarget]:
+    """Collect ``PrimaryContribution → agent → rdfs:label`` triples on ``work``.
+
+    Deduplicates by ``agent_uri`` because marc2bibframe2's MARC-100 lift
+    can emit the same primary contribution N times for an aggregate
+    record (one per included Work). One propagated contribution is
+    enough for M9 reconciliation.
+
+    Returns an empty list when the Work has no PrimaryContribution with
+    a URI agent and rdfs:label — those records are surfaced as M8
+    conflicts and don't reach M9 anyway.
+    """
+    out: list[ContributionTarget] = []
+    seen: set[str] = set()
+    for contrib in graph.objects(work, V.BFFI.contribution):
+        if V.BFFI.PrimaryContribution not in set(graph.objects(contrib, RDF.type)):
+            continue
+        for agent in graph.objects(contrib, V.BFFI.agent):
+            if not isinstance(agent, URIRef):
+                continue
+            agent_uri = str(agent)
+            if agent_uri in seen:
+                continue
+            label: str | None = None
+            for lab in graph.objects(agent, V.RDFS.label):
+                if isinstance(lab, RdfLiteral):
+                    label = str(lab)
+                    break
+            if label is None:
+                continue
+            seen.add(agent_uri)
+            out.append(ContributionTarget(agent_uri=agent_uri, agent_label=label))
+    return out
 
 
 def _helmet_identifiers(graph: Graph, work: URIRef) -> list[tuple[str, str]]:
@@ -303,6 +359,7 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
             continue
         subjects = _subject_targets(graph, work, V.BFFI.subject)
         genres = _subject_targets(graph, work, V.BFFI.genreForm)
+        contributions = _primary_contribution_targets(graph, work)
         out[str(work)] = CanonicalWorkInputs(
             work_uri=str(work),
             creator_uri=_primary_agent_uri(graph, work),
@@ -315,6 +372,7 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
             helmet_identifiers=_helmet_identifiers(graph, work),
             subject_targets=subjects,
             genre_form_targets=genres,
+            contribution_targets=contributions,
         )
     return out
 
@@ -479,6 +537,44 @@ def _propagate_subject_targets(
             g.add((node, V.BF.source, Literal(target.source)))
 
 
+def _propagate_primary_contributions(
+    g: Graph,
+    *,
+    canonical_uri: URIRef,
+    members: list[CanonicalWorkInputs],
+) -> None:
+    """Emit one ``PrimaryContribution → agent → rdfs:label`` block per absorbed agent.
+
+    Deduplicates by ``agent_uri`` across all absorbed members so a
+    multi-Work merge group produces one contribution per distinct
+    creator. The blank-node identifier is derived from a SHA-1 of
+    ``(canonical_uri, agent_uri)`` so canonical.ttl stays byte-stable
+    across runs (matching the determinism rule the subject-propagation
+    block follows).
+
+    The agent's ``rdfs:label`` is re-asserted on the canonical so the
+    M9 walker doesn't need to reach back into per-record BFFI Turtles
+    to resolve labels.
+    """
+    seen_agents: set[str] = set()
+    flat: list[ContributionTarget] = []
+    for member in members:
+        for target in member.contribution_targets:
+            if target.agent_uri in seen_agents:
+                continue
+            seen_agents.add(target.agent_uri)
+            flat.append(target)
+    flat.sort(key=lambda t: t.agent_uri)
+    for target in flat:
+        digest = hashlib.sha1(f"{canonical_uri}|{target.agent_uri}".encode()).hexdigest()
+        contrib = BNode(f"con{digest}")
+        agent = URIRef(target.agent_uri)
+        g.add((canonical_uri, V.BFFI.contribution, contrib))
+        g.add((contrib, RDF.type, V.BFFI.PrimaryContribution))
+        g.add((contrib, V.BFFI.agent, agent))
+        g.add((agent, V.RDFS.label, Literal(target.agent_label)))
+
+
 def _emit_canonical_work(
     g: Graph,
     *,
@@ -511,6 +607,9 @@ def _emit_canonical_work(
             g.add((ident, V.BF.source, V.HELMET_SOURCE_URI))
 
     # Rewrite expressionOf: every absorbed Expression now points at the canonical Work.
+    # Also re-assert the bffi:Expression typing on the canonical so M10's
+    # Skosify run can dual-type Expressions as skos:Concepts (the typing
+    # only existed in the per-record BFFI Turtles, not in canonical.ttl).
     seen_exprs: set[str] = set()
     for member in members:
         for expr_uri in member.expression_uris:
@@ -518,6 +617,7 @@ def _emit_canonical_work(
                 continue
             seen_exprs.add(expr_uri)
             expr = URIRef(expr_uri)
+            g.add((expr, RDF.type, V.BFFI.Expression))
             g.add((canonical_uri, V.BFFI.hasExpression, expr))
             g.add((expr, V.BFFI.expressionOf, canonical_uri))
 
@@ -545,6 +645,11 @@ def _emit_canonical_work(
         predicate=V.BFFI.genreForm,
         attr="genre_form_targets",
     )
+
+    # Propagate bffi:PrimaryContribution → agent → rdfs:label onto the
+    # canonical Work so M9's `_iter_creator_requests` walker can find
+    # creators to reconcile. Without this, M9 returns 0 entities.
+    _propagate_primary_contributions(g, canonical_uri=canonical_uri, members=members)
 
     # AdminMetadata block — every predicate from spec § 8 / BUILD_PLAN M8.
     admin_uri = _admin_metadata_uri(str(canonical_uri))
@@ -809,6 +914,7 @@ __all__ = [
     "JUDGE_DECISIONS_FILENAME",
     "CanonicalEntry",
     "CanonicalWorkInputs",
+    "ContributionTarget",
     "GroupConflict",
     "HelmetMapEntry",
     "JudgeDecisionRow",

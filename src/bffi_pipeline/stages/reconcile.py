@@ -71,12 +71,29 @@ AuthorityKind = LiteralType[
     "music_form",  # → MUSO
 ]
 
-#: Source-vocabulary keys logged onto the provenance Activity.
-VOCAB_KANTO: Final[str] = "kanto"
+#: Source-vocabulary keys logged onto the provenance Activity. Also
+#: consumed as Finto's ``vocab`` query parameter for the four Finto
+#: clients. KANTO is identified as ``finaf`` ("Finnish Authority File")
+#: in Finto's API even though the human-facing name is still "KANTO";
+#: using ``vocab=kanto`` returns HTTP 500.
+VOCAB_KANTO: Final[str] = "finaf"
 VOCAB_YSO: Final[str] = "yso"
 VOCAB_KAUNO: Final[str] = "kauno"
 VOCAB_MUSO: Final[str] = "muso"
 VOCAB_VIAF: Final[str] = "viaf"
+
+
+def _finto_search_query(literal: str) -> str:
+    """Build the Finto ``query`` parameter from a cataloguer literal.
+
+    Finto exact-matches on prefLabel by default; we want prefix-match.
+    Appends ``*`` unless the caller already supplied one. Trailing MARC
+    punctuation (``", "`` after a name) doesn't break the wildcard —
+    Finto treats it as part of the prefix and still finds entries whose
+    label is the exact prefix.
+    """
+    return literal if literal.endswith("*") else f"{literal}*"
+
 
 #: Stage tags, kept aligned with spec § 8 / BUILD_PLAN M9. These are the
 #: same Literal type as :data:`ReconciliationStage` below; declared via
@@ -707,9 +724,14 @@ class FintoSkosmosClient:
         cache_key = (vocab, request.literal, self.today)
         if cache_key in self._cache:
             return self._cache[cache_key][:top_k]
+        # Finto's `/search` endpoint defaults to exact-match against
+        # prefLabel; cataloguer literals like "Puškin, Aleksandr" almost
+        # never exact-match a KANTO entry like "Puškin, Aleksandr,
+        # 1799-1837". Append `*` for prefix match — the lexical
+        # similarity gate downstream still filters spurious matches.
         params = {
             "vocab": vocab,
-            "query": request.literal,
+            "query": _finto_search_query(request.literal),
             "lang": "fi",
             "maxhits": str(top_k),
         }

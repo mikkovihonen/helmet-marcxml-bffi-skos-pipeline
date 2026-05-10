@@ -115,7 +115,7 @@ def _request() -> EntityRequest:
     )
 
 
-def _candidate(uri: str, label: str, sim: float, vocab: str = "kanto") -> AuthorityCandidate:
+def _candidate(uri: str, label: str, sim: float, vocab: str = "finaf") -> AuthorityCandidate:
     return AuthorityCandidate(
         uri=uri, pref_label=label, source_vocabulary=vocab, lexical_similarity=sim
     )
@@ -253,12 +253,12 @@ def test_finto_client_parses_real_shape_results_into_candidates() -> None:
             {
                 "uri": "http://urn.fi/URN:NBN:fi:au:finaf:000041686",
                 "prefLabel": "Tolstoy, Leo",
-                "vocab": "kanto",
+                "vocab": "finaf",
             },
             {
                 "uri": "http://urn.fi/URN:NBN:fi:au:finaf:000041687",
                 "prefLabel": "Tolstoyevsky, Lev",
-                "vocab": "kanto",
+                "vocab": "finaf",
             },
         ]
     }
@@ -272,7 +272,7 @@ def test_finto_client_parses_real_shape_results_into_candidates() -> None:
     candidates = client.query(request=request)
     assert len(candidates) == 2
     assert candidates[0].uri.endswith("000041686")
-    assert candidates[0].source_vocabulary == "kanto"
+    assert candidates[0].source_vocabulary == "finaf"
     # The first candidate has prefLabel matching the input → high similarity.
     assert candidates[0].lexical_similarity > 0.9
 
@@ -302,7 +302,7 @@ def test_finto_client_caches_results_per_query_per_day() -> None:
             200,
             json={
                 "results": [
-                    {"uri": "http://kanto/1", "prefLabel": "Tolstoy, Leo", "vocab": "kanto"}
+                    {"uri": "http://kanto/1", "prefLabel": "Tolstoy, Leo", "vocab": "finaf"}
                 ]
             },
         )
