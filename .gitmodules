@@ -1,3 +1,6 @@
 [submodule "third_party/marc2bibframe2"]
 	path = third_party/marc2bibframe2
 	url = https://github.com/lcnetdev/marc2bibframe2.git
+[submodule "third_party/Skosmos"]
+	path = third_party/Skosmos
+	url = https://github.com/NatLibFi/Skosmos.git

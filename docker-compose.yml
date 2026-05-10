@@ -1,30 +1,49 @@
 # Fuseki + Skosmos for the BFFI pipeline.
-# Fuseki is pinned per docs/ci-strategy.md.
-# Skosmos pinned to 3.2; config/skosmos-config.ttl lands in M11.
+#
+# Both containers build from the Skosmos v3.2 submodule under
+# `third_party/Skosmos`. NatLibFi's Skosmos doesn't publish a Docker
+# image; the same submodule's `dockerfiles/jena-fuseki2-docker/`
+# Dockerfile is the canonical Fuseki build (downloads the official
+# Apache Jena Fuseki JAR at build time). JENA_VERSION is pinned to
+# the value Skosmos 3.2 commits to in its own docker-compose.yml.
+#
+# Apache Jena 5.4.0 / Skosmos 3.2 — keep these two in lock-step;
+# changing one without the other risks quiet incompatibilities in
+# the SPARQL `text:query` predicate or in the Skosmos REST shape.
 
 services:
   fuseki:
-    image: stain/jena-fuseki:5.0.0
+    build:
+      context: ./third_party/Skosmos/dockerfiles/jena-fuseki2-docker
+      dockerfile: Dockerfile
+      args:
+        JENA_VERSION: 5.4.0
+    image: bffi-fuseki:5.4.0
     container_name: bffi-fuseki
+    command: --config=/fuseki/skosmos.ttl
     ports:
       - "3030:3030"
     environment:
-      ADMIN_PASSWORD: admin
-      FUSEKI_DATASET_1: bffi
-      JVM_ARGS: -Xmx4g
+      JAVA_OPTIONS: -Xmx4g -Xms1g
     volumes:
-      - fuseki-data:/fuseki
+      # Fuseki dataset config (TDB2+text+unionDefaultGraph) creating
+      # the `bffi` service. Mirrors the structure of Skosmos's
+      # bundled `dockerfiles/config/skosmos.ttl`, renamed.
+      - ./config/fuseki-config.ttl:/fuseki/skosmos.ttl:ro
+      - fuseki-data:/fuseki/databases
+    user: "fuseki:fuseki"
     restart: unless-stopped
 
   skosmos:
-    image: ghcr.io/natlibfi/skosmos:3.2
+    build:
+      context: ./third_party/Skosmos
+      dockerfile: dockerfiles/Dockerfile.ubuntu
+    image: bffi-skosmos:3.2
     container_name: bffi-skosmos
     ports:
-      - "9090:8080"
+      - "9090:80"
     depends_on:
       - fuseki
-    environment:
-      SPARQL_ENDPOINT: http://fuseki:3030/bffi/query
     volumes:
       # M11: vocabulary config per docs/marcxml-to-bffi-skosmos-pipeline.md § 4.
       # The container reads /var/www/html/config.ttl on startup.

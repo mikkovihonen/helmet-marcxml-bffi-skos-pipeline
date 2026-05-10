@@ -72,8 +72,8 @@ Toolchain:
 
 - **Python 3.12** via [uv](https://github.com/astral-sh/uv) — the project pins everything in `uv.lock`.
 - **Ollama** (or vllm-mlx for production) on `:11434` for the LLM judge + reconciliation picker. Full installation walkthrough in [`docs/local-inference.md`](docs/local-inference.md#installation).
-- **Docker** + `docker compose` for Fuseki and Skosmos.
-- **git** with submodule support — `marc2bibframe2` is vendored under `third_party/`.
+- **Docker** (or Podman with `docker-compose`) for Fuseki and Skosmos. Both containers build from source — NatLibFi's Skosmos doesn't publish a Docker image, and we pin Apache Jena Fuseki via the JAR version Skosmos's vendored Dockerfile downloads at build time.
+- **git** with submodule support — `marc2bibframe2` and `Skosmos` (pinned at `v3.2`) are vendored under `third_party/`.
 
 One-time install:
 
@@ -85,6 +85,7 @@ cp .env.example .env                       # carries the committed LLM defaults
 brew install --cask ollama && open -a Ollama
 ollama pull qwen3:32b-q4_K_M               # primary judge (~20 GB)
 ollama pull qwen2.5:72b-instruct-q4_K_M    # cascade fallback (~40 GB; Qwen3 has no 72B size)
+docker compose build                       # one-off Skosmos + Fuseki build (~5-10 min)
 docker compose up -d                       # Fuseki + Skosmos
 ```
 
@@ -145,8 +146,10 @@ plan than to interrupt.
 ├── sparql/                    # versioned SPARQL queries
 ├── config/                    # Skosify overlay, Skosmos config, SHACL shapes
 ├── gold/                      # gold-set JSONL for the eval harness
-├── third_party/marc2bibframe2 # NLF/LoC XSLT, vendored as a submodule
-└── docker-compose.yml         # Fuseki 5.0.0 + Skosmos 3.2 (pinned)
+├── third_party/
+│   ├── marc2bibframe2         # NLF/LoC XSLT, vendored as a submodule
+│   └── Skosmos                # NatLibFi Skosmos v3.2, vendored; Fuseki + Skosmos both build from here
+└── docker-compose.yml         # Fuseki 5.4.0 + Skosmos v3.2 (built from third_party/Skosmos)
 ```
 
 ## Testing, CI, and the LLM eval

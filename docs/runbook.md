@@ -17,8 +17,8 @@ milestone notes.
 | FAISS HNSW | `M=32`, `efConstruction=200`, `efSearch=64`, IP metric on L2-normalised vectors | M5 |
 | LLM primary | `qwen3:32b-q4_K_M` (Ollama) / equivalent MLX 4-bit | M6 |
 | LLM fallback | `qwen2.5:72b-instruct-q4_K_M` | M6 cascade — Qwen3 has no 72B size; cascade steps to previous-gen 72B |
-| Fuseki | `stain/jena-fuseki:5.0.0` | M10 (`docker-compose.yml`) |
-| Skosmos | `ghcr.io/natlibfi/skosmos:3.2` | M11 |
+| Skosmos | `third_party/Skosmos` (git submodule pinned at `v3.2`) | M11; built from source via `docker-compose build` since NatLibFi doesn't publish a Docker image |
+| Apache Jena Fuseki | `5.4.0` (Maven JAR downloaded by Skosmos's vendored `dockerfiles/jena-fuseki2-docker/Dockerfile`) | M10 (`docker-compose.yml`); pinned to the same value Skosmos 3.2 commits to in its own compose file |
 
 Override via environment / `.env`:
 

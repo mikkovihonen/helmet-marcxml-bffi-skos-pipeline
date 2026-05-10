@@ -18,7 +18,45 @@
 @prefix bffi:    <http://urn.fi/URN:NBN:fi:schema:bffi:> .
 @prefix isothes: <http://purl.org/iso25964/skos-thes#> .
 @prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix :        <#> .
+
+# ---------------------------------------------------------------------------
+# Skosmos global configuration. Mirrors the structure of
+# `third_party/Skosmos/dockerfiles/config/config-docker-compose.ttl`
+# but trimmed to what the BFFI pipeline actually needs. Skosmos refuses
+# to start if config.ttl doesn't contain exactly one
+# `skosmos:Configuration` resource, so this block is mandatory even
+# when the per-vocabulary entry below carries its own SPARQL endpoint.
+# ---------------------------------------------------------------------------
+
+:config a skosmos:Configuration ;
+    skosmos:sparqlEndpoint    <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect     "JenaText" ;
+    skosmos:sparqlTimeout     20 ;
+    skosmos:httpTimeout       5 ;
+    skosmos:serviceName       "BFFI authority browser" ;
+    # UI languages match the BFFI display priority committed in
+    # CLAUDE.md: Finnish first, then Swedish, then English.
+    skosmos:languages (
+        [ rdfs:label "fi" ; rdf:value "fi_FI.utf8" ]
+        [ rdfs:label "sv" ; rdf:value "sv_SE.utf8" ]
+        [ rdfs:label "en" ; rdf:value "en_GB.utf8" ]
+    ) ;
+    skosmos:searchResultsSize    20 ;
+    skosmos:transitiveLimit      1000 ;
+    skosmos:rdfListItemsLimit    1000 ;
+    skosmos:logCaughtExceptions  false ;
+    skosmos:logBrowserConsole    false ;
+    skosmos:templateCache        "/tmp/skosmos-template-cache" ;
+    skosmos:customCss            "resource/css/stylesheet.css" ;
+    skosmos:feedbackAddress      "" ;
+    skosmos:feedbackSender       "" ;
+    skosmos:feedbackEnvelopeSender "" ;
+    skosmos:uiLanguageDropdown   false ;
+    skosmos:uiHoneypotEnabled    true ;
+    skosmos:uiHoneypotTime       5 ;
+    skosmos:globalPlugins        () .
 
 # ---------------------------------------------------------------------------
 # Type labels — Skosmos requires rdfs:label on every custom type so
