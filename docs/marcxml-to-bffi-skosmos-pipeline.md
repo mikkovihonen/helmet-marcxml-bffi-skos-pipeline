@@ -1219,7 +1219,7 @@ The build plan is structured as M0 → M13 with explicit definitions of done. On
 | M9 | Reconciliation | KANTO → VIAF / YSO / KAUNO / MUSO; four-tier decision logic. |
 | M10 | Skosify overlay + Fuseki load | Overlay-plus-inference; Helmet source URI declared; Boundary 5; `lookup-helmet` CLI. |
 | M11 | Skosmos config | Pinned Skosmos 3.x; `fi`/`sv`/`en` priority; overlay labels `dct:identifier` / `bffi:subject` / `bffi:genreForm` / `bffi:creator` / `bf:role` for concept-page rendering; cross-vocabulary linking via authority dumps (KANTO/YSO/KAUNO/MUSO/SLM + LoC relators) loaded into local Fuseki (option 3b — `bffi-pipeline load-finto` / `make refresh-finto`). |
-| M12 | Gold set + eval harness | 50–100 starter cases, 30 % hand-marked hold-out; eval not in CI. |
+| M12 | Gold set + eval harness | Pairwise M6-judge gold set (`gold/gold.jsonl`, 50–100 cases target, 30 % hand-marked hold-out); single-record M3-cascade contributor-extraction gold set (`gold/contrib.jsonl`, scaffolding committed, cataloguer-curated extension pending); eval not in CI. |
 | M13 | Documentation + handoff | Apache-2.0 LICENSE, README, runbook, architecture diagram. |
 
 ### CI
