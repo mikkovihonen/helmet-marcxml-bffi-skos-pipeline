@@ -45,17 +45,28 @@ from bffi_pipeline.stages.reconcile import (
 VOCAB_SLM: Final[str] = "slm"
 
 #: Authority kind → (source-vocabulary tag, named-graph URI) tuples.
-#: Multiple entries per kind (genre_form: KAUNO + SLM) get tried in
-#: order in a single SPARQL query via ``VALUES``. Order is the only
-#: thing that disambiguates when the same literal happens to be a
-#: prefLabel in two graphs — KAUNO precedes SLM because KAUNO is the
-#: spec-default for fiction genre/form (CLAUDE.md authority priority:
-#: KAUNO for fiction genre/form, SLM is a separate Finnish list).
+#: Multiple entries per kind get tried in declaration order in a single
+#: SPARQL query via ``VALUES``. Declaration order disambiguates when the
+#: same literal happens to be a prefLabel in two graphs.
+#:
+#: ``genre_form`` lists KAUNO first (CLAUDE.md authority priority for
+#: fiction genre/form), then SLM (Finnish genre/form list, separate from
+#: KAUNO), then YSO. The YSO fallback exists because cataloguers tag
+#: heterogeneous content with ``$2 kaunokki`` (the legacy KAUNO name)
+#: in MARC 6XX fields — temporal periods like "1800-luku" and place
+#: names like "Lontoo" route through the M9 walker as ``genre_form`` on
+#: that signal, but those concepts live in YSO-Aika / YSO-Paikat (loaded
+#: into the same Fuseki named graph as YSO general topics). Without the
+#: fallback they'd miss tier-0 and fall through to tier-1 ``vocab=kauno``
+#: which doesn't carry them either. KAUNO+SLM stay first so genuine
+#: fiction genre/form literals like "historialliset romaanit" still bind
+#: to their KAUNO/SLM URI even when an equivalent label exists in YSO.
 _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
     "subject": ((VOCAB_YSO, "http://www.yso.fi/onto/yso/"),),
     "genre_form": (
         (VOCAB_KAUNO, "http://www.yso.fi/onto/kauno/"),
         (VOCAB_SLM, "http://urn.fi/URN:NBN:fi:au:slm:"),
+        (VOCAB_YSO, "http://www.yso.fi/onto/yso/"),
     ),
     "music_form": ((VOCAB_MUSO, "http://www.yso.fi/onto/muso/"),),
 }

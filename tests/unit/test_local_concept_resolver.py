@@ -18,6 +18,7 @@ from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.local_concept_resolver import (
+    _KIND_TO_GRAPHS,
     FusekiConceptResolver,
     LocalConceptHit,
     StubLocalConceptResolver,
@@ -62,6 +63,27 @@ def test_build_query_unions_multiple_graphs_for_genre_form() -> None:
     )
     assert "http://www.yso.fi/onto/kauno/" in q
     assert "http://urn.fi/URN:NBN:fi:au:slm:" in q
+
+
+def test_genre_form_routing_includes_yso_fallback_for_kaunokki_misroutes() -> None:
+    """Cataloguers tag heterogeneous content (places, time periods,
+    fiction-specific topics) with ``$2 kaunokki`` in MARC 6XX. The
+    M9 walker routes those to ``genre_form``, but the underlying
+    concepts often live in YSO-Aika / YSO-Paikat (loaded into the
+    YSO named graph). Without the YSO fallback in tier-0, a kaunokki-
+    tagged "1800-luku" misses tier-0 and falls through to tier-1
+    ``vocab=kauno`` which doesn't carry temporal concepts either."""
+    graphs = _KIND_TO_GRAPHS["genre_form"]
+    graph_uris = [uri for _, uri in graphs]
+    assert "http://www.yso.fi/onto/kauno/" in graph_uris
+    assert "http://urn.fi/URN:NBN:fi:au:slm:" in graph_uris
+    assert "http://www.yso.fi/onto/yso/" in graph_uris
+    # KAUNO must precede YSO so genuine fiction genre/form literals
+    # (e.g. "historialliset romaanit") still bind to KAUNO when an
+    # equivalent label happens to exist in YSO.
+    assert graph_uris.index("http://www.yso.fi/onto/kauno/") < graph_uris.index(
+        "http://www.yso.fi/onto/yso/"
+    )
 
 
 # --- FusekiConceptResolver ----------------------------------------------
