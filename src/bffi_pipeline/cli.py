@@ -19,6 +19,7 @@ from bffi_pipeline.stages import (
     judge,
     load,
     load_finto,
+    local_concept_resolver,
     marc_to_bf,
     merge,
     reconcile,
@@ -752,6 +753,19 @@ def reconcile_command(
             ),
         ),
     ] = None,
+    local_resolver: Annotated[
+        bool,
+        typer.Option(
+            "--local-resolver/--no-local-resolver",
+            help=(
+                "Tier-0 lookup: try an exact prefLabel match against the local "
+                "Fuseki authority graphs (YSO/KAUNO/MUSO/SLM) before calling "
+                "Finto. Avoids ~one HTTP round-trip per cataloguer literal at "
+                "corpus scale. On by default; pass --no-local-resolver to "
+                "force every literal through the Finto API."
+            ),
+        ),
+    ] = True,
 ) -> None:
     """Reconcile canonical Work creators + subjects against KANTO / VIAF / YSO / KAUNO / MUSO."""
     settings = get_settings()
@@ -763,6 +777,14 @@ def reconcile_command(
         client = reconcile.FintoSkosmosClient(http_client=http_client)
         fallback = reconcile.ViafClient(http_client=http_client)
         picker = reconcile.LangChainLLMPicker(model_name=primary_model)
+        resolver: local_concept_resolver.LocalConceptResolver | None = (
+            local_concept_resolver.FusekiConceptResolver(
+                http_client=http_client,
+                fuseki_url=settings.fuseki_url,
+            )
+            if local_resolver
+            else None
+        )
 
         if provenance:
             with prov_writer.ProvenanceWriter(provenance_path) as writer:
@@ -774,6 +796,7 @@ def reconcile_command(
                     picker=picker,
                     provenance_graph=writer.graph,
                     kinds=selected_kinds,
+                    local_resolver=resolver,
                 )
         else:
             summary, _outcomes = reconcile.apply_reconciliation(
@@ -783,6 +806,7 @@ def reconcile_command(
                 fallback_client=fallback,
                 picker=picker,
                 kinds=selected_kinds,
+                local_resolver=resolver,
             )
     finally:
         http_client.close()

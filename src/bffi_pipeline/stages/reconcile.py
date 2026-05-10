@@ -1,9 +1,14 @@
 """Stage M9: reconciliation against KANTO / VIAF / YSO / KAUNO / MUSO.
 
 Resolves the literal creator / subject strings on canonical Works
-into authority URIs. The four-tier decision logic (spec § 6 + BUILD_PLAN
-M9) keeps the LLM out of the loop when lexical evidence is decisive:
+into authority URIs. The decision logic (spec § 6 + BUILD_PLAN M9)
+keeps the LLM out of the loop when lexical evidence is decisive:
 
+0. ``"reconciliation-local"`` — tier-0 exact-prefLabel match against
+   the locally-loaded Finto authority graphs. When a YSO concept's
+   ``skos:prefLabel`` exactly matches the cataloguer literal, bind
+   that URI without any HTTP round-trip to api.finto.fi. Skipped when
+   no ``local_resolver`` is wired.
 1. ``"reconciliation-lexical"`` — exactly one candidate has lexical
    similarity ≥ 0.95 *and* every other candidate is below 0.95. Take
    it deterministically.
@@ -38,8 +43,14 @@ from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 from typing import Literal as LiteralType
+
+if TYPE_CHECKING:
+    from bffi_pipeline.stages.local_concept_resolver import (
+        LocalConceptHit,
+        LocalConceptResolver,
+    )
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -99,6 +110,7 @@ def _finto_search_query(literal: str) -> str:
 #: same Literal type as :data:`ReconciliationStage` below; declared via
 #: forward strings so mypy treats the constants as the narrowed Literal,
 #: not just ``str``.
+STAGE_LOCAL: Final[ReconciliationStage] = "reconciliation-local"
 STAGE_LEXICAL: Final[ReconciliationStage] = "reconciliation-lexical"
 STAGE_LLM: Final[ReconciliationStage] = "reconciliation-llm"
 STAGE_FALLBACK: Final[ReconciliationStage] = "reconciliation-fallback"
@@ -216,6 +228,7 @@ class PickerDecision(BaseModel):
 
 
 ReconciliationStage = LiteralType[
+    "reconciliation-local",
     "reconciliation-lexical",
     "reconciliation-llm",
     "reconciliation-fallback",
@@ -245,6 +258,7 @@ class ReconciliationOutcome:
 class ReconciliationSummary:
     """Per-tier counts for a full ``apply_reconciliation`` pass."""
 
+    local: int = 0
     lexical: int = 0
     llm_pick: int = 0
     fallback: int = 0
@@ -257,6 +271,7 @@ class ReconciliationSummary:
             (
                 "M9 reconciliation complete",
                 f"  total entities:               {self.total:,}",
+                f"  reconciliation-local:         {self.local:,}",
                 f"  reconciliation-lexical:       {self.lexical:,}",
                 f"  reconciliation-llm:           {self.llm_pick:,}",
                 f"  reconciliation-fallback:      {self.fallback:,}",
@@ -1094,6 +1109,33 @@ def _emit_provenance(
     )
 
 
+def _local_outcome(request: EntityRequest, hit: LocalConceptHit) -> ReconciliationOutcome:
+    """Build a tier-0 outcome for an exact local prefLabel match.
+
+    Synthesises a single :class:`AuthorityCandidate` with similarity
+    1.0 so downstream provenance + summary code can treat tier-0 hits
+    uniformly with the other tiers.
+    """
+    candidate = AuthorityCandidate(
+        uri=hit.uri,
+        pref_label=hit.pref_label,
+        source_vocabulary=hit.source_vocabulary,
+        lexical_similarity=1.0,
+    )
+    return ReconciliationOutcome(
+        request=request,
+        stage=STAGE_LOCAL,
+        chosen_uri=hit.uri,
+        confidence=1.0,
+        rationale=(
+            f"Exact prefLabel match in local {hit.source_vocabulary} graph: "
+            f"{hit.pref_label!r} (no Finto API call)."
+        ),
+        candidates=[candidate],
+        needs_review=False,
+    )
+
+
 def reconcile_one(
     *,
     request: EntityRequest,
@@ -1101,8 +1143,19 @@ def reconcile_one(
     fallback_client: AuthorityClient | None,
     picker: LLMPicker,
     top_k: int = DEFAULT_TOP_K,
+    local_resolver: LocalConceptResolver | None = None,
 ) -> ReconciliationOutcome:
-    """Run the four-tier decision for ``request`` end-to-end."""
+    """Run the decision logic for ``request`` end-to-end.
+
+    Tier-0 (``local_resolver``) runs first when wired and short-circuits
+    on exact prefLabel match against the locally-loaded authority graph
+    — no tier-1 HTTP call, no LLM. Otherwise the tier-1+ four-tier
+    decision applies.
+    """
+    if local_resolver is not None:
+        hit = local_resolver.resolve(literal=request.literal, kind=request.kind)
+        if hit is not None:
+            return _local_outcome(request, hit)
     candidates = client.query(request=request, top_k=top_k)
     if not candidates and fallback_client is not None:
         candidates = fallback_client.query(request=request, top_k=top_k)
@@ -1144,6 +1197,7 @@ def apply_reconciliation(
     top_k: int = DEFAULT_TOP_K,
     now: datetime | None = None,
     kinds: set[AuthorityKind] | frozenset[AuthorityKind] | None = None,
+    local_resolver: LocalConceptResolver | None = None,
 ) -> tuple[ReconciliationSummary, list[ReconciliationOutcome]]:
     """Walk canonical.ttl, reconcile creators + subjects, and write the graph back.
 
@@ -1191,11 +1245,14 @@ def apply_reconciliation(
             fallback_client=fallback_client,
             picker=picker,
             top_k=top_k,
+            local_resolver=local_resolver,
         )
         ended = datetime.now(UTC)
         outcomes.append(outcome)
 
-        if outcome.stage == STAGE_LEXICAL:
+        if outcome.stage == STAGE_LOCAL:
+            summary.local += 1
+        elif outcome.stage == STAGE_LEXICAL:
             summary.lexical += 1
         elif outcome.stage == STAGE_LLM:
             summary.llm_pick += 1
@@ -1240,6 +1297,7 @@ __all__ = [
     "STAGE_FALLBACK",
     "STAGE_LEXICAL",
     "STAGE_LLM",
+    "STAGE_LOCAL",
     "STAGE_NO_CANDIDATE",
     "VOCAB_KANTO",
     "VOCAB_KAUNO",
