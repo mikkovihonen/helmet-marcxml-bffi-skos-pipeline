@@ -123,11 +123,11 @@ def bf_to_bffi_command(
             help=(
                 "Escalate ambiguous parallel-title records (e.g. 'X = Y = Z' with "
                 "all-Latin segments Lingua maps to the same language) to the local "
-                "Qwen3 cascade for per-segment language assignment. Off by default "
-                "to keep M3 graph-only and fast."
+                "Qwen3 cascade for per-segment language assignment. On by default; "
+                "pass --no-llm-title-cascade to skip the LLM and stay graph-only."
             ),
         ),
-    ] = False,
+    ] = True,
     primary_model: Annotated[
         str | None,
         typer.Option(
