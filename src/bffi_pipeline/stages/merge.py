@@ -43,6 +43,12 @@ from rdflib.namespace import DCTERMS, RDF
 from rdflib.term import Node
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.contrib_variants import (
+    DEFAULT_SIDECAR_NAME as VARIANTS_SIDECAR_NAME,
+)
+from bffi_pipeline.contrib_variants import (
+    load_variant_claims,
+)
 from bffi_pipeline.helmet import format_sierra_bib_id
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.logger import model_agent_uri
@@ -1026,6 +1032,7 @@ def apply_merge(
     map_path: Path | None = None,
     conflicts_path: Path | None = None,
     helmet_map_path: Path | None = None,
+    variants_sidecar_path: Path | None = None,
     work_records: dict[str, CanonicalWorkInputs] | None = None,
     helmet_entries: dict[str, HelmetMapEntry] | None = None,
     now: datetime | None = None,
@@ -1038,6 +1045,7 @@ def apply_merge(
     map_path = map_path or (settings.data_dir / CANONICAL_MAP_FILENAME)
     conflicts_path = conflicts_path or (settings.data_dir / CANONICAL_CONFLICTS_FILENAME)
     helmet_map_path = helmet_map_path or (settings.data_dir / HELMET_MAP_FILENAME)
+    variants_sidecar_path = variants_sidecar_path or (settings.data_dir / VARIANTS_SIDECAR_NAME)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     merged_at = (now or datetime.now(UTC)).replace(microsecond=0)
 
@@ -1106,12 +1114,24 @@ def apply_merge(
         )
         canonical_entries.append(entry)
 
+    # F2: bind variant labels from the M3 cascade's sidecar onto the
+    # canonical agents that match (canonical_label → existing rdfs:label
+    # on the canonical Work / Expression's agents). Skipped silently
+    # when the sidecar is absent (no cascade ran, or it ran without
+    # detecting any variants).
+    variants_bound = _apply_contrib_variants(
+        g,
+        variants_sidecar_path=variants_sidecar_path,
+        canonical_entries=canonical_entries,
+    )
+
     # Atomic-rename writes
     tmp_ttl = output_path.with_suffix(output_path.suffix + ".tmp")
     g.serialize(destination=str(tmp_ttl), format="turtle")
     tmp_ttl.replace(output_path)
     _emit_canonical_map(map_path, canonical_entries)
     _emit_conflicts(conflicts_path, conflicts)
+    del variants_bound  # value is for future telemetry; not yet exposed
 
     return MergeResult(
         total_works=len(work_records),
@@ -1124,6 +1144,59 @@ def apply_merge(
         map_path=str(map_path),
         conflicts_path=str(conflicts_path),
     )
+
+
+def _apply_contrib_variants(
+    g: Graph,
+    *,
+    variants_sidecar_path: Path,
+    canonical_entries: list[CanonicalEntry],
+) -> int:
+    """Read F2 ``contrib-variants.jsonl`` and attach ``skos:altLabel``
+    on the canonical agent each claim points at. Returns the number
+    of altLabels added (zero when sidecar is absent or no claim
+    matches).
+
+    Matching: each claim's ``raw_work_uri`` rolls up to the canonical
+    Work via :class:`CanonicalEntry`. On every Expression of that
+    canonical Work, every agent whose ``rdfs:label`` equals the
+    claim's ``canonical_label`` gets ``skos:altLabel <variant_label>``.
+    Multiple matches per claim are fine (an agent may be shared
+    across Expressions); duplicates are deduplicated by rdflib's
+    set-semantics graph add.
+
+    Idempotent: re-running on the same sidecar adds the same
+    triples, which is a no-op; canonical.ttl stays byte-stable.
+    """
+    claims = load_variant_claims(variants_sidecar_path)
+    if not claims:
+        return 0
+
+    raw_to_canonical: dict[str, str] = {}
+    for entry in canonical_entries:
+        for raw in entry.raw_work_uris:
+            raw_to_canonical[raw] = entry.canonical_work_uri
+
+    added = 0
+    for claim in claims:
+        canonical_uri = raw_to_canonical.get(claim.raw_work_uri)
+        if canonical_uri is None:
+            continue
+        canonical_node = URIRef(canonical_uri)
+        canonical_lit = Literal(claim.canonical_label)
+        variant_lit = Literal(claim.variant_label)
+        # Walk every Expression linked off the canonical Work and find
+        # agents on those Expressions whose rdfs:label matches.
+        for expr in g.objects(canonical_node, V.BFFI.hasExpression):
+            for contrib in g.objects(expr, V.BFFI.contribution):
+                for agent in g.objects(contrib, V.BFFI.agent):
+                    if (agent, V.RDFS.label, canonical_lit) not in g:
+                        continue
+                    if (agent, V.SKOS.altLabel, variant_lit) in g:
+                        continue
+                    g.add((agent, V.SKOS.altLabel, variant_lit))
+                    added += 1
+    return added
 
 
 def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, CanonicalWorkInputs]:

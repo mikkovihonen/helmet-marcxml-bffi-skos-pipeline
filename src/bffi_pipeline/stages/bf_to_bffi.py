@@ -17,6 +17,7 @@ import json
 import os
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Final, cast
@@ -26,6 +27,12 @@ from rdflib.namespace import DCTERMS, RDF, RDFS
 from rdflib.term import Node
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.contrib_variants import (
+    DEFAULT_SIDECAR_NAME,
+    ContribVariantClaim,
+    append_variant_claims,
+    truncate_sidecar,
+)
 from bffi_pipeline.helmet import format_sierra_bib_id
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.uris import mint_raw_expression_uri, register_sparql_functions
@@ -320,11 +327,29 @@ def _emit_helmet_identifiers(graph: Graph) -> None:
         graph.add(triple)
 
 
+def _read_helmet_bib_id(source: Graph, work: URIRef) -> str | None:
+    """Walk ``work``'s ``bf:identifiedBy`` chain for the bare Helmet bib ID.
+
+    Returns the ``rdf:value`` literal on the first ``bf:Local`` identifier
+    sourced from ``<helmet>`` — the same string M2 records in
+    ``helmet-map.jsonl``.
+    """
+    for ident in source.objects(work, V.BF.identifiedBy):
+        if (ident, V.BF.source, V.HELMET_SOURCE_URI) not in source:
+            continue
+        for value in source.objects(ident, RDF.value):
+            if isinstance(value, Literal):
+                return str(value)
+    return None
+
+
 def _emit_extracted_contributions(
     bffi_graph: Graph,
     source: Graph,
     *,
     contrib_extractor: object | None = None,
+    variants_sidecar_path: Path | None = None,
+    now: datetime | None = None,
 ) -> None:
     """Run the heuristic + optional LLM cascade for MARC 245$c extraction.
 
@@ -334,9 +359,16 @@ def _emit_extracted_contributions(
     new agent the LLM returns becomes a non-primary
     ``bffi:Contribution`` block on the corresponding bffi:Expression
     (mirroring the existing M3 routing rule that puts non-primary
-    contributions on the Expression). Transliteration-variant entries
-    are validated and preserved in the decision object but not yet
-    written to the graph — script-variant binding is M9 territory.
+    contributions on the Expression).
+
+    Transliteration-variant entries (``transliteration_of`` set) are
+    *not* emitted as new Contributions — that would propagate the
+    cataloguer's typo'd form. Instead, when ``variants_sidecar_path``
+    is supplied, each variant claim is appended to the
+    ``contrib-variants.jsonl`` sidecar as a
+    :class:`bffi_pipeline.contrib_variants.ContribVariantClaim`. M8's
+    binding pass later attaches ``skos:altLabel`` on the canonical
+    agent so both forms share the same identity downstream.
 
     Re-runs against the same source produce byte-identical bffi_graph
     output: blank nodes use SHA-1 of (work_uri, agent_name,
@@ -348,11 +380,21 @@ def _emit_extracted_contributions(
         gather_inputs,
     )
     from bffi_pipeline.contrib_extract_llm import (
+        DEFAULT_CONTRIB_MODEL,
         RELATOR_URI_PREFIX,
         ContribExtractor,
+        contrib_extract_prompt_hash,
     )
 
     typed_extractor = cast("ContribExtractor | None", contrib_extractor)
+    timestamp = (now or datetime.now(UTC)).isoformat()
+    prompt_hash = contrib_extract_prompt_hash() if variants_sidecar_path is not None else ""
+    extractor_model = (
+        getattr(typed_extractor, "model_name", None) or DEFAULT_CONTRIB_MODEL
+        if typed_extractor is not None
+        else DEFAULT_CONTRIB_MODEL
+    )
+    pending_claims: list[ContribVariantClaim] = []
 
     contained: set[URIRef] = {
         o
@@ -370,16 +412,31 @@ def _emit_extracted_contributions(
             continue
 
         expr_uri = URIRef(mint_raw_expression_uri(str(work)))
+        bib_id = _read_helmet_bib_id(source, work)
         for cand in decision.contributions:
-            if cand.transliteration_of is not None or cand.relator_code is None:
-                # Either flagged as a variant of an existing 100/700
-                # agent (transliteration_of set, possibly alongside a
-                # relator hint) or has no relator info at all. In both
-                # cases we skip emission: the variant case avoids
-                # propagating cataloguer typos as new agents, and M9
-                # script-variant binding will consume the
-                # transliteration pointer to share the canonical
-                # KANTO URI across both forms.
+            if cand.transliteration_of is not None:
+                # Variant pointer — record the binding decision in the
+                # sidecar so M8 can attach it as a skos:altLabel on
+                # the matching canonical agent. Skip Contribution
+                # emission either way to avoid propagating the typo'd
+                # form as a new agent.
+                if variants_sidecar_path is not None and bib_id is not None:
+                    pending_claims.append(
+                        ContribVariantClaim(
+                            helmet_bib_id=bib_id,
+                            raw_work_uri=str(work),
+                            variant_label=cand.name,
+                            canonical_label=cand.transliteration_of,
+                            relator_code_hint=cand.relator_code,
+                            role_text_hint=cand.role_text,
+                            rationale=decision.rationale,
+                            prompt_hash=prompt_hash,
+                            model_id=extractor_model,
+                            decided_at=timestamp,
+                        )
+                    )
+                continue
+            if cand.relator_code is None:
                 continue
             seed = f"{expr_uri}|{cand.name}|{cand.relator_code}"
             digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
@@ -393,6 +450,9 @@ def _emit_extracted_contributions(
             bffi_graph.add((agent_node, RDF.type, V.BFFI.Agent))
             bffi_graph.add((agent_node, RDFS.label, Literal(cand.name)))
 
+    if pending_claims and variants_sidecar_path is not None:
+        append_variant_claims(variants_sidecar_path, pending_claims)
+
 
 def post_process(
     bffi_graph: Graph,
@@ -400,6 +460,8 @@ def post_process(
     *,
     llm_detector: object | None = None,
     contrib_extractor: object | None = None,
+    variants_sidecar_path: Path | None = None,
+    now: datetime | None = None,
 ) -> Graph:
     """Mutate ``bffi_graph`` in place: tag prefLabels, denormalise Helmet
     identifiers for Skosmos display, optionally extract 245$c
@@ -408,14 +470,22 @@ def post_process(
     ``llm_detector`` enables the M3 title-language cascade;
     ``contrib_extractor`` enables the M3 245$c contributor-extraction
     cascade. Either / both can be ``None`` to keep that stage
-    graph-only.
+    graph-only. ``variants_sidecar_path`` is where the cascade
+    appends one row per detected transliteration variant; M8's
+    binding pass reads the same file.
     """
     candidates = _candidate_languages(source)
     if candidates:
         _retag_pref_labels(bffi_graph, candidates, llm_detector=llm_detector)
     _emit_helmet_identifiers(bffi_graph)
     _propagate_non_primary_roles(bffi_graph, source)
-    _emit_extracted_contributions(bffi_graph, source, contrib_extractor=contrib_extractor)
+    _emit_extracted_contributions(
+        bffi_graph,
+        source,
+        contrib_extractor=contrib_extractor,
+        variants_sidecar_path=variants_sidecar_path,
+        now=now,
+    )
     bffi_graph.bind("bf", V.BF)
     bffi_graph.bind("bffi", V.BFFI)
     bffi_graph.bind("bib", V.BIB)
@@ -455,6 +525,8 @@ def _convert_one(
     *,
     llm_detector: object | None = None,
     contrib_extractor: object | None = None,
+    variants_sidecar_path: Path | None = None,
+    now: datetime | None = None,
 ) -> Graph:
     source = Graph()
     source.parse(str(input_path), format="xml")
@@ -464,6 +536,8 @@ def _convert_one(
         source,
         llm_detector=llm_detector,
         contrib_extractor=contrib_extractor,
+        variants_sidecar_path=variants_sidecar_path,
+        now=now,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_bytes(output_path, bffi_graph.serialize(format="turtle").encode("utf-8"))
@@ -477,6 +551,8 @@ def run(
     force: bool = False,
     llm_detector: object | None = None,
     contrib_extractor: object | None = None,
+    variants_sidecar_path: Path | None = None,
+    now: datetime | None = None,
 ) -> BffiSummary:
     """Convert every ``<bibframe_dir>/<id>.rdf`` to a BFFI Turtle file.
 
@@ -486,11 +562,20 @@ def run(
     :class:`bffi_pipeline.contrib_extract_llm.ContribExtractor`) to
     enable 245$c contributor extraction. Without either, M3 stays
     graph-only.
+
+    ``variants_sidecar_path`` defaults to
+    ``<output_dir>/contrib-variants.jsonl`` and is the F2 sidecar
+    where the contributor cascade persists transliteration claims.
+    On ``force=True`` the sidecar is truncated at the start of the
+    run so cascade re-runs don't accumulate stale rows.
     """
     base = output_dir or get_settings().data_dir
     bibframe_dir = bibframe_dir or (base / "bibframe")
     summary = BffiSummary()
     validation_path = base / "bffi" / "_validation.jsonl"
+    sidecar_path = variants_sidecar_path or (base / DEFAULT_SIDECAR_NAME)
+    if force:
+        truncate_sidecar(sidecar_path)
 
     for rdf_path in _iter_bibframe_files(bibframe_dir):
         bib_id = rdf_path.stem
@@ -505,6 +590,8 @@ def run(
                 out_path,
                 llm_detector=llm_detector,
                 contrib_extractor=contrib_extractor,
+                variants_sidecar_path=sidecar_path,
+                now=now,
             )
         except Exception as exc:
             summary.errored.append((bib_id, str(exc)))

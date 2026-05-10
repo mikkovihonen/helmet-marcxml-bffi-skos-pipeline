@@ -9,6 +9,7 @@ the language-tag retag on skos:prefLabel.
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF
@@ -18,6 +19,7 @@ from bffi_pipeline.contrib_extract_llm import (
     ContribExtractDecision,
     StubContribExtractor,
 )
+from bffi_pipeline.contrib_variants import load_variant_claims
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import construct_bffi, post_process
 from bffi_pipeline.uris import mint_raw_expression_uri, mint_raw_work_uri
@@ -529,3 +531,125 @@ def test_post_process_routes_one_role_per_repeated_agent() -> None:
             for lab in bffi.objects(r, V.RDFS.label):
                 role_labels.add(str(lab))
     assert role_labels == {"johtaja", "cembalo", "urut"}
+
+
+# --- F2: variants sidecar persistence ------------------------------------
+
+
+def test_post_process_writes_variant_to_sidecar(tmp_path: Path) -> None:
+    """When the cascade returns a transliteration_of pointer, M3
+    appends a row to the variants sidecar (and skips Contribution
+    emission)."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title       [ a bf:Title ; bf:mainTitle "T" ] ;
+                bf:hasInstance <{BF_WORK}#Inst> ;
+                bf:identifiedBy <{BF_WORK}#hid> ;
+                bf:contribution <{BF_WORK}#c1> .
+
+            <{BF_WORK}#Inst> a bf:Instance ;
+                bf:responsibilityStatement "Anssi Karttunen, cembalo" .
+
+            <{BF_WORK}#c1> a bf:Contribution ;
+                bf:agent <{BF_WORK}#a1> .
+
+            <{BF_WORK}#a1> rdfs:label "Karttunen, Assi" .
+
+            <{BF_WORK}#hid> a bf:Local ;
+                rdf:value "1714651" ;
+                bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    extractor = StubContribExtractor(
+        decisions={
+            "Anssi Karttunen, cembalo": ContribExtractDecision(
+                contributions=[
+                    ContribCandidate(
+                        name="Anssi Karttunen",
+                        relator_code="prf",
+                        transliteration_of="Karttunen, Assi",
+                    ),
+                ],
+                rationale="Latin-script variant of the existing 700 entry.",
+            )
+        }
+    )
+    sidecar = tmp_path / "contrib-variants.jsonl"
+    bffi = construct_bffi(source)
+    post_process(bffi, source, contrib_extractor=extractor, variants_sidecar_path=sidecar)
+    # No new bf:role triples (variant skipped from Contribution emission).
+    assert list(bffi.triples((None, V.BF.role, None))) == []
+    # Sidecar carries the variant claim.
+    [claim] = load_variant_claims(sidecar)
+    assert claim.helmet_bib_id == "1714651"
+    assert claim.variant_label == "Anssi Karttunen"
+    assert claim.canonical_label == "Karttunen, Assi"
+    assert claim.relator_code_hint == "prf"
+
+
+def test_post_process_skips_sidecar_when_cascade_finds_no_variants(tmp_path: Path) -> None:
+    """A cascade run with only pure-new-agent decisions writes nothing
+    to the sidecar — no zero-row file, no empty-stub claim."""
+    source = _build_source_with_245c("Edited by Stanley Sadie", "Some Other Name")
+    extractor = StubContribExtractor(
+        decisions={
+            "Edited by Stanley Sadie": ContribExtractDecision(
+                contributions=[ContribCandidate(name="Stanley Sadie", relator_code="edt")],
+                rationale="New editor; not a variant of any existing agent.",
+            )
+        }
+    )
+    sidecar = tmp_path / "contrib-variants.jsonl"
+    bffi = construct_bffi(source)
+    post_process(bffi, source, contrib_extractor=extractor, variants_sidecar_path=sidecar)
+    assert load_variant_claims(sidecar) == []
+
+
+def test_post_process_does_not_touch_sidecar_when_path_is_none() -> None:
+    """No sidecar path supplied → no I/O, even when the cascade emits
+    a variant. Backwards-compatible with callers that don't want the
+    sidecar."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title       [ a bf:Title ; bf:mainTitle "T" ] ;
+                bf:hasInstance <{BF_WORK}#Inst> ;
+                bf:contribution <{BF_WORK}#c1> .
+
+            <{BF_WORK}#Inst> a bf:Instance ; bf:responsibilityStatement "x" .
+            <{BF_WORK}#c1> a bf:Contribution ; bf:agent <{BF_WORK}#a1> .
+            <{BF_WORK}#a1> rdfs:label "Karttunen, Assi" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    extractor = StubContribExtractor(
+        decisions={
+            "x": ContribExtractDecision(
+                contributions=[
+                    ContribCandidate(
+                        name="x",
+                        transliteration_of="Karttunen, Assi",
+                    ),
+                ],
+                rationale="Variant — but no sidecar requested, so nothing persists.",
+            )
+        }
+    )
+    bffi = construct_bffi(source)
+    # No path → no sidecar I/O. Should not raise.
+    post_process(bffi, source, contrib_extractor=extractor, variants_sidecar_path=None)

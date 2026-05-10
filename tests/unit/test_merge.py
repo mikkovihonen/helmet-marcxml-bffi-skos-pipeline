@@ -20,6 +20,10 @@ import pytest
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS
 
+from bffi_pipeline.contrib_variants import (
+    ContribVariantClaim,
+    append_variant_claims,
+)
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.merge import (
     CanonicalWorkInputs,
@@ -1097,3 +1101,148 @@ def test_canonical_expression_emits_blank_node_role_with_label(tmp_path: Path) -
     # Role is a blank node typed bf:Role with rdfs:label
     assert (role, V.RDF.type, V.BF.Role) in g
     assert (role, V.RDFS.label, Literal("cembalo")) in g
+
+
+# --- F2: variant-binding pass against the canonical graph ----------------
+
+
+def test_merge_attaches_skos_alt_label_from_variants_sidecar(tmp_path: Path) -> None:
+    """When the F2 sidecar contains a (raw_work_uri, variant_label,
+    canonical_label) claim that resolves on the merged canonical
+    graph, M8 attaches ``skos:altLabel "<variant_label>"`` on the
+    canonical agent whose ``rdfs:label`` matches ``canonical_label``.
+    """
+    # Build records where WORK_A's Expression carries the cataloguer's
+    # 700 agent with rdfs:label == 'Karttunen, Assi'. M8's F1 pass
+    # propagates that agent onto the canonical Expression.
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_contributions=[
+            ExpressionContribution(
+                expression_uri=EXPR_A,
+                role_label="cembalo",
+                agent_uri="http://urn.fi/URN:NBN:fi:bib:raw/aaa#Agent700-26",
+                agent_label="Karttunen, Assi",
+            ),
+        ],
+    )
+
+    # Sidecar carries the cascade's variant decision for the same record.
+    sidecar = tmp_path / "contrib-variants.jsonl"
+    append_variant_claims(
+        sidecar,
+        [
+            ContribVariantClaim(
+                helmet_bib_id="111",
+                raw_work_uri=WORK_A,
+                variant_label="Anssi Karttunen",
+                canonical_label="Karttunen, Assi",
+                relator_code_hint="prf",
+                rationale="Variant of the existing 700 entry.",
+                prompt_hash="sha256:abc",
+                model_id="qwen3:8b-q4_K_M",
+                decided_at="2026-05-09T12:00:00+00:00",
+            ),
+        ],
+    )
+
+    decisions_path = tmp_path / "judge-decisions.jsonl"
+    _write_decisions(decisions_path, [_decision_row(WORK_A, WORK_B, decision="different_work")])
+    canonical = tmp_path / "canonical.ttl"
+    apply_merge(
+        decisions_path,
+        tmp_path,
+        output_path=canonical,
+        map_path=tmp_path / "canonical-map.jsonl",
+        conflicts_path=tmp_path / "canonical-conflicts.jsonl",
+        helmet_map_path=tmp_path / "helmet-map.jsonl",
+        variants_sidecar_path=sidecar,
+        work_records=_records() | records,
+        helmet_entries=_helmet_entries(),
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+    )
+
+    g = Graph()
+    g.parse(str(canonical), format="turtle")
+    assert (
+        URIRef("http://urn.fi/URN:NBN:fi:bib:raw/aaa#Agent700-26"),
+        V.SKOS.altLabel,
+        Literal("Anssi Karttunen"),
+    ) in g
+
+
+def test_merge_skips_variants_with_no_matching_canonical_label(tmp_path: Path) -> None:
+    """A variant claim whose ``canonical_label`` doesn't match any agent
+    on the canonical Work is silently dropped — M8 mustn't fabricate
+    a stub agent or fail the run; the cascade may have produced a
+    stale entry that no longer maps."""
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_contributions=[
+            ExpressionContribution(
+                expression_uri=EXPR_A,
+                agent_uri="http://urn.fi/URN:NBN:fi:bib:raw/aaa#a1",
+                agent_label="Real, Agent",
+            ),
+        ],
+    )
+    sidecar = tmp_path / "contrib-variants.jsonl"
+    append_variant_claims(
+        sidecar,
+        [
+            ContribVariantClaim(
+                helmet_bib_id="111",
+                raw_work_uri=WORK_A,
+                variant_label="Variant Form",
+                canonical_label="Phantom Agent Not In Graph",
+                rationale="Stale claim — canonical no longer matches.",
+                prompt_hash="sha256:abc",
+                model_id="qwen3:8b-q4_K_M",
+                decided_at="2026-05-09T12:00:00+00:00",
+            ),
+        ],
+    )
+    decisions_path = tmp_path / "judge-decisions.jsonl"
+    _write_decisions(decisions_path, [_decision_row(WORK_A, WORK_B, decision="different_work")])
+    canonical = tmp_path / "canonical.ttl"
+    apply_merge(
+        decisions_path,
+        tmp_path,
+        output_path=canonical,
+        map_path=tmp_path / "canonical-map.jsonl",
+        conflicts_path=tmp_path / "canonical-conflicts.jsonl",
+        helmet_map_path=tmp_path / "helmet-map.jsonl",
+        variants_sidecar_path=sidecar,
+        work_records=_records() | records,
+        helmet_entries=_helmet_entries(),
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+    )
+    g = Graph()
+    g.parse(str(canonical), format="turtle")
+    # Only the real agent's rdfs:label exists; no altLabel anywhere
+    # because the claim's canonical_label didn't resolve.
+    assert (None, V.SKOS.altLabel, None) not in g
+
+
+def test_merge_runs_cleanly_when_sidecar_is_missing(tmp_path: Path) -> None:
+    """Sidecar absence is the dominant case — most M3 runs don't fire
+    the contributor cascade. Apply_merge must not raise, must not
+    touch any altLabel, and must not require the file to exist."""
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="different_work")],
+    )
+    assert not (tmp_path / "contrib-variants.jsonl").exists()
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    assert (None, V.SKOS.altLabel, None) not in g
