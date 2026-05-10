@@ -59,7 +59,7 @@ class _Recorder:
         url = str(request.url)
         if request.method == "GET" and url in self.finto_payloads:
             return httpx.Response(200, content=self.finto_payloads[url])
-        if request.method == "PUT" and "/data" in request.url.path:
+        if request.method in {"PUT", "POST"} and "/data" in request.url.path:
             return httpx.Response(204)
         return httpx.Response(404, json={"error": f"no handler for {request.method} {url}"})
 
@@ -248,6 +248,50 @@ def test_graph_uri_for_uri_routes_known_authority_namespaces(
     assert graph_uri_for_uri(uri) == expected
 
 
+# --- Shared graph URI grouping (yso + yso-paikat) -----------------------
+
+
+def test_run_groups_vocabs_sharing_a_graph_uri_into_one_put_then_post(tmp_path: Path) -> None:
+    """yso + yso-paikat both target ``http://www.yso.fi/onto/yso/``.
+    The first dump in the group must PUT (clears + loads); subsequent
+    dumps in the same group must POST (append). A second PUT would
+    clobber the first vocab's triples and silently lose data.
+    """
+    yso = FintoVocab(
+        vocab_id="yso",
+        dump_url="https://example.test/yso.ttl",
+        graph_uri="http://www.yso.fi/onto/yso/",
+        languages=("fi", "sv", "en", "se"),
+    )
+    paikat = FintoVocab(
+        vocab_id="yso-paikat",
+        dump_url="https://example.test/yso-paikat.ttl",
+        graph_uri="http://www.yso.fi/onto/yso/",
+        languages=("fi", "sv", "en"),
+    )
+    yso_dump = b"@prefix yso: <http://www.yso.fi/onto/yso/> . yso:p1 a <skos:Concept> ."
+    paikat_dump = b"@prefix yso: <http://www.yso.fi/onto/yso/> . yso:p2 a <skos:Concept> ."
+    rec = _Recorder(
+        finto_payloads={
+            yso.dump_url: yso_dump,
+            paikat.dump_url: paikat_dump,
+        }
+    )
+    with _client(rec) as c:
+        run(
+            output_dir=tmp_path,
+            fuseki_url="http://localhost:3030/bffi",
+            vocabs=(yso, paikat),
+            http_client=c,
+        )
+    methods = [r.method for r in rec.requests]
+    assert methods == ["GET", "GET", "PUT", "POST"]
+    # Both Fuseki uploads target the same graph URI.
+    fuseki_requests = [r for r in rec.requests if r.method in {"PUT", "POST"}]
+    for r in fuseki_requests:
+        assert r.params["graph"] == "http://www.yso.fi/onto/yso/"
+
+
 # --- Canonical vocab list sanity -----------------------------------------
 
 
@@ -259,6 +303,7 @@ def test_canonical_vocab_list_covers_expected_authority_vocabularies() -> None:
     grows or shrinks unintentionally."""
     assert {v.vocab_id for v in FINTO_VOCABS} == {
         "yso",
+        "yso-paikat",
         "finaf",
         "kauno",
         "muso",

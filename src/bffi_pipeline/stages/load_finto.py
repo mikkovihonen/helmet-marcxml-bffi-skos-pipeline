@@ -66,6 +66,21 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://www.yso.fi/onto/yso/",
         languages=("fi", "sv", "en", "se"),
     ),
+    # YSO-Paikat (places) shares the YSO concept namespace —
+    # ``http://www.yso.fi/onto/yso/p104995`` is "Lontoo" in places,
+    # ``.../p12279`` is "äidit" in YSO general topics. We load the
+    # places dump into the SAME Fuseki named graph as YSO so the
+    # existing Skosmos ``:yso`` vocab entry (uriSpace + sparqlGraph
+    # both equal to the YSO URI namespace) renders place URIs as
+    # labelled clickable concepts without a separate Skosmos vocab,
+    # and so M9 tier-0 finds place prefLabels via the same SPARQL
+    # query as topic prefLabels.
+    FintoVocab(
+        vocab_id="yso-paikat",
+        dump_url="https://api.finto.fi/download/yso-paikat/yso-paikat-skos.ttl",
+        graph_uri="http://www.yso.fi/onto/yso/",
+        languages=("fi", "sv", "en"),
+    ),
     FintoVocab(
         vocab_id="finaf",
         dump_url="https://api.finto.fi/download/finaf/finaf-skos.ttl",
@@ -225,19 +240,33 @@ def run(
     assert http_client is not None  # narrowing for mypy
 
     try:
+        # Download every dump first; group uploads by graph_uri so vocabs
+        # that share a named graph (e.g. yso + yso-paikat both targeting
+        # the YSO graph) get a single PUT (clears + loads the first dump)
+        # followed by POSTs (appends each subsequent dump) per the
+        # ``upload_graph`` multi-path protocol. Without this grouping the
+        # second vocab's PUT would clobber the first.
+        per_vocab_state: list[tuple[FintoVocab, Path, int, bool]] = []
         for vocab in vocabs:
             dump_path = dumps_dir / f"{vocab.vocab_id}-skos.ttl"
             cache_hit = not force and _is_dump_fresh(
                 dump_path, max_age_days=max_age_days, now=timestamp
             )
             bytes_downloaded = 0 if cache_hit else _download_dump(http_client, vocab, dump_path)
+            per_vocab_state.append((vocab, dump_path, bytes_downloaded, cache_hit))
 
+        groups: dict[str, list[Path]] = {}
+        for vocab, dump_path, _bytes, _cache in per_vocab_state:
+            groups.setdefault(vocab.graph_uri, []).append(dump_path)
+        for graph_uri, dump_paths in groups.items():
             upload_graph(
                 http_client,
                 fuseki_url=fuseki,
-                graph_uri=vocab.graph_uri,
-                ttl_paths=[dump_path],
+                graph_uri=graph_uri,
+                ttl_paths=dump_paths,
             )
+
+        for vocab, dump_path, bytes_downloaded, cache_hit in per_vocab_state:
             summary.results.append(
                 VocabResult(
                     vocab_id=vocab.vocab_id,
