@@ -2,6 +2,105 @@
 
 The pipeline runs end-to-end on a MacBook Pro M5 Max with 128 GB unified memory. **No paid LLM APIs.** Plan all LLM-dependent code around the local server.
 
+## Installation
+
+The pipeline talks to any OpenAI-compatible server via `LLM_BASE_URL`. The two committed options are Ollama (default for development and gold-set evaluation) and vllm-mlx (production batches). Pick one to start; switching is just an env-var change.
+
+### Ollama — development + gold-set runs
+
+One-time host install on macOS:
+
+```bash
+brew install --cask ollama          # or download the DMG from https://ollama.com
+open -a Ollama                      # starts the background service on :11434
+```
+
+Pull the two judge models (~20 GB and ~40 GB on disk; first-pull takes 10-30 min on a fast connection):
+
+```bash
+ollama pull qwen3:32b-instruct-q4_K_M    # primary judge
+ollama pull qwen3:72b-instruct-q4_K_M    # cascade fallback
+```
+
+Verify the OpenAI-compatible endpoint is up:
+
+```bash
+curl -s http://localhost:11434/v1/models | jq '.data[].id'
+# → "qwen3:32b-instruct-q4_K_M"
+# → "qwen3:72b-instruct-q4_K_M"
+```
+
+Configure the pipeline. Copy `.env.example` to `.env` (first time only) and edit if your install differs:
+
+```bash
+cp .env.example .env
+# .env carries the committed defaults:
+#   LLM_BASE_URL=http://localhost:11434/v1
+#   LLM_API_KEY=ollama
+#   LLM_MODEL_PRIMARY=qwen3:32b-instruct-q4_K_M
+#   LLM_MODEL_FALLBACK=qwen3:72b-instruct-q4_K_M
+```
+
+The `LLM_API_KEY` value is unused by Ollama but the `langchain-openai` client requires a non-empty string. Any literal works; `ollama` is the convention.
+
+A quick end-to-end probe through the pipeline (no Fuseki / no gold set required):
+
+```bash
+uv run python - <<'EOF'
+from bffi_pipeline.stages.judge import judge_pair, WorkRecord
+a = WorkRecord(record_id="probe-a", creator="Tolstoy, Leo", preferred_title="War and Peace", expression_language="eng")
+b = WorkRecord(record_id="probe-b", creator="Tolstoy, Leo", preferred_title="Sota ja rauha", expression_language="fin", original_language="rus")
+decision, cache_hit, latency = judge_pair(a, b, sim=0.84)
+print(decision.decision, decision.confidence, f"{latency:.1f}s", "(cached)" if cache_hit else "(fresh)")
+EOF
+```
+
+Expected: `same_work` with confidence ≥ 0.85 and latency 3-6 s on the M5 Max. If the call hangs or times out, check that the Ollama service is running (`ollama list`) and that the pulled tags match `LLM_MODEL_PRIMARY`.
+
+### vllm-mlx — production batches
+
+Switch to vllm-mlx for the full-corpus judge pass. Continuous batching gives 4-8x throughput on bulk runs (see "Throughput planning" below), which is the difference between a 70-hour Ollama-serial run and a 10-hour batched one.
+
+One-time install per the upstream project:
+
+```bash
+git clone https://github.com/Blaizzy/mlx_lm.git
+cd mlx_lm
+uv pip install -e .
+# or: pipx install mlx_lm
+```
+
+Convert the Qwen3 weights to MLX 4-bit (one-time; reuse the converted dir for every run):
+
+```bash
+mkdir -p ~/.mlx_models
+python -m mlx_lm.convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
+    --mlx-path ~/.mlx_models/Qwen3-32B-Instruct-4bit
+python -m mlx_lm.convert --hf-path Qwen/Qwen3-72B-Instruct -q --q-bits 4 \
+    --mlx-path ~/.mlx_models/Qwen3-72B-Instruct-4bit
+```
+
+Start the OpenAI-compatible server (one model per process; restart with `--model …` to swap):
+
+```bash
+python -m mlx_lm.server \
+    --model ~/.mlx_models/Qwen3-32B-Instruct-4bit \
+    --host 0.0.0.0 --port 8000
+```
+
+Point the pipeline at the new endpoint for the production batch:
+
+```bash
+LLM_BASE_URL=http://localhost:8000/v1 \
+    bffi-pipeline judge --concurrency 16
+```
+
+The `--concurrency` value is the per-batch parallel-request count. The committed sweep range is `{4, 8, 16, 32}`; pick the value that maximises throughput without OOMing — see the runbook's `--concurrency` tuning sweep section.
+
+### Memory headroom
+
+Don't run the 32B and 72B models concurrently on a 64 GB Mac. The cascade only needs the primary model loaded most of the time; the fallback is invoked for ~10-20 % of pairs. On the 128 GB M5 Max both fit, which is the only configuration the production timings below assume. Stop both LLM and Docker services before swapping models in unified-memory-tight setups.
+
 ## Memory budget
 
 | Component | Approx. resident size |

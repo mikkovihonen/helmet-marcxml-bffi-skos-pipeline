@@ -71,7 +71,7 @@ the development stack and the gold-set eval, but the
 Toolchain:
 
 - **Python 3.12** via [uv](https://github.com/astral-sh/uv) — the project pins everything in `uv.lock`.
-- **Ollama** (or vllm-mlx for production) on `:11434` for the LLM judge + reconciliation picker.
+- **Ollama** (or vllm-mlx for production) on `:11434` for the LLM judge + reconciliation picker. Full installation walkthrough in [`docs/local-inference.md`](docs/local-inference.md#installation).
 - **Docker** + `docker compose` for Fuseki and Skosmos.
 - **git** with submodule support — `marc2bibframe2` is vendored under `third_party/`.
 
@@ -81,10 +81,22 @@ One-time install:
 git clone --recurse-submodules https://github.com/<org>/helmet-marcxml-bffi-skos-pipeline.git
 cd helmet-marcxml-bffi-skos-pipeline
 uv sync                                    # fetches every pinned dep
-ollama pull qwen3:32b-instruct-q4_K_M      # primary judge
-ollama pull qwen3:72b-instruct-q4_K_M      # cascade fallback
+cp .env.example .env                       # carries the committed LLM defaults
+brew install --cask ollama && open -a Ollama
+ollama pull qwen3:32b-instruct-q4_K_M      # primary judge (~20 GB)
+ollama pull qwen3:72b-instruct-q4_K_M      # cascade fallback (~40 GB)
 docker compose up -d                       # Fuseki + Skosmos
 ```
+
+### Local LLM setup
+
+The judge and reconciliation picker both call a local OpenAI-compatible
+server. The end-to-end install — Ollama for development and gold-set
+runs, vllm-mlx for production batches, model conversion, the
+`.env` wiring, and a one-shot verification probe — is documented in
+**[`docs/local-inference.md`](docs/local-inference.md#installation)**.
+Follow that section before running `bffi-pipeline judge` or
+`bffi-pipeline reconcile` for the first time.
 
 ## Quick start — sample data
 

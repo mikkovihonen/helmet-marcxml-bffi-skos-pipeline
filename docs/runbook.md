@@ -29,6 +29,10 @@ LLM_MODEL_FALLBACK=qwen3:72b-instruct-q4_K_M
 BFFI_DATA_DIR=./data
 ```
 
+Local-LLM install (Ollama for development, vllm-mlx for production
+batches), model pulls, and the verification probe live in
+[`docs/local-inference.md`](local-inference.md#installation).
+
 ## Throughput expectations on the M5 Max
 
 | Stage | Mode | Time on 800 k records | RAM peak |
