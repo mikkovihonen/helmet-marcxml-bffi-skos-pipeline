@@ -216,3 +216,19 @@ bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
     skosmos:sparqlDialect   "JenaText" ;
     skosmos:showTopConcepts       true ;
     skosmos:fullAlphabeticalIndex true .
+
+# LoC MARC Code List for Relators — labels the bf:role URIs emitted by
+# the M3 contributor-extraction cascade (e.g. relators/trl for
+# translator). English-only; downstream Finnish-UI sessions still
+# render the labels because Skosmos falls back when only one language
+# is available.
+:relators a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "MARC Code List for Relators"@en ;
+    skosmos:shortName "relators"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/relators/" ;
+    skosmos:language        "en" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/relators/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .

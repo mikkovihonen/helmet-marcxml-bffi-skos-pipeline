@@ -119,12 +119,18 @@ class ContribCandidate(BaseModel):
     transliteration_of: str | None = None
 
     @model_validator(mode="after")
-    def _exactly_one_of_relator_or_transliteration(self) -> ContribCandidate:
-        has_relator = self.relator_code is not None
-        has_translit = self.transliteration_of is not None
-        if has_relator == has_translit:
+    def _at_least_one_of_relator_or_transliteration(self) -> ContribCandidate:
+        """Require at least one of the two fields. Allowing *both* lets the
+        LLM say "this is a typo'd variant of an existing agent AND I know
+        its role" — observed on Qwen3 8B for 'Anssi Karttunen' matched to
+        a 700 entry with a typo. ``_filter_to_valid_relators`` resolves
+        the ambiguity at emission time: transliteration_of wins, the
+        relator_code hint is preserved on the decision but not used to
+        emit a new bffi:Contribution (M9 script-variant binding will
+        consume it later)."""
+        if self.relator_code is None and self.transliteration_of is None:
             raise ValueError(
-                "exactly one of relator_code / transliteration_of must be set "
+                "at least one of relator_code / transliteration_of must be set "
                 "(new agent vs. transliteration variant of an existing agent)"
             )
         return self
@@ -248,6 +254,25 @@ def _is_connection_error(exc: BaseException) -> bool:
     return False
 
 
+#: Hard request timeout per chain.invoke. Without this, the OpenAI Python
+#: SDK's default 10-min timeout + internal retries lets a slow/wedged
+#: Ollama pin a worker thread for 30+ minutes silently. Our retry stack
+#: relies on the call raising; ``timeout`` + ``max_retries=0`` makes
+#: that contract real. 120s headroom: warm Qwen3 8B calls land in
+#: 8-15s; cold-start (Ollama swapping the model in) observed at ~50s.
+#: 120s leaves >2x margin while still catching genuinely wedged
+#: requests.
+CONTRIB_REQUEST_TIMEOUT_SECONDS: Final[float] = 120.0
+
+#: Per-cascade default model. Picked by benchmark on 4 representative
+#: 245$c cases (Hogwood / Karttunen / Spector / Bridžet Kollinz):
+#: Qwen3 8B at Q4_K_M produces correct relator codes + transliteration
+#: routing in ~10s/call warm, vs ~45s/call for 32B. Extraction quality
+#: is the same or better. Override via the constructor's ``model_name``
+#: or the ``bf-to-bffi --primary-model`` flag.
+DEFAULT_CONTRIB_MODEL: Final[str] = "qwen3:8b-q4_K_M"
+
+
 def _build_chain(
     *,
     model_name: str,
@@ -273,6 +298,8 @@ def _build_chain(
         model=model_name,
         temperature=temperature,
         seed=seed,
+        timeout=CONTRIB_REQUEST_TIMEOUT_SECONDS,
+        max_retries=0,
     )
     return template | llm.with_structured_output(ContribExtractDecision, method="json_schema")
 
@@ -281,22 +308,38 @@ def _filter_to_valid_relators(
     decision: ContribExtractDecision,
     existing_agents: tuple[str, ...],
 ) -> ContribExtractDecision:
-    """Drop new-agent entries whose relator_code isn't in
-    :data:`VALID_RELATOR_CODES`, and drop transliteration entries whose
-    pointer doesn't appear in ``existing_agents``. Defends against an
-    LLM that hallucinates a relator code or a phantom canonical agent.
+    """Sanitise the LLM output:
+
+    - When ``transliteration_of`` is set, it must point at an agent in
+      ``existing_agents``; phantom pointers are dropped.
+    - When ``relator_code`` is set, it must be in
+      :data:`VALID_RELATOR_CODES`; hallucinated codes are stripped.
+    - When BOTH are set on the same entry, transliteration_of wins —
+      the entry is preserved as a variant pointer, the (validated)
+      relator hint is kept on the decision but downstream emitters
+      treat the candidate as a variant rather than a new agent. M9
+      script-variant binding will consume the hint later.
     """
     if not decision.contributions:
         return decision
     existing = set(existing_agents)
     cleaned: list[ContribCandidate] = []
     for c in decision.contributions:
-        if c.relator_code is not None:
-            if c.relator_code not in VALID_RELATOR_CODES:
-                continue
-        elif c.transliteration_of not in existing:
-            continue
-        cleaned.append(c)
+        translit_ok = c.transliteration_of is not None and c.transliteration_of in existing
+        relator_ok = c.relator_code is not None and c.relator_code in VALID_RELATOR_CODES
+        if translit_ok:
+            cleaned.append(
+                ContribCandidate(
+                    name=c.name,
+                    relator_code=c.relator_code if relator_ok else None,
+                    role_text=c.role_text,
+                    transliteration_of=c.transliteration_of,
+                )
+            )
+        elif relator_ok and c.transliteration_of is None:
+            cleaned.append(c)
+        # Otherwise: drop (phantom transliteration_of, or hallucinated
+        # relator with no transliteration anchor to fall back on).
     return ContribExtractDecision(contributions=cleaned, rationale=decision.rationale)
 
 
@@ -337,7 +380,7 @@ class LangChainContribExtractor:
             return self.chain
         settings = get_settings()
         return _build_chain(
-            model_name=self.model_name or settings.llm_model_primary,
+            model_name=self.model_name or DEFAULT_CONTRIB_MODEL,
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
         )

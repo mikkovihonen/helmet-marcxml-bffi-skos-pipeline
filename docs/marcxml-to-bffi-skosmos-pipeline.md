@@ -600,7 +600,7 @@ Every merge decision becomes a discrete `prov:Activity` in a separate named grap
 bib:merge/01HXYZ... a prov:Activity, bffi-prov:WorkMergeDecision ;
     prov:startedAtTime    "2026-05-08T10:23:14Z"^^xsd:dateTime ;
     prov:endedAtTime      "2026-05-08T10:23:18Z"^^xsd:dateTime ;
-    prov:wasAssociatedWith bib:agent/qwen3-32b ;
+    prov:wasAssociatedWith bib:agent/qwen3-32b-q4_K_M ;
     prov:used             bib:rawwork/12345678 ,
                           bib:rawwork/12345679 ;
     bffi-prov:stage       "llm-judge-primary" ;
@@ -630,16 +630,27 @@ bib:work/c0ffee...  a bffi:Work, skos:Concept ;
                           bib:rawwork/12345679 .
 
 # --- Agents ---
-# Both cascade tiers are declared so primary and second-opinion decisions
-# attribute to distinct prov:SoftwareAgent records.
-bib:agent/qwen3-32b a prov:SoftwareAgent ;
-    rdfs:label            "Qwen3 32B (4-bit, instruct weights — Ollama default)" ;
+# URIs are minted at runtime as `bib:agent/<model_id with ":" → "-">`
+# (see `bffi_pipeline.provenance.logger.model_agent_uri`); the
+# quantisation suffix is preserved so different quantisations remain
+# distinguishable. Cascade tiers are declared so primary, fallback, and
+# the M3 contributor-extraction default attribute to distinct
+# prov:SoftwareAgent records.
+bib:agent/qwen3-32b-q4_K_M a prov:SoftwareAgent ;
+    rdfs:label            "Qwen3 32B (4-bit, instruct weights — M6/M9 cascade primary; M3 title cascade)" ;
     bffi-prov:provider    "Alibaba (Qwen team) — open weights, served locally via Ollama" ;
     bffi-prov:modelId     "qwen3:32b-q4_K_M" ;
     bffi-prov:temperature "0.0"^^xsd:decimal ;
     bffi-prov:seed        "42"^^xsd:integer .
 
-bib:agent/qwen2.5-72b-instruct a prov:SoftwareAgent ;
+bib:agent/qwen3-8b-q4_K_M a prov:SoftwareAgent ;
+    rdfs:label            "Qwen3 8B (4-bit — M3 contributor-extraction cascade default)" ;
+    bffi-prov:provider    "Alibaba (Qwen team) — open weights, served locally via Ollama" ;
+    bffi-prov:modelId     "qwen3:8b-q4_K_M" ;
+    bffi-prov:temperature "0.0"^^xsd:decimal ;
+    bffi-prov:seed        "42"^^xsd:integer .
+
+bib:agent/qwen2.5-72b-instruct-q4_K_M a prov:SoftwareAgent ;
     rdfs:label            "Qwen2.5 72B Instruct (4-bit, cascade fallback — Qwen3 has no 72B size)" ;
     bffi-prov:provider    "Alibaba (Qwen team) — open weights, served locally via Ollama" ;
     bffi-prov:modelId     "qwen2.5:72b-instruct-q4_K_M" ;

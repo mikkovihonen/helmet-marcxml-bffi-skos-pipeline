@@ -205,6 +205,14 @@ def _is_connection_error(exc: BaseException) -> bool:
     return False
 
 
+#: Hard request timeout per chain.invoke. Without this, a wedged or
+#: slow Ollama can pin a worker for 10+ minutes silently — the OpenAI
+#: SDK's defaults are too generous for our retry contract, which
+#: relies on the call raising on hang. Same value as the M9 picker
+#: and M3 contributor cascade.
+TITLE_LANG_REQUEST_TIMEOUT_SECONDS: Final[float] = 120.0
+
+
 def _build_chain(
     *,
     model_name: str,
@@ -231,6 +239,8 @@ def _build_chain(
         model=model_name,
         temperature=temperature,
         seed=seed,
+        timeout=TITLE_LANG_REQUEST_TIMEOUT_SECONDS,
+        max_retries=0,
     )
     return template | llm.with_structured_output(TitleLangDecision, method="json_schema")
 

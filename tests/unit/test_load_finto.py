@@ -238,19 +238,93 @@ def test_is_dump_fresh_returns_true_for_recent_file(tmp_path: Path) -> None:
         ("http://www.yso.fi/onto/muso/p123", "http://www.yso.fi/onto/muso/"),
         ("http://urn.fi/URN:NBN:fi:au:slm:s1073", "http://urn.fi/URN:NBN:fi:au:slm:"),
         ("http://urn.fi/URN:NBN:fi:au:finaf:000123", "http://urn.fi/URN:NBN:fi:au:finaf:"),
+        ("http://id.loc.gov/vocabulary/relators/trl", "http://id.loc.gov/vocabulary/relators/"),
         ("http://example.org/something-unrelated", None),
     ],
 )
-def test_graph_uri_for_uri_routes_known_finto_namespaces(uri: str, expected: str | None) -> None:
+def test_graph_uri_for_uri_routes_known_authority_namespaces(
+    uri: str, expected: str | None
+) -> None:
     assert graph_uri_for_uri(uri) == expected
 
 
 # --- Canonical vocab list sanity -----------------------------------------
 
 
-def test_canonical_vocab_list_covers_the_five_finto_vocabularies() -> None:
+def test_canonical_vocab_list_covers_expected_authority_vocabularies() -> None:
     """The hard-coded ``FINTO_VOCABS`` list is the project's source of
-    truth for which Finto vocabularies the pipeline knows about. A
-    regression test fails loudly if the list grows or shrinks
-    unintentionally."""
-    assert {v.vocab_id for v in FINTO_VOCABS} == {"yso", "finaf", "kauno", "muso", "slm"}
+    truth for which authority vocabularies the pipeline knows about
+    (despite the name, ``relators`` is LoC-hosted, not Finto-hosted —
+    same load mechanism). A regression test fails loudly if the list
+    grows or shrinks unintentionally."""
+    assert {v.vocab_id for v in FINTO_VOCABS} == {
+        "yso",
+        "finaf",
+        "kauno",
+        "muso",
+        "slm",
+        "relators",
+    }
+
+
+# --- RDF/XML to Turtle conversion (LoC relators) ------------------------
+
+
+def test_run_converts_rdfxml_dump_to_turtle_before_uploading(tmp_path: Path) -> None:
+    """LoC's ``id.loc.gov/vocabulary/relators.rdf`` ignores
+    ``Accept: text/turtle`` and serves RDF/XML. The download path must
+    detect that via the response Content-Type and convert through
+    rdflib so ``upload_graph`` can use the same ``text/turtle`` upload
+    path as every other vocab."""
+    relators = FintoVocab(
+        vocab_id="relators",
+        dump_url="https://example.test/relators.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/relators/",
+        languages=("en",),
+    )
+    rdfxml_payload = (
+        b"<?xml version='1.0' encoding='UTF-8'?>"
+        b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#' "
+        b"xmlns:skos='http://www.w3.org/2004/02/skos/core#'>"
+        b"<rdf:Description rdf:about='http://id.loc.gov/vocabulary/relators/trl'>"
+        b"<skos:prefLabel xml:lang='en'>Translator</skos:prefLabel>"
+        b"</rdf:Description>"
+        b"</rdf:RDF>"
+    )
+
+    @dataclass
+    class _Recorder2:
+        requests: list[_RecordedRequest] = field(default_factory=list)
+
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            self.requests.append(
+                _RecordedRequest(
+                    method=request.method,
+                    url=str(request.url),
+                    accept=request.headers.get("accept"),
+                    body=request.content,
+                    params=dict(request.url.params),
+                )
+            )
+            if request.method == "GET":
+                return httpx.Response(
+                    200,
+                    content=rdfxml_payload,
+                    headers={"content-type": "application/rdf+xml"},
+                )
+            return httpx.Response(204)  # PUT to GSP
+
+    rec = _Recorder2()
+    with httpx.Client(transport=httpx.MockTransport(rec), follow_redirects=True) as c:
+        run(
+            output_dir=tmp_path,
+            fuseki_url="http://localhost:3030/bffi",
+            vocabs=(relators,),
+            http_client=c,
+        )
+    put = next(r for r in rec.requests if r.method == "PUT")
+    # The body Fuseki receives should be Turtle, not RDF/XML.
+    body = put.body
+    is_turtle = body.startswith(b"@prefix") or b"a skos:Concept" in body or b"prefLabel" in body
+    assert is_turtle
+    assert b"<?xml" not in body

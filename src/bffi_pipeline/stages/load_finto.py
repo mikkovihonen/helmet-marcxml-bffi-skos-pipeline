@@ -90,6 +90,17 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://urn.fi/URN:NBN:fi:au:slm:",
         languages=("fi", "sv"),
     ),
+    # MARC Code List for Relators — not Finto-hosted but loaded the
+    # same way so Skosmos renders the bf:role URIs the M3
+    # contributor-extraction cascade emits (e.g. relators/trl) as
+    # labelled, clickable links. Served as RDF/XML; the download path
+    # converts to Turtle on the fly. ~130 KB; English-only.
+    FintoVocab(
+        vocab_id="relators",
+        dump_url="https://id.loc.gov/vocabulary/relators.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/relators/",
+        languages=("en",),
+    ),
 )
 
 
@@ -138,6 +149,11 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
     os.replace(tmp, path)
 
 
+_RDFXML_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
+    {"application/rdf+xml", "text/xml", "application/xml"}
+)
+
+
 def _download_dump(
     client: httpx.Client,
     vocab: FintoVocab,
@@ -150,10 +166,25 @@ def _download_dump(
     them so callers get the real Turtle. ``raise_for_status`` surfaces
     HTTP errors loudly — these are deliberately not caught here, since
     a missing or rate-limited dump means the operator should retry
-    rather than have the load proceed against stale data."""
+    rather than have the load proceed against stale data.
+
+    LoC's ``id.loc.gov/vocabulary/relators.rdf`` ignores
+    ``Accept: text/turtle`` and serves RDF/XML regardless. We detect
+    that via the response Content-Type and re-serialize through rdflib
+    so :func:`upload_graph` can use the same ``text/turtle`` upload
+    path as every other vocab.
+    """
+    from rdflib import Graph
+
     response = client.get(vocab.dump_url, headers={"Accept": "text/turtle"})
     response.raise_for_status()
-    payload = response.content
+    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type in _RDFXML_CONTENT_TYPES:
+        graph = Graph()
+        graph.parse(data=response.content, format="xml")
+        payload = graph.serialize(format="turtle").encode("utf-8")
+    else:
+        payload = response.content
     _atomic_write_bytes(target_path, payload)
     return len(payload)
 

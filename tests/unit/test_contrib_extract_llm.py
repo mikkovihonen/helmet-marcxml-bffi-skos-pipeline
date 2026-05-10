@@ -12,6 +12,8 @@ from pydantic import ValidationError
 
 from bffi_pipeline.contrib_extract_llm import (
     CONTRIB_MAX_VALIDATION_RETRIES,
+    CONTRIB_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_CONTRIB_MODEL,
     RELATOR_URI_PREFIX,
     VALID_RELATOR_CODES,
     ContribCandidate,
@@ -39,19 +41,26 @@ def test_contrib_candidate_transliteration_minimal_shape() -> None:
     assert c.relator_code is None
 
 
-def test_contrib_candidate_rejects_both_relator_and_transliteration() -> None:
-    """Either a new-agent (relator_code) OR a transliteration variant —
-    never both. Defends against an LLM that conflates the two output
-    modes in one entry."""
-    with pytest.raises(ValidationError):
-        ContribCandidate(
-            name="x",
-            relator_code="aut",
-            transliteration_of="Foo, Bar",
-        )
+def test_contrib_candidate_accepts_both_relator_and_transliteration() -> None:
+    """Qwen3 8B sometimes emits both — e.g. 'Anssi Karttunen' as a
+    transliteration of a typo'd 700 entry 'Karttunen, Assi' AND
+    relator_code='prf' because it knows the role. Originally rejected
+    via XOR, but that lost both signals on perfectly-handleable
+    cases. ``_filter_to_valid_relators`` resolves the ambiguity at
+    emission time (transliteration_of wins; relator hint preserved
+    for M9 script-variant binding)."""
+    c = ContribCandidate(
+        name="Anssi Karttunen",
+        relator_code="prf",
+        transliteration_of="Karttunen, Assi",
+    )
+    assert c.relator_code == "prf"
+    assert c.transliteration_of == "Karttunen, Assi"
 
 
 def test_contrib_candidate_rejects_neither_relator_nor_transliteration() -> None:
+    """An entry with neither field carries no information — the LLM
+    just gave us a name with no actionable hint. Reject it."""
     with pytest.raises(ValidationError):
         ContribCandidate(name="x")
 
@@ -259,3 +268,21 @@ def test_relator_uri_prefix_is_loc_canonical() -> None:
     built as `RELATOR_URI_PREFIX + 'trl'` resolves correctly when the
     LoC relators vocab is loaded into Fuseki."""
     assert RELATOR_URI_PREFIX == "http://id.loc.gov/vocabulary/relators/"
+
+
+def test_request_timeout_is_set_to_a_finite_value() -> None:
+    """Without an explicit ``timeout`` on ChatOpenAI, the OpenAI SDK's
+    10-min default times retry-internally and a wedged Ollama can pin
+    a worker for 30+ minutes silently — discovered during the M3
+    contributor-extraction live smoke. Pinning the constant here so a
+    future refactor can't accidentally remove the bound."""
+    assert 10 < CONTRIB_REQUEST_TIMEOUT_SECONDS < 600
+
+
+def test_default_contrib_model_is_qwen3_8b() -> None:
+    """Per-cascade default picked by live benchmark on the M2 Max:
+    Qwen3 8B Q4_K_M produces correct extractions in ~10s/call warm,
+    vs ~45s/call for 32B at the same quality. Caller can still
+    override via the constructor's ``model_name`` or the CLI's
+    ``--primary-model`` flag."""
+    assert DEFAULT_CONTRIB_MODEL == "qwen3:8b-q4_K_M"

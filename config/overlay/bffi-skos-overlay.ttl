@@ -57,6 +57,14 @@ bffi:subject   rdfs:label "Subject"@en, "Aihe"@fi, "Ämne"@sv .
 bffi:genreForm rdfs:label "Genre/form"@en, "Genre/muoto"@fi, "Genre/form"@sv .
 bffi:creator   rdfs:label "Creator"@en, "Tekijä"@fi, "Upphovsperson"@sv .
 
+# bf:role labels the relator URI on each Contribution block (set by the
+# M3 contributor-extraction cascade — bf:role <relators/trl> for
+# translator, etc.). Without this rdfs:label Skosmos drops the
+# predicate from the rendered concept page even though the LoC
+# relators vocab is loaded under <http://id.loc.gov/vocabulary/relators/>
+# and would otherwise resolve the URIs to labels.
+bf:role rdfs:label "Role"@en, "Rooli"@fi, "Roll"@sv .
+
 # ---------------------------------------------------------------------------
 # Helmet source URI — declared as a real entity so bf:identifiedBy
 # triples on Works and Expressions resolve to a labeled resource in
