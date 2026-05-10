@@ -8,6 +8,7 @@ check, mirrored in the M11 runbook checklist."""
 
 from __future__ import annotations
 
+import gzip
 import os
 import time
 from dataclasses import dataclass, field
@@ -310,6 +311,8 @@ def test_canonical_vocab_list_covers_expected_authority_vocabularies() -> None:
         "muso",
         "slm",
         "relators",
+        "lcgft",
+        "lcsh",
     }
 
 
@@ -374,3 +377,67 @@ def test_run_converts_rdfxml_dump_to_turtle_before_uploading(tmp_path: Path) -> 
     is_turtle = body.startswith(b"@prefix") or b"a skos:Concept" in body or b"prefLabel" in body
     assert is_turtle
     assert b"<?xml" not in body
+
+
+# --- Gzipped Turtle dumps (LoC LCGFT / LCSH) ----------------------------
+
+
+def test_run_decompresses_gzipped_turtle_dumps(tmp_path: Path) -> None:
+    """LoC's ``id.loc.gov/download/authorities/*.skosrdf.ttl.gz`` serves
+    Turtle pre-compressed with gzip — ``Content-Encoding: identity``,
+    the gzip is part of the payload format. The download path must
+    detect ``.gz`` URL suffix and decompress before saving so
+    ``upload_graph`` uploads valid text/turtle to Fuseki."""
+    lcgft = FintoVocab(
+        vocab_id="lcgft",
+        dump_url="https://example.test/genreForms.skosrdf.ttl.gz",
+        graph_uri="http://id.loc.gov/authorities/genreForms/",
+        languages=("en",),
+    )
+    turtle_body = (
+        b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+        b"<http://id.loc.gov/authorities/genreForms/gf2015026020> "
+        b'a skos:Concept ; skos:prefLabel "Novels"@en .\n'
+    )
+    gzipped = gzip.compress(turtle_body)
+
+    @dataclass
+    class _GzipRecorder:
+        requests: list[_RecordedRequest] = field(default_factory=list)
+
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            self.requests.append(
+                _RecordedRequest(
+                    method=request.method,
+                    url=str(request.url),
+                    accept=request.headers.get("accept"),
+                    body=request.content,
+                    params=dict(request.url.params),
+                )
+            )
+            if request.method == "GET":
+                # Server sends gzip as the payload format; httpx must
+                # NOT auto-decompress (that's why we set identity here).
+                return httpx.Response(
+                    200,
+                    content=gzipped,
+                    headers={
+                        "content-type": "application/x-gzip",
+                        "content-encoding": "identity",
+                    },
+                )
+            return httpx.Response(204)
+
+    rec = _GzipRecorder()
+    with httpx.Client(transport=httpx.MockTransport(rec), follow_redirects=True) as c:
+        run(
+            output_dir=tmp_path,
+            fuseki_url="http://localhost:3030/bffi",
+            vocabs=(lcgft,),
+            http_client=c,
+        )
+    put = next(r for r in rec.requests if r.method == "PUT")
+    # The body Fuseki receives must be the decompressed Turtle, not
+    # gzip bytes — Fuseki's Graph Store Protocol can't parse gzip.
+    assert put.body == turtle_body
+    assert b"\x1f\x8b" not in put.body  # gzip magic bytes

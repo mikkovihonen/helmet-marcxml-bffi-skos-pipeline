@@ -232,3 +232,35 @@ bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
     skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
     skosmos:sparqlDialect   "JenaText" ;
     skosmos:fullAlphabeticalIndex true .
+
+# LC Genre/Form Terms — Helmet cataloguers cite English LCGFT URIs on
+# MARC 655 fields (e.g. genreForms/gf2015026020 for "Novels"). Loading
+# the dump lets Skosmos render those URIs as labelled clickable
+# concepts and lets graph_uri_for_uri recognise them so M9 walkers
+# correctly skip them as already-resolved.
+:lcgft a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "LC Genre/Form Terms"@en ;
+    skosmos:shortName "lcgft"@en ;
+    void:uriSpace     "http://id.loc.gov/authorities/genreForms/" ;
+    skosmos:language        "en" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/authorities/genreForms/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+# LC Subject Headings — the general English subject thesaurus.
+# Cataloguers occasionally use $2 lcsh for topical subjects on records
+# copied or harmonised from English-language sources. Tier-0 routes
+# subject-kind requests through both YSO and LCSH so those English
+# literals bind deterministically without a Finto API call.
+:lcsh a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "LC Subject Headings"@en ;
+    skosmos:shortName "lcsh"@en ;
+    void:uriSpace     "http://id.loc.gov/authorities/subjects/" ;
+    skosmos:language        "en" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/authorities/subjects/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .

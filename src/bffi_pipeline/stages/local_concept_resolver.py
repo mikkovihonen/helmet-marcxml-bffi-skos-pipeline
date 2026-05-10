@@ -37,12 +37,14 @@ from bffi_pipeline.stages.reconcile import (
     AuthorityKind,
 )
 
-#: SLM is loaded into Fuseki by ``load-finto`` but isn't one of the
-#: ``VOCAB_*`` constants in :mod:`reconcile` (those mirror Finto's
-#: ``vocab=`` query parameter, and tier-0 doesn't use that endpoint).
-#: Tier-0 hits SLM directly via its named graph URI, so we just need
-#: a string source-vocabulary tag for provenance.
+#: SLM, LCGFT, and LCSH are loaded into Fuseki by ``load-finto`` but
+#: aren't ``VOCAB_*`` constants in :mod:`reconcile` (those mirror
+#: Finto's ``vocab=`` query parameter, and tier-0 doesn't use that
+#: endpoint). Tier-0 hits each directly via its named graph URI, so we
+#: just need a string source-vocabulary tag for provenance.
 VOCAB_SLM: Final[str] = "slm"
+VOCAB_LCGFT: Final[str] = "lcgft"
+VOCAB_LCSH: Final[str] = "lcsh"
 
 #: Authority kind → (source-vocabulary tag, named-graph URI) tuples.
 #: Multiple entries per kind get tried in declaration order in a single
@@ -62,10 +64,22 @@ VOCAB_SLM: Final[str] = "slm"
 #: fiction genre/form literals like "historialliset romaanit" still bind
 #: to their KAUNO/SLM URI even when an equivalent label exists in YSO.
 _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
-    "subject": ((VOCAB_YSO, "http://www.yso.fi/onto/yso/"),),
+    "subject": (
+        (VOCAB_YSO, "http://www.yso.fi/onto/yso/"),
+        # LCSH covers the cataloguer-tagged-$2-lcsh case where an
+        # English topical literal lands without $0; YSO comes first
+        # because Finnish-source records dominate Helmet.
+        (VOCAB_LCSH, "http://id.loc.gov/authorities/subjects/"),
+    ),
     "genre_form": (
         (VOCAB_KAUNO, "http://www.yso.fi/onto/kauno/"),
         (VOCAB_SLM, "http://urn.fi/URN:NBN:fi:au:slm:"),
+        # LCGFT covers English-cataloguer-supplied genre/form labels
+        # (Novels, Short stories, Video recordings, etc.) when the
+        # cataloguer tagged $2 lcgft without $0. Last in the order so
+        # KAUNO+SLM Finnish-language preferences still win when both
+        # carry the literal.
+        (VOCAB_LCGFT, "http://id.loc.gov/authorities/genreForms/"),
         (VOCAB_YSO, "http://www.yso.fi/onto/yso/"),
     ),
     "music_form": ((VOCAB_MUSO, "http://www.yso.fi/onto/muso/"),),
@@ -196,6 +210,8 @@ class StubLocalConceptResolver:
 
 
 __all__ = [
+    "VOCAB_LCGFT",
+    "VOCAB_LCSH",
     "VOCAB_SLM",
     "FusekiConceptResolver",
     "LocalConceptHit",

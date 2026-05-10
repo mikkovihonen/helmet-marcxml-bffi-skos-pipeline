@@ -206,6 +206,8 @@ _FINTO_VOCAB_ASSERTIONS: list[tuple[str, str]] = [
     ("muso", "http://www.yso.fi/onto/muso/"),
     ("slm", "http://urn.fi/URN:NBN:fi:au:slm:"),
     ("relators", "http://id.loc.gov/vocabulary/relators/"),
+    ("lcgft", "http://id.loc.gov/authorities/genreForms/"),
+    ("lcsh", "http://id.loc.gov/authorities/subjects/"),
 ]
 
 

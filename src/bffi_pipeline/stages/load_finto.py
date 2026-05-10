@@ -124,6 +124,36 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://id.loc.gov/vocabulary/relators/",
         languages=("en",),
     ),
+    # LC Genre/Form Terms — Helmet cataloguers cite English genre/form
+    # URIs (e.g. ``http://id.loc.gov/authorities/genreForms/gf2015026020``
+    # for "Novels", ``.../gf2014026542`` for "Short stories") on MARC
+    # 655 fields without further translation. Loading the LCGFT dump
+    # both makes ``graph_uri_for_uri`` recognise those URIs (so M9
+    # walkers correctly skip them as already-resolved) and gives
+    # Skosmos a graph to render English labels from. Served gzipped;
+    # the download path detects ``.gz`` and decompresses on the fly.
+    # ~330 KB compressed; English-only.
+    FintoVocab(
+        vocab_id="lcgft",
+        dump_url="https://id.loc.gov/download/authorities/genreForms.skosrdf.ttl.gz",
+        graph_uri="http://id.loc.gov/authorities/genreForms/",
+        languages=("en",),
+    ),
+    # LC Subject Headings — the general English subject thesaurus.
+    # Cataloguers occasionally use ``$2 lcsh`` for topical subjects on
+    # records copied or harmonised from English-language sources, with
+    # the literal heading carried as ``rdfs:label``. Tier-0 routes
+    # ``subject``-kind requests through both YSO and LCSH so those
+    # English literals bind deterministically without a Finto API call.
+    # Served gzipped; ~39 MB compressed (~250-500 MB uncompressed
+    # depending on rdflib's serialisation density), the largest dump
+    # after KANTO. English-only.
+    FintoVocab(
+        vocab_id="lcsh",
+        dump_url="https://id.loc.gov/download/authorities/subjects.skosrdf.ttl.gz",
+        graph_uri="http://id.loc.gov/authorities/subjects/",
+        languages=("en",),
+    ),
 )
 
 
@@ -184,19 +214,30 @@ def _download_dump(
 ) -> int:
     """GET ``vocab.dump_url`` and write atomically to ``target_path``.
 
-    Returns the number of bytes written. The Finto dump endpoints
-    return 302s to ``/download/<vocab>/<vocab>-skos.ttl``; we follow
-    them so callers get the real Turtle. ``raise_for_status`` surfaces
-    HTTP errors loudly — these are deliberately not caught here, since
-    a missing or rate-limited dump means the operator should retry
-    rather than have the load proceed against stale data.
+    Returns the number of bytes written (after any decompression). The
+    Finto dump endpoints return 302s to ``/download/<vocab>/<vocab>-skos.ttl``;
+    we follow them so callers get the real Turtle. ``raise_for_status``
+    surfaces HTTP errors loudly — these are deliberately not caught
+    here, since a missing or rate-limited dump means the operator should
+    retry rather than have the load proceed against stale data.
 
-    LoC's ``id.loc.gov/vocabulary/relators.rdf`` ignores
-    ``Accept: text/turtle`` and serves RDF/XML regardless. We detect
-    that via the response Content-Type and re-serialize through rdflib
-    so :func:`upload_graph` can use the same ``text/turtle`` upload
-    path as every other vocab.
+    Two non-Turtle wire formats are normalised to Turtle on the way in:
+
+    - **RDF/XML** — LoC's ``id.loc.gov/vocabulary/relators.rdf`` ignores
+      ``Accept: text/turtle`` and serves RDF/XML regardless. Detected
+      via the response Content-Type and re-serialised through rdflib.
+    - **Gzipped Turtle** — LoC's bulk authority dumps
+      (``id.loc.gov/download/authorities/*.skosrdf.ttl.gz``) are only
+      published gzipped; the server sends ``Content-Encoding: identity``
+      because the gzip is part of the payload format. Detected via the
+      ``.gz`` URL suffix and decompressed before saving.
+
+    Decompression / conversion happens once at download time so
+    :func:`upload_graph` always sees ``text/turtle`` regardless of what
+    the upstream wire format was.
     """
+    import gzip
+
     from rdflib import Graph
 
     response = client.get(vocab.dump_url, headers={"Accept": "text/turtle"})
@@ -206,6 +247,8 @@ def _download_dump(
         graph = Graph()
         graph.parse(data=response.content, format="xml")
         payload = graph.serialize(format="turtle").encode("utf-8")
+    elif vocab.dump_url.endswith(".gz"):
+        payload = gzip.decompress(response.content)
     else:
         payload = response.content
     _atomic_write_bytes(target_path, payload)
