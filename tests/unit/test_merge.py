@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 
 import pytest
@@ -23,8 +24,10 @@ from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.merge import (
     CanonicalWorkInputs,
     ContributionTarget,
+    ExpressionContribution,
     HelmetMapEntry,
     SubjectTarget,
+    _expression_contributions,
     apply_merge,
 )
 
@@ -827,3 +830,204 @@ def test_absorbed_expression_prefLabels_are_propagated_to_canonical(tmp_path: Pa
     expr_b_labels = {(str(o), o.language) for o in g.objects(URIRef(EXPR_B), V.SKOS.prefLabel)}
     assert expr_a_labels == {("Sota ja rauha", "fi")}
     assert expr_b_labels == {("Война и мир", "ru"), ("War and Peace", "en")}
+
+
+# --- Non-primary contribution propagation onto canonical Expressions (F1) ---
+
+
+def test_canonical_expression_carries_blank_node_contribution_from_cascade(
+    tmp_path: Path,
+) -> None:
+    """M3's contributor-extraction cascade emits non-primary
+    bffi:Contribution blocks with blank-node agents on raw
+    Expressions. M8 must propagate them onto the canonical Expression
+    so Skosmos surfaces them on the canonical-Work concept page."""
+
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_contributions=[
+            ExpressionContribution(
+                expression_uri=EXPR_A,
+                role_uri="http://id.loc.gov/vocabulary/relators/cnd",
+                agent_uri=None,
+                agent_label="Christopher Hogwood",
+            ),
+        ],
+    )
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="different_work")],
+        work_records=records,
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    contribs = list(g.objects(URIRef(EXPR_A), V.BFFI.contribution))
+    assert len(contribs) == 1
+    contrib = contribs[0]
+    roles = list(g.objects(contrib, V.BF.role))
+    assert roles == [URIRef("http://id.loc.gov/vocabulary/relators/cnd")]
+    [agent] = list(g.objects(contrib, V.BFFI.agent))
+    labels = list(g.objects(agent, V.RDFS.label))
+    assert labels == [Literal("Christopher Hogwood")]
+
+
+def test_canonical_expression_carries_uri_agent_contribution_from_700(
+    tmp_path: Path,
+) -> None:
+    """The 700-fielded variant: marc2bibframe2 emits non-primary
+    contributions whose agent is a URIRef (e.g.
+    ``http://urn.fi/.../#Agent700-24``) plus an rdfs:label. The
+    propagator must re-emit both on the canonical Expression so
+    Skosmos has a labelled link to follow."""
+
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_contributions=[
+            ExpressionContribution(
+                expression_uri=EXPR_A,
+                role_uri="http://id.loc.gov/vocabulary/relators/trl",
+                agent_uri="http://urn.fi/URN:NBN:fi:bib:raw/aaa#Agent700-24",
+                agent_label="Adrian, Esa",
+            ),
+        ],
+    )
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="different_work")],
+        work_records=records,
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    [contrib] = list(g.objects(URIRef(EXPR_A), V.BFFI.contribution))
+    [agent] = list(g.objects(contrib, V.BFFI.agent))
+    assert agent == URIRef("http://urn.fi/URN:NBN:fi:bib:raw/aaa#Agent700-24")
+    assert (agent, V.RDFS.label, Literal("Adrian, Esa")) in g
+
+
+def test_canonical_expression_dedups_contribution_across_members(tmp_path: Path) -> None:
+    """When two raw Works absorb into one canonical and both Expressions
+    carry the same (expr_uri, agent, role) triple, the canonical
+    Expression must show one Contribution block, not two — re-running
+    M8 on byte-equivalent input produces byte-equivalent output."""
+
+    records = _records()
+    shared = ExpressionContribution(
+        expression_uri=EXPR_A,
+        role_uri="http://id.loc.gov/vocabulary/relators/trl",
+        agent_uri=None,
+        agent_label="Adrian, Esa",
+    )
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_contributions=[shared],
+    )
+    records[WORK_B] = CanonicalWorkInputs(
+        work_uri=WORK_B,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Война и мир",
+        expression_uris=[EXPR_A],  # ← same Expression URI
+        helmet_identifiers=[("http://example.org/ident/b1", "222")],
+        expression_contributions=[shared],
+    )
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=records,
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    contribs = list(g.objects(URIRef(EXPR_A), V.BFFI.contribution))
+    assert len(contribs) == 1
+
+
+def test_canonical_expression_skips_contribution_with_no_agent_info(
+    tmp_path: Path,
+) -> None:
+    """An ExpressionContribution with no agent_uri AND no agent_label
+    has nothing to propagate — emitting an empty Agent block would
+    just create cataloguer noise. The propagator should silently skip.
+    (The walker filters these too; this test pins the propagator's
+    independent guard for the case where a future caller passes
+    raw user input.)"""
+
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_contributions=[
+            ExpressionContribution(
+                expression_uri=EXPR_A,
+                role_uri="http://id.loc.gov/vocabulary/relators/cnd",
+                agent_uri=None,
+                agent_label="Real Agent",
+            ),
+        ],
+    )
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="different_work")],
+        work_records=records,
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    contribs = list(g.objects(URIRef(EXPR_A), V.BFFI.contribution))
+    # The valid one should propagate normally.
+    assert len(contribs) == 1
+
+
+def test_walker_filters_primary_contributions_from_expression_propagation() -> None:
+    """The walker that builds expression_contributions must filter
+    out PrimaryContribution blocks — those go on the canonical Work
+    via _propagate_primary_contributions, not on Expressions."""
+    g = Graph()
+    g.parse(
+        data=dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{WORK_A}> a bffi:Work ;
+                bffi:hasExpression <{EXPR_A}> .
+
+            <{EXPR_A}> a bffi:Expression ;
+                bffi:contribution <#contrib1>, <#contrib2> .
+
+            # Primary — MUST be filtered out by the walker.
+            <#contrib1> a bffi:Contribution, bffi:PrimaryContribution ;
+                bffi:agent <#agent-primary> ;
+                bf:role <http://id.loc.gov/vocabulary/relators/aut> .
+
+            # Non-primary — MUST be picked up.
+            <#contrib2> a bffi:Contribution ;
+                bffi:agent <#agent-translator> ;
+                bf:role <http://id.loc.gov/vocabulary/relators/trl> .
+
+            <#agent-primary>    rdfs:label "Tolstoy, Lev" .
+            <#agent-translator> rdfs:label "Adrian, Esa" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    out = _expression_contributions(g, URIRef(WORK_A))
+    assert len(out) == 1
+    [ec] = out
+    assert ec.agent_label == "Adrian, Esa"
+    assert ec.role_uri == "http://id.loc.gov/vocabulary/relators/trl"

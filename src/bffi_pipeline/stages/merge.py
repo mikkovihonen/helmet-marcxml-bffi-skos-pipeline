@@ -231,6 +231,26 @@ class ContributionTarget:
     agent_label: str
 
 
+@dataclass(frozen=True)
+class ExpressionContribution:
+    """One non-primary ``bffi:Contribution`` block from a raw Expression.
+
+    Captures everything M8 needs to re-emit the block on the
+    corresponding canonical Expression: the role URI (``bf:role``),
+    plus the agent in either URI form (``agent_uri``, e.g. for
+    marc2bibframe2-emitted 700-fielded contributions like
+    ``http://urn.fi/.../#Agent700-24``) or blank-node form
+    (``agent_label`` only, used by the M3 contributor-extraction
+    cascade for LLM-extracted agents not yet reconciled). Both forms
+    coexist in real Helmet data; the propagator handles each.
+    """
+
+    expression_uri: str
+    role_uri: str | None
+    agent_uri: str | None
+    agent_label: str | None
+
+
 @dataclass
 class CanonicalWorkInputs:
     """Per-Work data the merge step needs to mint a canonical Work URI."""
@@ -259,6 +279,15 @@ class CanonicalWorkInputs:
     title (e.g. en/fi/ru on the Tšarka pattern); M8 unions these across
     absorbed members and propagates the full set onto the canonical Work
     so Skosmos picks the right per-language label."""
+    expression_contributions: list[ExpressionContribution] = field(default_factory=list)
+    """Non-primary ``bffi:Contribution`` blocks attached to the raw
+    Expressions linked from this Work. Includes both
+    cataloguer-supplied 700-fielded contributions (URI agents) and the
+    M3 contributor-extraction cascade's blank-node-agent emissions.
+    M8 re-emits each on the corresponding canonical Expression with
+    deterministic blank-node IDs so Skosmos's canonical-Work view
+    surfaces them — without this propagation the cascade's output is
+    visible only on per-bib-ID raw Expression pages."""
 
 
 def _first_pref_label(graph: Graph, subject: URIRef) -> str | None:
@@ -411,6 +440,53 @@ def _expression_labels(graph: Graph, work: URIRef) -> list[tuple[str, str, str |
     return out
 
 
+def _expression_contributions(graph: Graph, work: URIRef) -> list[ExpressionContribution]:
+    """Collect non-primary ``bffi:Contribution`` blocks on each Expression
+    linked to ``work`` via ``bffi:hasExpression``.
+
+    For each such contribution: extracts the ``bf:role`` URI (when
+    present) and the agent — either as a URI (700-fielded form) or as
+    a blank node identified by its ``rdfs:label`` (M3 cascade form).
+    A contribution typed as ``bffi:PrimaryContribution`` is filtered
+    out — those are propagated separately by
+    :func:`_propagate_primary_contributions` onto the canonical Work.
+
+    Skipped: contributions whose agent has neither a URI nor a label
+    (no information to propagate, would emit an empty agent block).
+    """
+    out: list[ExpressionContribution] = []
+    for expr in graph.objects(work, V.BFFI.hasExpression):
+        if not isinstance(expr, URIRef):
+            continue
+        for contrib in graph.objects(expr, V.BFFI.contribution):
+            types = set(graph.objects(contrib, RDF.type))
+            if V.BFFI.PrimaryContribution in types:
+                continue
+            role_uri: str | None = None
+            for role in graph.objects(contrib, V.BF.role):
+                if isinstance(role, URIRef):
+                    role_uri = str(role)
+                    break
+            for agent in graph.objects(contrib, V.BFFI.agent):
+                agent_uri = str(agent) if isinstance(agent, URIRef) else None
+                agent_label: str | None = None
+                for lab in graph.objects(agent, V.RDFS.label):
+                    if isinstance(lab, RdfLiteral):
+                        agent_label = str(lab)
+                        break
+                if agent_uri is None and agent_label is None:
+                    continue
+                out.append(
+                    ExpressionContribution(
+                        expression_uri=str(expr),
+                        role_uri=role_uri,
+                        agent_uri=agent_uri,
+                        agent_label=agent_label,
+                    )
+                )
+    return out
+
+
 def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
     """Walk the combined BFFI + BIBFRAME graph and return per-Work merge inputs."""
     out: dict[str, CanonicalWorkInputs] = {}
@@ -435,6 +511,7 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
             contribution_targets=contributions,
             expression_labels=_expression_labels(graph, work),
             pref_labels=_all_pref_labels(graph, work),
+            expression_contributions=_expression_contributions(graph, work),
         )
     return out
 
@@ -605,15 +682,23 @@ def _propagate_expressions(
     canonical_uri: URIRef,
     members: list[CanonicalWorkInputs],
 ) -> None:
-    """Re-assert Expression typing + bffi:hasExpression / expressionOf + prefLabel.
+    """Re-assert Expression typing + ``bffi:hasExpression`` /
+    ``expressionOf`` + prefLabel + non-primary Contribution blocks.
 
     The typing and link triples make M10's Skosify dual-type
     Expressions as ``skos:Concept``. The prefLabel literal is what
     Skosmos surfaces in the Work → Expression hierarchy view; without
     it the UI renders Expressions with empty labels.
+
+    Non-primary contributions (M3 cascade-emitted + 700-fielded
+    translators / illustrators / performers) are dedup'd across
+    members by ``(expr_uri, agent, role)`` and re-emitted on the
+    canonical Expression with deterministic SHA-1 blank-node IDs so
+    canonical.ttl stays byte-stable across re-runs.
     """
     seen_exprs: set[str] = set()
     seen_labels: set[tuple[str, str, str | None]] = set()
+    seen_contribs: set[tuple[str, str, str, str]] = set()
     for member in members:
         for expr_uri in member.expression_uris:
             if expr_uri in seen_exprs:
@@ -630,6 +715,32 @@ def _propagate_expressions(
             seen_labels.add(key)
             literal = Literal(label_text, lang=lang) if lang else Literal(label_text)
             g.add((URIRef(expr_uri), V.SKOS.prefLabel, literal))
+        for ec in member.expression_contributions:
+            key_t = (
+                ec.expression_uri,
+                ec.agent_uri or "",
+                ec.agent_label or "",
+                ec.role_uri or "",
+            )
+            if key_t in seen_contribs:
+                continue
+            seen_contribs.add(key_t)
+            digest = hashlib.sha1("|".join(key_t).encode("utf-8")).hexdigest()
+            contrib_node = BNode(f"econ{digest}")
+            expr = URIRef(ec.expression_uri)
+            g.add((expr, V.BFFI.contribution, contrib_node))
+            g.add((contrib_node, RDF.type, V.BFFI.Contribution))
+            if ec.role_uri is not None:
+                g.add((contrib_node, V.BF.role, URIRef(ec.role_uri)))
+            agent_node: URIRef | BNode
+            if ec.agent_uri is not None:
+                agent_node = URIRef(ec.agent_uri)
+            else:
+                agent_node = BNode(f"eag{digest}")
+                g.add((agent_node, RDF.type, V.BFFI.Agent))
+            g.add((contrib_node, V.BFFI.agent, agent_node))
+            if ec.agent_label is not None:
+                g.add((agent_node, V.RDFS.label, Literal(ec.agent_label)))
 
 
 def _propagate_primary_contributions(
