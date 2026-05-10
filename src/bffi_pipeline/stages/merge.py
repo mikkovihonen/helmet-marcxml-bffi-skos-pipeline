@@ -301,18 +301,32 @@ def _primary_contribution_targets(graph: Graph, work: URIRef) -> list[Contributi
 
 
 def _helmet_identifiers(graph: Graph, work: URIRef) -> list[tuple[str, str]]:
-    """Return [(ident_uri, helmet_bib_id), ...] for ``work``'s Helmet identifiers."""
+    """Return [(ident_uri, helmet_bib_id), ...] for ``work``'s Helmet identifiers.
+
+    M2 mints the BIBFRAME `bf:identifiedBy` object as a blank node;
+    M3's SPARQL CONSTRUCT preserves it as a blank node into the BFFI
+    graph. Blank nodes can't be re-emitted as URIs on the canonical
+    Work because rdflib's bnode IDs aren't stable across processes.
+    For blank-node identifiers, mint a deterministic URI from the
+    bib_id (``<graph_base>ident/helmet/<bib_id>``) so M8 produces a
+    byte-stable canonical.ttl across runs.
+    """
     out: list[tuple[str, str]] = []
     for ident in graph.objects(work, V.BF.identifiedBy):
-        if not isinstance(ident, URIRef):
-            continue
         sources = set(graph.objects(ident, V.BF.source))
         if V.HELMET_SOURCE_URI not in sources:
             continue
         for value in graph.objects(ident, RDF.value):
-            if isinstance(value, RdfLiteral):
-                out.append((str(ident), str(value)))
-                break
+            if not isinstance(value, RdfLiteral):
+                continue
+            bib_id = str(value)
+            ident_uri = (
+                str(ident)
+                if isinstance(ident, URIRef)
+                else f"{get_settings().graph_base}ident/helmet/{bib_id}"
+            )
+            out.append((ident_uri, bib_id))
+            break
     return out
 
 

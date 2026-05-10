@@ -18,25 +18,25 @@
 
 # ---------------------------------------------------------------------------
 # Agents — dual-typed so they appear in both PROV-O and AdminMetadata views.
-# Cataloguer agents (bib:agent/cataloguer/<id>) are minted on demand at
+# Cataloguer agents (<http://urn.fi/URN:NBN:fi:bib:agent/cataloguer/><id>) are minted on demand at
 # review time and don't live in this file.
 # ---------------------------------------------------------------------------
 
-bib:agent/qwen3-32b  a prov:SoftwareAgent, bffi:Agent ;
+<http://urn.fi/URN:NBN:fi:bib:agent/qwen3-32b>  a prov:SoftwareAgent, bffi:Agent ;
     rdfs:label "Qwen3 32B (4-bit, instruct weights — Ollama default)"@en ;
     bffi-prov:provider    "Alibaba (Qwen team) — open weights, served locally via Ollama" ;
     bffi-prov:modelId     "qwen3:32b-q4_K_M" ;
     bffi-prov:temperature "0.0"^^xsd:decimal ;
     bffi-prov:seed        "42"^^xsd:integer .
 
-bib:agent/qwen2.5-72b-instruct  a prov:SoftwareAgent, bffi:Agent ;
+<http://urn.fi/URN:NBN:fi:bib:agent/qwen2.5-72b-instruct>  a prov:SoftwareAgent, bffi:Agent ;
     rdfs:label "Qwen2.5 72B Instruct (4-bit, cascade fallback — Qwen3 has no 72B size)"@en ;
     bffi-prov:provider    "Alibaba (Qwen team) — open weights, served locally via Ollama" ;
     bffi-prov:modelId     "qwen2.5:72b-instruct-q4_K_M" ;
     bffi-prov:temperature "0.0"^^xsd:decimal ;
     bffi-prov:seed        "42"^^xsd:integer .
 
-bib:agent/marc2bibframe2  a prov:SoftwareAgent, bffi:Agent ;
+<http://urn.fi/URN:NBN:fi:bib:agent/marc2bibframe2>  a prov:SoftwareAgent, bffi:Agent ;
     rdfs:label "Library of Congress marc2bibframe2 XSLT"@en ;
     rdfs:seeAlso <https://github.com/lcnetdev/marc2bibframe2> .
 
@@ -45,22 +45,22 @@ bib:agent/marc2bibframe2  a prov:SoftwareAgent, bffi:Agent ;
 # segment when M0–M13 milestones change in ways that affect the produced data.
 # ---------------------------------------------------------------------------
 
-bib:gen-process/bffi-pipeline/v0.1.0  a bffi:GenerationProcess ;
+<http://urn.fi/URN:NBN:fi:bib:gen-process/bffi-pipeline/v0.1.0>  a bffi:GenerationProcess ;
     rdfs:label "BFFI pipeline v0.1.0 — MARCXML→BIBFRAME→BFFI; Qwen3 32B+72B cascade dedup; KANTO/YSO/KAUNO/MUSO reconciliation"@en .
 
 # ---------------------------------------------------------------------------
 # Description authentication — three states the pipeline distinguishes.
 # ---------------------------------------------------------------------------
 
-bib:auth/auto-merged   a bffi:DescriptionAuthentication ;
+<http://urn.fi/URN:NBN:fi:bib:auth/auto-merged>   a bffi:DescriptionAuthentication ;
     rdfs:label "Auto-merged by LLM cascade"@en ,
                "Automaattisesti yhdistetty LLM-kaskadin avulla"@fi .
 
-bib:auth/needs-review  a bffi:DescriptionAuthentication ;
+<http://urn.fi/URN:NBN:fi:bib:auth/needs-review>  a bffi:DescriptionAuthentication ;
     rdfs:label "Awaiting human review"@en ,
                "Odottaa ihmisen tarkistusta"@fi .
 
-bib:auth/verified      a bffi:DescriptionAuthentication ;
+<http://urn.fi/URN:NBN:fi:bib:auth/verified>      a bffi:DescriptionAuthentication ;
     rdfs:label "Human-reviewed and confirmed"@en ,
                "Ihmisen tarkistama ja vahvistama"@fi .
 
@@ -68,7 +68,7 @@ bib:auth/verified      a bffi:DescriptionAuthentication ;
 # Description conventions — the rule set the pipeline emits.
 # ---------------------------------------------------------------------------
 
-bib:desc-conv/bffi-1.0.0  a bffi:DescriptionConventions ;
+<http://urn.fi/URN:NBN:fi:bib:desc-conv/bffi-1.0.0>  a bffi:DescriptionConventions ;
     rdfs:label "BFFI 1.0.0 (RDA-based)"@en ;
     rdfs:seeAlso <https://schema.finto.fi/bffi/> .
 
@@ -76,27 +76,27 @@ bib:desc-conv/bffi-1.0.0  a bffi:DescriptionConventions ;
 # Description level — minimum for auto, full after cataloguer review.
 # ---------------------------------------------------------------------------
 
-bib:desc-level/minimum  a bffi:DescriptionLevel ;
+<http://urn.fi/URN:NBN:fi:bib:desc-level/minimum>  a bffi:DescriptionLevel ;
     rdfs:label "Minimum (auto-generated)"@en .
 
-bib:desc-level/full     a bffi:DescriptionLevel ;
+<http://urn.fi/URN:NBN:fi:bib:desc-level/full>     a bffi:DescriptionLevel ;
     rdfs:label "Full (cataloguer-reviewed)"@en .
 
 # ---------------------------------------------------------------------------
 # Encoding level — same auto/human distinction at the encoding axis.
 # ---------------------------------------------------------------------------
 
-bib:enc-level/auto             a bffi:EncodingLevel ;
+<http://urn.fi/URN:NBN:fi:bib:enc-level/auto>             a bffi:EncodingLevel ;
     rdfs:label "Auto-encoded by pipeline"@en .
 
-bib:enc-level/human-reviewed   a bffi:EncodingLevel ;
+<http://urn.fi/URN:NBN:fi:bib:enc-level/human-reviewed>   a bffi:EncodingLevel ;
     rdfs:label "Reviewed by cataloguer"@en .
 
 # ---------------------------------------------------------------------------
 # Metadata licensor — CC0 to match Finto convention (committed in CLAUDE.md).
 # ---------------------------------------------------------------------------
 
-bib:metadata-licensor/cc0  a bffi:MetadataLicensor ;
+<http://urn.fi/URN:NBN:fi:bib:metadata-licensor/cc0>  a bffi:MetadataLicensor ;
     rdfs:label "Creative Commons CC0 1.0 Universal"@en ;
     rdfs:seeAlso <https://creativecommons.org/publicdomain/zero/1.0/> .
 
@@ -108,6 +108,6 @@ bib:metadata-licensor/cc0  a bffi:MetadataLicensor ;
 # bffi:RecordingSource is what bffi:recordingSource on AdminMetadata expects.
 # ---------------------------------------------------------------------------
 
-bib:recording-source/helmet  a bffi:RecordingSource ;
+<http://urn.fi/URN:NBN:fi:bib:recording-source/helmet>  a bffi:RecordingSource ;
     rdfs:label "Helmet — joint catalog of Helsinki, Espoo, Vantaa, and Kauniainen public libraries"@en ,
                "Helmet — Helsingin, Espoon, Vantaan ja Kauniaisten kirjastojen yhteinen aineistorekisteri"@fi .

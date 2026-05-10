@@ -64,6 +64,13 @@ class Settings(BaseSettings):
         default="http://localhost:3030/bffi",
         alias="FUSEKI_URL",
     )
+    # Fuseki credentials are optional. The Apache Jena Fuseki 5 image
+    # protects the Graph Store Protocol (`/<dataset>/data`) endpoints
+    # behind admin auth by default; M10 phase 2 needs them set when
+    # the dataset is locked down. Empty defaults preserve the existing
+    # anonymous-access behavior for instances configured that way.
+    fuseki_user: str = Field(default="", alias="FUSEKI_USER")
+    fuseki_password: str = Field(default="", alias="FUSEKI_PASSWORD")
 
     # Filesystem layout.
     data_dir: Path = Field(default=Path("./data"), alias="BFFI_DATA_DIR")

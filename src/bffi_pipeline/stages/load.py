@@ -167,11 +167,21 @@ def run_ask(
     *,
     fuseki_url: str,
     query: str,
+    default_graph_uri: str | None = None,
 ) -> bool:
-    """Run a SPARQL ASK query; return its boolean result."""
+    """Run a SPARQL ASK query; return its boolean result.
+
+    ``default_graph_uri`` is passed as the SPARQL Protocol
+    ``default-graph-uri`` parameter so Fuseki uses the named graph as
+    the query's default — needed because the Boundary-5 ASKs (and the
+    spec § 10 examples) don't include explicit ``GRAPH`` clauses.
+    """
+    data = {"query": query}
+    if default_graph_uri is not None:
+        data["default-graph-uri"] = default_graph_uri
     response = client.post(
         f"{fuseki_url.rstrip('/')}/sparql",
-        data={"query": query},
+        data=data,
         headers={"Accept": "application/sparql-results+json"},
     )
     response.raise_for_status()
@@ -184,11 +194,15 @@ def run_select(
     *,
     fuseki_url: str,
     query: str,
+    default_graph_uri: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run a SPARQL SELECT and return the ``results.bindings`` array."""
+    data = {"query": query}
+    if default_graph_uri is not None:
+        data["default-graph-uri"] = default_graph_uri
     response = client.post(
         f"{fuseki_url.rstrip('/')}/sparql",
-        data={"query": query},
+        data=data,
         headers={"Accept": "application/sparql-results+json"},
     )
     response.raise_for_status()
@@ -235,13 +249,19 @@ def lookup_helmet_id(
     *,
     fuseki_url: str | None = None,
     template_path: Path | None = None,
+    default_graph_uri: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run ``helmet_lookup.rq`` against Fuseki and return the SPARQL bindings."""
-    fuseki_url = fuseki_url or get_settings().fuseki_url
+    settings = get_settings()
+    fuseki_url = fuseki_url or settings.fuseki_url
     template_path = template_path or DEFAULT_HELMET_LOOKUP_PATH
+    if default_graph_uri is None:
+        default_graph_uri = _bffi_works_graph_uri(settings.graph_base)
     template = Template(template_path.read_text(encoding="utf-8"), autoescape=False)
     query = template.render(helmet_id=_quote_sparql_literal(helmet_id))
-    return run_select(client, fuseki_url=fuseki_url, query=query)
+    return run_select(
+        client, fuseki_url=fuseki_url, query=query, default_graph_uri=default_graph_uri
+    )
 
 
 def render_helmet_lookup(rows: list[dict[str, Any]]) -> str:
@@ -372,7 +392,12 @@ def _run_pipeline(
     smoke_queries = load_smoke_queries(smoke_path)
     for sq in smoke_queries:
         try:
-            ok = run_ask(http_client, fuseki_url=fuseki_url, query=sq.query)
+            ok = run_ask(
+                http_client,
+                fuseki_url=fuseki_url,
+                query=sq.query,
+                default_graph_uri=bffi_works_graph,
+            )
             result.smoke_results.append(SmokeResult(name=sq.name, passed=ok))
         except httpx.HTTPError as exc:
             result.smoke_results.append(SmokeResult(name=sq.name, passed=False, error=str(exc)))

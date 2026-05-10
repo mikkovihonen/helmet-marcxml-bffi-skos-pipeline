@@ -866,12 +866,20 @@ def load_command(
     ] = None,
 ) -> None:
     """Load skosified data + provenance into Fuseki and run Boundary-5 smokes (M10)."""
-    result = load.run(
-        skosified_path=skosified_path,
-        admin_vocab_path=admin_vocab_path,
-        provenance_path=provenance_path,
-        fuseki_url=fuseki_url,
+    settings = get_settings()
+    auth: tuple[str, str] | None = (
+        (settings.fuseki_user, settings.fuseki_password)
+        if settings.fuseki_user and settings.fuseki_password
+        else None
     )
+    with httpx.Client(timeout=30.0, auth=auth) as client:
+        result = load.run(
+            skosified_path=skosified_path,
+            admin_vocab_path=admin_vocab_path,
+            provenance_path=provenance_path,
+            fuseki_url=fuseki_url,
+            client=client,
+        )
     typer.echo(result.render())
     if not result.success:
         raise typer.Exit(code=1)
