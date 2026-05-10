@@ -1199,7 +1199,7 @@ The build plan is structured as M0 → M13 with explicit definitions of done. On
 | M0 | Skeleton | Repo layout, lint/test skeleton green, `docker-compose.yml` runs Fuseki + Skosmos. |
 | M1 | URI minting + config | `src/bffi_pipeline/uris.py` deterministic minting; Pydantic Settings. |
 | M2 | MARCXML → BIBFRAME | XSLT wrapper; UTF-8-only; one-record-per-file `<id>.xml`; emits Helmet `bf:identifiedBy`; sidecar `helmet-map.jsonl`; Boundaries 1 & 2. |
-| M3 | BIBFRAME → BFFI | Two SPARQL CONSTRUCTs; preserves Helmet identifiers; Boundary 3. |
+| M3 | BIBFRAME → BFFI | Two SPARQL CONSTRUCTs; preserves Helmet identifiers; Boundary 3; `skos:prefLabel` language tagging via Lingua, with optional local-LLM cascade for ambiguous parallel titles. |
 | M4 | Work-key blocking | Stage-1 deterministic blocking key. |
 | M5 | Embedding candidates | BGE-M3 (post-benchmark) + FAISS HNSW; persisted index; tightened thresholds. |
 | M6 | LLM judge | Qwen3 cascade; SQLite cache; checkpoint; Boundary 4 validators. |
