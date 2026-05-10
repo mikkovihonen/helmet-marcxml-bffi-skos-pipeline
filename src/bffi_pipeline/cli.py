@@ -514,6 +514,39 @@ def merge_command(
     typer.echo(result.render())
 
 
+_RECONCILE_KIND_GROUPS: dict[str, frozenset[reconcile.AuthorityKind]] = {
+    "creators": frozenset({"person", "corporate_body"}),
+    "subjects": frozenset({"subject"}),
+    "genres": frozenset({"genre_form", "music_form"}),
+    "all": reconcile.ALL_AUTHORITY_KINDS,
+}
+
+
+def _parse_reconcile_kinds(raw: str | None) -> frozenset[reconcile.AuthorityKind] | None:
+    """Parse the ``--kinds`` CLI option into a runtime kind set.
+
+    ``None`` (or ``"all"``, or whitespace) returns ``None`` so the
+    orchestrator runs every kind by default. Unknown groups raise
+    ``typer.BadParameter`` so cataloguers see the typo immediately.
+    """
+    if raw is None or not raw.strip():
+        return None
+    selected: set[reconcile.AuthorityKind] = set()
+    for token in raw.split(","):
+        name = token.strip().casefold()
+        if not name:
+            continue
+        if name == "all":
+            return None
+        group = _RECONCILE_KIND_GROUPS.get(name)
+        if group is None:
+            raise typer.BadParameter(
+                f"Unknown --kinds group {name!r}; choose from {sorted(_RECONCILE_KIND_GROUPS)}."
+            )
+        selected.update(group)
+    return frozenset(selected) if selected else None
+
+
 @app.command("reconcile")
 def reconcile_command(
     canonical_path: Annotated[
@@ -567,10 +600,23 @@ def reconcile_command(
             resolve_path=True,
         ),
     ] = None,
+    kinds: Annotated[
+        str | None,
+        typer.Option(
+            "--kinds",
+            help=(
+                "Comma-separated reconciliation groups to run. Choices: "
+                "'creators' (KANTO+VIAF persons/corporate bodies), "
+                "'subjects' (YSO topical), 'genres' (KAUNO + MUSO music form), "
+                "or 'all'. Default is all."
+            ),
+        ),
+    ] = None,
 ) -> None:
-    """Reconcile canonical Work creators against KANTO / VIAF (M9)."""
+    """Reconcile canonical Work creators + subjects against KANTO / VIAF / YSO / KAUNO / MUSO."""
     settings = get_settings()
     target = output_path or canonical_path or (settings.data_dir / "canonical.ttl")
+    selected_kinds = _parse_reconcile_kinds(kinds)
 
     http_client = httpx.Client(timeout=10.0)
     try:
@@ -587,6 +633,7 @@ def reconcile_command(
                     fallback_client=fallback,
                     picker=picker,
                     provenance_graph=writer.graph,
+                    kinds=selected_kinds,
                 )
         else:
             summary, _outcomes = reconcile.apply_reconciliation(
@@ -595,6 +642,7 @@ def reconcile_command(
                 client=client,
                 fallback_client=fallback,
                 picker=picker,
+                kinds=selected_kinds,
             )
     finally:
         http_client.close()

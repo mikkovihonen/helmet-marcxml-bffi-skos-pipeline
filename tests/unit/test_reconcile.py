@@ -14,11 +14,12 @@ from typing import Any
 import httpx
 import pytest
 from pydantic import ValidationError
-from rdflib import Graph, Literal, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.reconcile import (
+    ALL_AUTHORITY_KINDS,
     LEXICAL_DIRECT_THRESHOLD,
     LEXICAL_FLOOR,
     LLM_CONFIDENCE_THRESHOLD,
@@ -34,6 +35,7 @@ from bffi_pipeline.stages.reconcile import (
     PickerDecision,
     StubAuthorityClient,
     StubPicker,
+    _iter_subject_requests,
     apply_reconciliation,
     decide_reconciliation,
     lexical_similarity,
@@ -761,3 +763,215 @@ def test_langchain_picker_returns_uncertain_when_no_candidates() -> None:
         candidates=[],
     )
     assert out.decision == "uncertain"
+
+
+# --- M9 phase 3: subject + genre/form reconciliation ---------------------
+
+
+def _build_subject_canonical_graph(
+    *,
+    subject_label: str | None = "Tampere",
+    subject_source: str | None = "yso/fin",
+    subject_uri: str | None = None,
+    genre_label: str | None = None,
+    genre_source: str | None = None,
+) -> Graph:
+    """Build a canonical graph with optional subject + genreForm targets.
+
+    ``subject_uri`` (when given) emits a URI-resolved subject target;
+    blank-node targets are emitted from ``*_label`` + ``*_source``. The
+    contribution + AdminMetadata blocks mirror
+    :func:`_build_canonical_graph` so the AdminMetadata bumping
+    side-effects can be verified on the same shape.
+    """
+    g = _build_canonical_graph()  # creator graph already wired
+    work = URIRef(WORK)
+    if subject_uri is not None:
+        g.add((work, V.BFFI.subject, URIRef(subject_uri)))
+    if subject_label is not None:
+        node_b = BNode()
+        g.add((work, V.BFFI.subject, node_b))
+        g.add((node_b, V.RDFS.label, Literal(subject_label)))
+        if subject_source is not None:
+            g.add((node_b, V.BF.source, Literal(subject_source)))
+    if genre_label is not None:
+        gnode = BNode()
+        g.add((work, V.BFFI.genreForm, gnode))
+        g.add((gnode, V.RDFS.label, Literal(genre_label)))
+        if genre_source is not None:
+            g.add((gnode, V.BF.source, Literal(genre_source)))
+    return g
+
+
+def test_iter_subject_requests_classifies_yso_source_as_subject() -> None:
+    g = _build_subject_canonical_graph(subject_label="Tampere", subject_source="yso/fin")
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "subject"
+    assert requests[0].literal == "Tampere"
+    assert requests[0].predicate_uri == str(V.BFFI.subject)
+
+
+def test_iter_subject_requests_classifies_kauno_source_as_genre_form() -> None:
+    g = _build_subject_canonical_graph(
+        subject_label=None,
+        genre_label="historialliset romaanit",
+        genre_source="kauno/fin",
+    )
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "genre_form"
+    assert requests[0].predicate_uri == str(V.BFFI.genreForm)
+
+
+def test_iter_subject_requests_classifies_muso_source_as_music_form() -> None:
+    g = _build_subject_canonical_graph(
+        subject_label="oboo",  # treble clef literal
+        subject_source="muso/fin",
+    )
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "music_form"
+
+
+def test_iter_subject_requests_defaults_unknown_source_to_subject() -> None:
+    g = _build_subject_canonical_graph(subject_label="something", subject_source="lcsh")
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "subject"
+
+
+def test_iter_subject_requests_skips_uri_targets() -> None:
+    """Pre-resolved $0 subjects are not re-reconciled."""
+    g = _build_subject_canonical_graph(
+        subject_label=None,
+        subject_uri="http://www.yso.fi/onto/yso/p105076",
+    )
+    assert list(_iter_subject_requests(g)) == []
+
+
+def test_iter_subject_requests_treats_missing_source_as_subject() -> None:
+    g = _build_subject_canonical_graph(subject_label="Tampere", subject_source=None)
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "subject"
+
+
+def test_apply_reconciliation_subject_path_links_authority_and_bridges_blank_node() -> None:
+    g = _build_subject_canonical_graph(subject_label="Tampere", subject_source="yso/fin")
+    yso_uri = "http://www.yso.fi/onto/yso/p105076"
+    client = StubAuthorityClient(
+        fixtures={
+            ("subject", "Tampere"): [
+                _candidate(yso_uri, "Tampere", 0.99, vocab="yso"),
+            ]
+        }
+    )
+    summary, outcomes = apply_reconciliation(
+        client=client,
+        picker=StubPicker(),
+        graph=g,
+        kinds={"subject"},
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+    )
+    assert summary.lexical == 1
+    assert summary.total == 1
+    work = URIRef(WORK)
+    assert (work, V.BFFI.subject, URIRef(yso_uri)) in g
+    # The original blank-node target survives and now bridges to the authority.
+    blank_targets = [o for o in g.objects(work, V.BFFI.subject) if not isinstance(o, URIRef)]
+    assert len(blank_targets) == 1
+    bridges = list(g.objects(blank_targets[0], V.PROV.specializationOf))
+    assert URIRef(yso_uri) in bridges
+    # AdminMetadata picked up the source-consulted side-effect like the creator path.
+    block = next(g.objects(work, V.adminMetadata))
+    assert (block, V.sourceConsulted, URIRef(yso_uri)) in g
+    assert outcomes[0].request.kind == "subject"
+
+
+def test_apply_reconciliation_genre_path_uses_genre_form_predicate() -> None:
+    g = _build_subject_canonical_graph(
+        subject_label=None,
+        genre_label="historialliset romaanit",
+        genre_source="kauno/fin",
+    )
+    kauno_uri = "http://urn.fi/URN:NBN:fi:au:kauno:p1234"
+    client = StubAuthorityClient(
+        fixtures={
+            ("genre_form", "historialliset romaanit"): [
+                _candidate(kauno_uri, "historialliset romaanit", 0.99, vocab="kauno"),
+            ]
+        }
+    )
+    summary, _ = apply_reconciliation(
+        client=client,
+        picker=StubPicker(),
+        graph=g,
+        kinds={"genre_form"},
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+    )
+    assert summary.lexical == 1
+    work = URIRef(WORK)
+    # Authority binds back via bffi:genreForm, NOT bffi:subject.
+    assert (work, V.BFFI.genreForm, URIRef(kauno_uri)) in g
+    assert (work, V.BFFI.subject, URIRef(kauno_uri)) not in g
+
+
+def test_apply_reconciliation_kinds_filter_creators_skips_subjects() -> None:
+    """`kinds={"person", "corporate_body"}` walks creators only."""
+    g = _build_subject_canonical_graph(subject_label="Tampere", subject_source="yso/fin")
+    primary = StubAuthorityClient(
+        fixtures={
+            ("person", "Tolstoy, Leo,"): [
+                _candidate("http://kanto/1", "Tolstoy, Leo,", 0.99),
+            ],
+            # A subject candidate is wired but should not be queried.
+            ("subject", "Tampere"): [
+                _candidate("http://yso/1", "Tampere", 0.99, vocab="yso"),
+            ],
+        }
+    )
+    summary, outcomes = apply_reconciliation(
+        client=primary,
+        picker=StubPicker(),
+        graph=g,
+        kinds={"person", "corporate_body"},
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+    )
+    assert summary.total == 1
+    assert {o.request.kind for o in outcomes} == {"person"}
+    work = URIRef(WORK)
+    # No subject reconciliation happened.
+    assert (work, V.BFFI.subject, URIRef("http://yso/1")) not in g
+
+
+def test_apply_reconciliation_kinds_none_walks_all_kinds() -> None:
+    """Default ``kinds=None`` runs creators + subjects in the same pass."""
+    g = _build_subject_canonical_graph(subject_label="Tampere", subject_source="yso/fin")
+    client = StubAuthorityClient(
+        fixtures={
+            ("person", "Tolstoy, Leo,"): [
+                _candidate("http://kanto/1", "Tolstoy, Leo,", 0.99),
+            ],
+            ("subject", "Tampere"): [
+                _candidate("http://yso/1", "Tampere", 0.99, vocab="yso"),
+            ],
+        }
+    )
+    summary, outcomes = apply_reconciliation(
+        client=client,
+        picker=StubPicker(),
+        graph=g,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+    )
+    assert summary.total == 2
+    kinds_seen = {o.request.kind for o in outcomes}
+    assert kinds_seen == {"person", "subject"}
+    work = URIRef(WORK)
+    assert (work, V.BFFI.creator, URIRef("http://kanto/1")) in g
+    assert (work, V.BFFI.subject, URIRef("http://yso/1")) in g
+
+
+def test_all_authority_kinds_constant_covers_every_authority_kind() -> None:
+    expected = frozenset({"person", "corporate_body", "subject", "genre_form", "music_form"})
+    assert expected == ALL_AUTHORITY_KINDS

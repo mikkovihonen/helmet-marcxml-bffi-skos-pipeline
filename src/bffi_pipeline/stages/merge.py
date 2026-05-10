@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Final
 from typing import Literal as LiteralType
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
 from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF
 
@@ -187,6 +187,29 @@ def _detect_conflicts(
 # --- BFFI graph extraction ------------------------------------------------
 
 
+@dataclass(frozen=True)
+class SubjectTarget:
+    """One ``bffi:subject`` or ``bffi:genreForm`` target.
+
+    Either pre-resolved (``uri`` set, label/source unused) — the
+    cataloguer supplied a ``$0`` authority URI in MARC 6XX; or
+    unresolved (``uri`` None, ``label`` set) — the canonical Work
+    carries a blank-node target with an ``rdfs:label`` from MARC
+    ``$a`` and a ``bf:source`` literal (e.g. ``"yso/fin"``).
+
+    M9 phase 3 walks the unresolved subjects and binds them to
+    authority URIs via Finto. The resolved-URI case is left alone.
+    """
+
+    uri: str | None = None
+    label: str | None = None
+    source: str | None = None
+
+    @property
+    def is_resolved(self) -> bool:
+        return self.uri is not None
+
+
 @dataclass
 class CanonicalWorkInputs:
     """Per-Work data the merge step needs to mint a canonical Work URI."""
@@ -197,6 +220,10 @@ class CanonicalWorkInputs:
     expression_uris: list[str] = field(default_factory=list)
     helmet_identifiers: list[tuple[str, str]] = field(default_factory=list)
     """List of (identifier_uri, helmet_bib_id) pairs as found on bf:identifiedBy."""
+    subject_targets: list[SubjectTarget] = field(default_factory=list)
+    """``bffi:subject`` targets; M9 phase 3 reconciles unresolved ones."""
+    genre_form_targets: list[SubjectTarget] = field(default_factory=list)
+    """``bffi:genreForm`` targets; M9 phase 3 reconciles unresolved ones."""
 
 
 def _first_pref_label(graph: Graph, subject: URIRef) -> str | None:
@@ -232,12 +259,49 @@ def _helmet_identifiers(graph: Graph, work: URIRef) -> list[tuple[str, str]]:
     return out
 
 
+def _subject_targets(graph: Graph, work: URIRef, predicate: URIRef) -> list[SubjectTarget]:
+    """Walk ``work``'s ``bffi:subject`` / ``bffi:genreForm`` targets.
+
+    Returns a :class:`SubjectTarget` per object with either:
+    - ``uri`` set (the cataloguer pre-resolved with MARC 6XX ``$0``); or
+    - ``label`` + ``source`` set (the target is a blank node carrying
+      an ``rdfs:label`` — what marc2bibframe2 emits for unresolved
+      MARC 6XX entries).
+
+    Targets we can't classify (no URI and no label) are skipped — they
+    carry no useful information for either propagation or
+    reconciliation.
+    """
+    out: list[SubjectTarget] = []
+    for obj in graph.objects(work, predicate):
+        if isinstance(obj, URIRef):
+            out.append(SubjectTarget(uri=str(obj)))
+            continue
+        # Blank-node target — collect its label + source.
+        label: str | None = None
+        for lab in graph.objects(obj, V.RDFS.label):
+            if isinstance(lab, RdfLiteral):
+                label = str(lab)
+                break
+        source: str | None = None
+        for src in graph.objects(obj, V.BF.source):
+            if isinstance(src, RdfLiteral):
+                source = str(src)
+                break
+        if label is None and source is None:
+            continue
+        out.append(SubjectTarget(label=label, source=source))
+    return out
+
+
 def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
     """Walk the combined BFFI + BIBFRAME graph and return per-Work merge inputs."""
     out: dict[str, CanonicalWorkInputs] = {}
     for work in graph.subjects(RDF.type, V.BFFI.Work):
         if not isinstance(work, URIRef):
             continue
+        subjects = _subject_targets(graph, work, V.BFFI.subject)
+        genres = _subject_targets(graph, work, V.BFFI.genreForm)
         out[str(work)] = CanonicalWorkInputs(
             work_uri=str(work),
             creator_uri=_primary_agent_uri(graph, work),
@@ -248,6 +312,8 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
                 if isinstance(expr, URIRef)
             ),
             helmet_identifiers=_helmet_identifiers(graph, work),
+            subject_targets=subjects,
+            genre_form_targets=genres,
         )
     return out
 
@@ -339,6 +405,65 @@ def _admin_metadata_uri(canonical_uri: str) -> URIRef:
     return URIRef(f"{get_settings().graph_base}adminmeta/{digest}")
 
 
+def _propagate_subject_targets(
+    g: Graph,
+    *,
+    canonical_uri: URIRef,
+    members: list[CanonicalWorkInputs],
+    predicate: URIRef,
+    attr: LiteralType["subject_targets", "genre_form_targets"],
+) -> None:
+    """Emit ``predicate`` triples on ``canonical_uri`` from each member's targets.
+
+    Resolved targets (the cataloguer supplied a ``$0`` URI in MARC 6XX)
+    dedupe across members by URI. Unresolved targets (blank-node with
+    ``rdfs:label`` + ``bf:source``) dedupe by ``(label, source)`` so the
+    same cataloguer subject string from N raw Works produces exactly one
+    blank node on the canonical — M9 phase 3 reconciles each one once.
+    """
+    seen_uris: set[str] = set()
+    seen_blank_keys: set[tuple[str | None, str | None]] = set()
+    blank_targets: list[SubjectTarget] = []
+    for member in members:
+        for target in getattr(member, attr):
+            if target.is_resolved:
+                assert target.uri is not None
+                if target.uri in seen_uris:
+                    continue
+                seen_uris.add(target.uri)
+                g.add((canonical_uri, predicate, URIRef(target.uri)))
+                continue
+            key = (target.label, target.source)
+            if key in seen_blank_keys:
+                continue
+            seen_blank_keys.add(key)
+            blank_targets.append(target)
+    # Order blank-node emission deterministically AND mint stable BNode
+    # identifiers from a hash of (canonical, predicate, label, source) so
+    # canonical.ttl is byte-stable across runs. rdflib's default
+    # BNode() uses a process-local counter, which would otherwise leak
+    # non-determinism into the serialised file.
+    blank_targets.sort(key=lambda t: (t.label or "", t.source or ""))
+    predicate_str = str(predicate)
+    for target in blank_targets:
+        digest = hashlib.sha1(
+            "|".join(
+                (
+                    str(canonical_uri),
+                    predicate_str,
+                    target.label or "",
+                    target.source or "",
+                )
+            ).encode("utf-8")
+        ).hexdigest()
+        node = BNode(f"sub{digest}")
+        g.add((canonical_uri, predicate, node))
+        if target.label is not None:
+            g.add((node, V.RDFS.label, Literal(target.label)))
+        if target.source is not None:
+            g.add((node, V.BF.source, Literal(target.source)))
+
+
 def _emit_canonical_work(
     g: Graph,
     *,
@@ -385,6 +510,26 @@ def _emit_canonical_work(
     raw_uris_sorted = sorted(m.work_uri for m in members)
     for raw in raw_uris_sorted:
         g.add((canonical_uri, V.PROV.wasDerivedFrom, URIRef(raw)))
+
+    # Propagate bffi:subject + bffi:genreForm onto the canonical Work.
+    # Resolved (URI) targets dedupe across members; unresolved (blank-node)
+    # targets dedupe by (label, source) so two raw Works carrying the same
+    # cataloguer subject string emit one blank node on the canonical, ready
+    # for M9 phase 3 to reconcile against Finto.
+    _propagate_subject_targets(
+        g,
+        canonical_uri=canonical_uri,
+        members=members,
+        predicate=V.BFFI.subject,
+        attr="subject_targets",
+    )
+    _propagate_subject_targets(
+        g,
+        canonical_uri=canonical_uri,
+        members=members,
+        predicate=V.BFFI.genreForm,
+        attr="genre_form_targets",
+    )
 
     # AdminMetadata block — every predicate from spec § 8 / BUILD_PLAN M8.
     admin_uri = _admin_metadata_uri(str(canonical_uri))
@@ -652,6 +797,7 @@ __all__ = [
     "HelmetMapEntry",
     "JudgeDecisionRow",
     "MergeResult",
+    "SubjectTarget",
     "apply_merge",
     "extract_work_metadata",
 ]

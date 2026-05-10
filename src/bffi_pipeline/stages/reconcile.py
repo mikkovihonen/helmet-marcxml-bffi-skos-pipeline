@@ -99,11 +99,20 @@ FINTO_BASE_URL: Final[str] = "https://api.finto.fi/rest/v1"
 
 @dataclass(frozen=True)
 class EntityRequest:
-    """One reconciliation input drawn from a canonical Work."""
+    """One reconciliation input drawn from a canonical Work.
+
+    ``predicate_uri`` is set for subject/genre/music requests so the
+    dispatcher knows whether to bind the chosen authority back as
+    ``bffi:subject`` or ``bffi:genreForm`` — the cataloguer's MARC tag
+    chose the predicate at M2 conversion time, and reconciliation must
+    preserve it. Creator requests leave it ``None``; the creator linker
+    rewrites ``bffi:contribution`` instead.
+    """
 
     work_uri: str
     literal: str
     kind: AuthorityKind
+    predicate_uri: str | None = None
 
 
 @dataclass(frozen=True)
@@ -816,6 +825,81 @@ def _iter_creator_requests(graph: Graph) -> Iterator[EntityRequest]:
                         break
 
 
+#: Maps the ``bf:source`` literal that marc2bibframe2 emits on unresolved
+#: 6XX targets to the reconciliation kind that selects the right Finto
+#: vocabulary. Anything not matched here defaults to ``"subject"`` (YSO),
+#: which is the broadest of the three subject vocabularies and the safest
+#: backstop when MARC ``$2`` is missing or unrecognised.
+_SOURCE_PREFIX_TO_KIND: Final[tuple[tuple[str, AuthorityKind], ...]] = (
+    ("yso", "subject"),
+    ("kauno", "genre_form"),
+    ("muso", "music_form"),
+)
+
+
+def _classify_subject_source(source: str | None) -> AuthorityKind:
+    """Map a ``bf:source`` literal to the M9 authority kind."""
+    if source is None:
+        return "subject"
+    lowered = source.casefold()
+    for prefix, kind in _SOURCE_PREFIX_TO_KIND:
+        if lowered.startswith(prefix):
+            return kind
+    return "subject"
+
+
+def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
+    """Yield reconciliation requests for unresolved ``bffi:subject`` / ``bffi:genreForm``.
+
+    Walks canonical Works (``bffi:Work``) and emits one
+    :class:`EntityRequest` per blank-node subject/genreForm target that
+    carries an ``rdfs:label``. URI-valued targets are skipped — those
+    were pre-resolved by the cataloguer's MARC ``$0`` subfield and don't
+    need reconciliation.
+
+    Routing by ``bf:source``:
+    - ``yso*``   → ``subject`` (YSO)
+    - ``kauno*`` → ``genre_form`` (KAUNO)
+    - ``muso*``  → ``music_form`` (MUSO)
+    - missing / unknown → ``subject`` (YSO default)
+
+    Resolution priority between predicates: any ``bffi:genreForm`` blank
+    node with ``yso*`` source still routes by source (i.e. YSO), because
+    cataloguer-supplied source vocabulary trumps the MARC tag the
+    pipeline used to mint the predicate. This keeps the request kind
+    aligned with the candidate set the authority client returns.
+
+    Deduplication is *not* applied here — the apply step caches per
+    ``(kind, literal)`` lookups, so two canonical Works asking for the
+    same subject only hit Finto once.
+    """
+    for work in graph.subjects(RDF.type, V.BFFI.Work):
+        if not isinstance(work, URIRef):
+            continue
+        for predicate in (V.BFFI.subject, V.BFFI.genreForm):
+            for target in graph.objects(work, predicate):
+                if isinstance(target, URIRef):
+                    continue  # pre-resolved by cataloguer; skip.
+                label_lit: RdfLiteral | None = None
+                for lab in graph.objects(target, V.RDFS.label):
+                    if isinstance(lab, RdfLiteral):
+                        label_lit = lab
+                        break
+                if label_lit is None:
+                    continue
+                source: str | None = None
+                for src in graph.objects(target, V.BF.source):
+                    if isinstance(src, RdfLiteral):
+                        source = str(src)
+                        break
+                yield EntityRequest(
+                    work_uri=str(work),
+                    literal=str(label_lit),
+                    kind=_classify_subject_source(source),
+                    predicate_uri=str(predicate),
+                )
+
+
 def _admin_block_for(graph: Graph, work: URIRef) -> URIRef | None:
     for block in graph.objects(work, V.adminMetadata):
         if isinstance(block, URIRef):
@@ -859,9 +943,9 @@ def _bump_admin_metadata(
 def _link_canonical_creator(graph: Graph, work_uri: str, chosen_uri: str) -> None:
     """Add ``<work> bffi:creator <authority>`` and rewrite the agent URI on the contribution.
 
-    Also adds ``owl:sameAs`` from the existing agent URI to the chosen
-    authority URI so downstream consumers of the M3 raw graph still
-    have a one-hop bridge to the reconciled identity.
+    Also adds ``prov:specializationOf`` from the existing agent URI to
+    the chosen authority URI so downstream consumers of the M3 raw graph
+    still have a one-hop bridge to the reconciled identity.
     """
     work = URIRef(work_uri)
     auth = URIRef(chosen_uri)
@@ -872,6 +956,58 @@ def _link_canonical_creator(graph: Graph, work_uri: str, chosen_uri: str) -> Non
         for agent in list(graph.objects(contrib, V.BFFI.agent)):
             if isinstance(agent, URIRef) and str(agent) != chosen_uri:
                 graph.add((agent, V.PROV.specializationOf, auth))
+
+
+def _link_canonical_subject(
+    graph: Graph,
+    *,
+    work_uri: str,
+    chosen_uri: str,
+    predicate_uri: str,
+    literal: str,
+) -> None:
+    """Add ``<work> <predicate> <authority>`` and bridge the original blank node.
+
+    The blank-node target M8 propagated onto the canonical Work stays in
+    place (it preserves the cataloguer's literal for audit), and gains a
+    ``prov:specializationOf`` triple pointing at the chosen authority.
+    The same predicate (``bffi:subject`` or ``bffi:genreForm``) the M8
+    propagation used is re-used here — the cataloguer's MARC tag, not
+    the Finto vocabulary, decides which slot the authority binds into.
+    """
+    work = URIRef(work_uri)
+    auth = URIRef(chosen_uri)
+    predicate = URIRef(predicate_uri)
+    graph.add((work, predicate, auth))
+    for target in graph.objects(work, predicate):
+        if isinstance(target, URIRef):
+            continue
+        # Bridge only the blank node whose label matches the input literal,
+        # so two distinct cataloguer subjects on the same canonical (e.g.
+        # "Tampere" and "Helsinki") don't accidentally share a bridge.
+        for label in graph.objects(target, V.RDFS.label):
+            if isinstance(label, RdfLiteral) and str(label) == literal:
+                graph.add((target, V.PROV.specializationOf, auth))
+                break
+
+
+def _apply_canonical_link(graph: Graph, request: EntityRequest, chosen_uri: str) -> None:
+    """Dispatch the per-kind binding logic on a successful reconciliation."""
+    if request.kind in {"person", "corporate_body"}:
+        _link_canonical_creator(graph, request.work_uri, chosen_uri)
+        return
+    # Subject-side requests must carry their predicate. If a caller
+    # hand-built an EntityRequest without going through
+    # `_iter_subject_requests`, fall back to bffi:subject so we don't
+    # drop the binding silently.
+    predicate_uri = request.predicate_uri or str(V.BFFI.subject)
+    _link_canonical_subject(
+        graph,
+        work_uri=request.work_uri,
+        chosen_uri=chosen_uri,
+        predicate_uri=predicate_uri,
+        literal=request.literal,
+    )
 
 
 def _emit_provenance(
@@ -915,6 +1051,28 @@ def reconcile_one(
     return decide_reconciliation(request=request, candidates=candidates, picker=picker)
 
 
+#: All authority kinds the orchestrator can walk for. Mirrors the
+#: ``AuthorityKind`` Literal; kept as a runtime ``frozenset`` so callers
+#: can build subsets ergonomically (``{"person", "corporate_body"}``).
+ALL_AUTHORITY_KINDS: Final[frozenset[AuthorityKind]] = frozenset(
+    {"person", "corporate_body", "subject", "genre_form", "music_form"}
+)
+_CREATOR_KINDS: Final[frozenset[AuthorityKind]] = frozenset({"person", "corporate_body"})
+_SUBJECT_KINDS: Final[frozenset[AuthorityKind]] = frozenset({"subject", "genre_form", "music_form"})
+
+
+def _collect_requests(
+    graph: Graph, selected_kinds: frozenset[AuthorityKind]
+) -> list[EntityRequest]:
+    """Walk the canonical graph and yield reconciliation requests filtered by kind."""
+    out: list[EntityRequest] = []
+    if selected_kinds & _CREATOR_KINDS:
+        out.extend(r for r in _iter_creator_requests(graph) if r.kind in selected_kinds)
+    if selected_kinds & _SUBJECT_KINDS:
+        out.extend(r for r in _iter_subject_requests(graph) if r.kind in selected_kinds)
+    return out
+
+
 def apply_reconciliation(
     canonical_path: Path | None = None,
     *,
@@ -927,18 +1085,29 @@ def apply_reconciliation(
     graph: Graph | None = None,
     top_k: int = DEFAULT_TOP_K,
     now: datetime | None = None,
+    kinds: set[AuthorityKind] | frozenset[AuthorityKind] | None = None,
 ) -> tuple[ReconciliationSummary, list[ReconciliationOutcome]]:
-    """Walk canonical.ttl, run reconcile_one per creator, and write the graph back.
+    """Walk canonical.ttl, reconcile creators + subjects, and write the graph back.
 
     ``graph`` is an injection point for tests so the same orchestrator
     can run against an in-memory graph without serialising to disk.
     Production callers leave it ``None``; the orchestrator parses
     ``canonical_path``, mutates the graph, and serialises it back.
+
+    ``kinds`` filters which reconciliation paths to walk. ``None`` means
+    "all kinds" (creators + subjects + genre/forms). Pass
+    ``{"person", "corporate_body"}`` to limit to creators, or
+    ``{"subject", "genre_form", "music_form"}`` to limit to the subject
+    side. Explicit ``requests=`` overrides this filter — the caller is
+    assumed to have done the filtering already.
     """
     settings = get_settings()
     canonical_path = canonical_path or (settings.data_dir / "canonical.ttl")
     output_path = output_path or canonical_path
     moment = (now or datetime.now(UTC)).replace(microsecond=0)
+    selected_kinds: frozenset[AuthorityKind] = (
+        ALL_AUTHORITY_KINDS if kinds is None else frozenset(kinds)
+    )
 
     own_graph = graph is None
     target_graph: Graph
@@ -950,7 +1119,7 @@ def apply_reconciliation(
         target_graph = graph
 
     request_list: list[EntityRequest] = (
-        list(requests) if requests is not None else list(_iter_creator_requests(target_graph))
+        list(requests) if requests is not None else _collect_requests(target_graph, selected_kinds)
     )
 
     summary = ReconciliationSummary(total=len(request_list))
@@ -978,7 +1147,7 @@ def apply_reconciliation(
             summary.no_candidate += 1
 
         if outcome.chosen_uri is not None:
-            _link_canonical_creator(target_graph, outcome.request.work_uri, outcome.chosen_uri)
+            _apply_canonical_link(target_graph, outcome.request, outcome.chosen_uri)
             _bump_admin_metadata(
                 target_graph,
                 outcome.request.work_uri,
@@ -997,6 +1166,7 @@ def apply_reconciliation(
 
 
 __all__ = [
+    "ALL_AUTHORITY_KINDS",
     "DEFAULT_TOP_K",
     "FINTO_BASE_URL",
     "LEXICAL_DIRECT_THRESHOLD",

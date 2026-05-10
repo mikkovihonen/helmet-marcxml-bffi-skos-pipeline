@@ -22,6 +22,7 @@ from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.merge import (
     CanonicalWorkInputs,
     HelmetMapEntry,
+    SubjectTarget,
     apply_merge,
 )
 
@@ -438,3 +439,132 @@ def test_decisions_with_uncertain_are_counted_but_dont_merge(tmp_path: Path) -> 
     # 3 singletons, no merge, no conflicts.
     assert len(rows) == 3
     assert conflicts.read_text().strip() == ""
+
+
+# --- Subject + genreForm propagation (M8 extension for M9 phase 3) -------
+
+
+YSO_TAMPERE = "http://www.yso.fi/onto/yso/p105076"
+YSO_HELSINKI = "http://www.yso.fi/onto/yso/p105080"
+
+
+def _records_with_subjects() -> dict[str, CanonicalWorkInputs]:
+    """Two members of one merge group, each carrying overlapping subjects."""
+    return {
+        WORK_A: CanonicalWorkInputs(
+            work_uri=WORK_A,
+            creator_uri=AGENT_TOLSTOY,
+            pref_label="Sota ja rauha",
+            expression_uris=[EXPR_A],
+            helmet_identifiers=[("http://example.org/ident/a1", "111")],
+            subject_targets=[
+                SubjectTarget(uri=YSO_TAMPERE),
+                SubjectTarget(label="Sota", source="yso/fin"),
+            ],
+            genre_form_targets=[
+                SubjectTarget(label="historialliset romaanit", source="kauno/fin"),
+            ],
+        ),
+        WORK_B: CanonicalWorkInputs(
+            work_uri=WORK_B,
+            creator_uri=AGENT_TOLSTOY,
+            pref_label="Война и мир",
+            expression_uris=[EXPR_B],
+            helmet_identifiers=[("http://example.org/ident/b1", "222")],
+            subject_targets=[
+                SubjectTarget(uri=YSO_TAMPERE),  # duplicate URI across members
+                SubjectTarget(uri=YSO_HELSINKI),  # only on B
+                SubjectTarget(label="Sota", source="yso/fin"),  # duplicate blank-node key
+            ],
+            genre_form_targets=[
+                SubjectTarget(label="sotaromaanit", source="kauno/fin"),
+            ],
+        ),
+        WORK_C: CanonicalWorkInputs(  # singleton — gets its own canonical
+            work_uri=WORK_C,
+            creator_uri=AGENT_TOLSTOY,
+            pref_label="War and Peace",
+            expression_uris=[EXPR_C],
+            helmet_identifiers=[("http://example.org/ident/c1", "333")],
+        ),
+    }
+
+
+def _merged_canonical(g: Graph) -> URIRef:
+    """The merged-group canonical (the one with > 1 bf:identifiedBy)."""
+    for c in g.subjects(V.RDF.type, V.BFFI.Work):
+        if isinstance(c, URIRef) and len(list(g.objects(c, V.BF.identifiedBy))) > 1:
+            return c
+    raise AssertionError("no merged canonical found")
+
+
+def test_uri_subjects_propagate_and_dedupe_across_absorbed_members(tmp_path: Path) -> None:
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_subjects(),
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    canonical = _merged_canonical(g)
+    subjects = sorted(str(o) for o in g.objects(canonical, V.BFFI.subject) if isinstance(o, URIRef))
+    # YSO_TAMPERE is shared (A and B) and dedupes to one triple; YSO_HELSINKI
+    # only appears on B but still propagates.
+    assert subjects == sorted([YSO_TAMPERE, YSO_HELSINKI])
+
+
+def test_blank_node_subjects_propagate_with_label_and_source(tmp_path: Path) -> None:
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_subjects(),
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    canonical = _merged_canonical(g)
+    blank_targets = [o for o in g.objects(canonical, V.BFFI.subject) if not isinstance(o, URIRef)]
+    # Both A and B carry the same ("Sota", "yso/fin") blank-node key →
+    # one blank node on the canonical, not two.
+    assert len(blank_targets) == 1
+    target = blank_targets[0]
+    labels = {str(o) for o in g.objects(target, V.RDFS.label)}
+    sources = {str(o) for o in g.objects(target, V.BF.source)}
+    assert labels == {"Sota"}
+    assert sources == {"yso/fin"}
+
+
+def test_genre_form_propagation_uses_genre_form_predicate(tmp_path: Path) -> None:
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_subjects(),
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    canonical = _merged_canonical(g)
+    # Both members contribute one distinct genre-form blank node each.
+    genre_forms = list(g.objects(canonical, V.BFFI.genreForm))
+    assert len(genre_forms) == 2
+    labels = sorted(
+        str(label) for target in genre_forms for label in g.objects(target, V.RDFS.label)
+    )
+    assert labels == ["historialliset romaanit", "sotaromaanit"]
+
+
+def test_subject_propagation_byte_stable_across_runs(tmp_path: Path) -> None:
+    """The blank-node ordering is deterministic so canonical.ttl is byte-stable."""
+    fixed = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+    canonical1, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_subjects(),
+        now=fixed,
+    )
+    bytes_1 = canonical1.read_bytes()
+    canonical2, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="same_work")],
+        work_records=_records_with_subjects(),
+        now=fixed,
+    )
+    assert canonical2.read_bytes() == bytes_1
