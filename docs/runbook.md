@@ -55,6 +55,56 @@ Two things to plan around:
    gold-set runs and the few-hundred-pair test sweeps. Production
    passes use `--concurrency` ≥ 4 and the vllm-mlx server.
 
+## Source-data export — Helmet Sierra Postgres replica
+
+Upstream of M2 sits `marcxml-export-sierra`
+([`src/marcxml_export_pipeline/sierra/`](../src/marcxml_export_pipeline/sierra/)),
+which streams the Sierra Postgres replica and writes one MARCXML
+file per non-suppressed bib record. The exporter synthesises
+MARC 001 (from `record_num`), 003 (`FI-HELME`), 005 (record-
+modified timestamp), and 907 (`.b<num><check>`) when the source
+varfields lack them — this is what keeps marc2bibframe2's
+work-key contract clean downstream (records with a blank 001 get
+clustered into a single bogus canonical Work, the "SupaRed"
+incident).
+
+The Helmet operator runs this with **DB access enabled and
+public-internet disabled** (network policy). The pre-flight
++ offline export + smoke + validate + full sequence lives in
+[`scripts/run-sierra-export.sh`](../scripts/run-sierra-export.sh).
+
+```bash
+# .env should carry: DB_HOST / DB_PORT / DB_USER / DB_PASSWORD /
+# DB_NAME (Sierra Postgres replica) and optionally
+# MARCXML_EXPORT_AGENCY_CODE (defaults to FI-HELME).
+
+# 1. With internet still on: seed local Fuseki with vocab dumps
+#    and confirm the Ollama judge models are pulled.
+uv run bffi-pipeline load-finto
+ollama list                       # expect the LLM_MODEL_PRIMARY/FALLBACK tags
+
+# 2. Switch DB on, internet off. Smoke export + local validation,
+#    no full export yet.
+scripts/run-sierra-export.sh
+# → /tmp/sierra-smoke/<bib_id>.xml (500 rows)
+# → /tmp/sierra-smoke-validated/bibframe/*.rdf via marc2bibframe2
+# → stops with "STOP" banner unless --confirm-full is passed.
+
+# 3. If smoke + validate are green, gated full export:
+scripts/run-sierra-export.sh --confirm-full
+# → ./marcxml/sierra/<bib_id>.xml for every non-suppressed bib
+#   (~800 k rows; 1-2 h on a healthy replica).
+
+# 4. Switch DB off, internet on. The downstream pipeline reads the
+#    on-disk MARCXML and never touches the ILS again.
+```
+
+The exporter is shipped as a sibling Python package
+(`marcxml_export_pipeline.sierra`) rather than nested under
+`bffi_pipeline` so future ILS sources (Koha, Alma, …) can grow
+as additional sub-packages without entangling them with the
+BFFI conversion code.
+
 ## End-to-end command sequence
 
 The whole pipeline against a single record dir:
