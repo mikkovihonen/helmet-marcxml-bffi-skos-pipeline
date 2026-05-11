@@ -49,6 +49,21 @@ class Settings(BaseSettings):
         default="http://localhost:11434/v1",
         alias="LLM_BASE_URL",
     )
+    # Per-tier base URLs for the M6 cascade. Empty string means
+    # "use ``llm_base_url`` for this tier" (backward compatibility
+    # with single-server setups such as Ollama). When set, the
+    # cascade's primary judge calls route to ``llm_base_url_primary``
+    # and the fallback judge calls route to ``llm_base_url_fallback``
+    # — needed for mlx-lm where one process serves one model and the
+    # cascade has to hop between two ports. Plan P-02 § D1.
+    llm_base_url_primary: str = Field(
+        default="",
+        alias="LLM_BASE_URL_PRIMARY",
+    )
+    llm_base_url_fallback: str = Field(
+        default="",
+        alias="LLM_BASE_URL_FALLBACK",
+    )
     llm_api_key: str = Field(default="ollama", alias="LLM_API_KEY")
     llm_model_primary: str = Field(
         default="qwen3:32b-q4_K_M",

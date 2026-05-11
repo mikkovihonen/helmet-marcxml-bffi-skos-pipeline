@@ -689,6 +689,117 @@ def test_cascade_does_not_run_fallback_on_different_work_low_confidence(
     assert fallback.calls == []
 
 
+# --- D1 per-port routing (P-02 § D1) -----------------------------------
+
+
+def _make_recorder_build_chain(
+    decisions: dict[str, WorkMatchDecision],
+) -> tuple[list[dict[str, Any]], Any]:
+    """Return ``(calls, build_chain)`` where ``build_chain`` records every
+    kwarg call and returns a ``_ScriptedChain`` keyed on ``base_url``.
+
+    Each unique ``base_url`` may have one queued decision in ``decisions``
+    — the cascade builds at most two chains (primary URL, fallback URL).
+    """
+    calls: list[dict[str, Any]] = []
+
+    def fake_build_chain(**kwargs: Any) -> _ScriptedChain:
+        calls.append(kwargs)
+        url = kwargs["base_url"]
+        return _ScriptedChain([decisions[url]])
+
+    return calls, fake_build_chain
+
+
+_PRIMARY_MODEL = "test-primary-model"
+_FALLBACK_MODEL = "test-fallback-model"
+
+
+def _setup_settings(monkeypatch: pytest.MonkeyPatch, **env: str) -> None:
+    """Pin the LLM-related env vars deterministically and clear the
+    ``get_settings`` cache so the test sees the patched values."""
+    monkeypatch.setenv("LLM_MODEL_PRIMARY", _PRIMARY_MODEL)
+    monkeypatch.setenv("LLM_MODEL_FALLBACK", _FALLBACK_MODEL)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    judge.get_settings.cache_clear()
+
+
+def test_cascade_routes_primary_and_fallback_to_distinct_base_urls(
+    monkeypatch: pytest.MonkeyPatch, tmp_cache: JudgeCache
+) -> None:
+    """Cascade dispatches the primary tier at ``llm_base_url_primary``
+    and the fallback tier at ``llm_base_url_fallback``. No chain
+    injection — exercises the actual URL resolution path used by
+    production callers."""
+    _setup_settings(
+        monkeypatch,
+        LLM_BASE_URL="http://localhost:11434/v1",
+        LLM_BASE_URL_PRIMARY="http://127.0.0.1:8001/v1",
+        LLM_BASE_URL_FALLBACK="http://127.0.0.1:8002/v1",
+    )
+    monkeypatch.setattr(judge, "default_cache_path", lambda: tmp_cache._path)
+
+    decisions = {
+        "http://127.0.0.1:8001/v1": _uncertain(),
+        "http://127.0.0.1:8002/v1": _high_conf_same_work(),
+    }
+    calls, fake = _make_recorder_build_chain(decisions)
+    monkeypatch.setattr(judge, "_build_chain", fake)
+
+    outcome = cascade_judge(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.84,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+    )
+    judge.get_settings.cache_clear()
+
+    assert outcome.used_cascade is True
+    assert outcome.final.decision == "same_work"
+    # _build_chain was called once per tier with the right base_url.
+    by_url = {call["base_url"]: call for call in calls}
+    assert by_url["http://127.0.0.1:8001/v1"]["model_name"] == _PRIMARY_MODEL
+    assert by_url["http://127.0.0.1:8002/v1"]["model_name"] == _FALLBACK_MODEL
+
+
+def test_cascade_falls_back_to_llm_base_url_when_per_tier_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_cache: JudgeCache
+) -> None:
+    """Backward compatibility: when LLM_BASE_URL_PRIMARY /
+    LLM_BASE_URL_FALLBACK are empty (Ollama-shaped setup), both
+    cascade tiers route at ``llm_base_url``."""
+    _setup_settings(
+        monkeypatch,
+        LLM_BASE_URL="http://localhost:11434/v1",
+        LLM_BASE_URL_PRIMARY="",
+        LLM_BASE_URL_FALLBACK="",
+    )
+    monkeypatch.setattr(judge, "default_cache_path", lambda: tmp_cache._path)
+
+    calls: list[dict[str, Any]] = []
+    queue: list[WorkMatchDecision] = [_uncertain(), _high_conf_same_work()]
+
+    def fake_build(**kwargs: Any) -> _ScriptedChain:
+        calls.append(kwargs)
+        return _ScriptedChain([queue.pop(0)])
+
+    monkeypatch.setattr(judge, "_build_chain", fake_build)
+
+    cascade_judge(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.84,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+    )
+    judge.get_settings.cache_clear()
+
+    assert {call["base_url"] for call in calls} == {"http://localhost:11434/v1"}
+    assert [call["model_name"] for call in calls] == [_PRIMARY_MODEL, _FALLBACK_MODEL]
+
+
 # --- synthesize_auto_merge_outcome --------------------------------------
 
 

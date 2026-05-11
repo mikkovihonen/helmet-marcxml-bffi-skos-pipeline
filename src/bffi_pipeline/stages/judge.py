@@ -678,6 +678,7 @@ def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + val
     sim: float,
     *,
     model_name: str | None = None,
+    base_url: str | None = None,
     chain: ChainLike | None = None,
     cache: JudgeCache | None = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -708,9 +709,10 @@ def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + val
     """
     settings = get_settings()
     effective_model = model_name or settings.llm_model_primary
+    effective_base_url = base_url or settings.llm_base_url
     chain = chain or _build_chain(
         model_name=effective_model,
-        base_url=settings.llm_base_url,
+        base_url=effective_base_url,
         api_key=settings.llm_api_key,
         full_rationale=full_rationale,
         timeout=settings.llm_call_timeout_seconds,
@@ -853,6 +855,8 @@ def cascade_judge(
     *,
     primary_model: str | None = None,
     fallback_model: str | None = None,
+    primary_base_url: str | None = None,
+    fallback_base_url: str | None = None,
     primary_chain: ChainLike | None = None,
     fallback_chain: ChainLike | None = None,
     cache: JudgeCache | None = None,
@@ -879,6 +883,13 @@ def cascade_judge(
     primary_name = primary_model or settings.llm_model_primary
     fallback_name = fallback_model or settings.llm_model_fallback
 
+    # Per-tier base URL resolution (plan P-02 § D1). Explicit kwarg
+    # wins; otherwise fall through to the per-tier env var; otherwise
+    # to the single ``llm_base_url`` (Ollama-shaped setups where one
+    # process serves both models). Empty string means "unset".
+    primary_url = primary_base_url or settings.llm_base_url_primary or settings.llm_base_url
+    fallback_url = fallback_base_url or settings.llm_base_url_fallback or settings.llm_base_url
+
     # Per-pair wall-time ceiling (P-03 Phase B). Single deadline
     # shared across both cascade tiers — the budget belongs to the
     # pair, not the individual model attempt.
@@ -896,6 +907,7 @@ def cascade_judge(
             record_b,
             sim,
             model_name=primary_name,
+            base_url=primary_url,
             chain=primary_chain,
             cache=cache,
             sleep=sleep,
@@ -920,6 +932,7 @@ def cascade_judge(
             record_b,
             sim,
             model_name=fallback_name,
+            base_url=fallback_url,
             chain=fallback_chain,
             cache=cache,
             sleep=sleep,
