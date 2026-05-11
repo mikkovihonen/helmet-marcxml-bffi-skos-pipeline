@@ -3,6 +3,22 @@
 **Status**: proposed.
 **Scope**: 1-2 days for the MVP (Option 1 below); milestone-sized if
 we also want Options 2 + 3.
+**Proposal-base commit**: `8f4affe` (initial draft as part of the
+combined `performance-enhancements.md`). Material updates since
+then:
+
+- `9789c20` — k-NN critique folded into Open questions.
+- `2966bb2` — file extracted from the combined doc into its own
+  per-proposal file.
+
+To gauge how much the project has changed since drafting, run
+`git diff 8f4affe..HEAD -- src/bffi_pipeline/stages/judge.py
+src/bffi_pipeline/stages/embeddings.py
+src/bffi_pipeline/stages/merge.py
+src/bffi_pipeline/provenance/`. The "Motivation" and "Approach"
+sections were authored against the structure those files had at
+`8f4affe`; significant refactors there mean the proposal needs a
+re-read before it graduates.
 
 ## Motivation
 

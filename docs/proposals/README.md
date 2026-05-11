@@ -27,15 +27,17 @@ prose.
 
 Each proposal carries these sections:
 
+- **Status** — `proposed` / `planning (graduated)` / `done` /
+  `rejected (reason)`. Read that first before treating anything in
+  here as a plan of record.
+- **Scope** — rough size (half-day / 1-2 days / 1-2 weeks / milestone).
+- **Proposal-base commit** — see "Tying proposals to version
+  control" below.
 - **Motivation** — what the current pipeline does, and what's
   expensive about it.
 - **Approach** — the proposed change, kept high-level.
 - **Prerequisites** — what has to be true before we can start.
 - **Risks** — what could go wrong, and how we'd notice.
-- **Scope** — rough size (half-day / 1-2 days / 1-2 weeks / milestone).
-- **Status** — `proposed` / `planning (graduated)` / `done` /
-  `rejected (reason)`. Read that first before treating anything in
-  here as a plan of record.
 - **Open questions** — anything that should be settled before the
   proposal can graduate. Counterpoints and rejected alternatives
   also live here (with the reasoning) so the trade-off is on the
@@ -44,6 +46,34 @@ Each proposal carries these sections:
 A proposal in the `planning (graduated)` state may collapse most of
 this template to a short stub pointing at its corresponding plan
 under `docs/plans/`.
+
+## Tying proposals to version control
+
+A proposal is a snapshot. Its "Motivation" and "Approach" reason
+about the code as it stood when the proposal was drafted; if `main`
+moves a lot before the proposal is acted on, parts can quietly go
+stale. To make that drift detectable, each proposal carries a
+**Proposal-base commit** field near the top:
+
+- The base commit is the commit the proposal was drafted against
+  (usually the commit that introduced the proposal file, or its
+  parent if the proposal was reasoning about a state just before
+  its own landing).
+- **Material updates** are listed as a short bullet list under the
+  base — each entry pairs a commit hash with one phrase describing
+  what changed in the proposal text (e.g. "added counterpoint", "
+  prerequisites tightened"). These give a fast way to scan the
+  proposal's intellectual history without `git log -p` archaeology.
+- Before acting on a proposal, run `git diff <base>..HEAD --
+  <relevant paths>` to confirm the section the proposal touches has
+  not been refactored out from under it. The proposal should
+  explicitly name those relevant paths.
+
+When a proposal graduates into a plan, the plan picks up its own
+**Plan-base commit** field (see [`docs/plans/README.md`](../plans/README.md)).
+The proposal's commit-hash trail and the plan's are independent
+records — the proposal documents *when the idea was conceived*; the
+plan documents *when the execution was scheduled*.
 
 ## Current proposals
 
