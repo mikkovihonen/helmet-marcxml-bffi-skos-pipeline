@@ -74,12 +74,20 @@ LLM_CONFIDENCE_THRESHOLD: Final[float] = 0.80
 #: Spec-committed authority kinds. KANTO and VIAF cover persons +
 #: corporate bodies; YSO/KAUNO/MUSO cover subjects + genre/form. Phase 1
 #: wires creators (KANTO+VIAF). Subjects land in phase 2.
+#: ``fictional_character`` is a marker kind: cataloguer-tagged
+#: ``(fiktiivinen hahmo)`` / ``(fiktiv gestalt)`` qualifiers on MARC
+#: 6XX person labels mean the subject is a fictional entity that
+#: doesn't exist in any general authority. Reconcile short-circuits
+#: with a by-design ``"reconciliation-fictional-character"`` outcome
+#: — saves the Finto/VIAF call AND reframes the metric (these aren't
+#: pipeline failures, they're cataloguer-marked-unbindable).
 AuthorityKind = LiteralType[
     "person",  # → KANTO, VIAF as fallback
     "corporate_body",  # → KANTO, VIAF as fallback
     "subject",  # → YSO
     "genre_form",  # → KAUNO
     "music_form",  # → MUSO
+    "fictional_character",  # → skip both tiers; no authority carries fictional persons
 ]
 
 #: Source-vocabulary keys logged onto the provenance Activity. Also
@@ -115,6 +123,7 @@ STAGE_LEXICAL: Final[ReconciliationStage] = "reconciliation-lexical"
 STAGE_LLM: Final[ReconciliationStage] = "reconciliation-llm"
 STAGE_FALLBACK: Final[ReconciliationStage] = "reconciliation-fallback"
 STAGE_NO_CANDIDATE: Final[ReconciliationStage] = "reconciliation-no-candidate"
+STAGE_FICTIONAL: Final[ReconciliationStage] = "reconciliation-fictional-character"
 
 #: Default top-k pulled from the authority for each input literal.
 DEFAULT_TOP_K: Final[int] = 10
@@ -233,6 +242,7 @@ ReconciliationStage = LiteralType[
     "reconciliation-llm",
     "reconciliation-fallback",
     "reconciliation-no-candidate",
+    "reconciliation-fictional-character",
 ]
 
 
@@ -263,6 +273,7 @@ class ReconciliationSummary:
     llm_pick: int = 0
     fallback: int = 0
     no_candidate: int = 0
+    fictional: int = 0
     total: int = 0
 
     def render(self) -> str:
@@ -270,12 +281,13 @@ class ReconciliationSummary:
         return "\n".join(
             (
                 "M9 reconciliation complete",
-                f"  total entities:               {self.total:,}",
-                f"  reconciliation-local:         {self.local:,}",
-                f"  reconciliation-lexical:       {self.lexical:,}",
-                f"  reconciliation-llm:           {self.llm_pick:,}",
-                f"  reconciliation-fallback:      {self.fallback:,}",
-                f"  reconciliation-no-candidate:  {self.no_candidate:,}",
+                f"  total entities:                          {self.total:,}",
+                f"  reconciliation-local:                    {self.local:,}",
+                f"  reconciliation-lexical:                  {self.lexical:,}",
+                f"  reconciliation-llm:                      {self.llm_pick:,}",
+                f"  reconciliation-fallback:                 {self.fallback:,}",
+                f"  reconciliation-no-candidate:             {self.no_candidate:,}",
+                f"  reconciliation-fictional-character:      {self.fictional:,}",
             )
         )
 
@@ -927,16 +939,44 @@ _AGENT_FRAGMENT_TO_KIND: Final[dict[str, AuthorityKind]] = {
     "11": "corporate_body",  # MARC 611 (meetings) → KANTO conferences
 }
 
+#: Parenthetical qualifiers cataloguers attach to MARC 6XX person
+#: labels to mark them as fictional characters. ``(fiktiivinen
+#: hahmo)`` is the Finnish form, ``(fiktiv gestalt)`` the Swedish
+#: parallel — both surfaced on the 200-record corpus smoke. Matched
+#: case-insensitively because cataloguing-side capitalisation isn't
+#: uniform; literal-trailing because the qualifier always comes after
+#: the name (``"Nicholson, Dorothy (fiktiivinen hahmo)"``).
+_FICTIONAL_CHARACTER_QUALIFIERS: Final[tuple[str, ...]] = (
+    "(fiktiivinen hahmo)",
+    "(fiktiv gestalt)",
+)
 
-def _classify_subject_target(target: URIRef | None, source: str | None) -> AuthorityKind:
+
+def _is_fictional_character_literal(literal: str) -> bool:
+    """Return True iff the cataloguer-supplied label ends with a
+    fictional-character qualifier (Finnish or Swedish form)."""
+    stripped = literal.rstrip().casefold()
+    return any(stripped.endswith(q) for q in _FICTIONAL_CHARACTER_QUALIFIERS)
+
+
+def _classify_subject_target(
+    target: URIRef | None, source: str | None, literal: str | None = None
+) -> AuthorityKind:
     """Decide kind for a subject-target node.
 
-    First checks for the ``Agent6XX`` URI-fragment pattern that
-    marc2bibframe2 emits for MARC 6XX subject-as-name fields — those
-    route to ``person`` / ``corporate_body`` so tier-1 hits KANTO
-    instead of YSO. Falls back to :func:`_classify_subject_source`
-    for everything else.
+    Order:
+
+    1. Fictional-character qualifier in the literal (``"X (fiktiivinen
+       hahmo)"``) → ``fictional_character``. Highest priority — no
+       authority carries fictional persons; routing to KANTO would
+       just spend a Finto call to learn nothing.
+    2. ``Agent6XX`` URI-fragment pattern from marc2bibframe2 → ``person``
+       / ``corporate_body`` so tier-1 hits KANTO instead of YSO.
+    3. Fall back to :func:`_classify_subject_source` (``bf:source``
+       token routing).
     """
+    if literal is not None and _is_fictional_character_literal(literal):
+        return "fictional_character"
     if target is not None:
         match = _SUBJECT_AS_NAME_FRAGMENT_RE.search(str(target))
         if match is not None:
@@ -1004,10 +1044,11 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
                         source = str(src)
                         break
                 target_uri = target if isinstance(target, URIRef) else None
+                literal_str = str(label_lit)
                 yield EntityRequest(
                     work_uri=str(work),
-                    literal=str(label_lit),
-                    kind=_classify_subject_target(target_uri, source),
+                    literal=literal_str,
+                    kind=_classify_subject_target(target_uri, source, literal_str),
                     predicate_uri=str(predicate),
                 )
 
@@ -1181,6 +1222,29 @@ def _local_outcome(request: EntityRequest, hit: LocalConceptHit) -> Reconciliati
     )
 
 
+def _fictional_outcome(request: EntityRequest) -> ReconciliationOutcome:
+    """Build a by-design no-bind outcome for a fictional-character label.
+
+    No candidates, no chosen URI, ``needs_review=False`` — cataloguer
+    already classified this entity as fictional with the parenthetical
+    qualifier; downstream review queues should NOT show these. The
+    distinct ``STAGE_FICTIONAL`` stage tag separates them from genuine
+    ``reconciliation-no-candidate`` failures in summary + provenance.
+    """
+    return ReconciliationOutcome(
+        request=request,
+        stage=STAGE_FICTIONAL,
+        chosen_uri=None,
+        confidence=0.0,
+        rationale=(
+            f"Fictional-character label (cataloguer-tagged): {request.literal!r}. "
+            "No general authority carries fictional persons; skipped by design."
+        ),
+        candidates=[],
+        needs_review=False,
+    )
+
+
 def reconcile_one(
     *,
     request: EntityRequest,
@@ -1192,11 +1256,18 @@ def reconcile_one(
 ) -> ReconciliationOutcome:
     """Run the decision logic for ``request`` end-to-end.
 
-    Tier-0 (``local_resolver``) runs first when wired and short-circuits
-    on exact prefLabel match against the locally-loaded authority graph
-    — no tier-1 HTTP call, no LLM. Otherwise the tier-1+ four-tier
-    decision applies.
+    Order of short-circuits:
+
+    1. ``fictional_character`` kind → ``reconciliation-fictional-character``
+       outcome with no candidates. Cataloguer marked the entity as
+       fictional; no authority carries it.
+    2. Tier-0 ``local_resolver`` exact prefLabel match → no HTTP call,
+       no LLM.
+    3. Tier-1 ``client.query`` (with optional ``fallback_client``) and
+       the four-tier decision logic.
     """
+    if request.kind == "fictional_character":
+        return _fictional_outcome(request)
     if local_resolver is not None:
         hit = local_resolver.resolve(literal=request.literal, kind=request.kind)
         if hit is not None:
@@ -1211,10 +1282,24 @@ def reconcile_one(
 #: ``AuthorityKind`` Literal; kept as a runtime ``frozenset`` so callers
 #: can build subsets ergonomically (``{"person", "corporate_body"}``).
 ALL_AUTHORITY_KINDS: Final[frozenset[AuthorityKind]] = frozenset(
-    {"person", "corporate_body", "subject", "genre_form", "music_form"}
+    {
+        "person",
+        "corporate_body",
+        "subject",
+        "genre_form",
+        "music_form",
+        "fictional_character",
+    }
 )
 _CREATOR_KINDS: Final[frozenset[AuthorityKind]] = frozenset({"person", "corporate_body"})
-_SUBJECT_KINDS: Final[frozenset[AuthorityKind]] = frozenset({"subject", "genre_form", "music_form"})
+#: ``fictional_character`` walks alongside the subject kinds because
+#: the marker comes from a MARC 6XX subject target whose label
+#: carries the ``(fiktiivinen hahmo)`` qualifier; without it included
+#: here, ``--kinds subjects`` would drop the marker before
+#: ``reconcile_one`` could emit the by-design outcome.
+_SUBJECT_KINDS: Final[frozenset[AuthorityKind]] = frozenset(
+    {"subject", "genre_form", "music_form", "fictional_character"}
+)
 
 
 def _collect_requests(
@@ -1303,6 +1388,8 @@ def apply_reconciliation(
             summary.llm_pick += 1
         elif outcome.stage == STAGE_FALLBACK:
             summary.fallback += 1
+        elif outcome.stage == STAGE_FICTIONAL:
+            summary.fictional += 1
         else:
             summary.no_candidate += 1
 
@@ -1340,6 +1427,7 @@ __all__ = [
     "PICKER_STUB_PHRASES",
     "PICKER_UNCERTAIN_MAX_CONFIDENCE",
     "STAGE_FALLBACK",
+    "STAGE_FICTIONAL",
     "STAGE_LEXICAL",
     "STAGE_LLM",
     "STAGE_LOCAL",

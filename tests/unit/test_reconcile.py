@@ -25,6 +25,7 @@ from bffi_pipeline.stages.reconcile import (
     LLM_CONFIDENCE_THRESHOLD,
     PICKER_MAX_VALIDATION_RETRIES,
     STAGE_FALLBACK,
+    STAGE_FICTIONAL,
     STAGE_LEXICAL,
     STAGE_LLM,
     STAGE_NO_CANDIDATE,
@@ -42,6 +43,7 @@ from bffi_pipeline.stages.reconcile import (
     lexical_similarity,
     picker_prompt_hash,
     picker_prompt_text,
+    reconcile_one,
 )
 
 # --- lexical_similarity ---------------------------------------------------
@@ -980,6 +982,131 @@ def test_iter_subject_requests_does_not_misroute_non_subject_agent_fragments() -
     assert requests[0].kind == "subject"  # routed via yso source token, not Agent fragment
 
 
+# --- fictional_character kind --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Lily (fiktiivinen hahmo)",
+        "Nicholson, Dorothy (fiktiivinen hahmo)",
+        "Fjeld, Knut (fiktiv gestalt)",
+        "Sophie (fiktiv gestalt)",
+        # Trailing whitespace tolerated.
+        "Marvel (fiktiivinen hahmo)  ",
+    ],
+)
+def test_iter_subject_requests_routes_fictional_character_label(label: str) -> None:
+    """Cataloguer-tagged ``(fiktiivinen hahmo)`` / ``(fiktiv gestalt)``
+    qualifiers on a MARC 6XX person label win priority over the
+    Agent6XX URI-fragment routing — fictional persons aren't in any
+    authority, so KANTO/VIAF calls are wasted."""
+    g = Graph()
+    work = URIRef(WORK)
+    g.add((work, RDF.type, V.BFFI.Work))
+    target = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/test#Agent600-22")
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, V.RDFS.label, Literal(label)))
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "fictional_character"
+    assert requests[0].literal == label
+
+
+def test_iter_subject_requests_treats_non_fictional_marker_label_as_person() -> None:
+    """``"Pekurinen, Arndt"`` (no fictional-marker qualifier) on an
+    Agent600 URI still routes to ``person`` — only the explicit
+    parenthetical phrase triggers the fictional kind."""
+    g = Graph()
+    work = URIRef(WORK)
+    g.add((work, RDF.type, V.BFFI.Work))
+    target = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/test#Agent600-25")
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, V.RDFS.label, Literal("Pekurinen, Arndt")))
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "person"
+
+
+def test_reconcile_one_short_circuits_on_fictional_character_kind() -> None:
+    """Both tier-0 and tier-1 must be skipped — no Finto call, no
+    LLM call, just a by-design outcome. Verified by injecting an
+    exploding client + resolver."""
+    request = EntityRequest(
+        work_uri=WORK,
+        literal="Lily (fiktiivinen hahmo)",
+        kind="fictional_character",
+        predicate_uri=str(V.BFFI.subject),
+    )
+
+    class _ExplodingClient:
+        def query(self, *, request: EntityRequest, top_k: int = 10) -> list[AuthorityCandidate]:
+            pytest.fail("tier-1 client must NOT be called for fictional_character")
+
+    class _ExplodingResolver:
+        def resolve(self, *, literal: str, kind: AuthorityKind) -> None:
+            pytest.fail("tier-0 resolver must NOT be called for fictional_character")
+
+    outcome = reconcile_one(
+        request=request,
+        client=_ExplodingClient(),
+        fallback_client=None,
+        picker=StubPicker(),
+        local_resolver=_ExplodingResolver(),
+    )
+    assert outcome.stage == STAGE_FICTIONAL
+    assert outcome.chosen_uri is None
+    assert outcome.candidates == []
+    assert outcome.needs_review is False
+
+
+def test_apply_reconciliation_counts_fictional_separately_from_no_candidate() -> None:
+    """The summary counter splits ``STAGE_FICTIONAL`` from
+    ``STAGE_NO_CANDIDATE`` — review queues only show genuine
+    no-candidates, not cataloguer-marked-unbindable entries."""
+    g = Graph()
+    work = URIRef(WORK)
+    g.add((work, RDF.type, V.BFFI.Work))
+    target = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/test#Agent600-29")
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, V.RDFS.label, Literal("Winslow, Elodie (fiktiivinen hahmo)")))
+
+    # No AdminMetadata block needed; the fictional path doesn't bump it.
+    summary, outcomes = apply_reconciliation(
+        client=StubAuthorityClient(),
+        picker=StubPicker(),
+        graph=g,
+        now=datetime(2026, 5, 11, 12, 0, tzinfo=UTC),
+    )
+    assert summary.fictional == 1
+    assert summary.no_candidate == 0
+    assert outcomes[0].stage == STAGE_FICTIONAL
+
+
+def test_apply_reconciliation_emits_provenance_for_fictional_outcome() -> None:
+    """Per spec § 8 every reconciliation attempt logs one Activity,
+    including the by-design fictional skip. Cataloguers reviewing the
+    provenance graph can spot-check the marker was set correctly."""
+    g = Graph()
+    work = URIRef(WORK)
+    g.add((work, RDF.type, V.BFFI.Work))
+    target = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/test#Agent600-29")
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, V.RDFS.label, Literal("Marvel (fiktiivinen hahmo)")))
+    prov = Graph()
+    apply_reconciliation(
+        client=StubAuthorityClient(),
+        picker=StubPicker(),
+        graph=g,
+        provenance_graph=prov,
+        now=datetime(2026, 5, 11, 12, 0, tzinfo=UTC),
+    )
+    activities = list(prov.subjects(V.RDF.type, V.Reconciliation))
+    assert len(activities) == 1
+    stages = {str(s) for s in prov.objects(activities[0], V.stage)}
+    assert STAGE_FICTIONAL in stages
+
+
 def test_apply_reconciliation_subject_path_links_authority_and_bridges_blank_node() -> None:
     g = _build_subject_canonical_graph(subject_label="Tampere", subject_source="yso/fin")
     yso_uri = "http://www.yso.fi/onto/yso/p105076"
@@ -1096,5 +1223,14 @@ def test_apply_reconciliation_kinds_none_walks_all_kinds() -> None:
 
 
 def test_all_authority_kinds_constant_covers_every_authority_kind() -> None:
-    expected = frozenset({"person", "corporate_body", "subject", "genre_form", "music_form"})
+    expected = frozenset(
+        {
+            "person",
+            "corporate_body",
+            "subject",
+            "genre_form",
+            "music_form",
+            "fictional_character",
+        }
+    )
     assert expected == ALL_AUTHORITY_KINDS
