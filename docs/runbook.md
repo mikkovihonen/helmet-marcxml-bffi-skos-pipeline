@@ -134,6 +134,11 @@ LLM_BASE_URL=http://localhost:11434/v1 \
 # Filter to a subset of kinds with --kinds:
 #   bffi-pipeline reconcile --kinds creators        # KANTO + VIAF only
 #   bffi-pipeline reconcile --kinds subjects,genres # YSO + KAUNO + MUSO
+#
+# After reconcile, surface the YSA → YSO bare-label residue for the
+# cataloguer worklist (see "Expected reconciliation residue from the
+# YSA → YSO vocabulary merge" section below):
+#   bffi-pipeline ysa-disambiguation-report
 
 # 8. M10 phase 1 — Skosify the canonical graph.
 bffi-pipeline skosify
@@ -313,10 +318,41 @@ which is exactly the ambiguity cataloguers need to resolve.
 
 **Resolution path.** Surface the needs-review queue to cataloguers; on
 each record they pick the right disambiguated YSO URI and the next
-pipeline run binds correctly. A future "YSA→YSO mismatch report"
-helper that pre-groups by literal could speed the review (one
-decision per literal applies across all records that share it), but
-it's a cataloguer-side workflow, not a pipeline fix.
+pipeline run binds correctly.
+
+**Cataloguer worklist.** Helmet cataloguers can't search the
+needs-review queue from the current ILS, so the
+`ysa-disambiguation-report` CLI produces a UTF-8-with-BOM CSV
+(Excel-safe for Finnish diacritics) that they can open, sort, and
+work through directly:
+
+```bash
+bffi-pipeline ysa-disambiguation-report
+# → writes <BFFI_DATA_DIR>/ysa-disambiguation-report.csv with
+#   columns: helmet_bib_id, canonical_work_uri, source_tag, literal,
+#   case_type, n_candidates, candidate_uri, candidate_pref_label.
+#   One row per (helmet_bib_id, literal, candidate) tuple — sort by
+#   `literal` to apply one decision across the N records sharing it;
+#   sort by `helmet_bib_id` to find each record in the ILS.
+```
+
+The report classifies each flagged literal into one of two
+case types so cataloguers can prioritise:
+
+- **`missed-altlabel`** — exactly one disambiguated YSO candidate,
+  no real ambiguity. Cataloguer just adds `$0 <candidate_uri>` to
+  the MARC record. Quick win. Examples on the 200-record sample:
+  `1600-luku`–`2010-luku` decade literals (each → the single
+  `*-luku (vuosikymmen)` URI).
+- **`ambiguous`** — ≥ 2 disambiguated candidates; cataloguer
+  inspects record context and picks. Examples: `Lappi` (4 senses —
+  municipality / Tampere-neighborhood / Swedish-Lapland /
+  Finnish-Lapland), `lapset`, `metro`, `musiikki`,
+  `pohjalaismurteet`, `2000-luku` (decade vs. century).
+
+The walker dedupes Fuseki round-trips per distinct literal, so
+running this against the full 800 k canonical is cheap — one SPARQL
+SELECT per unique flagged term, not per record.
 
 ## Compaction cron suggestion
 
