@@ -5,7 +5,6 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 ## Project specs and plans
 
 - `docs/marcxml-to-bffi-skosmos-pipeline.md` — technical spec (what to build).
-- `docs/BUILD_PLAN.md` — milestone-ordered build plan (M0–M13). **Read before starting any milestone work.**
 - `docs/validation-strategy.md` — five validation boundaries (MARCXML → BIBFRAME → BFFI → judge → post-load).
 - `docs/local-inference.md` — Apple Silicon / Ollama setup, model choice, throughput, cascade strategy.
 - `docs/external-dependencies.md` — records and confirmations to request from Helmet cataloguers.
@@ -13,6 +12,7 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - `docs/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions; consult before adding any `bffi:*` term to spec, code, or shapes.**
 - `docs/proposals/` — forward-looking ideas not yet committed to (`prop-<NN>-<slug>.md`). Each carries `Status: proposed | planning (graduated) | done | rejected (reason)` and a `Proposal-base commit` for drift detection. **Skim the proposals README and the current proposals index before recommending an architectural change** — the idea may already be on record, possibly with a documented reason not to pursue it.
 - `docs/plans/` — committed-to-action plans of record (`p-<NN>-<slug>.md`). Each plan has sequenced phases with verification checkpoints, a risk register, and a rollback procedure, plus a `Plan-base commit` and `Phase commits` for tying execution to git history. Plans graduate from proposals; **consult before re-scoping work that overlaps an active plan**.
+- `docs/archived/` — historical / superseded documents kept for reference only. Includes `BUILD_PLAN.md` (milestone-ordered checklist M0-M13; the live execution detail has moved to `docs/plans/`). Path references from source code or live docs may point here; do not edit archived material except for typos or to add a supersede pointer.
 
 ## Operating constraints
 
@@ -47,11 +47,11 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 
 ## Workflow rules
 
-- Read `docs/BUILD_PLAN.md` before starting any milestone. Each milestone has an explicit definition of done; don't move on until it's met.
+- Before starting work on a plan, read it through and run its `git diff <plan-base>..HEAD -- <relevant paths>` drift check. If you're not working off a plan, check `docs/plans/` and `docs/proposals/` first to see whether a plan or proposal already covers the work.
 - `make lint && make test` must pass before any commit.
 - LLM eval (`make eval`) runs locally on the M5 Max — never in CI. Output is pasted into the PR description if the PR touches `prompts/`, `gold/`, or `src/bffi_pipeline/stages/judge.py`.
-- Commit messages tag the milestone, e.g. `M3: BIBFRAME → BFFI conversion`.
-- Update the milestone checklist in `docs/BUILD_PLAN.md` (mark `[x]`) when done.
+- Commit messages tag the relevant milestone or plan phase, e.g. `M3: BIBFRAME → BFFI conversion` for milestone work or `P-04 Phase A: lock embedding model` for plan execution.
+- When a plan phase completes, fill in its `Phase commit` field in the plan document with the merge commit hash. Don't update the historical milestone checkboxes in `docs/archived/BUILD_PLAN.md`.
 
 ## What not to do
 
@@ -60,4 +60,4 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - Don't reach for async unless a stage genuinely benefits.
 - Don't modify `third_party/marc2bibframe2/` (git submodule). Wrap, don't fork.
 - Don't merge silent failures into provenance. Log `uncertain` with the actual error.
-- Don't add features not in the build plan. Surface them as a milestone proposal first.
+- Don't add features that aren't covered by an active plan in `docs/plans/`. Surface new directions as a proposal in `docs/proposals/` first; only graduate into a plan after the trade-off is on the record.

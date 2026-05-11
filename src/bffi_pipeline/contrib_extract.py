@@ -15,7 +15,7 @@ running the LLM. Extractor-driven mode returns the full
 
 Tokenisation and the stop-word list were tuned against a 5,000-record
 random sample from the 800k Helmet corpus; see
-``docs/BUILD_PLAN.md`` § M3 for the measurement rationale.
+``docs/archived/BUILD_PLAN.md`` § M3 for the measurement rationale.
 """
 
 from __future__ import annotations

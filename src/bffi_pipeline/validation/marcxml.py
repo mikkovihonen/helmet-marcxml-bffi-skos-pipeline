@@ -1,6 +1,6 @@
 """Boundary 1: MARCXML pre-conversion validation.
 
-The four typed-error families (see ``docs/BUILD_PLAN.md`` M2) :
+The four typed-error families (see ``docs/archived/BUILD_PLAN.md`` M2) :
 
 * ``marcxml-filename`` — filename does not match ``^\\d+\\.xml$``.
 * ``marcxml-encoding`` — file is not strict UTF-8.

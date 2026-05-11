@@ -5,7 +5,7 @@ combines them, post-processes ``skos:prefLabel`` with language tags derived
 from ``bf:language``, validates against ``config/shapes/bffi.shape.ttl``
 (Boundary 3 — *non-blocking*), and writes a Turtle file per record.
 
-Per ``docs/BUILD_PLAN.md`` M3 the SHACL failures do not halt the pipeline.
+Per ``docs/archived/BUILD_PLAN.md`` M3 the SHACL failures do not halt the pipeline.
 Counts and per-record validation reports go to
 ``<output_dir>/bffi/_validation.jsonl``; the CLI prints a summary warning.
 """

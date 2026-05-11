@@ -56,7 +56,7 @@ flowchart TD
     PROV -.-> M12[M12: gold-set eval<br/>+ growth from overrides]
 ```
 
-Each box maps to a milestone in [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md).
+Each box maps to a milestone in [`docs/archived/BUILD_PLAN.md`](docs/archived/BUILD_PLAN.md).
 Stage code lives in [`src/bffi_pipeline/stages/`](src/bffi_pipeline/stages/);
 orchestration in [`src/bffi_pipeline/cli.py`](src/bffi_pipeline/cli.py).
 
@@ -138,12 +138,14 @@ plan than to interrupt.
 .
 ├── CLAUDE.md                  # session conventions; read first
 ├── docs/
-│   ├── BUILD_PLAN.md          # milestone-ordered checklist (M0-M13)
 │   ├── runbook.md             # canonical end-to-end recipe
 │   ├── marcxml-to-bffi-skosmos-pipeline.md  # technical spec
 │   ├── validation-strategy.md # five validation boundaries
 │   ├── local-inference.md     # Apple Silicon / Ollama / model choice
-│   └── ci-strategy.md         # CI + PR template rationale
+│   ├── ci-strategy.md         # CI + PR template rationale
+│   ├── proposals/             # forward-looking sketches (prop-<NN>-<slug>.md)
+│   ├── plans/                 # plans of record (p-<NN>-<slug>.md)
+│   └── archived/              # reference only — BUILD_PLAN.md + other superseded docs
 ├── src/bffi_pipeline/
 │   ├── stages/                # per-milestone stage code (don't cross-import)
 │   ├── eval/                  # gold-set loader, harness, growth

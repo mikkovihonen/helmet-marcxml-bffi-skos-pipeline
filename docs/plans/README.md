@@ -13,8 +13,8 @@ committed to. A plan lays out:
 
 Each plan carries a `Status:` field — `draft` / `in-progress` /
 `completed` / `aborted (reason)`. A completed plan stays in place for
-the audit trail; the milestone shows up in `docs/BUILD_PLAN.md`
-separately.
+the audit trail; the canonical record of what shipped is the plan's
+own `Phase commits` field.
 
 ## Tying plans to version control
 
@@ -39,8 +39,7 @@ each plan carries three commit-hash fields near the top:
   archived.
 
 When the plan completes, the final phase commit is the canonical
-reference; `docs/BUILD_PLAN.md` cross-links to the plan rather than
-duplicating the detail.
+reference for what shipped.
 
 A plan ships when the engineer executing it could pick up the
 document cold and follow it through without re-deriving any choices.

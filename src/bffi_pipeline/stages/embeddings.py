@@ -9,7 +9,7 @@ The structural pieces (input-string builder, graph extraction, FAISS
 build / persist / query, threshold bands, JSONL output, embed-stats)
 land in this module and are exercised by unit tests against synthetic
 data. The model-benchmark, threshold validation, and ``efSearch``
-tuning sub-tasks listed in ``docs/BUILD_PLAN.md`` M5 are gated on the
+tuning sub-tasks listed in ``docs/archived/BUILD_PLAN.md`` M5 are gated on the
 M12 gold set and remain open.
 
 Heavy ML imports (``sentence_transformers``, ``faiss``, ``numpy``) are

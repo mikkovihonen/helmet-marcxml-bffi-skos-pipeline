@@ -1,7 +1,7 @@
 # P-04 — M5 calibration: embedding-model bench + efSearch tuning
 
 **Status**: draft.
-**Source**: `docs/BUILD_PLAN.md` M5 unfinished items (lines 274 + 283 at
+**Source**: `docs/archived/BUILD_PLAN.md` M5 unfinished items (lines 274 + 283 at
 plan-base). Not graduated from a proposal — these are milestone
 follow-ups that need their own execution document because they
 require a one-time benchmark on the M5 Max that the rest of the
@@ -217,7 +217,7 @@ rebuilding (only query-time `efSearch` changed).
 
 ## Cross-references
 
-- `docs/BUILD_PLAN.md` M5 — origin checklist items.
+- `docs/archived/BUILD_PLAN.md` M5 — origin checklist items.
 - `docs/runbook.md` § "Pinned versions" — receives the embedding-
   model update if the winner is not BGE-M3.
 - `src/bffi_pipeline/eval/embed_benchmark.py` — Phase A harness.

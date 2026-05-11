@@ -1,8 +1,8 @@
 # Build Plan — BFFI Pipeline
 
-> **Read CLAUDE.md first.** This file is the milestone-ordered build plan. Each milestone produces something runnable and testable. Don't move to milestone N+1 until N is green.
+> **Archived — reference only.** This document is no longer the live work tracker. The remaining unfinished milestone items have been distilled into per-plan documents under [`docs/plans/`](../plans/), which carry the sequenced execution detail, verification checkpoints, and rollback procedures. The milestone checkboxes below remain a useful historical record of what shipped when, but the live work tracking lives in `docs/plans/`. Do not update checkboxes here.
 
-For technical detail on what each stage produces, see `docs/marcxml-to-bffi-skosmos-pipeline.md` (the spec). For validation expectations, see `docs/validation-strategy.md`. For local LLM setup, see `docs/local-inference.md`. For the records you'll need to request from Helmet, see `docs/external-dependencies.md`.
+For technical detail on what each stage produces, see [`../marcxml-to-bffi-skosmos-pipeline.md`](../marcxml-to-bffi-skosmos-pipeline.md) (the spec). For validation expectations, see [`../validation-strategy.md`](../validation-strategy.md). For local LLM setup, see [`../local-inference.md`](../local-inference.md). For the records you'll need to request from Helmet, see [`../external-dependencies.md`](../external-dependencies.md).
 
 ## Tech stack
 

@@ -2,7 +2,7 @@
 
 A practical guide to converting MARCXML records into BFFI (the Finnish BIBFRAME profile) and publishing Work and Expression authority records via Skosmos, including LLM-assisted deduplication, provenance logging, and evaluation.
 
-> **Note on document scope.** This is the **technical specification** — patterns, code samples, and design rationale for each component. For the build plan (milestones, repository structure, definitions of done), see `CLAUDE.md` and `docs/BUILD_PLAN.md`. For validation boundaries, local-inference setup, and external dependencies, see the corresponding files in `docs/`.
+> **Note on document scope.** This is the **technical specification** — patterns, code samples, and design rationale for each component. For the build plan (milestones, repository structure, definitions of done), see `CLAUDE.md` and `docs/archived/BUILD_PLAN.md`. For validation boundaries, local-inference setup, and external dependencies, see the corresponding files in `docs/`.
 >
 > **Post-draft updates.** This document was originally drafted while the project was still considering Anthropic's API for the LLM judge. Subsequent decisions committed the project to local inference on Apple Silicon (no paid API services) and assigned URN namespaces under `http://urn.fi/URN:NBN:fi:bib:`. The code samples below have been updated; the patterns and reasoning are unchanged.
 
@@ -35,7 +35,7 @@ A practical guide to converting MARCXML records into BFFI (the Finnish BIBFRAME 
 | Display language priority for `skos:prefLabel` | `fi`, `sv`, `en` |
 | Documentation language | English |
 
-These are not up for renegotiation without surfacing the decision. See `CLAUDE.md` for the full operating-constraints rationale and `docs/BUILD_PLAN.md` for the milestone-by-milestone build plan.
+These are not up for renegotiation without surfacing the decision. See `CLAUDE.md` for the full operating-constraints rationale and `docs/archived/BUILD_PLAN.md` for the milestone-by-milestone build plan.
 
 ---
 
@@ -169,11 +169,11 @@ WHERE {
 **Notes:**
 
 - Property allocation below has been verified against `docs/lkd.rdf` (the vendored BFFI 1.0.0 ontology — see § 1). Re-verify whenever BFFI publishes a minor revision; the schema is the canonical source for class names, predicate names, and `rdfs:domain` / `rdfs:range`.
-- URI minting goes through `src/bffi_pipeline/uris.py` — never concatenate URI strings elsewhere. The CONSTRUCT shown here is the **raw** pass: it hashes the source `bf:Work` URI so the same input produces the same output on re-run. Canonical Works minted by the M8 merge stage hash a different canonical input (creator URI + original-language preferred title), so identical works across records collapse naturally. See `docs/BUILD_PLAN.md` M1/M3 for both URI-minting rules.
+- URI minting goes through `src/bffi_pipeline/uris.py` — never concatenate URI strings elsewhere. The CONSTRUCT shown here is the **raw** pass: it hashes the source `bf:Work` URI so the same input produces the same output on re-run. Canonical Works minted by the M8 merge stage hash a different canonical input (creator URI + original-language preferred title), so identical works across records collapse naturally. See `docs/archived/BUILD_PLAN.md` M1/M3 for both URI-minting rules.
 - **Property routing is intentionally conservative.** BFFI's schema gives `bffi:title`, `bffi:note`, and `bffi:language` broader domains than Expression alone (the union covers Work too, or `rdfs:Resource` universally). The CONSTRUCT above pins them to Expression on purpose — a clean Work/Expression split is more useful for downstream RDA-FRBR consumers than mirroring the schema's broadest permissible domains. The Boundary-3 SHACL shape (§ 10) enforces this pipeline-level allocation, not the schema-level one.
 - **Subclass typing is out-of-scope for v0.1.0.** BFFI distinguishes ~28 specific Work/Expression subclasses (`bffi:MusicWork`, `bffi:NotatedMusic`, `bffi:CartographyWork`, `bffi:CartographyExpression`, `bffi:SerialWork`, `bffi:SerialExpression`, `bffi:MovingImageWork`, `bffi:MovingImageExpression`, `bffi:MonographWork`, `bffi:MonographExpression`, `bffi:NonMusicAudioWork`, `bffi:NonMusicAudioExpression`, etc.). The CONSTRUCT above emits the bare `bffi:Work` / `bffi:Expression` types regardless of material type. Subclass-specific typing would require mapping each BIBFRAME subclass that `marc2bibframe2` emits (`bf:Text`, `bf:NotatedMusic`, `bf:Cartography`, `bf:MovingImage`, `bf:NonMusicAudio`, etc.) to its BFFI counterpart in Pass 1 and Pass 2 — a meaningful upgrade, but its own milestone.
-- **Helmet identifier preservation.** Both passes must copy `bf:identifiedBy` from the source `bf:Work` onto the new `bffi:Work` *and* `bffi:Expression`, with `bf:source` = `<http://urn.fi/URN:NBN:fi:bib:source:helmet>`. Each raw Work and Expression carries the Helmet bib ID of the record it came from; M8 unions the identifier sets when raw Works merge into a canonical Work, so a canonical Work that absorbed N Helmet records carries N `bf:identifiedBy` triples. (See `docs/BUILD_PLAN.md` M2/M3/M8.)
-- **MARCXML inputs are UTF-8 only.** One record per file, named `<helmet_bib_id>.xml` (filename pattern `^\d+\.xml$`). Encoding discrepancies are hard errors at the Boundary-1 ingest check (§10) — the offending filename is surfaced and the record is skipped to `_errors.jsonl`. No silent transcoding from MARC-8 / Latin-1. See `docs/BUILD_PLAN.md` M2 and `docs/validation-strategy.md` Boundary 1.
+- **Helmet identifier preservation.** Both passes must copy `bf:identifiedBy` from the source `bf:Work` onto the new `bffi:Work` *and* `bffi:Expression`, with `bf:source` = `<http://urn.fi/URN:NBN:fi:bib:source:helmet>`. Each raw Work and Expression carries the Helmet bib ID of the record it came from; M8 unions the identifier sets when raw Works merge into a canonical Work, so a canonical Work that absorbed N Helmet records carries N `bf:identifiedBy` triples. (See `docs/archived/BUILD_PLAN.md` M2/M3/M8.)
+- **MARCXML inputs are UTF-8 only.** One record per file, named `<helmet_bib_id>.xml` (filename pattern `^\d+\.xml$`). Encoding discrepancies are hard errors at the Boundary-1 ingest check (§10) — the offending filename is surfaced and the record is skipped to `_errors.jsonl`. No silent transcoding from MARC-8 / Latin-1. See `docs/archived/BUILD_PLAN.md` M2 and `docs/validation-strategy.md` Boundary 1.
 - Note: the `, skos:Concept` is intentionally absent from the `a` lines; Skosify will infer it from the RDFS overlay (see §5).
 
 ---
@@ -232,7 +232,7 @@ bffi:Expression rdfs:label "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
 - `skosmos:sparqlDialect "JenaText"` enables the `text:query` predicate Skosmos uses for fast label search; without it, search becomes painfully slow at scale. Verify `jena-text` is enabled in the Fuseki image.
 - `skosmos:language` order doubles as the display-language priority. `"fi", "sv", "en"` matches Finland's official languages plus an international fallback; `skosmos:defaultLanguage "fi"` is the committed default.
 - To display Works with their Expressions hierarchically, model the link with `skos:narrower`/`skos:broader` *in addition* to `bffi:hasExpression`/`bffi:expressionOf`. This is handled automatically by the Skosify overlay below.
-- Both Fuseki (`stain/jena-fuseki:5.0.0`) and Skosmos (`ghcr.io/natlibfi/skosmos:3.2`) are pinned in `docker-compose.yml`; see `docs/BUILD_PLAN.md` M10/M11 for the rationale.
+- Both Fuseki (`stain/jena-fuseki:5.0.0`) and Skosmos (`ghcr.io/natlibfi/skosmos:3.2`) are pinned in `docker-compose.yml`; see `docs/archived/BUILD_PLAN.md` M10/M11 for the rationale.
 
 ---
 
@@ -338,7 +338,7 @@ Compute a cheap rule-based key from MARC 100/240/245 of the source Helmet record
 
 ### Stage 2 — Embedding similarity
 
-Within each block, embed a structured string per record (fixed field order: `"creator: <X> | title: <Y> | language: <Z> | year: <Y> | type: <T>"`). The committed embedding model is **BGE-M3** (1024-dim, multilingual; subject to a benchmark against `intfloat/multilingual-e5-large` and `jinaai/jina-embeddings-v3` against the gold set per `docs/BUILD_PLAN.md` M5 before locking in). Index with **FAISS `IndexHNSWFlat`** (cosine via L2-normalized inner product, `M=32`, `efConstruction=200`). Persist the index to disk so M6 reloads rather than rebuilds.
+Within each block, embed a structured string per record (fixed field order: `"creator: <X> | title: <Y> | language: <Z> | year: <Y> | type: <T>"`). The committed embedding model is **BGE-M3** (1024-dim, multilingual; subject to a benchmark against `intfloat/multilingual-e5-large` and `jinaai/jina-embeddings-v3` against the gold set per `docs/archived/BUILD_PLAN.md` M5 before locking in). Index with **FAISS `IndexHNSWFlat`** (cosine via L2-normalized inner product, `M=32`, `efConstruction=200`). Persist the index to disk so M6 reloads rather than rebuilds.
 
 Thresholds are tightened from "frontier-API" defaults (≥ 0.92 / ≤ 0.75) because local LLM inference is throughput-bound: a wider gray zone produces more pairs the judge has to handle, and at 800k records that becomes a multi-week run rather than multi-night. The narrower gray zone roughly halves judge workload at modest cost in accuracy (see §11 for the throughput numbers):
 
@@ -357,7 +357,7 @@ Send only ambiguous pairs to a model with a structured-output schema. Force it t
 - **Provenance:** store the model name, version, prompt hash, and rationale alongside every merge decision — including negative ones. Ground every judgment in field-level evidence. See §8.
 - **Asymmetric thresholds:** false merges cost much more than false splits. Bias toward keeping things separate when uncertain.
 - **Boundary-4 semantic validators** sit between the model output and the cache: `decision="uncertain"` requires `confidence ≤ 0.7`; `decision="same_work"` requires non-empty `matching_fields`; rationale must be ≥ 20 chars and free of stub phrases ("I don't know", "n/a", "unable to determine", "not sure"). Validation failures share the retry path with JSON parse failures (max 2 retries → log `uncertain` with the validation error). **Validation-failed responses must not be cached** — caching cements bad outputs across re-runs.
-- **Two distinct confidence cutoffs — don't conflate them.** The cascade re-run threshold (§7, §11) is `confidence < 0.85`: any `same_work` decision below this gets a Qwen3 72B second opinion. The reconciliation fallback threshold (M9, see `docs/BUILD_PLAN.md`) is `confidence < 0.80`: below this, the M9 LLM-pick result is discarded in favour of the highest-lexical candidate, and the canonical Work's AdminMetadata is tagged `bffi:descriptionAuthentication = <bib:auth/needs-review>` (see § 8 "AdminMetadata view"). Cascade applies to Work-merge decisions; reconciliation-fallback applies to authority-URI selection.
+- **Two distinct confidence cutoffs — don't conflate them.** The cascade re-run threshold (§7, §11) is `confidence < 0.85`: any `same_work` decision below this gets a Qwen3 72B second opinion. The reconciliation fallback threshold (M9, see `docs/archived/BUILD_PLAN.md`) is `confidence < 0.80`: below this, the M9 LLM-pick result is discarded in favour of the highest-lexical candidate, and the canonical Work's AdminMetadata is tagged `bffi:descriptionAuthentication = <bib:auth/needs-review>` (see § 8 "AdminMetadata view"). Cascade applies to Work-merge decisions; reconciliation-fallback applies to authority-URI selection.
 - **Use LLMs for normalization too:** giving the model a creator string and a list of KANTO/VIAF candidates and asking it to pick the right URI is a much better-bounded task than open-ended dedup.
 
 ### Finnish-context shortcut
@@ -369,7 +369,7 @@ Authority priority is committed:
 - **Fiction genre/form:** KAUNO.
 - **Music subjects/forms:** MUSO.
 
-Embed MARC 100/700 strings, retrieve top-k candidates from the relevant authority, let the LLM pick from the candidate list (only when lexical similarity is ambiguous; a single high-similarity hit goes through deterministically). The best work-key after all this is *not* a string — it's the URI of the canonical creator plus the URI of the original-language preferred title. That key is stable under language, transliteration, and edition variation. See `docs/BUILD_PLAN.md` M9 for the five-tier reconciliation decision logic (tier-0 local-prefLabel-match / lexical / LLM-pick / fallback-with-review-flag / unreconciled). Tier-0 takes the locally-loaded M11 option 3b authority graphs (YSO + YSO-Paikat + YSO-Aika sharing one Fuseki named graph; KAUNO; SLM; MUSO; LCGFT; LCSH) as the first port of call: an exact `skos:prefLabel` match against the locally-loaded graph binds deterministically with no `api.finto.fi` round-trip — the dominant path for YSA-tagged subject literals because YSO inherited the YSA prefLabels unchanged in the 2014-2018 vocabulary merge. Per-kind graph routing in tier-0: `subject` queries YSO (with sub-vocabs) then LCSH; `genre_form` queries KAUNO + SLM + LCGFT then falls through to YSO so cataloguer-tagged `$2 kaunokki` (the legacy KAUNO name) doesn't strand temporal / place literals that live in YSO-Aika / YSO-Paikat; `music_form` queries MUSO. MARC 6XX subject-as-name fields (`#Agent6(00|10|11)-N` URI fragments minted by marc2bibframe2) route to KANTO so a biography of Pekurinen carries `bffi:creator → biographer-kanto-uri` AND `bffi:subject → pekurinen-kanto-uri` distinctly — `_apply_canonical_link` dispatches on `predicate_uri` rather than `kind`, so a person-kind request from the *subject* walker never accidentally writes `bffi:creator`.
+Embed MARC 100/700 strings, retrieve top-k candidates from the relevant authority, let the LLM pick from the candidate list (only when lexical similarity is ambiguous; a single high-similarity hit goes through deterministically). The best work-key after all this is *not* a string — it's the URI of the canonical creator plus the URI of the original-language preferred title. That key is stable under language, transliteration, and edition variation. See `docs/archived/BUILD_PLAN.md` M9 for the five-tier reconciliation decision logic (tier-0 local-prefLabel-match / lexical / LLM-pick / fallback-with-review-flag / unreconciled). Tier-0 takes the locally-loaded M11 option 3b authority graphs (YSO + YSO-Paikat + YSO-Aika sharing one Fuseki named graph; KAUNO; SLM; MUSO; LCGFT; LCSH) as the first port of call: an exact `skos:prefLabel` match against the locally-loaded graph binds deterministically with no `api.finto.fi` round-trip — the dominant path for YSA-tagged subject literals because YSO inherited the YSA prefLabels unchanged in the 2014-2018 vocabulary merge. Per-kind graph routing in tier-0: `subject` queries YSO (with sub-vocabs) then LCSH; `genre_form` queries KAUNO + SLM + LCGFT then falls through to YSO so cataloguer-tagged `$2 kaunokki` (the legacy KAUNO name) doesn't strand temporal / place literals that live in YSO-Aika / YSO-Paikat; `music_form` queries MUSO. MARC 6XX subject-as-name fields (`#Agent6(00|10|11)-N` URI fragments minted by marc2bibframe2) route to KANTO so a biography of Pekurinen carries `bffi:creator → biographer-kanto-uri` AND `bffi:subject → pekurinen-kanto-uri` distinctly — `_apply_canonical_link` dispatches on `predicate_uri` rather than `kind`, so a person-kind request from the *subject* walker never accidentally writes `bffi:creator`.
 
 ---
 
@@ -569,7 +569,7 @@ def judge_pair(a: WorkRecord, b: WorkRecord, sim: float) -> WorkMatchDecision:
 
 ### Retry, cache, checkpoint
 
-Three layered failure-recovery mechanisms (see `docs/BUILD_PLAN.md` M6):
+Three layered failure-recovery mechanisms (see `docs/archived/BUILD_PLAN.md` M6):
 
 - **SQLite cache** keyed on `(model, prompt_hash, record_a_canonical, record_b_canonical)`. Cache writes happen only after Boundary-4 validation passes — never cement a malformed or stub-phrase response.
 - **Checkpoint file** at `<output_path>.checkpoint`, written every 100 pairs, recording last-completed index + cache-hit counts. On restart the run resumes with an honest ETA rather than re-iterating silently.
@@ -687,7 +687,7 @@ The `bffi-prov` namespace (`http://urn.fi/URN:NBN:fi:schema:bffi-prov#`) is the 
     bffi-prov:lastCompactedAt "2026-05-08T20:14:00Z"^^xsd:dateTime .
 ```
 
-Every `bffi-pipeline ...` invocation reads this triple at startup; if the value is older than 90 days (or absent), the CLI prints a stale-provenance warning to stderr. See `docs/BUILD_PLAN.md` M7.
+Every `bffi-pipeline ...` invocation reads this triple at startup; if the value is older than 90 days (or absent), the CLI prints a stale-provenance warning to stderr. See `docs/archived/BUILD_PLAN.md` M7.
 
 **`bffi-prov:stage` vocabulary.** Each `WorkMergeDecision` Activity carries exactly one `bffi-prov:stage` literal. The committed enum:
 
@@ -898,7 +898,7 @@ SELECT ?activity ?confidence ?rationale ?reviewNote WHERE {
 ### Operational notes
 
 - Keep provenance in a **separate named graph** `<http://urn.fi/URN:NBN:fi:bib:graph:provenance>`; do *not* include it in Skosmos's `void:sparqlGraph`. Otherwise Skosmos will render `prov:Activity` URIs as concepts.
-- **Retention policy:** keep the structured Activity record indefinitely (it's small); compact `bffi-prov:rawResponse` literals after ~90 days via `bffi-pipeline provenance compact --older-than 90d`. Structured fields (decision, confidence, rationale, prompt hash) survive compaction; only the raw model output is dropped. CLI prints a stale-provenance warning on startup if the last compaction is older than 90 days. See `docs/BUILD_PLAN.md` M7.
+- **Retention policy:** keep the structured Activity record indefinitely (it's small); compact `bffi-prov:rawResponse` literals after ~90 days via `bffi-pipeline provenance compact --older-than 90d`. Structured fields (decision, confidence, rationale, prompt hash) survive compaction; only the raw model output is dropped. CLI prints a stale-provenance warning on startup if the last compaction is older than 90 days. See `docs/archived/BUILD_PLAN.md` M7.
 - **Version the prompt template in git** and store the file path alongside the hash (`bffi-prov:promptSource "git://repo/prompts/judge_v1.txt"`).
 - **Log negative decisions too**, not just merges — when a cataloguer asks "why didn't these merge?", you need the answer.
 - **`bffi-prov:stage` vocabulary.** Each decision is tagged with the stage that produced it, so review queues, eval, and gold-set growth can filter precisely:
@@ -1200,11 +1200,11 @@ Full ask list with English phrasing for cataloguers and Finnish-language equival
 
 ### Tech stack (committed)
 
-Python 3.11+, `uv` package manager, `rdflib` 7.x, `pymarc` for inspection plus the LoC `marc2bibframe2` XSLT (vendored as a git submodule under `third_party/`) for conversion, `lxml` for XSLT and XSD, `langchain-openai` + Pydantic v2 against a local OpenAI-compatible server (Ollama default; vllm-mlx for production), MLX inference framework, **Qwen3 32B** primary judge with **Qwen3 72B** cascade, `sentence-transformers` BGE-M3 embeddings, FAISS `IndexHNSWFlat`, `python-ulid`, `typer` CLI, `pytest` + `pytest-asyncio`, Apache Jena Fuseki 5.x with `jena-text` (Docker, version pinned), Skosmos 3.x (Docker, version pinned), `ruff` lint+format, `mypy --strict`. Full table with rationale: `docs/BUILD_PLAN.md` § "Tech stack".
+Python 3.11+, `uv` package manager, `rdflib` 7.x, `pymarc` for inspection plus the LoC `marc2bibframe2` XSLT (vendored as a git submodule under `third_party/`) for conversion, `lxml` for XSLT and XSD, `langchain-openai` + Pydantic v2 against a local OpenAI-compatible server (Ollama default; vllm-mlx for production), MLX inference framework, **Qwen3 32B** primary judge with **Qwen3 72B** cascade, `sentence-transformers` BGE-M3 embeddings, FAISS `IndexHNSWFlat`, `python-ulid`, `typer` CLI, `pytest` + `pytest-asyncio`, Apache Jena Fuseki 5.x with `jena-text` (Docker, version pinned), Skosmos 3.x (Docker, version pinned), `ruff` lint+format, `mypy --strict`. Full table with rationale: `docs/archived/BUILD_PLAN.md` § "Tech stack".
 
 ### Milestones
 
-The build plan is structured as M0 → M13 with explicit definitions of done. One-liners (full detail in `docs/BUILD_PLAN.md`):
+The build plan is structured as M0 → M13 with explicit definitions of done. One-liners (full detail in `docs/archived/BUILD_PLAN.md`):
 
 | ID | Milestone | One-liner |
 |---|---|---|
@@ -1236,7 +1236,7 @@ CI runs on **GitHub-hosted Ubuntu 24.04 runners only**:
 
 The LLM eval is **not** in CI. Tests requiring a running Ollama instance carry the `@pytest.mark.requires_llm` mark and are excluded from CI; they run locally via `make test-integration`. `make eval` runs manually on the M5 Max before any PR touching `prompts/`, `gold/`, `src/bffi_pipeline/stages/judge.py`, or `src/bffi_pipeline/eval/`. Output is pasted into the PR description per `.github/pull_request_template.md`.
 
-Full milestone breakdown: `docs/BUILD_PLAN.md`. CI rationale, workflow file, and PR template: `docs/ci-strategy.md`.
+Full milestone breakdown: `docs/archived/BUILD_PLAN.md`. CI rationale, workflow file, and PR template: `docs/ci-strategy.md`.
 
 ---
 
@@ -1263,7 +1263,7 @@ Full milestone breakdown: `docs/BUILD_PLAN.md`. CI rationale, workflow file, and
 ### Companion documents in this project
 
 - **`CLAUDE.md`** (root) — operating constraints, conventions, do-nots.
-- **`docs/BUILD_PLAN.md`** — milestone-ordered build plan (M0–M13) with definitions of done.
+- **`docs/archived/BUILD_PLAN.md`** — milestone-ordered build plan (M0–M13) with definitions of done.
 - **`docs/validation-strategy.md`** — the five validation boundaries (MARCXML XSD, BIBFRAME shape, BFFI shape, judge semantic, post-load smoke).
 - **`docs/local-inference.md`** — Apple Silicon memory budget, model expectations, throughput planning, cascade strategy.
 - **`docs/external-dependencies.md`** — records and confirmations to request from Helmet cataloguers.

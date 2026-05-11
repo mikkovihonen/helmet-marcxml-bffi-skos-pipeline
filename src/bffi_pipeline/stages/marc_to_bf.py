@@ -14,7 +14,7 @@ For each input file the stage:
      source filename, ``bffi-prov:helmetBibId``, ``bffi-prov:converterVersion``);
    - links the Work and Instance to the Activity via ``prov:wasGeneratedBy``;
    - mints one ``bffi:AdminMetadata`` block per Work/Instance, populated
-     with the M2 initial-stamp fields (see ``docs/BUILD_PLAN.md`` M2 and
+     with the M2 initial-stamp fields (see ``docs/archived/BUILD_PLAN.md`` M2 and
      spec § 8).
 4. Validates the result against ``config/shapes/bibframe-conversion.shape.ttl``
    (Boundary 2 — :mod:`bffi_pipeline.validation.bibframe`).

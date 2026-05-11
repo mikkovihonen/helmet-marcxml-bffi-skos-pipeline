@@ -1,7 +1,7 @@
 # P-05 — M3 cascade follow-ups: F1, F2, F3
 
 **Status**: draft.
-**Source**: `docs/BUILD_PLAN.md` M3 unfinished item at L253 (the
+**Source**: `docs/archived/BUILD_PLAN.md` M3 unfinished item at L253 (the
 "M3 cascade follow-ups, in dependency order" block). Not graduated
 from a proposal — these are committed M3 follow-up work items that
 deserve their own plan because they touch M8 / M9 boundaries and
@@ -276,7 +276,7 @@ F2's variant bindings.
 
 ## Cross-references
 
-- `docs/BUILD_PLAN.md` M3 — origin checklist item.
+- `docs/archived/BUILD_PLAN.md` M3 — origin checklist item.
 - `docs/marcxml-to-bffi-skosmos-pipeline.md` § 8 — provenance
   stage enum; F2 may require a new value.
 - `gold/contrib.jsonl` — the cataloguer-vetted dataset gating F3.
