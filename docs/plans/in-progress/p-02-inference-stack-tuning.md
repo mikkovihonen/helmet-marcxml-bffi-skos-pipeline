@@ -39,7 +39,7 @@ acceptance criteria):
     step, both files local + gitignored. The committed plan + doc
     sweep that documented the rename and the upstream
     `python -m mlx_lm.<sub>` → `python -m mlx_lm <sub>` migration
-    accompanies A1/A4: `<unfilled>` (filled when the commit lands).
+    accompanies A1/A4: `7cde2bf`.
   - A2 (Qwen3-8B-Instruct-4bit + Qwen3-32B-Instruct-4bit converted): `<unfilled>`
   - A3 (`mlx_lm server` running on :8001 + :8002): `<unfilled>`
   - A5 (`scripts/p02-parity-bench.sh` parity verdict captured): `<unfilled>`
