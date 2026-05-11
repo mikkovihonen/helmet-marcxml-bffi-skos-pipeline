@@ -162,7 +162,6 @@ def _utc_now() -> str:
 #: ``http://www.loc.gov/MARC21/slim``.
 _MARC_NS: Final[str] = "http://www.loc.gov/MARC21/slim"
 _SUBFIELD_TAG: Final[str] = f"{{{_MARC_NS}}}subfield"
-_CONTROLFIELD_TAG: Final[str] = f"{{{_MARC_NS}}}controlfield"
 
 #: Regex for the cataloguer-pasted subfield separator. ``‡`` (U+2021,
 #: DOUBLE DAGGER) was used as a visible separator in some legacy ILS
@@ -177,43 +176,6 @@ _TAGGED_DAGGER_RE: Final[re.Pattern[str]] = re.compile(r"‡([0-9a-z])")
 #: Length of the ``re.split`` result that has at least one capture
 #: group fired — ``[leading_text, code1, content1]``.
 _MIN_SPLIT_PARTS: Final[int] = 3
-
-
-def _ensure_marc_001(tree: etree._ElementTree, helmet_bib_id: str) -> bool:
-    """Inject ``<controlfield tag="001">{helmet_bib_id}</controlfield>``
-    if MARC ``001`` is missing or empty, so marc2bibframe2's
-    ``idfield="001"`` setting produces a unique Work URI per record.
-
-    Helmet-imported records (from BTJ feeds and some legacy ILS
-    exports) frequently omit ``001`` or leave it blank; without an
-    injection, marc2bibframe2 falls back to its default ``id1``
-    placeholder, so every such record produces the same BIBFRAME Work
-    URI (``<...#raw/id1#Work>``). M3 then mints the same
-    ``raw_work_uri`` for all of them, and M8 collapses every record
-    missing ``001`` into one giant canonical Work — surfaced on the
-    200-record corpus smoke as the "SupaRed" over-merge (28 unrelated
-    bibs sharing one canonical).
-
-    Pre-existing ``001`` values (Sierra control numbers, BTJ external
-    IDs, etc.) stay untouched — they're presumed authoritative and
-    the audit-trail value of the original identifier matters.
-
-    Returns ``True`` iff an injection happened. The boolean lets
-    operator-side reporting count "synthetic-001 records" at scale.
-    """
-    root = tree.getroot()
-    for cf in root.iter(_CONTROLFIELD_TAG):
-        if cf.get("tag") == "001" and (cf.text or "").strip():
-            return False
-    new_cf = etree.SubElement(root, _CONTROLFIELD_TAG)
-    new_cf.set("tag", "001")
-    new_cf.text = helmet_bib_id
-    # MARC ordering convention: controlfields (00X) before datafields.
-    # Insert at the start so the injected 001 sorts naturally before
-    # any 008 / 010 / etc. already present.
-    root.remove(new_cf)
-    root.insert(0, new_cf)
-    return True
 
 
 def _sanitize_subfield_separators(tree: etree._ElementTree) -> int:
@@ -473,14 +435,6 @@ def _convert_one(
         return None, "skipped"
 
     converted_at = _utc_now()
-    # Inject MARC 001 with the Helmet bib_id when missing — otherwise
-    # marc2bibframe2 falls back to its ``id1`` placeholder, producing
-    # the same BIBFRAME Work URI for every record that lacks 001, and
-    # M3's ``mint_raw_work_uri`` then collapses them all into one
-    # canonical Work at M8 time. The 200-record corpus smoke surfaced
-    # this as the "SupaRed" over-merge (28 unrelated bibs sharing one
-    # canonical because they all lacked 001).
-    _ensure_marc_001(validated.tree, helmet_id)
     # Recover ``‡<code>``-separator copy-paste before the XSLT sees it:
     # cataloguers sometimes paste from a legacy ILS display that uses
     # ``‡`` as a visible subfield boundary, producing
