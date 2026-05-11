@@ -82,7 +82,13 @@ def marc_to_bf_command(
     target = output_dir or get_settings().data_dir
     summary = marc_to_bf.run(input_dir, output_dir=target, force=force)
     typer.echo(summary.render())
-    if summary.failed:
+    # Partial-failure exit policy: non-zero only when *nothing* made
+    # progress (no successes, no idempotent skips). 800 k-record
+    # batches always have a long tail of records missing 336/337/338
+    # or 1XX/7XX — those are tracked in ``_errors.jsonl`` and visible
+    # in summary.render(), but they must not abort a multi-stage shell
+    # driver via ``set -e``.
+    if summary.failed and not summary.succeeded and not summary.skipped_idempotent:
         raise typer.Exit(code=1)
 
 
@@ -175,7 +181,10 @@ def bf_to_bffi_command(
         contrib_extractor=contrib_extractor,
     )
     typer.echo(summary.render())
-    if summary.errored:
+    # Partial-failure exit policy: see ``marc-to-bf`` for the
+    # rationale. Errored records are listed in summary.render() and
+    # do not abort the pipeline unless *every* record errored.
+    if summary.errored and not summary.converted and not summary.skipped_idempotent:
         raise typer.Exit(code=1)
 
 

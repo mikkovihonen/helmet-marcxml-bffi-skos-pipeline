@@ -3,6 +3,7 @@
 /data/
 /logs/
 /eval-runs/
+/marcxml/
 
 # Local environment
 .env

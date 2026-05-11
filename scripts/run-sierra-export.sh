@@ -23,7 +23,7 @@
 #   SMOKE_LIMIT  Rows in the smoke export. Default 500.
 #   SMOKE_DIR    Output dir for smoke MARCXML. Default /tmp/sierra-smoke.
 #   FULL_DIR     Output dir for the full export. Default
-#                $HOME/Workspace/helmet-sierra-data-tools/output/marcxml-fresh.
+#                ./marcxml/sierra.
 #   MAX_WORKERS  marcxml-export-sierra --max-workers. Default 10.
 #
 # Usage:
@@ -34,7 +34,7 @@ set -euo pipefail
 
 SMOKE_LIMIT="${SMOKE_LIMIT:-500}"
 SMOKE_DIR="${SMOKE_DIR:-/tmp/sierra-smoke}"
-FULL_DIR="${FULL_DIR:-$HOME/Workspace/helmet-sierra-data-tools/output/marcxml-fresh}"
+FULL_DIR="${FULL_DIR:-./marcxml/sierra}"
 MAX_WORKERS="${MAX_WORKERS:-10}"
 CONFIRM_FULL=0
 

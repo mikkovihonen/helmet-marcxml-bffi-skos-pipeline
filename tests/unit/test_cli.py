@@ -7,10 +7,20 @@ non-trivial enough to warrant their own assertions.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 import pytest
 import typer
+from typer.testing import CliRunner
 
-from bffi_pipeline.cli import _parse_reconcile_kinds
+from bffi_pipeline import cli as cli_module
+from bffi_pipeline.cli import _parse_reconcile_kinds, app
+from bffi_pipeline.stages.bf_to_bffi import BffiSummary
+from bffi_pipeline.stages.marc_to_bf import ConversionErrorRow, ConversionSummary
+
+if TYPE_CHECKING:
+    from pytest import MonkeyPatch
 
 
 def test_parse_reconcile_kinds_none_returns_none() -> None:
@@ -58,3 +68,87 @@ def test_parse_reconcile_kinds_unknown_group_raises() -> None:
 def test_parse_reconcile_kinds_all_among_other_groups_short_circuits_to_none() -> None:
     """``all`` anywhere in the list collapses the filter to "every kind"."""
     assert _parse_reconcile_kinds("creators,all") is None
+
+
+# --- marc-to-bf / bf-to-bffi partial-failure exit policy ----------------
+#
+# Real 800 k-record batches always have a long tail of validation
+# failures (missing 336/337/338, 1XX/7XX). The CLI must NOT exit
+# non-zero on partial failures — `set -e` shell drivers depend on
+# exit 0 to keep the multi-stage pipeline moving. Only a total
+# wipeout (zero progress) is a real abort signal.
+
+
+def _make_error_row(filename: str = "1.xml") -> ConversionErrorRow:
+    return ConversionErrorRow(
+        helmet_bib_id=filename.removesuffix(".xml"),
+        filename=filename,
+        error_type="marcxml-content-minimum",
+        message="Missing required MARC fields",
+    )
+
+
+def test_marc_to_bf_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    """Some succeed, some fail → exit 0; failures stay observable via
+    ``summary.render()`` + ``_errors.jsonl``."""
+    summary = ConversionSummary(
+        succeeded=["a.xml", "b.xml"],
+        failed=[_make_error_row("c.xml")],
+    )
+    monkeypatch.setattr(cli_module.marc_to_bf, "run", lambda *a, **kw: summary)
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
+    assert result.exit_code == 0, result.output
+
+
+def test_marc_to_bf_exits_one_on_total_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    """No successes AND no idempotent skips → exit 1 (genuine
+    catastrophe; abort the shell driver)."""
+    summary = ConversionSummary(
+        succeeded=[],
+        failed=[_make_error_row("a.xml"), _make_error_row("b.xml")],
+    )
+    monkeypatch.setattr(cli_module.marc_to_bf, "run", lambda *a, **kw: summary)
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
+    assert result.exit_code == 1, result.output
+
+
+def test_marc_to_bf_exits_zero_when_only_idempotent_skips(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """A re-run that hits 100 % idempotent skips is a no-op success,
+    not a failure — even if a previous run logged failures."""
+    summary = ConversionSummary(
+        skipped_idempotent=["a.xml", "b.xml"],
+        failed=[_make_error_row("c.xml")],
+    )
+    monkeypatch.setattr(cli_module.marc_to_bf, "run", lambda *a, **kw: summary)
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
+    assert result.exit_code == 0, result.output
+
+
+def test_bf_to_bffi_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    """Mirror of the marc-to-bf rule — partial errors don't abort."""
+    summary = BffiSummary(
+        converted=["a", "b"],
+        errored=[("c", "boom")],
+    )
+    monkeypatch.setattr(cli_module.bf_to_bffi, "run", lambda *a, **kw: summary)
+    bibframe_dir = tmp_path / "bibframe"
+    bibframe_dir.mkdir()
+    result = CliRunner().invoke(app, ["bf-to-bffi", "--bibframe-dir", str(bibframe_dir)])
+    assert result.exit_code == 0, result.output
+
+
+def test_bf_to_bffi_exits_one_on_total_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    summary = BffiSummary(errored=[("a", "boom"), ("b", "boom")])
+    monkeypatch.setattr(cli_module.bf_to_bffi, "run", lambda *a, **kw: summary)
+    bibframe_dir = tmp_path / "bibframe"
+    bibframe_dir.mkdir()
+    result = CliRunner().invoke(app, ["bf-to-bffi", "--bibframe-dir", str(bibframe_dir)])
+    assert result.exit_code == 1, result.output
