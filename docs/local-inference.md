@@ -63,31 +63,50 @@ Expected: `same_work` with confidence ≥ 0.85 and latency 3-6 s on the M5 Max. 
 
 Switch to vllm-mlx for the full-corpus judge pass. Continuous batching gives 4-8x throughput on bulk runs (see "Throughput planning" below), which is the difference between a 70-hour Ollama-serial run and a 10-hour batched one.
 
-One-time install per the upstream project:
+**About the inference stack.** Three layered projects:
+
+| Layer | Project | Role |
+|---|---|---|
+| Framework | `mlx` (Apple) | Apple-Silicon array/ML framework. Transitive dep. |
+| LLM runtime | `mlx-lm` ([`ml-explore/mlx-lm`](https://github.com/ml-explore/mlx-lm)) | Apple's plain LLM inference + basic OpenAI-compatible server. Transitive dep. |
+| Serving layer | **`vllm-mlx`** ([`waybarrios/vllm-mlx`](https://github.com/waybarrios/vllm-mlx)) | **This is what we install and run.** vLLM-style continuous-batching server with OpenAI + Anthropic compat, prefix caching, prompt cache, and speculative decoding. Builds on top of mlx-lm. |
+
+(An earlier draft of these docs referenced `Blaizzy/mlx_lm.git` — a
+typo. That repo does not exist; the closest match `Blaizzy/mlx-vlm`
+is for vision-language models, not text-only LLMs. Corrected during
+P-02 Phase A1.)
+
+One-time install via PyPI:
 
 ```bash
-git clone https://github.com/Blaizzy/mlx_lm.git
-cd mlx_lm
-uv pip install -e .
-# or: pipx install mlx_lm
+mkdir -p ~/Workspace/vendor/vllm-mlx && cd ~/Workspace/vendor/vllm-mlx
+uv venv .venv-mlx --python 3.12
+source .venv-mlx/bin/activate
+uv pip install vllm-mlx
+python -c "import vllm_mlx; print(vllm_mlx.__version__)"
 ```
 
-Convert the Qwen3 weights to MLX 4-bit (one-time; reuse the converted dir for every run):
+Download pre-quantised MLX checkpoints (one-time; cached under `~/.cache/huggingface/hub/`):
 
 ```bash
-mkdir -p ~/.mlx_models
-python -m mlx_lm.convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
-    --mlx-path ~/.mlx_models/Qwen3-32B-Instruct-4bit
-python -m mlx_lm.convert --hf-path Qwen/Qwen3-72B-Instruct -q --q-bits 4 \
-    --mlx-path ~/.mlx_models/Qwen3-72B-Instruct-4bit
+vllm-mlx download mlx-community/Qwen3-8B-Instruct-4bit
+vllm-mlx download mlx-community/Qwen3-32B-Instruct-4bit
 ```
 
-Start the OpenAI-compatible server (one model per process; restart with `--model …` to swap):
+(`vllm-mlx model --help` covers from-scratch conversion if a pre-quantised checkpoint isn't published yet.)
+
+Start the OpenAI-compatible server. For multi-model serving (primary + fallback under one endpoint), use `--models-config`:
 
 ```bash
-python -m mlx_lm.server \
-    --model ~/.mlx_models/Qwen3-32B-Instruct-4bit \
-    --host 0.0.0.0 --port 8000
+# Single model (simple case):
+vllm-mlx serve mlx-community/Qwen3-8B-Instruct-4bit \
+    --host 127.0.0.1 --port 8001 \
+    --continuous-batching --enable-prefix-cache
+
+# Multi-model (matches Ollama's per-request model-selection UX):
+vllm-mlx serve --models-config ~/.config/vllm-mlx/models.yaml \
+    --host 127.0.0.1 --port 8001 \
+    --continuous-batching --enable-prefix-cache
 ```
 
 Point the pipeline at the new endpoint for the production batch:
