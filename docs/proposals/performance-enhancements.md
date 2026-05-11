@@ -161,6 +161,56 @@ becomes fuzzier in the spec.
   `matching_fields` + `diverging_fields` might be useful as a
   feature-engineering aid for the LLM prompt itself (a kind of
   retrieval-augmented prompt). Lower priority.
+- **Why not Option 2 (k-NN) as the chosen path?** The simplicity of
+  k-NN is real and tempting, but five specific weaknesses push us
+  toward Option 1 for the production short-circuit:
+  1. **k-NN amplifies LLM bias.** It can only ever reproduce what
+     the LLM said. If the LLM is systematically wrong on some bib
+     class — false-merging music records sharing a generic title
+     like "Symphony No. 5", say — k-NN short-circuits those cases
+     and reports high confidence ("3 of 3 neighbors agreed"). The
+     gold-set's whole job is to catch LLM blind spots; k-NN
+     actively hides them. Option 1's GBDT, trained with gold
+     held-out, gives a knob to refuse to trust the LLM where it
+     is wrong.
+  2. **"3 neighbors agree" is not a probability.** Safely
+     short-circuiting the LLM requires a calibrated threshold
+     ("this prediction has ≥ 99 % precision against gold"). GBDT
+     outputs `predict_proba` we can isotonic-calibrate; k-NN
+     gives a vote count.
+  3. **Cold start on new acquisitions.** A new bib type (first
+     Chinese children's books; next round of board games)
+     produces no useful neighbors. GBDT can be retrained on a
+     few new labelled pairs; k-NN waits for the LLM to populate
+     the index slowly.
+  4. **The cases k-NN catches are mostly already caught by the
+     auto-merge band.** Spec § 6's deterministic auto-merge
+     (sim ≥ 0.90) handles the easy `same_work` cases without
+     LLM. k-NN's marginal value is on the medium-similarity
+     `[0.78, 0.90)` band — exactly where the LLM's signal IS
+     valuable and memorization-without-understanding is most
+     likely to mislead.
+  5. **Distance metric is an unprincipled free parameter.**
+     Euclidean vs. Mahalanobis vs. cosine over a heterogeneous
+     feature vector silently encodes assumptions. GBDT learns
+     the weighting from data.
+
+  If simplicity is the deciding criterion, the right comparison
+  isn't "k-NN vs GBDT" but **"k-NN vs logistic regression"**.
+  LogReg is conceptually no more complex than k-NN (fitting
+  weights to a linear combination instead of memorizing
+  examples) but gives calibrated probabilities, constant memory
+  after training, and generalization to unseen feature
+  combinations. Option 1 is robust to switching the model class
+  from GBDT to LogReg if a simpler model carries the gold-set
+  precision target.
+
+  Where k-NN does still earn its keep: as an **exploratory tool**
+  rather than a production short-circuit. Running k-NN over the
+  M6 decision history is a cheap way to ask "are there clusters
+  in the data the LLM treats inconsistently?" — a useful
+  diagnostic that surfaces the very LLM blind spots Option 1's
+  classifier needs to be evaluated against.
 
 ---
 
