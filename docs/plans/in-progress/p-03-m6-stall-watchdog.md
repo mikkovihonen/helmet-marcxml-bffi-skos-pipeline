@@ -432,6 +432,58 @@ if removed from `.env`.
 
 ---
 
+## End-to-end smoke verification (Phase A + B, 2026-05-11)
+
+Post-implementation smoke against real Ollama + real cascade, run
+with deliberately aggressive timeouts (`--abort-budget-seconds 1`
++ `--pair-budget-seconds 5`) to force the watchdog paths to fire
+on every escalate-band pair. **Not the calibration dry-run** the
+plan defines as Phase A8 / B6 — that one uses default budgets
+against a 5000-pair slice and is still pending operator action.
+The aggressive smoke verifies the *plumbing*; the proper dry-run
+verifies the *defaults*.
+
+**Setup**: 10 candidates from `preview-373/embed-candidates.jsonl`
+fed through `bffi-pipeline judge` with the aggressive flags.
+
+**Outcome**:
+
+| Check | Result |
+|---|---|
+| Per-pair budget fires on escalate-band pairs | ✓ 6 ``pair_budget_exceeded`` events across 3 unique pairs |
+| Events stream to both stderr (``WATCHDOG_EVENT `` prefix) and ``watchdog-events.jsonl`` | ✓ 6 lines on each surface; payloads identical |
+| Cascade escalates primary → fallback after primary aborts | ✓ Each affected pair has events from both ``qwen3:8b-q4_K_M`` and ``qwen3:32b-q4_K_M`` |
+| Fallback also enforces the shared per-pair deadline | ✓ Fallback events fire with ``elapsed_s=0.0`` because the shared deadline is already in the past at entry |
+| Final decisions land as ``uncertain`` with the watchdog rationale | ✓ 3/3 escalate-band pairs landed as ``uncertain`` with ``"pair budget exceeded — cumulative cascade wall time passed LLM_PAIR_TIMEOUT_SECONDS"`` |
+| Auto-merge-band pairs still short-circuit normally | ✓ The 1 auto-merge candidate got a synthetic ``same_work`` instantly without an LLM call |
+| Reject-band pairs filtered out before M6 (no spurious events) | ✓ 6 reject-band candidates from the input never reached the judge |
+| ``judge_batch`` summary counts events accurately | ✓ "completed: 3 / auto-merged: 1 / cascade used: 3 / decision counts: same_work=1 uncertain=3" |
+| Process exits cleanly, no crash | ✓ |
+
+**Empirical calibration findings** (relevant for the real dry-run):
+
+- **Path A** — budget exhausted at cascade entry (the
+  ``elapsed_s=0.0, retry_n=0`` events). Happens when an earlier
+  call in the cascade already burned through the budget; the
+  next-tier ``judge_pair`` checks the deadline before invoking and
+  aborts immediately. Clean.
+- **Path B** — budget exhausted mid-retry (the
+  ``elapsed_s=6.331, retry_n=1`` event). The pair's primary fired
+  one ``chain.invoke()`` (which timed out at the 1 s per-call
+  ceiling), the existing connection-retry stack waited 5 s before
+  retry, the deadline check fired before the second invoke.
+  **Insight**: the 5/30/120 s connection-retry backoff is what
+  burns the per-pair budget in practice. At default budgets (90 s
+  call / 300 s pair) the cascade has room for ~3 tier-call
+  sequences before the per-pair budget kicks in — exactly the
+  intended behaviour.
+
+**Conclusion**: Phase A + Phase B's implementation is verified
+end-to-end against real backend + real cascade. The remaining
+acceptance step is the operator's dry-run measurement at default
+budgets, against a 5000-pair slice from the v2 corpus once M6
+starts.
+
 ## Risks
 
 | Risk | Likelihood | Mitigation |
