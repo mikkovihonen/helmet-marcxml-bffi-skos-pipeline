@@ -60,6 +60,15 @@ Each box maps to a milestone in [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md).
 Stage code lives in [`src/bffi_pipeline/stages/`](src/bffi_pipeline/stages/);
 orchestration in [`src/bffi_pipeline/cli.py`](src/bffi_pipeline/cli.py).
 
+The MARCXML at the head of the diagram is produced by a sibling package,
+[`src/marcxml_export_pipeline/sierra/`](src/marcxml_export_pipeline/sierra/),
+which streams Helmet's Sierra Postgres replica and writes per-bib
+MARCXML files (synthesising MARC 001/003/005/907 when the source row
+lacks them, which is what keeps the marc2bibframe2 → BFFI work-key
+contract clean downstream). It is shipped as its own CLI entry point —
+`marcxml-export-sierra` — so the repository can grow other ILS sources
+(Koha, Alma, …) without entangling them with the BFFI pipeline itself.
+
 ## Prerequisites
 
 The full pipeline targets **Apple Silicon — MacBook Pro M5 Max
@@ -142,6 +151,8 @@ plan than to interrupt.
 │   ├── validation/            # SHACL boundary validators
 │   ├── blocking.py uris.py    # M1 + M4 cross-stage helpers
 │   └── cli.py                 # typer entry point
+├── src/marcxml_export_pipeline/
+│   └── sierra/                # Sierra Postgres → MARCXML export (CLI: marcxml-export-sierra)
 ├── prompts/                   # versioned LLM prompts (hashed at runtime)
 ├── sparql/                    # versioned SPARQL queries
 ├── config/                    # Skosify overlay, Skosmos config, SHACL shapes
