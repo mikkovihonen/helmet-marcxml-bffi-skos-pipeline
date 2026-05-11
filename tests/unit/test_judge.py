@@ -608,6 +608,23 @@ def test_synthesize_auto_merge_preserves_similarity_as_confidence() -> None:
     assert outcome.steps[0].decision.confidence == pytest.approx(0.927)
 
 
+def test_auto_merge_clamps_similarity_above_one() -> None:
+    """FAISS inner-product on L2-normalised vectors occasionally drifts
+    a hair above 1.0 from float32 accumulation noise. The synthesiser
+    must clamp rather than fail Pydantic's ``le=1.0`` constraint —
+    rejecting an auto-merge pair on float-noise alone would kill the
+    M6 stage mid-batch."""
+    row = {
+        "work_a": "http://example.org/a",
+        "work_b": "http://example.org/b",
+        "similarity": 1.0000001192092896,  # exact value seen in the preview-373 pipeline
+        "block_a": "blk",
+        "block_b": "blk",
+    }
+    outcome = synthesize_auto_merge_outcome(row)
+    assert outcome.final.confidence == pytest.approx(1.0)
+
+
 # --- WorkMatchDecisionFast (fast-mode schema) ----------------------------
 
 

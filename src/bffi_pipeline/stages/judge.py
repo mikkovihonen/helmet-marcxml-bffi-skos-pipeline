@@ -1162,6 +1162,11 @@ def synthesize_auto_merge_outcome(
     ``same_work``; ``"embedding_similarity"`` is the literal signal.
     """
     similarity = float(row.get("similarity", 0.0))
+    # FAISS inner-product on L2-normalised vectors can drift a hair
+    # above 1.0 (~1.0000001) from float32 accumulation noise. Clamp
+    # to the Pydantic ``le=1.0`` constraint on ``WorkMatchDecision.
+    # confidence`` rather than rejecting the pair.
+    similarity_clamped = min(max(similarity, 0.0), 1.0)
     block_a = row.get("block_a", "")
     block_b = row.get("block_b", "")
     rationale = (
@@ -1172,7 +1177,7 @@ def synthesize_auto_merge_outcome(
     )
     decision = WorkMatchDecision(
         decision="same_work",
-        confidence=similarity,
+        confidence=similarity_clamped,
         matching_fields=["embedding_similarity"],
         diverging_fields=[],
         rationale=rationale,
