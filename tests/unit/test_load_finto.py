@@ -315,6 +315,7 @@ def test_canonical_vocab_list_covers_expected_authority_vocabularies() -> None:
         "relators",
         "lcgft",
         "lcsh",
+        "childrensSubjects",
     }
 
 

@@ -298,3 +298,17 @@ bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
     skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
     skosmos:sparqlDialect   "JenaText" ;
     skosmos:fullAlphabeticalIndex true .
+
+# LoC Children's Subject Headings — juvenile-collection subset of
+# LCSH. Cataloguers may use these forms on translated English
+# children's-collection records.
+:childrensSubjects a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "LC Children's Subject Headings"@en ;
+    skosmos:shortName "childrensSubjects"@en ;
+    void:uriSpace     "http://id.loc.gov/authorities/childrensSubjects/" ;
+    skosmos:language        "en" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/authorities/childrensSubjects/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .

@@ -185,6 +185,21 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://id.loc.gov/authorities/subjects/",
         languages=("en",),
     ),
+    # LC Children's Subject Headings — a subset of LCSH tuned for
+    # juvenile-collection cataloguing. Cataloguers tag ``$2 lcsh``
+    # for children's-collection records on translated English imports
+    # ("Jukka Hukka (fiktiivinen hahmo)" → matching English form).
+    # Same gzipped Turtle wire format as LCSH/LCGFT, ~1.8 MB
+    # compressed. Separate URI namespace
+    # (``http://id.loc.gov/authorities/childrensSubjects/``) so it
+    # loads to its own Fuseki named graph; tier-0 ``subject`` routing
+    # adds it after LCSH.
+    FintoVocab(
+        vocab_id="childrensSubjects",
+        dump_url="https://id.loc.gov/download/authorities/childrensSubjects.skosrdf.ttl.gz",
+        graph_uri="http://id.loc.gov/authorities/childrensSubjects/",
+        languages=("en",),
+    ),
 )
 
 

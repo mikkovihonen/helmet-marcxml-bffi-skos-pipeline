@@ -47,6 +47,7 @@ VOCAB_LCGFT: Final[str] = "lcgft"
 VOCAB_LCSH: Final[str] = "lcsh"
 VOCAB_ALLARS: Final[str] = "allars"
 VOCAB_KAUNOKKI: Final[str] = "kaunokki"
+VOCAB_CHILDRENS_SUBJECTS: Final[str] = "childrensSubjects"
 
 #: Authority kind → (source-vocabulary tag, named-graph URI) tuples.
 #: Multiple entries per kind get tried in declaration order in a single
@@ -79,6 +80,10 @@ _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
         # English topical literal lands without $0; YSO comes first
         # because Finnish-source records dominate Helmet.
         (VOCAB_LCSH, "http://id.loc.gov/authorities/subjects/"),
+        # LoC Children's Subject Headings — the juvenile-collection
+        # subset of LCSH. After LCSH because the general form usually
+        # carries the same prefLabel and is the broader binding.
+        (VOCAB_CHILDRENS_SUBJECTS, "http://id.loc.gov/authorities/childrensSubjects/"),
     ),
     "genre_form": (
         (VOCAB_KAUNO, "http://www.yso.fi/onto/kauno/"),
@@ -226,6 +231,7 @@ class StubLocalConceptResolver:
 
 __all__ = [
     "VOCAB_ALLARS",
+    "VOCAB_CHILDRENS_SUBJECTS",
     "VOCAB_KAUNOKKI",
     "VOCAB_LCGFT",
     "VOCAB_LCSH",
