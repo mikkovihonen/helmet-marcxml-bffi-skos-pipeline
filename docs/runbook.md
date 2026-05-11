@@ -254,6 +254,70 @@ done
 Pick the value that maximises throughput without OOMing. Update this
 section + the example command sequence above with the chosen value.
 
+## Expected reconciliation residue from the YSA → YSO vocabulary merge
+
+A 200-record corpus smoke surfaced a class of `reconciliation-no-candidate`
+entries that look like tier-0 bugs but are actually cataloguing-data
+quality, not pipeline issues. Document here so operators don't chase
+them down twice.
+
+**Pattern.** YSA (the pre-2018 general Finnish thesaurus) used bare
+prefLabels for many lemmas that have multiple meanings — e.g. `lapset`
+(both "children as an age group" and "children as family members").
+During the 2014–2018 YSA → YSO merge, YSO replaced these with
+**parenthetically-disambiguated** prefLabels:
+
+| YSA bare form         | YSO disambiguated form(s)                                          |
+| --------------------- | ------------------------------------------------------------------ |
+| `lapset`              | `lapset (ikäryhmät)` p4354 + `lapset (perheenjäsenet)` p2357       |
+| `sissit`              | `partisaanit` p8177 + `sissit (suomalaiset sotilaat)` p8175        |
+| `pohjalaismurteet`    | `pohjalaismurteet (suomen kieli)` p17804 + `… (suomenruotsi)` p27707 |
+| `2000-luku`           | `2000-luku (vuosikymmen)` p6200062009 + `2000-luku (vuosisata)` p6200062099 |
+
+YSO **does not** carry the bare form (`lapset`) as `skos:altLabel` —
+that's an intentional curatorial choice. Cataloguers are expected to
+update records to one of the disambiguated forms; meanwhile MARC
+records keep the bare YSA literal.
+
+**What the pipeline does.** Tier-0 exact-prefLabel match correctly
+misses (the bare token isn't in YSO). Tier-1 Finto prefix search
+returns the 2–3 disambiguated candidates with similarity ~0.7–0.8
+(below the 0.95 lexical-direct threshold). The LLM picker has no
+context to choose between e.g. age-group vs. family-member sense,
+so it falls through to `reconciliation-fallback` with the
+canonical Work's AdminMetadata flagged
+`bffi:descriptionAuthentication = <bib:auth/needs-review>` — or to
+`reconciliation-no-candidate` if Finto returns nothing within the
+similarity floor.
+
+**Operational impact at corpus scale.** ~1% of YSA-tagged subjects on
+the corpus sample (5–10 k records over the 800 k Helmet corpus). The
+M9 review queue already surfaces them via the AdminMetadata filter:
+
+```sparql
+PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>
+SELECT ?work ?inputLiteral WHERE {
+  ?work bffi:adminMetadata/bffi:descriptionAuthentication
+        <http://urn.fi/URN:NBN:fi:bib:auth/needs-review> .
+  ?activity prov:used ?work ;
+            bffi-prov:inputLiteral ?inputLiteral ;
+            bffi-prov:stage "reconciliation-fallback" .
+}
+```
+
+**What NOT to do.** Don't try to wire YSA's bare forms into a tier-0
+altLabel lookup — they're absent from YSO by design. Don't lower the
+lexical-similarity threshold to accept the 0.7-0.8 prefix matches —
+that would silently bind to whichever disambiguated sense sorts first,
+which is exactly the ambiguity cataloguers need to resolve.
+
+**Resolution path.** Surface the needs-review queue to cataloguers; on
+each record they pick the right disambiguated YSO URI and the next
+pipeline run binds correctly. A future "YSA→YSO mismatch report"
+helper that pre-groups by literal could speed the review (one
+decision per literal applies across all records that share it), but
+it's a cataloguer-side workflow, not a pipeline fix.
+
 ## Compaction cron suggestion
 
 Once production data is flowing:
