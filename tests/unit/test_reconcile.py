@@ -842,6 +842,27 @@ def test_iter_subject_requests_defaults_unknown_source_to_subject() -> None:
     assert requests[0].kind == "subject"
 
 
+def test_iter_subject_requests_classifies_allars_source_as_subject() -> None:
+    """``$2 allars`` is the Swedish general thesaurus (Allmän tesaurus
+    på svenska) — parallel to YSA/YSO on the Finnish side. Routes to
+    ``subject`` so tier-0 hits the loaded Allars graph (and falls
+    through to YSO + LCSH if Allars misses)."""
+    g = _build_subject_canonical_graph(subject_label="ekonomi", subject_source="allars/swe")
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "subject"
+
+
+def test_iter_subject_requests_classifies_bella_source_as_genre_form() -> None:
+    """``$2 bella`` is the Swedish parallel labels under the Kaunokki
+    fiction thesaurus — routes to ``genre_form`` just like ``$2
+    kaunokki`` (the Finnish form) and ``$2 kauno`` (the modern form)."""
+    g = _build_subject_canonical_graph(subject_label="dödsfall", subject_source="bella/swe")
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "genre_form"
+
+
 def test_iter_subject_requests_skips_uri_targets() -> None:
     """Pre-resolved $0 subjects are not re-reconciled."""
     g = _build_subject_canonical_graph(

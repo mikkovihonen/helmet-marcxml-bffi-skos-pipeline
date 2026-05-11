@@ -45,6 +45,8 @@ from bffi_pipeline.stages.reconcile import (
 VOCAB_SLM: Final[str] = "slm"
 VOCAB_LCGFT: Final[str] = "lcgft"
 VOCAB_LCSH: Final[str] = "lcsh"
+VOCAB_ALLARS: Final[str] = "allars"
+VOCAB_KAUNOKKI: Final[str] = "kaunokki"
 
 #: Authority kind → (source-vocabulary tag, named-graph URI) tuples.
 #: Multiple entries per kind get tried in declaration order in a single
@@ -66,6 +68,13 @@ VOCAB_LCSH: Final[str] = "lcsh"
 _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
     "subject": (
         (VOCAB_YSO, "http://www.yso.fi/onto/yso/"),
+        # Allars (Swedish general thesaurus) covers $2 allars-tagged
+        # Swedish topical literals (ekonomi / gymnasiet etc) — the
+        # 200-record corpus smoke surfaced Swedish-language records
+        # whose subject literals don't have Finnish prefLabels in YSO.
+        # Between YSO and LCSH so the language priority reads
+        # Finnish → Swedish → English.
+        (VOCAB_ALLARS, "http://www.yso.fi/onto/allars/"),
         # LCSH covers the cataloguer-tagged-$2-lcsh case where an
         # English topical literal lands without $0; YSO comes first
         # because Finnish-source records dominate Helmet.
@@ -74,6 +83,12 @@ _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
     "genre_form": (
         (VOCAB_KAUNO, "http://www.yso.fi/onto/kauno/"),
         (VOCAB_SLM, "http://urn.fi/URN:NBN:fi:au:slm:"),
+        # Kaunokki/Bella — legacy KAUNO with Swedish parallel labels
+        # under the Bella sub-vocab. Cataloguers tag $2 kaunokki
+        # (Finnish) or $2 bella (Swedish) on fiction MARC 6XX. After
+        # KAUNO+SLM in the lookup order so genuine modern KAUNO
+        # bindings still win when both carry the same literal.
+        (VOCAB_KAUNOKKI, "http://urn.fi/URN:NBN:fi:au:kaunokki:"),
         # LCGFT covers English-cataloguer-supplied genre/form labels
         # (Novels, Short stories, Video recordings, etc.) when the
         # cataloguer tagged $2 lcgft without $0. Last in the order so
@@ -210,6 +225,8 @@ class StubLocalConceptResolver:
 
 
 __all__ = [
+    "VOCAB_ALLARS",
+    "VOCAB_KAUNOKKI",
     "VOCAB_LCGFT",
     "VOCAB_LCSH",
     "VOCAB_SLM",

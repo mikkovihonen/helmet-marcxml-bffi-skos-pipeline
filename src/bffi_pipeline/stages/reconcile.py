@@ -884,10 +884,16 @@ def _iter_creator_requests(graph: Graph) -> Iterator[EntityRequest]:
 #: ``ysa`` maps to ``"subject"`` so YSA-tagged terms route through
 #: the YSO reconciliation path — YSO inherited the YSA concepts as
 #: ``skos:prefLabel@fi`` during the 2014-2018 vocabulary merge.
+#: ``allars`` and ``bella`` are the Swedish-language parallels to
+#: YSO and KAUNO respectively; ``$2 allars`` routes to ``"subject"``
+#: and ``$2 bella`` routes to ``"genre_form"`` (same kind as the
+#: existing ``$2 kaunokki`` which substring-matches ``"kauno"``).
 _SOURCE_TOKEN_TO_KIND: Final[tuple[tuple[str, AuthorityKind], ...]] = (
     ("yso", "subject"),
     ("ysa", "subject"),
+    ("allars", "subject"),
     ("kauno", "genre_form"),
+    ("bella", "genre_form"),
     ("muso", "music_form"),
     ("slm", "genre_form"),
 )

@@ -101,6 +101,22 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://www.yso.fi/onto/kauno/",
         languages=("fi", "sv", "en"),
     ),
+    # KAUNOKKI/BELLA — the legacy KAUNO thesaurus, with the Swedish
+    # parallel labels under the Bella sub-vocab. Cataloguers tag
+    # ``$2 kaunokki`` (Finnish form) or ``$2 bella`` (Swedish form) on
+    # MARC 6XX for fiction material — the 200-record corpus smoke
+    # surfaced ~10 Bella-tagged Swedish-language records that fell into
+    # tier-0 ``no-candidate`` because the underlying labels live in
+    # Kaunokki's graph (separate URI namespace from KAUNO), not loaded
+    # by the original M11 3b pass. Separate Fuseki named graph because
+    # the URI namespace (``http://urn.fi/URN:NBN:fi:au:kaunokki:``)
+    # doesn't overlap KAUNO's (``http://www.yso.fi/onto/kauno/``).
+    FintoVocab(
+        vocab_id="kaunokki",
+        dump_url="https://api.finto.fi/download/kaunokki/kaunokki-skos.ttl",
+        graph_uri="http://urn.fi/URN:NBN:fi:au:kaunokki:",
+        languages=("fi", "sv"),
+    ),
     FintoVocab(
         vocab_id="muso",
         dump_url="https://api.finto.fi/download/muso/muso-skos.ttl",
@@ -112,6 +128,21 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         dump_url="https://api.finto.fi/download/slm/slm-skos.ttl",
         graph_uri="http://urn.fi/URN:NBN:fi:au:slm:",
         languages=("fi", "sv"),
+    ),
+    # Allärs — the Swedish General Thesaurus, Allmän tesaurus på
+    # svenska. Cataloguers tag ``$2 allars`` on Swedish-language MARC
+    # 6XX subjects (parallel to YSA/YSO on the Finnish side). The
+    # 200-record corpus smoke surfaced 10 Allars-tagged entries; at
+    # 800k scale Swedish-language records are a significant minority
+    # of Helmet. Allars lives in its own URI namespace under
+    # ``http://www.yso.fi/onto/allars/`` so it loads to a separate
+    # Fuseki named graph; tier-0 ``subject`` routing adds Allars
+    # between YSO (Finnish-first) and LCSH (English-last).
+    FintoVocab(
+        vocab_id="allars",
+        dump_url="https://api.finto.fi/download/allars/allars-skos.ttl",
+        graph_uri="http://www.yso.fi/onto/allars/",
+        languages=("sv",),
     ),
     # MARC Code List for Relators — not Finto-hosted but loaded the
     # same way so Skosmos renders the bf:role URIs the M3
@@ -283,8 +314,13 @@ def run(
 
     owned_client = http_client is None
     if owned_client:
+        # Connect / pool default to 60 s. Read 300 s for the long-poll
+        # downloads (KANTO is ~183 MB, LCSH ~39 MB compressed). Write
+        # 1800 s (30 min) because every PUT to Fuseki re-uploads the
+        # full Turtle payload — at LCSH's ~465 MB decompressed size the
+        # POST body alone can exceed the default 60 s write timeout.
         http_client = httpx.Client(
-            timeout=httpx.Timeout(60.0, read=300.0),
+            timeout=httpx.Timeout(60.0, read=300.0, write=1800.0),
             follow_redirects=True,
             headers={"User-Agent": DEFAULT_USER_AGENT},
         )

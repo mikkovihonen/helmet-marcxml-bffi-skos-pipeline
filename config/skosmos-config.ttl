@@ -264,3 +264,37 @@ bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
     skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
     skosmos:sparqlDialect   "JenaText" ;
     skosmos:fullAlphabeticalIndex true .
+
+# KAUNOKKI/BELLA — Finto fiction thesaurus, the legacy KAUNO form with
+# Swedish parallel labels under the Bella sub-vocab. Loaded so that
+# $2 kaunokki / $2 bella-tagged URIs render as labelled clickable
+# concepts in Skosmos.
+:kaunokki a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "KAUNOKKI/BELLA — fiktiivisen aineiston sanasto"@fi,
+                      "KAUNOKKI/BELLA — vocabulary for fictional material"@en ;
+    skosmos:shortName "kaunokki"@fi,
+                      "kaunokki"@sv,
+                      "kaunokki"@en ;
+    void:uriSpace     "http://urn.fi/URN:NBN:fi:au:kaunokki:" ;
+    skosmos:language        "fi", "sv" ;
+    skosmos:defaultLanguage "fi" ;
+    skosmos:sparqlGraph     <http://urn.fi/URN:NBN:fi:au:kaunokki:> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+# Allärs — Swedish general subjects thesaurus (Allmän tesaurus på
+# svenska). Swedish-language parallel to YSA/YSO; cataloguers tag
+# $2 allars on Swedish-language MARC 6XX subjects.
+:allars a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "Allärs — Allmän tesaurus på svenska"@sv,
+                      "Allars — Swedish general thesaurus"@en ;
+    skosmos:shortName "allars"@sv,
+                      "allars"@en ;
+    void:uriSpace     "http://www.yso.fi/onto/allars/" ;
+    skosmos:language        "sv" ;
+    skosmos:defaultLanguage "sv" ;
+    skosmos:sparqlGraph     <http://www.yso.fi/onto/allars/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
