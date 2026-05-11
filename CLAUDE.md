@@ -11,6 +11,8 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - `docs/external-dependencies.md` — records and confirmations to request from Helmet cataloguers.
 - `docs/ci-strategy.md` — CI rationale and PR template.
 - `docs/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions; consult before adding any `bffi:*` term to spec, code, or shapes.**
+- `docs/proposals/` — forward-looking ideas not yet committed to (`prop-<NN>-<slug>.md`). Each carries `Status: proposed | planning (graduated) | done | rejected (reason)` and a `Proposal-base commit` for drift detection. **Skim the proposals README and the current proposals index before recommending an architectural change** — the idea may already be on record, possibly with a documented reason not to pursue it.
+- `docs/plans/` — committed-to-action plans of record (`p-<NN>-<slug>.md`). Each plan has sequenced phases with verification checkpoints, a risk register, and a rollback procedure, plus a `Plan-base commit` and `Phase commits` for tying execution to git history. Plans graduate from proposals; **consult before re-scoping work that overlaps an active plan**.
 
 ## Operating constraints
 
