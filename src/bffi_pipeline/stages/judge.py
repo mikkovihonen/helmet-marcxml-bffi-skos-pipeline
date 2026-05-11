@@ -61,6 +61,7 @@ from rdflib.namespace import RDF, RDFS
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.writer import ProvenanceWriter
+from bffi_pipeline.stages.watchdog import emit_watchdog_event
 
 # --- Constants ------------------------------------------------------------
 
@@ -100,6 +101,18 @@ STAGE_SECOND_OPINION: Final[str] = "llm-judge-second-opinion"
 #: (similarity ≥ 0.90 per spec § 6). These are merged deterministically
 #: without an LLM call — the embedding similarity is the entire signal.
 STAGE_AUTO_MERGE: Final[str] = "auto-merge-embedding"
+#: ``bffi-prov:stage`` for pairs that fell through the M6 cascade
+#: because every LLM call (primary + fallback) exceeded
+#: ``LLM_CALL_TIMEOUT_SECONDS`` and exhausted the retry budget.
+#: Plan: ``docs/plans/in-progress/p-03-m6-stall-watchdog.md``.
+STAGE_WATCHDOG: Final[str] = "watchdog-aborted"
+
+#: Subset of timeout-shaped exception names that the watchdog
+#: specifically counts as "the LLM took too long" — narrower than
+#: :func:`_is_connection_error` which also catches network resets etc.
+_TIMEOUT_EXCEPTION_NAMES: Final[frozenset[str]] = frozenset(
+    {"ReadTimeout", "ConnectTimeout", "APITimeoutError", "Timeout"}
+)
 
 #: Stub phrases the rationale must NOT contain. Stored already lower-cased.
 STUB_PHRASES: Final[tuple[str, ...]] = (
@@ -552,6 +565,23 @@ def _is_connection_error(exc: BaseException) -> bool:
     return False
 
 
+def _is_timeout_error(exc: BaseException) -> bool:
+    """Narrower variant of :func:`_is_connection_error` for the watchdog.
+
+    Returns True only for exceptions where the LLM call hit a
+    wall-time ceiling — not for generic network resets / RPC errors.
+    The watchdog emits ``timeout`` / ``give_up`` events on this
+    subset; the cascade's retry stack covers both.
+    """
+    name = type(exc).__name__
+    if name in _TIMEOUT_EXCEPTION_NAMES:
+        return True
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None and cause is not exc:
+        return _is_timeout_error(cause)
+    return False
+
+
 def _build_chain(
     *,
     model_name: str,
@@ -560,6 +590,7 @@ def _build_chain(
     temperature: float = 0.0,
     seed: int = 42,
     full_rationale: bool = True,
+    timeout: int | None = None,
 ) -> Any:
     """Compose ``ChatOpenAI(...).with_structured_output(schema)``.
 
@@ -586,13 +617,20 @@ def _build_chain(
             ("user", sections["USER"]),
         ]
     )
-    llm = ChatOpenAI(
-        base_url=base_url,
-        api_key=SecretStr(api_key),
-        model=model_name,
-        temperature=temperature,
-        seed=seed,
-    )
+    llm_kwargs: dict[str, Any] = {
+        "base_url": base_url,
+        "api_key": SecretStr(api_key),
+        "model": model_name,
+        "temperature": temperature,
+        "seed": seed,
+    }
+    if timeout is not None:
+        # ChatOpenAI propagates ``timeout`` to the underlying httpx client.
+        # httpx raises ``ReadTimeout`` when the server doesn't produce a
+        # complete response within the budget — caught by the watchdog
+        # path in :func:`judge_pair`.
+        llm_kwargs["timeout"] = timeout
+    llm = ChatOpenAI(**llm_kwargs)
     schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
     return template | llm.with_structured_output(schema, method="json_schema")
 
@@ -644,6 +682,7 @@ def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + val
     cache: JudgeCache | None = None,
     sleep: Callable[[float], None] = time.sleep,
     full_rationale: bool = True,
+    watchdog_sidecar_path: Path | None = None,
 ) -> tuple[WorkMatchDecision, bool, float]:
     """Judge a single Work-pair with retry, post-validation cache.
 
@@ -673,7 +712,9 @@ def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + val
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key,
         full_rationale=full_rationale,
+        timeout=settings.llm_call_timeout_seconds,
     )
+    pair_id = f"{record_a.record_id}+{record_b.record_id}"
 
     own_cache = cache is None
     if own_cache:
@@ -711,6 +752,19 @@ def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + val
                 raw = chain.invoke(invoke_payload)
             except Exception as exc:
                 if _is_connection_error(exc):
+                    if _is_timeout_error(exc):
+                        # Surface the wedge to the operator + audit trail.
+                        # Same retry behaviour as any other connection
+                        # error, but tagged distinctly so the dry-run
+                        # bench can count specifically watchdog events.
+                        emit_watchdog_event(
+                            pair_id=pair_id,
+                            event="timeout",
+                            model_name=effective_model,
+                            elapsed_seconds=time.monotonic() - started,
+                            retry_n=connection_attempts,
+                            sidecar_path=watchdog_sidecar_path,
+                        )
                     if connection_attempts < MAX_CONNECTION_RETRIES:
                         sleep(CONNECTION_BACKOFF_SECONDS[connection_attempts])
                         connection_attempts += 1
@@ -718,6 +772,15 @@ def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + val
                             f"connection error after {connection_attempts} retry(ies): {exc!s}"
                         )
                         continue
+                    if _is_timeout_error(exc):
+                        emit_watchdog_event(
+                            pair_id=pair_id,
+                            event="give_up",
+                            model_name=effective_model,
+                            elapsed_seconds=time.monotonic() - started,
+                            retry_n=connection_attempts,
+                            sidecar_path=watchdog_sidecar_path,
+                        )
                     last_error = (
                         f"connection error after {MAX_CONNECTION_RETRIES} retries exhausted: "
                         f"{exc!s}"
@@ -775,6 +838,7 @@ def cascade_judge(
     cache: JudgeCache | None = None,
     sleep: Callable[[float], None] = time.sleep,
     full_rationale: bool = True,
+    watchdog_sidecar_path: Path | None = None,
 ) -> JudgeOutcome:
     """Two-stage cascade per spec § 7 / docs/local-inference.md.
 
@@ -809,6 +873,7 @@ def cascade_judge(
             cache=cache,
             sleep=sleep,
             full_rationale=full_rationale,
+            watchdog_sidecar_path=watchdog_sidecar_path,
         )
         steps = [
             CascadeStep(
@@ -831,6 +896,7 @@ def cascade_judge(
             cache=cache,
             sleep=sleep,
             full_rationale=full_rationale,
+            watchdog_sidecar_path=watchdog_sidecar_path,
         )
         steps.append(
             CascadeStep(
@@ -1266,6 +1332,7 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
     concurrency: int = DEFAULT_CONCURRENCY,
     sleep: Callable[[float], None] = time.sleep,
     full_rationale: bool = True,
+    watchdog_sidecar_path: Path | None = None,
 ) -> JudgeBatchResult:
     """Run the cascade over every escalate-band pair from M5.
 
@@ -1286,6 +1353,10 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
     output_path = output_path or (settings.data_dir / DECISIONS_FILENAME)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_path = _checkpoint_path_for(output_path)
+    if watchdog_sidecar_path is None:
+        # Default sidecar lives alongside the other M6 artefacts so a
+        # ``BFFI_DATA_DIR`` swap rotates it automatically.
+        watchdog_sidecar_path = settings.data_dir / "watchdog-events.jsonl"
 
     cascade_fn: CascadeFn = cascade if cascade is not None else cascade_judge
 
@@ -1359,6 +1430,7 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
             cache=cache,
             sleep=sleep,
             full_rationale=full_rationale,
+            watchdog_sidecar_path=watchdog_sidecar_path,
         )
 
     def _record_outcome(

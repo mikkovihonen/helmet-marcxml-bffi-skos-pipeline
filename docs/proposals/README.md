@@ -87,7 +87,7 @@ plan documents *when the execution was scheduled*.
   — `planning (graduated)`. Detect M6 LLM calls that hang and retry
   the stuck pair so unattended overnight runs don't lose hours to a
   single transient Ollama wedge. Plan lives at
-  [`docs/plans/backlog/p-03-m6-stall-watchdog.md`](../plans/backlog/p-03-m6-stall-watchdog.md).
+  [`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](../plans/in-progress/p-03-m6-stall-watchdog.md).
 - [`prop-04-consolidate-on-vllm-mlx.md`](prop-04-consolidate-on-vllm-mlx.md)
   — `proposed`. After P-02 ships, consider replacing Ollama with
   vllm-mlx for the dev loop too so only one inference stack needs

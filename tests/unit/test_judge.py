@@ -9,6 +9,7 @@ without an Ollama or vllm-mlx server.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -417,6 +418,96 @@ def test_non_connection_exception_lands_as_uncertain_immediately(
     assert decision.decision == "uncertain"
     assert "unrecoverable" in decision.rationale.lower()
     assert len(chain.calls) == 1
+
+
+# --- watchdog (per plan P-03) --------------------------------------------
+
+
+class _TimeoutErr(Exception):
+    """Stand-in whose class name matches the watchdog's timeout enum."""
+
+
+_TimeoutErr.__name__ = "ReadTimeout"
+
+
+def test_timeout_emits_watchdog_event_and_retries_to_success(
+    tmp_cache: JudgeCache, tmp_path: Path, capsys: Any
+) -> None:
+    """A single timeout fires a ``timeout`` watchdog event, the cascade
+    retry stack kicks in, and the second call succeeds — no
+    ``give_up`` event, no ``uncertain`` outcome."""
+    sidecar = tmp_path / "watchdog-events.jsonl"
+    good = _make_decision()
+    chain = _ScriptedChain([_TimeoutErr("ollama wedged"), good])
+    decision, cache_hit, _ = judge_pair(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.84,
+        chain=chain,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+        watchdog_sidecar_path=sidecar,
+    )
+    assert decision == good
+    assert cache_hit is False
+    # Sidecar got one timeout event, no give_up.
+    events = [json.loads(line) for line in sidecar.read_text().splitlines() if line.strip()]
+    assert len(events) == 1
+    assert events[0]["event"] == "timeout"
+    assert events[0]["pair_id"] == "a+b"
+    assert events[0]["retry_n"] == 0  # first attempt failed; not yet a retry.
+    # Stderr mirror carries the same payload behind the WATCHDOG_EVENT prefix.
+    stderr = capsys.readouterr().err
+    assert "WATCHDOG_EVENT " in stderr
+    assert '"event":"timeout"' in stderr
+
+
+def test_repeated_timeouts_emit_give_up_event_and_land_uncertain(
+    tmp_cache: JudgeCache, tmp_path: Path
+) -> None:
+    """All-timeout scripted chain: retries exhaust, ``give_up`` event
+    is emitted, decision lands as ``uncertain``."""
+    sidecar = tmp_path / "watchdog-events.jsonl"
+    chain = _ScriptedChain([_TimeoutErr("wedged")] * (MAX_CONNECTION_RETRIES + 1))
+    decision, _, _ = judge_pair(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.84,
+        chain=chain,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+        watchdog_sidecar_path=sidecar,
+    )
+    assert decision.decision == "uncertain"
+    events = [json.loads(line) for line in sidecar.read_text().splitlines() if line.strip()]
+    # Every failed attempt emits a ``timeout``; the final exhaustion
+    # additionally emits ``give_up`` — so ``MAX_CONNECTION_RETRIES + 1``
+    # timeouts plus one give_up.
+    assert sum(1 for e in events if e["event"] == "timeout") == MAX_CONNECTION_RETRIES + 1
+    assert sum(1 for e in events if e["event"] == "give_up") == 1
+    assert events[-1]["event"] == "give_up"
+
+
+def test_non_timeout_connection_error_does_not_emit_watchdog_event(
+    tmp_cache: JudgeCache, tmp_path: Path
+) -> None:
+    """Generic ``ConnectError`` retries but does NOT emit a watchdog
+    event — the watchdog specifically counts wall-time wedges, not
+    network resets."""
+    sidecar = tmp_path / "watchdog-events.jsonl"
+    good = _make_decision()
+    chain = _ScriptedChain([_ConnError("connection reset"), good])
+    decision, _, _ = judge_pair(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.84,
+        chain=chain,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+        watchdog_sidecar_path=sidecar,
+    )
+    assert decision == good
+    assert not sidecar.exists() or sidecar.read_text().strip() == ""
 
 
 # --- cascade_judge --------------------------------------------------------

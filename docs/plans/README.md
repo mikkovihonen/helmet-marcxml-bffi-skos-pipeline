@@ -76,11 +76,6 @@ reference for what shipped.
   — Migrate M6 from Ollama to vllm-mlx and layer prefix caching +
   speculative decoding (graduated from prop-02). Also absorbs the
   M6 `--concurrency` sweep.
-- [`backlog/p-03-m6-stall-watchdog.md`](backlog/p-03-m6-stall-watchdog.md)
-  — Per-call LLM timeout + kill-and-retry-same-pair so unattended
-  overnight runs don't lose hours to a single transient Ollama
-  wedge. Structured event logging on stderr + a sidecar JSONL for
-  audit. Graduated from prop-03.
 - [`backlog/p-04-m5-calibration.md`](backlog/p-04-m5-calibration.md)
   — Lock in M5's embedding model + `efSearch` via one-time benchmark
   runs on the M5 Max. Two independent phases.
@@ -95,7 +90,12 @@ reference for what shipped.
 
 ### In progress
 
-*(none)*
+- [`in-progress/p-03-m6-stall-watchdog.md`](in-progress/p-03-m6-stall-watchdog.md)
+  — Per-call LLM timeout + watchdog event logging (stderr +
+  `watchdog-events.jsonl` sidecar) + kill-and-retry-same-pair, so
+  unattended overnight runs don't lose hours to a single transient
+  Ollama wedge. Phase A code shipped; awaits the dry-run measurement
+  step against a 5,000-pair slice.
 
 ### Completed
 

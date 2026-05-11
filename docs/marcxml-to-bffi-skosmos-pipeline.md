@@ -699,6 +699,7 @@ Every `bffi-pipeline ...` invocation reads this triple at startup; if the value 
 - `"reconciliation-fallback"` — LLM `uncertain` or confidence < 0.80; took highest-lexical and set the canonical Work's AdminMetadata `bffi:descriptionAuthentication = <bib:auth/needs-review>`.
 - `"reconciliation-no-candidate"` — no candidate cleared the lexical floor; left unreconciled.
 - `"human-only"` — category routed straight to human review without an LLM decision (see §11).
+- `"watchdog-aborted"` — the M6 cascade's LLM call exceeded `LLM_CALL_TIMEOUT_SECONDS` and exhausted the 5/30/120 s retry budget on both primary and fallback. The Activity's `bffi-prov:confidence` is 0.0, `bffi-prov:decision` is `uncertain`, and the rationale carries the per-call latency for forensics. Plan: `docs/plans/in-progress/p-03-m6-stall-watchdog.md`.
 
 `"human-review"` is **not** a `bffi-prov:stage` value; `bffi-prov:HumanReview` Activities use `prov:wasInformedBy` to chain onto an earlier decision.
 

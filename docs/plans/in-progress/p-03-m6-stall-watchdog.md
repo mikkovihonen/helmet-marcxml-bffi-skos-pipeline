@@ -1,6 +1,6 @@
 # P-03 — M6 stall watchdog
 
-**Status**: backlog.
+**Status**: in-progress.
 **Source proposal**:
 [`docs/proposals/prop-03-m6-stall-watchdog.md`](../../proposals/prop-03-m6-stall-watchdog.md)
 (drafted in commit `da5e3c9`; recovery-evidence amendment in `538c99e`).
@@ -236,19 +236,31 @@ change beyond the documentation.
 
 ### A8. Overnight-grade dry run
 
-Run the pipeline against a 5,000-pair slice with
-`LLM_CALL_TIMEOUT_SECONDS=20` (aggressive — most calls will time out
-on the first attempt; the retry path is what we're stress-testing).
-Expected outcome:
+Run the pipeline against a 5,000-pair slice with the **default**
+`LLM_CALL_TIMEOUT_SECONDS=90`. The purpose of the dry run is **to
+measure how often the watchdog fires at the committed default**, not
+to stress-test the retry path. Two outcomes interpret meaningfully:
 
-- Pipeline completes without operator intervention.
-- `watchdog-events.jsonl` is non-empty (probably hundreds of
-  events at the aggressive 20-s budget).
-- Final decision distribution: most pairs decided after one or two
-  retries; a small minority land as `uncertain` (the genuinely
-  pathological ones).
-- Per-pair latency p99 inflated compared to a no-timeout run, but
-  bounded (no infinite stalls).
+- **Watchdog fires zero or near-zero times.** Either the corpus
+  has no pathological pairs (best case) or the default is too loose
+  to catch the real ones. Compare against the preview-373 incident's
+  observed wedge: that one would have hit the 90 s ceiling. If the
+  dry run sees zero events, that's a positive signal *only if* the
+  pipeline also visibly completed without long quiet stretches.
+- **Watchdog fires N times.** The events file tells us exactly which
+  pairs caused trouble, how often a retry was enough to recover,
+  and whether any pairs landed as `uncertain` after exhausting
+  retries. Counts inform whether to tighten or loosen the default
+  for the production run.
+
+Either way the artefacts we look at:
+
+- `watchdog-events.jsonl` event count + distribution (`timeout` vs
+  `retry` vs `escalate` vs `give_up`).
+- M6 wall-time vs the no-watchdog baseline (should be within a few
+  percent on the default unless the watchdog fires often).
+- Final decision distribution — count of `uncertain` pairs that
+  carry the `watchdog-aborted` provenance stage.
 
 ### A9. Phase A acceptance
 

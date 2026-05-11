@@ -579,9 +579,34 @@ def judge_command(
             ),
         ),
     ] = True,
+    abort_budget_seconds: Annotated[
+        int | None,
+        typer.Option(
+            "--abort-budget-seconds",
+            help=(
+                "Per-call LLM wall-time ceiling. Overrides "
+                "LLM_CALL_TIMEOUT_SECONDS for this run. When a single "
+                "LLM call exceeds this budget, the cascade's existing "
+                "retry stack (5/30/120 s) retries the same pair on the "
+                "same model first; only after retries exhaust on both "
+                "primary and fallback does the pair land as "
+                "'uncertain' with bffi-prov:stage='watchdog-aborted'. "
+                "Watchdog events stream to stderr (prefix 'WATCHDOG_EVENT') "
+                "and to <BFFI_DATA_DIR>/watchdog-events.jsonl for "
+                "post-run audit. See docs/plans/in-progress/p-03-m6-stall-watchdog.md."
+            ),
+            min=1,
+        ),
+    ] = None,
 ) -> None:
     """Run the cascade judge over M5's escalate-band candidate pairs (M6)."""
     settings = get_settings()
+    if abort_budget_seconds is not None:
+        # Mutate the cached Settings singleton in place. The judge stage
+        # reads ``settings.llm_call_timeout_seconds`` lazily inside
+        # ``_build_chain`` so this override propagates without further
+        # plumbing.
+        settings.llm_call_timeout_seconds = abort_budget_seconds
     target_output = output_path or (settings.data_dir / judge.DECISIONS_FILENAME)
 
     def _on_progress(snapshot: judge.JudgeBatchProgress) -> None:
