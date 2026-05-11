@@ -20,14 +20,23 @@ Events go to two destinations:
 
 Event vocabulary (one line per call):
 
-- ``timeout``    — a single LLM call exceeded the budget.
-- ``retry``      — the cascade re-attempts the same pair on the
-                   same model after a timeout.
-- ``escalate``   — primary-model retries exhausted; cascade moves
-                   to the fallback model.
-- ``give_up``    — fallback-model retries also exhausted; the pair
-                   lands as ``decision="uncertain"`` with the
-                   ``bffi-prov:stage = "watchdog-aborted"`` marker.
+- ``timeout``               — a single LLM call exceeded
+                              ``LLM_CALL_TIMEOUT_SECONDS``.
+- ``retry``                 — the cascade re-attempts the same pair
+                              on the same model after a timeout.
+- ``escalate``              — primary-model retries exhausted;
+                              cascade moves to the fallback model.
+- ``give_up``               — fallback-model retries also
+                              exhausted; the pair lands as
+                              ``decision="uncertain"`` with the
+                              ``bffi-prov:stage = "watchdog-aborted"``
+                              marker.
+- ``pair_budget_exceeded``  — cumulative wall time for one pair
+                              (across all cascade tiers + retries)
+                              exceeded ``LLM_PAIR_TIMEOUT_SECONDS``.
+                              The pair is abandoned with no further
+                              retries; same ``watchdog-aborted``
+                              provenance stage as ``give_up``.
 
 No shared state, no module-level config — the caller passes every
 field explicitly so the function stays trivially testable.
@@ -41,7 +50,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal
 
-WatchdogEvent = Literal["timeout", "retry", "escalate", "give_up"]
+WatchdogEvent = Literal[
+    "timeout",
+    "retry",
+    "escalate",
+    "give_up",
+    "pair_budget_exceeded",
+]
 
 #: stderr prefix; pipeline.log tails / Monitor filters match on this
 #: literal to surface watchdog activity alongside ``STAGE_`` markers.

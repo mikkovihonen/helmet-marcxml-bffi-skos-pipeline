@@ -598,6 +598,25 @@ def judge_command(
             min=1,
         ),
     ] = None,
+    pair_budget_seconds: Annotated[
+        int | None,
+        typer.Option(
+            "--pair-budget-seconds",
+            help=(
+                "Per-pair LLM wall-time ceiling for the whole cascade "
+                "(primary + fallback + retries). Overrides "
+                "LLM_PAIR_TIMEOUT_SECONDS for this run. Orthogonal to "
+                "--abort-budget-seconds: catches pairs where many "
+                "legitimate calls pile up to a long pair time even "
+                "when no single call exceeds the per-call ceiling. "
+                "Pairs exceeding this budget land as 'uncertain' with "
+                "bffi-prov:stage='watchdog-aborted' and emit a "
+                "'pair_budget_exceeded' watchdog event. See "
+                "docs/plans/in-progress/p-03-m6-stall-watchdog.md Phase B."
+            ),
+            min=1,
+        ),
+    ] = None,
 ) -> None:
     """Run the cascade judge over M5's escalate-band candidate pairs (M6)."""
     settings = get_settings()
@@ -607,6 +626,8 @@ def judge_command(
         # ``_build_chain`` so this override propagates without further
         # plumbing.
         settings.llm_call_timeout_seconds = abort_budget_seconds
+    if pair_budget_seconds is not None:
+        settings.llm_pair_timeout_seconds = pair_budget_seconds
     target_output = output_path or (settings.data_dir / judge.DECISIONS_FILENAME)
 
     def _on_progress(snapshot: judge.JudgeBatchProgress) -> None:

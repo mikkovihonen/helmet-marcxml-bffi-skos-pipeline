@@ -488,6 +488,62 @@ def test_repeated_timeouts_emit_give_up_event_and_land_uncertain(
     assert events[-1]["event"] == "give_up"
 
 
+def test_pair_budget_exceeded_aborts_without_more_calls(
+    tmp_cache: JudgeCache, tmp_path: Path
+) -> None:
+    """Plan P-03 Phase B: when the per-pair deadline passes before
+    the next LLM call, the cascade abandons the pair, emits a
+    ``pair_budget_exceeded`` event, and returns ``uncertain``.
+
+    Uses a chain that returns valid decisions but with a deadline
+    already in the past, so the budget check fires before any
+    invoke happens.
+    """
+    sidecar = tmp_path / "watchdog-events.jsonl"
+    good = _make_decision()
+    chain = _ScriptedChain([good, good, good])  # all good — but won't get there.
+    deadline = -1.0  # always in the past — first iteration aborts.
+    decision, _, _ = judge_pair(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.84,
+        chain=chain,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+        watchdog_sidecar_path=sidecar,
+        pair_deadline=deadline,
+    )
+    assert decision.decision == "uncertain"
+    assert "pair budget exceeded" in decision.rationale.lower()
+    # Zero chain invocations because the deadline check fires first.
+    assert len(chain.calls) == 0
+    events = [json.loads(line) for line in sidecar.read_text().splitlines() if line.strip()]
+    assert len(events) == 1
+    assert events[0]["event"] == "pair_budget_exceeded"
+    assert events[0]["pair_id"] == "a+b"
+
+
+def test_pair_budget_generous_does_not_fire(tmp_cache: JudgeCache, tmp_path: Path) -> None:
+    """Negative case: deadline far in the future → pair completes
+    normally with no budget event."""
+    sidecar = tmp_path / "watchdog-events.jsonl"
+    good = _make_decision()
+    chain = _ScriptedChain([good])
+    deadline = 1e12  # year ~33658; never fires.
+    decision, _, _ = judge_pair(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.84,
+        chain=chain,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+        watchdog_sidecar_path=sidecar,
+        pair_deadline=deadline,
+    )
+    assert decision == good
+    assert not sidecar.exists() or sidecar.read_text().strip() == ""
+
+
 def test_non_timeout_connection_error_does_not_emit_watchdog_event(
     tmp_cache: JudgeCache, tmp_path: Path
 ) -> None:

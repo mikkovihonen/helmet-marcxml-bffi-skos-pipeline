@@ -683,6 +683,7 @@ def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + val
     sleep: Callable[[float], None] = time.sleep,
     full_rationale: bool = True,
     watchdog_sidecar_path: Path | None = None,
+    pair_deadline: float | None = None,
 ) -> tuple[WorkMatchDecision, bool, float]:
     """Judge a single Work-pair with retry, post-validation cache.
 
@@ -748,6 +749,25 @@ def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + val
         schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
 
         while True:
+            # Per-pair budget check (plan P-03 Phase B). Fires when
+            # cumulative wall time across cascade tiers + retries
+            # exceeds the budget — orthogonal to the per-call
+            # ceiling. No further retries; the pair lands as
+            # ``uncertain``.
+            if pair_deadline is not None and time.monotonic() > pair_deadline:
+                emit_watchdog_event(
+                    pair_id=pair_id,
+                    event="pair_budget_exceeded",
+                    model_name=effective_model,
+                    elapsed_seconds=time.monotonic() - started,
+                    retry_n=connection_attempts,
+                    sidecar_path=watchdog_sidecar_path,
+                )
+                last_error = (
+                    "pair budget exceeded — cumulative cascade wall time "
+                    "passed LLM_PAIR_TIMEOUT_SECONDS"
+                )
+                break
             try:
                 raw = chain.invoke(invoke_payload)
             except Exception as exc:
@@ -859,6 +879,13 @@ def cascade_judge(
     primary_name = primary_model or settings.llm_model_primary
     fallback_name = fallback_model or settings.llm_model_fallback
 
+    # Per-pair wall-time ceiling (P-03 Phase B). Single deadline
+    # shared across both cascade tiers — the budget belongs to the
+    # pair, not the individual model attempt.
+    pair_deadline: float | None = None
+    if settings.llm_pair_timeout_seconds and settings.llm_pair_timeout_seconds > 0:
+        pair_deadline = time.monotonic() + settings.llm_pair_timeout_seconds
+
     own_cache = cache is None
     if own_cache:
         cache = JudgeCache(default_cache_path())
@@ -874,6 +901,7 @@ def cascade_judge(
             sleep=sleep,
             full_rationale=full_rationale,
             watchdog_sidecar_path=watchdog_sidecar_path,
+            pair_deadline=pair_deadline,
         )
         steps = [
             CascadeStep(
@@ -897,6 +925,7 @@ def cascade_judge(
             sleep=sleep,
             full_rationale=full_rationale,
             watchdog_sidecar_path=watchdog_sidecar_path,
+            pair_deadline=pair_deadline,
         )
         steps.append(
             CascadeStep(

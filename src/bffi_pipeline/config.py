@@ -68,6 +68,16 @@ class Settings(BaseSettings):
         default=90,
         alias="LLM_CALL_TIMEOUT_SECONDS",
     )
+    # Per-pair wall-time ceiling for the whole M6 cascade
+    # (primary + fallback + retries). 300 s is ~3-5x a typical
+    # all-tier pass; orthogonal to the per-call ceiling above —
+    # catches the pile-up case where many legitimate calls add up
+    # to a long pair even when no single call exceeds the per-call
+    # budget. See the same plan, Phase B.
+    llm_pair_timeout_seconds: int = Field(
+        default=300,
+        alias="LLM_PAIR_TIMEOUT_SECONDS",
+    )
 
     # Triple store.
     fuseki_url: str = Field(

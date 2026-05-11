@@ -10,8 +10,8 @@ src/bffi_pipeline/stages/judge.py src/bffi_pipeline/cli.py
 scripts/run-full-pipeline.sh`.
 **Phase commits**:
 
-- Phase A (in-process timeout + retry + structured logging): `f3367b1` (code, tests, docs; the overnight-grade dry-run measurement is the remaining operator step before Phase A is fully done).
-- Phase B (out-of-process heartbeat watchdog, contingent): `<unfilled>`
+- Phase A (in-process per-call timeout + retry + structured logging): `f3367b1` (code, tests, docs; overnight-grade dry-run measurement is the remaining operator step).
+- Phase B (in-process per-pair budget): `<unfilled>` — promoted from "contingent" to a tracked sub-phase after preview-373's resume showed the slow-pair pile-up the per-call ceiling can't catch.
 
 **Owner**: TBD.
 **Estimated wall-time**: ~1-1.5 days for Phase A (the user-visible
@@ -21,23 +21,35 @@ slow-but-not-dead pathology uncovered.
 
 ## Goal
 
-Make unattended overnight M6 runs safe to start: a single stuck pair
-must not silently consume hours, and the operator must be able to see
+Make unattended overnight M6 runs safe to start: neither a single
+stuck call nor a slow pile-up of legitimate calls on one pair must
+silently consume hours, and the operator must be able to see
 that the watchdog fired without sifting through prose log spam.
 
-Three concrete capabilities:
+Four concrete capabilities, partitioned across **two ceilings** —
+per-call (Phase A) and per-pair (Phase B):
 
-1. **A configurable maximum time** the LLM is allowed for any single
-   call, exposed both as an env var and a CLI flag, defaulting to a
-   safe value calibrated against the observed steady-state per-decision
-   latency.
-2. **Auto-recovery via kill-and-retry**, per the recovery-evidence
-   finding in the source proposal: timed-out calls retry on the same
-   model first (transient Ollama wedges resolve this way), then
-   escalate to the fallback model, and only finally land as
-   `uncertain`. Persistently pathological pairs still surface for
-   manual review; one-time stalls become invisible to the operator.
-3. **Structured log events** the operator can tail with the same
+1. **A configurable per-call ceiling** (`LLM_CALL_TIMEOUT_SECONDS`,
+   default 90 s) for any single LLM round-trip. Catches the
+   "one call wedged forever" pathology — the preview-373 incident's
+   signature. Exposed via env var and `--abort-budget-seconds` flag.
+2. **A configurable per-pair ceiling**
+   (`LLM_PAIR_TIMEOUT_SECONDS`, default 300 s) for the cumulative
+   wall-time of a single pair's cascade. Catches the orthogonal
+   "many legitimate-but-slow calls pile up on one pair" pathology
+   — observed empirically on preview-373 at ~2.75 min/pair without
+   any single call exceeding the per-call ceiling, which means
+   Phase A's per-call ceiling missed it entirely. Exposed via env
+   var and `--pair-budget-seconds` flag.
+3. **Auto-recovery via kill-and-retry** for per-call timeouts, per
+   the recovery-evidence finding in the source proposal: timed-out
+   calls retry on the same model first (transient Ollama wedges
+   resolve this way), then escalate to the fallback model, and only
+   finally land as `uncertain`. Per-pair timeouts abandon the
+   cascade for that pair and emit a `pair_budget_exceeded` event;
+   no further retry because the pair has already had ample
+   opportunity.
+4. **Structured log events** the operator can tail with the same
    pipeline-monitoring tooling they already use (Monitor / Bash
    `grep`), so the watchdog firing is observable in real time and
    auditable after the fact.
@@ -292,28 +304,131 @@ harmless after rollback.
 
 ---
 
-## Phase B — Out-of-process heartbeat watchdog (contingent)
+## Phase B — Per-pair wall-time budget (in-process)
 
-**Only start Phase B if Phase A's dry-run reveals a "slow but not
-dead" pathology** — i.e., calls that produce one token every 20
-seconds, never hit the per-call budget but are still effectively
-useless. Phase A's `httpx.ReadTimeout` cannot catch that case
-because the connection is making progress (just very slowly).
+Estimated wall-time: ~0.5 day. **Promoted from "contingent" to a
+tracked sub-phase** after the preview-373 resume surfaced the exact
+pathology the original Phase B contemplated: pairs taking ~2.75 min
+of wall time without any single LLM call exceeding the 90 s per-call
+ceiling — Phase A's per-call watchdog is blind to this case by
+design.
 
-Sketch (full design deferred until Phase A's bench tells us whether
-this is actually a real failure mode):
+Empirical signature: the cascade fires multiple sequential LLM
+calls per pair (primary + fallback + up-to-2 validation retries +
+exponential-backoff connection retries). Each call individually
+completes under the 90 s ceiling, so Phase A emits no events.
+Cumulatively the pair burns 3-5 calls × ~30-50 s = 2-4 min,
+producing the observed slow patches.
 
-- A companion CLI `bffi-pipeline judge-watchdog --decisions-path
-  <path> --max-stall-seconds N --target-pid <pid>` tails
-  `judge-decisions.jsonl`, sends `SIGUSR1` to the target judge
-  process when no new line has been written for `N` seconds.
-- The judge installs a `SIGUSR1` handler that cancels the current
-  httpx call, emits a `WATCHDOG_EVENT` of `event="heartbeat-stall"`,
-  and re-enters the cascade retry path Phase A built.
-- `scripts/run-full-pipeline.sh` starts the watchdog as a sibling
-  background process and traps on exit to kill it cleanly.
+Design: an in-process per-pair budget, checked at natural
+breakpoints inside `cascade_judge` and `judge_pair` (between
+cascade tiers, before each `chain.invoke()`). Much simpler than the
+out-of-process SIGUSR1 design the source proposal sketched —
+single process, no signal handlers, no sibling supervisor — and
+sufficient for our observed failure mode because the slow pairs
+ARE making progress at the call level; we just need to give up when
+cumulative wall time exceeds the budget.
 
-This is documented as the future shape; do not pre-implement.
+### B1. Add `llm_pair_timeout_seconds` to Settings
+
+In `src/bffi_pipeline/config.py`:
+
+```python
+llm_pair_timeout_seconds: int = Field(
+    default=300,
+    alias="LLM_PAIR_TIMEOUT_SECONDS",
+    description=(
+        "Per-pair wall-time ceiling for the whole M6 cascade "
+        "(primary + fallback + retries). 300 s is ~3-5× a typical "
+        "all-tier pass; raise for hard-rationale-heavy corpora, "
+        "lower for tighter overnight bounds."
+    ),
+)
+```
+
+`.env.example` gets a matching entry alongside `LLM_CALL_TIMEOUT_SECONDS`.
+
+### B2. CLI flag
+
+`bffi-pipeline judge --pair-budget-seconds N` overrides the env for
+the run, mirroring `--abort-budget-seconds` from Phase A. Same
+plumbing: mutate the cached Settings singleton.
+
+### B3. Pair deadline plumbing
+
+`cascade_judge` records `pair_started_at = time.monotonic()` at
+entry, computes a deadline, and passes `pair_deadline: float | None
+= None` to each `judge_pair` invocation. `judge_pair`'s retry loop
+checks `if pair_deadline and time.monotonic() > pair_deadline:
+break` at the top of each iteration (before invoking the chain).
+
+When the budget fires:
+
+- Emit a `pair_budget_exceeded` watchdog event (extending the
+  Phase A vocabulary).
+- Mark the pair `decision="uncertain"`, `stage="watchdog-aborted"`
+  (same provenance stage as Phase A — operationally the operator
+  treats both the same: manual review).
+- Rationale text: `"M6 pair budget exceeded after N s — manual
+  review required"`.
+
+No re-entry into the cascade after a `pair_budget_exceeded` event.
+The pair has had its budget; further attempts would just be more
+sunk cost.
+
+### B4. Event-vocabulary extension
+
+`stages/watchdog.py`'s `WatchdogEvent` Literal grows
+`"pair_budget_exceeded"`. The event payload shape stays
+identical; semantically the `event` field distinguishes which
+ceiling fired.
+
+### B5. Tests
+
+`tests/unit/test_judge.py`:
+
+- Synthetic chain that simulates a sequence of calls each taking
+  ~30 s (via injected sleep callable + `time.monotonic` monkeypatch)
+  with the budget at 100 s. Assert: cascade aborts after the 3rd or
+  4th call, emits a `pair_budget_exceeded` event, returns
+  `uncertain`.
+- Negative case: budget is generous (1 hour); a multi-call pair
+  completes normally with no `pair_budget_exceeded` event.
+
+### B6. Dry-run on the preview-373 corpus
+
+Re-run the preview-373 slice with `LLM_PAIR_TIMEOUT_SECONDS=180`
+(3 min; tighter than the observed average). Expected:
+
+- Most pairs complete normally.
+- ~5-15 % of pairs (the slow patches we observed) hit the budget
+  and land as `pair_budget_exceeded` `uncertain` decisions.
+- Total M6 wall time drops from the previous "5+ hours due to
+  slow tail" to a bounded value.
+
+This is the actual unblocker for unattended overnight runs: no
+single pair can drag the batch out longer than the budget allows.
+
+### B7. Phase B acceptance
+
+- [ ] `LLM_PAIR_TIMEOUT_SECONDS` Settings field + `.env.example`
+      entry.
+- [ ] `--pair-budget-seconds` CLI flag.
+- [ ] `pair_deadline` plumbed through `cascade_judge` → `judge_pair`.
+- [ ] `pair_budget_exceeded` event emits to stderr + sidecar.
+- [ ] Provenance carries `bffi-prov:stage = "watchdog-aborted"`
+      for pair-budget-aborted pairs.
+- [ ] Tests in `test_judge.py` cover the budget-exceeded and
+      budget-not-exceeded cases.
+- [ ] preview-373 dry-run shows the per-pair budget firing on the
+      observed slow patches without spuriously aborting healthy
+      pairs.
+
+### B8. Rollback
+
+Revert the judge.py + config.py + CLI changes. The Settings field
+defaulting to no-timeout (`None`) preserves the existing behavior
+if removed from `.env`.
 
 ---
 
