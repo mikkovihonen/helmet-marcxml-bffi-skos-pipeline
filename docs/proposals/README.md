@@ -84,10 +84,10 @@ plan documents *when the execution was scheduled*.
   layer prompt-prefix caching + speculative decoding on top. Plan
   lives at [`docs/plans/backlog/p-02-inference-stack-tuning.md`](../plans/backlog/p-02-inference-stack-tuning.md).
 - [`prop-03-m6-stall-watchdog.md`](prop-03-m6-stall-watchdog.md)
-  — `proposed`. Detect M6 LLM calls that hang and abandon the stuck
-  pair so unattended pipeline runs don't lose hours to a single
-  pathological pair. Two options: per-call timeout (recommended MVP)
-  or out-of-process heartbeat watchdog.
+  — `planning (graduated)`. Detect M6 LLM calls that hang and retry
+  the stuck pair so unattended overnight runs don't lose hours to a
+  single transient Ollama wedge. Plan lives at
+  [`docs/plans/backlog/p-03-m6-stall-watchdog.md`](../plans/backlog/p-03-m6-stall-watchdog.md).
 - [`prop-04-consolidate-on-vllm-mlx.md`](prop-04-consolidate-on-vllm-mlx.md)
   — `proposed`. After P-02 ships, consider replacing Ollama with
   vllm-mlx for the dev loop too so only one inference stack needs
