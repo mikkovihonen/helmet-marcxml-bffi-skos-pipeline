@@ -39,13 +39,24 @@ Activate the venv any time you want to run `python -m mlx-lm.*` commands. The bf
 
 One-time. The pipeline's two judge models are `qwen3-8B-Instruct` (primary) and `qwen3-32B-Instruct` (fallback); a smaller `qwen3-1.7B-Instruct` is the draft model for speculative decoding (P-02 Phase C).
 
+The one-shot wrapper [`scripts/llm-pull.sh`](../scripts/llm-pull.sh) restores the `ollama pull qwen3:8b` one-command UX (P-02 § D2). It validates the slug, writes to `~/.mlx_models/<name>-4bit/`, and skips already-converted directories:
+
+```bash
+source ~/.venvs/mlx-lm/bin/activate
+scripts/llm-pull.sh Qwen/Qwen3-8B-Instruct
+scripts/llm-pull.sh Qwen/Qwen3-32B-Instruct
+# Optional, only if you're shipping P-02 Phase C:
+scripts/llm-pull.sh Qwen/Qwen3-1.7B-Instruct
+```
+
+The wrapper just calls `python -m mlx_lm.convert -q --q-bits 4` under the hood; equivalent long-form if you need to pin a different quantisation or output path:
+
 ```bash
 mkdir -p ~/.mlx_models
 python -m mlx_lm.convert --hf-path Qwen/Qwen3-8B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-8B-Instruct-4bit
 python -m mlx_lm.convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-32B-Instruct-4bit
-# Optional, only if you're shipping P-02 Phase C:
 python -m mlx_lm.convert --hf-path Qwen/Qwen3-1.7B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-1.7B-Instruct-4bit
 ```

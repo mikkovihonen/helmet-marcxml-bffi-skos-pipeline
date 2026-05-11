@@ -109,3 +109,13 @@ Each underlying CLI subcommand is idempotent:
 If a stage fails midway, fix the underlying issue and re-run the
 script — completed stages are skipped where idempotent, partial work
 is recovered where checkpointed.
+
+## Operator helpers (not pipeline drivers)
+
+One-shot wrappers that exist for operator-side convenience and don't
+emit `STAGE_*` milestones:
+
+| Script | Purpose |
+|---|---|
+| [`llm-pull.sh`](llm-pull.sh) | Convert a Hugging Face checkpoint to MLX 4-bit and write it under `~/.mlx_models/` — the parity move for `ollama pull` in the mlx-lm setup. Activate `~/.venvs/mlx-lm` first. P-02 § D2. |
+| [`p02-parity-bench.sh`](p02-parity-bench.sh) | Run the gold-set eval twice (Ollama baseline vs. mlx-lm candidate) and diff the verdicts to gate P-02 Phase A on regression. |
