@@ -2,7 +2,7 @@
 
 The pipeline can be built autonomously through M0–M4 using synthetic MARCXML, but **M5 onwards requires real records** because the dedup quality, embedding benchmark, and gold-set development all depend on realistic field content. Surface these asks at the milestones below — don't proceed past the gates listed on synthetic data alone.
 
-A Finnish-language version of the cataloguer-facing requests is available in `docs/cataloguer-asks-fi.md` for forwarding directly to Helmet staff.
+A Finnish-language snapshot of the cataloguer-facing requests is available in `docs/archived/cataloguer-asks-fi.md` for forwarding directly to Helmet staff. The English version here is the live source — regenerate the Finnish copy from this document if the asks change.
 
 ## Ask 1 — Curated development sample (~15 records, before M5)
 
@@ -122,4 +122,4 @@ When the user asks for help drafting the request to Helmet, the phrasing that wo
 
 > I'm building a tool that converts Helmet bibliographic records into linked data and clusters them by RDA Work. To test it, I need a curated set of about 15 records exercising specific cases — translations, adaptations, common-title collisions, music recordings vs scores, corporate-body authors, and a few records with known cataloguing quirks. For each record I need the Helmet bib ID and a one-sentence note on why it's interesting. I've drafted the list of cases needed [share Ask 1]. Could you suggest specific Helmet bib IDs that fit each slot? You'll know the catalog far better than I do.
 
-Frame it as a 30-minute task, not an ongoing engagement. Cataloguers usually appreciate the specificity. The Finnish-language version of this request is in `docs/cataloguer-asks-fi.md`.
+Frame it as a 30-minute task, not an ongoing engagement. Cataloguers usually appreciate the specificity. A Finnish-language snapshot of this request is in `docs/archived/cataloguer-asks-fi.md`.

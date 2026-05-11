@@ -130,7 +130,7 @@ def load_gold_set(path: Path | None = None) -> list[GoldCase]:
     if not target.is_file():
         raise FileNotFoundError(
             f"Gold set not found at {target!s}. Bootstrap with cases drawn from real "
-            "Helmet records (see docs/marcxml-to-bffi-skosmos-pipeline.md § 9)."
+            "Helmet records (see docs/archived/marcxml-to-bffi-skosmos-pipeline.md § 9)."
         )
     cases: list[GoldCase] = []
     for line_no, line in enumerate(target.read_text(encoding="utf-8").splitlines(), start=1):

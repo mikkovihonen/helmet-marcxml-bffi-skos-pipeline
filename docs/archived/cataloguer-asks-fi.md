@@ -1,5 +1,14 @@
 # Pyynnöt Helmet-luetteloijalle
 
+> **Archived.** Finnish-language cataloguer-facing copy of the requests
+> originally listed in `docs/external-dependencies.md`. Retained for reference;
+> the live English source remains at
+> [`../external-dependencies.md`](../external-dependencies.md). If a fresh
+> Finnish version is needed for re-distribution, regenerate it from the live
+> document rather than editing this snapshot.
+
+---
+
 Tämä dokumentti sisältää suomenkieliset versiot pyynnöistä, jotka ovat määriteltyinä englanniksi pääprojektin `CLAUDE.md`-tiedostossa kohdassa "External dependencies — records to request from Helmet cataloguers". Tämä versio on tarkoitettu välitettäväksi suoraan Helmet-luetteloijalle.
 
 **Konteksti:** Rakennan pro bono -työnä työkalua, joka muuntaa Helmetin bibliografiset MARCXML-tietueet linkitetyksi dataksi suomalaisen BIBFRAME-tietomallin (BFFI) mukaisesti, ryhmittelee ne RDA-teoksiksi ja julkaisee tulokset Skosmos-pohjaisena selauspalveluna. Hanke on tarkoitus luovuttaa Kansalliskirjastolle valmistuttuaan. Osa kehitysvaiheista vaatii oikeita Helmet-tietueita, koska synteettinen testidata ei tuota uskottavia tuloksia.

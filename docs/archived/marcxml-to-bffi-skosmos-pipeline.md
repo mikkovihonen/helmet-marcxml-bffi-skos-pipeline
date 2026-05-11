@@ -1,5 +1,25 @@
 # MARCXML → BFFI → Skosmos Pipeline
 
+> **Archived.** This document captured the original end-to-end technical
+> specification for the BFFI pipeline. It is retained for historical context
+> and section-level back-references from older commits, plans, and source
+> comments. **Do not treat it as the source of truth for ongoing work.**
+> Live references have moved as follows:
+>
+> - Committed identifiers, URI namespaces, `bffi-prov` enums and Activity
+>   classes → [`CLAUDE.md`](../../CLAUDE.md).
+> - Toolchain (rdflib, Fuseki, mlx-lm, embeddings, FAISS, LangChain) →
+>   [`../tech-stack.md`](../tech-stack.md).
+> - Local inference setup → [`../local-inference.md`](../local-inference.md).
+> - Validation boundaries → [`../validation-strategy.md`](../validation-strategy.md).
+> - Forward-looking design changes → [`../proposals/`](../proposals/).
+> - Sequenced execution detail → [`../plans/`](../plans/).
+>
+> The historical milestone-ordered build plan lives at
+> [`BUILD_PLAN.md`](BUILD_PLAN.md) (also archived).
+
+---
+
 A practical guide to converting MARCXML records into BFFI (the Finnish BIBFRAME profile) and publishing Work and Expression authority records via Skosmos, including LLM-assisted deduplication, provenance logging, and evaluation.
 
 > **Note on document scope.** This is the **technical specification** — patterns, code samples, and design rationale for each component. For the build plan (milestones, repository structure, definitions of done), see `CLAUDE.md` and `docs/archived/BUILD_PLAN.md`. For validation boundaries, local-inference setup, and external dependencies, see the corresponding files in `docs/`.
@@ -375,7 +395,7 @@ Embed MARC 100/700 strings, retrieve top-k candidates from the relevant authorit
 
 ## 7. The stage-3 LLM judge
 
-The judge runs against a **local OpenAI-compatible server** (Ollama on `:11434` for development; vllm-mlx on `:8000` for production batches). Both expose the same chat-completions API, so the application code talks to either through `langchain-openai` pointed at `LLM_BASE_URL`. The committed primary model is **Qwen3 32B Instruct, MLX 4-bit quantization**; see §11 for the cascade and the throughput rationale.
+The judge runs against a **local OpenAI-compatible server** (Ollama on `:11434` for development; mlx_lm on `:8000` for production batches). Both expose the same chat-completions API, so the application code talks to either through `langchain-openai` pointed at `LLM_BASE_URL`. The committed primary model is **Qwen3 32B Instruct, MLX 4-bit quantization**; see §11 for the cascade and the throughput rationale.
 
 The prompt is a versioned file (`prompts/judge_v1.txt`) hashed at startup so the hash can be logged with every provenance record. The inline `SYSTEM` and `EXAMPLES` blocks below are reproduced for narrative purposes; production code reads them from the file.
 
@@ -528,7 +548,7 @@ prompt = ChatPromptTemplate.from_messages([
 
 
 # --- Chain -----------------------------------------------------------------
-# Local OpenAI-compatible server. Ollama by default; vllm-mlx for production.
+# Local OpenAI-compatible server. Ollama by default; mlx_lm for production.
 
 llm_primary = ChatOpenAI(
     base_url=os.environ["LLM_BASE_URL"],          # http://localhost:11434/v1
@@ -1140,7 +1160,7 @@ Comfortable on 128 GB. Loading both judge models simultaneously (~60 GB of model
 ### Server choice
 
 - **Default: Ollama.** Simplest setup, OpenAI-compatible API on `:11434`, MLX backend in preview. Use for development and gold-set runs.
-- **Production batch: vllm-mlx.** Continuous batching gives 4–8× throughput on bulk judge runs. Use for the production pass over 50k+ pairs.
+- **Production batch: mlx_lm.** Continuous batching gives 4–8× throughput on bulk judge runs. Use for the production pass over 50k+ pairs.
 
 The application code talks to either through `langchain-openai` pointed at `LLM_BASE_URL`. Don't write server-specific code.
 
@@ -1159,11 +1179,11 @@ A single-pass judge run on 50k–100k gray-zone pairs:
 | Model | Server mode | Time |
 |---|---|---|
 | Qwen3 32B | Ollama (serial) | 70–170 hours |
-| Qwen3 32B | vllm-mlx (batched) | 10–25 hours |
+| Qwen3 32B | mlx_lm (batched) | 10–25 hours |
 | Qwen3 72B | Ollama (serial) | 140–340 hours |
-| Qwen3 72B | vllm-mlx (batched) | 20–50 hours |
+| Qwen3 72B | mlx_lm (batched) | 20–50 hours |
 
-Two consequences for the design. **Tighten the gray zone aggressively** — auto-merge ≥ 0.90 (not 0.92) and rejection ≤ 0.78 (not 0.75) once thresholds are validated against the gold set; this roughly halves the LLM workload (§6 Stage 2). **Plan for vllm-mlx in production** — Ollama is fine for development, but the full corpus run uses vllm-mlx.
+Two consequences for the design. **Tighten the gray zone aggressively** — auto-merge ≥ 0.90 (not 0.92) and rejection ≤ 0.78 (not 0.75) once thresholds are validated against the gold set; this roughly halves the LLM workload (§6 Stage 2). **Plan for mlx_lm in production** — Ollama is fine for development, but the full corpus run uses mlx_lm.
 
 ### Cascade strategy
 
@@ -1201,7 +1221,7 @@ Full ask list with English phrasing for cataloguers and Finnish-language equival
 
 ### Tech stack (committed)
 
-Python 3.11+, `uv` package manager, `rdflib` 7.x, `pymarc` for inspection plus the LoC `marc2bibframe2` XSLT (vendored as a git submodule under `third_party/`) for conversion, `lxml` for XSLT and XSD, `langchain-openai` + Pydantic v2 against a local OpenAI-compatible server (Ollama default; vllm-mlx for production), MLX inference framework, **Qwen3 32B** primary judge with **Qwen3 72B** cascade, `sentence-transformers` BGE-M3 embeddings, FAISS `IndexHNSWFlat`, `python-ulid`, `typer` CLI, `pytest` + `pytest-asyncio`, Apache Jena Fuseki 5.x with `jena-text` (Docker, version pinned), Skosmos 3.x (Docker, version pinned), `ruff` lint+format, `mypy --strict`. Full table with rationale: `docs/archived/BUILD_PLAN.md` § "Tech stack".
+Python 3.11+, `uv` package manager, `rdflib` 7.x, `pymarc` for inspection plus the LoC `marc2bibframe2` XSLT (vendored as a git submodule under `third_party/`) for conversion, `lxml` for XSLT and XSD, `langchain-openai` + Pydantic v2 against a local OpenAI-compatible server (Ollama default; mlx_lm for production), MLX inference framework, **Qwen3 32B** primary judge with **Qwen3 72B** cascade, `sentence-transformers` BGE-M3 embeddings, FAISS `IndexHNSWFlat`, `python-ulid`, `typer` CLI, `pytest` + `pytest-asyncio`, Apache Jena Fuseki 5.x with `jena-text` (Docker, version pinned), Skosmos 3.x (Docker, version pinned), `ruff` lint+format, `mypy --strict`. Full table with rationale: `docs/archived/BUILD_PLAN.md` § "Tech stack".
 
 ### Milestones
 

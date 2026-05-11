@@ -4,15 +4,16 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 
 ## Project specs and plans
 
-- `docs/marcxml-to-bffi-skosmos-pipeline.md` — technical spec (what to build).
+- `docs/tech-stack.md` — consolidated toolchain reference (languages, RDF tooling, inference stack, vocabularies, services). Start here for "what does this project use for X?".
 - `docs/validation-strategy.md` — five validation boundaries (MARCXML → BIBFRAME → BFFI → judge → post-load).
-- `docs/local-inference.md` — Apple Silicon / Ollama setup, model choice, throughput, cascade strategy.
+- `docs/local-inference.md` — Apple Silicon / mlx-lm setup, model choice, throughput, cascade strategy.
+- `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` — original end-to-end technical specification (archived). Section-level back-references from older commits, plans, and source comments still point here; live successors are listed at the top of that document.
 - `docs/external-dependencies.md` — records and confirmations to request from Helmet cataloguers.
 - `docs/ci-strategy.md` — CI rationale and PR template.
 - `docs/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions; consult before adding any `bffi:*` term to spec, code, or shapes.**
 - `docs/proposals/` — forward-looking ideas not yet committed to (`prop-<NN>-<slug>.md`). Each carries `Status: proposed | planning (graduated) | done | rejected (reason)` and a `Proposal-base commit` for drift detection. **Skim the proposals README and the current proposals index before recommending an architectural change** — the idea may already be on record, possibly with a documented reason not to pursue it.
 - `docs/plans/` — committed-to-action plans of record (`p-<NN>-<slug>.md`). Each plan has sequenced phases with verification checkpoints, a risk register, and a rollback procedure, plus a `Plan-base commit` and `Phase commits` for tying execution to git history. **State is encoded by sub-folder**: `backlog/` (drafted, not started), `in-progress/` (at least one phase shipped), `completed/` (done), `abandoned/` (dropped, with reason). State transitions happen via `git mv` in the same commit as the corresponding phase commit. Plans graduate from proposals; **consult before re-scoping work that overlaps an active plan**.
-- `docs/archived/` — historical / superseded documents kept for reference only. Includes `BUILD_PLAN.md` (milestone-ordered checklist M0-M13; the live execution detail has moved to `docs/plans/`). Path references from source code or live docs may point here; do not edit archived material except for typos or to add a supersede pointer.
+- `docs/archived/` — historical / superseded documents kept for reference only. Includes `BUILD_PLAN.md` (milestone-ordered checklist M0-M13; the live execution detail has moved to `docs/plans/`) and `marcxml-to-bffi-skosmos-pipeline.md` (original technical spec; live successors are listed in the document's archived banner). Path references from source code or live docs may point here; do not edit archived material except for typos or to add a supersede pointer.
 
 ## Operating constraints
 
@@ -27,8 +28,8 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - Expression URI namespace: `http://urn.fi/URN:NBN:fi:bib:expression:`
 - Helmet source URI (used in `bf:identifiedBy`): `http://urn.fi/URN:NBN:fi:bib:source:helmet`
 - Named-graph base for Fuseki: `http://urn.fi/URN:NBN:fi:bib:graph:`
-- `bffi-prov` namespace: `http://urn.fi/URN:NBN:fi:schema:bffi-prov#` (provenance vocabulary — Activity classes, decision/confidence/rationale predicates, stage tags). Full `bffi-prov:stage` enum and Activity class list live in `docs/marcxml-to-bffi-skosmos-pipeline.md` § 8.
-- `bffi:adminMetadata` linking property: `http://urn.fi/URN:NBN:fi:schema:bffi:adminMetadata` (`owl:equivalentProperty` of `bf:adminMetadata`). Every canonical `bffi:Work` and `bffi:Expression` carries one `bffi:adminMetadata` triple to a `bffi:AdminMetadata` block summarising administrative state. The AdminMetadata view is layered alongside the PROV-O graph (not a replacement); see spec § 8.
+- `bffi-prov` namespace: `http://urn.fi/URN:NBN:fi:schema:bffi-prov#` (provenance vocabulary — Activity classes, decision/confidence/rationale predicates, stage tags). Full `bffi-prov:stage` enum and Activity class list live in `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` § 8 (archived spec; treat enum additions as code changes — extend `STAGE_*` constants in `src/bffi_pipeline/stages/judge.py` and document the new value in the relevant active plan).
+- `bffi:adminMetadata` linking property: `http://urn.fi/URN:NBN:fi:schema:bffi:adminMetadata` (`owl:equivalentProperty` of `bf:adminMetadata`). Every canonical `bffi:Work` and `bffi:Expression` carries one `bffi:adminMetadata` triple to a `bffi:AdminMetadata` block summarising administrative state. The AdminMetadata view is layered alongside the PROV-O graph (not a replacement); see archived spec § 8.
 - Authority priority: KANTO → VIAF (persons / corporate bodies); YSO (subjects); KAUNO (fiction genre/form); MUSO (music).
 - Display language priority for `skos:prefLabel`: `fi`, `sv`, `en`.
 - Documentation language: English throughout.

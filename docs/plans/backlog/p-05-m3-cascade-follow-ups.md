@@ -277,7 +277,8 @@ F2's variant bindings.
 ## Cross-references
 
 - `docs/archived/BUILD_PLAN.md` M3 — origin checklist item.
-- `docs/marcxml-to-bffi-skosmos-pipeline.md` § 8 — provenance
-  stage enum; F2 may require a new value.
+- `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` § 8 — provenance
+  stage enum (archived spec); F2 may require a new value, and the live
+  enum reference lives in `CLAUDE.md` § "Committed identifiers".
 - `gold/contrib.jsonl` — the cataloguer-vetted dataset gating F3.
 - P-06 — gold-set growth that unblocks F3.0.

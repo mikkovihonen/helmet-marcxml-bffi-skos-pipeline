@@ -59,7 +59,7 @@ DEFAULT_TOP_K: Final[int] = 20
 
 # Threshold bands. Tightened from the spec's frontier-API defaults
 # because the M5 Max LLM judge is throughput-bound; see
-# docs/marcxml-to-bffi-skosmos-pipeline.md § 6.
+# docs/archived/marcxml-to-bffi-skosmos-pipeline.md § 6.
 BAND_AUTO_MERGE: Final[float] = 0.90
 BAND_REJECT: Final[float] = 0.78
 

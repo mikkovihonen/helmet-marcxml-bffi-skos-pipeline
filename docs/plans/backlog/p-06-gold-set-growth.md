@@ -234,8 +234,8 @@ This stops the gold set from regressing on stratification.
 ## Cross-references
 
 - `docs/archived/BUILD_PLAN.md` M12 — origin checklist item.
-- `docs/marcxml-to-bffi-skosmos-pipeline.md` § 9 — gold-set
-  stratification requirement.
+- `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` § 9 — gold-set
+  stratification requirement (archived spec).
 - `gold/README.md` — cataloguer-facing instructions; update with
   the dual-source workflow once Phase A ships.
 - `src/bffi_pipeline/eval/grow.py` — existing growth CLI.

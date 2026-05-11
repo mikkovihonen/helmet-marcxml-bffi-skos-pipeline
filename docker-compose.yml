@@ -45,7 +45,7 @@ services:
     depends_on:
       - fuseki
     volumes:
-      # M11: vocabulary config per docs/marcxml-to-bffi-skosmos-pipeline.md § 4.
+      # M11: vocabulary config per docs/archived/marcxml-to-bffi-skosmos-pipeline.md § 4.
       # The container reads /var/www/html/config.ttl on startup.
       - ./config/skosmos-config.ttl:/var/www/html/config.ttl:ro
     restart: unless-stopped
