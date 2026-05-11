@@ -1,6 +1,6 @@
 # P-06 — Gold-set growth to 50-100 cataloguer-vetted cases
 
-**Status**: draft.
+**Status**: backlog.
 **Source**: `docs/archived/BUILD_PLAN.md` M12 unfinished item at L452 (gold-
 set growth toward 50-100 cases with per-category holdout
 stratification). Not graduated from a proposal — this is committed

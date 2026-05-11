@@ -1,6 +1,6 @@
 # P-05 — M3 cascade follow-ups: F1, F2, F3
 
-**Status**: draft.
+**Status**: backlog.
 **Source**: `docs/archived/BUILD_PLAN.md` M3 unfinished item at L253 (the
 "M3 cascade follow-ups, in dependency order" block). Not graduated
 from a proposal — these are committed M3 follow-up work items that

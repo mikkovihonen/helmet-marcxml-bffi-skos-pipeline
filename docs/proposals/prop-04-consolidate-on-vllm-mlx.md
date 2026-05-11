@@ -8,10 +8,10 @@ the dev-loop ergonomics turn out to need more than a thin wrapper.
 **Proposal-base commit**: `be5dbf6`. To gauge drift, run
 `git diff be5dbf6..HEAD -- src/bffi_pipeline/config.py
 src/bffi_pipeline/stages/judge.py docs/local-inference.md
-docs/plans/p-02-inference-stack-tuning.md`.
+docs/plans/backlog/p-02-inference-stack-tuning.md`.
 
 > **Numbering note**: the `P-04` shorthand here refers to *this
-> proposal*. A separate plan with the same number (`p-04-m5-calibration.md`)
+> proposal*. A separate plan with the same number (`backlog/p-04-m5-calibration.md`)
 > covers M5 hyperparameter calibration — different concept. Cross-
 > references in prose should be path-qualified
 > (`docs/proposals/prop-04-...` vs `docs/plans/p-04-...`) to
@@ -178,7 +178,7 @@ before assuming this is free.
 ## Cross-references
 
 - [`docs/proposals/prop-02-inference-stack-tuning-for-M6.md`](prop-02-inference-stack-tuning-for-M6.md)
-  + [`docs/plans/p-02-inference-stack-tuning.md`](../plans/p-02-inference-stack-tuning.md)
+  + [`docs/plans/backlog/p-02-inference-stack-tuning.md`](../plans/backlog/p-02-inference-stack-tuning.md)
   — the proposal + plan that introduces vllm-mlx alongside Ollama.
   This proposal builds on whatever P-02 ships.
 - [`docs/proposals/prop-03-m6-stall-watchdog.md`](prop-03-m6-stall-watchdog.md)

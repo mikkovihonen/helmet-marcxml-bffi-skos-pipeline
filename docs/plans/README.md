@@ -11,10 +11,38 @@ committed to. A plan lays out:
 - a **risk register** with named mitigations,
 - a **rollback procedure** if the change has to be reversed.
 
-Each plan carries a `Status:` field — `draft` / `in-progress` /
-`completed` / `aborted (reason)`. A completed plan stays in place for
-the audit trail; the canonical record of what shipped is the plan's
-own `Phase commits` field.
+A plan ships when the engineer executing it could pick up the
+document cold and follow it through without re-deriving any choices.
+If a step requires judgment, the plan should say what the judgment
+hinges on and what the answer should be in the expected case.
+
+## Lifecycle: state folders
+
+A plan's state is encoded by which sub-folder it lives in. There are
+four, traversed in order from intake to terminal state:
+
+| Folder | Meaning |
+|---|---|
+| [`backlog/`](backlog/) | Drafted but not yet started — no phase commit landed. Ready to be picked up cold. |
+| [`in-progress/`](in-progress/) | At least one phase has shipped but the plan's definition of done has not been met. |
+| [`completed/`](completed/) | Every phase has a filled-in phase commit; the audit trail of what shipped. |
+| [`abandoned/`](abandoned/) | Dropped before completion. Each plan in here carries an `Abandonment reason` section. |
+
+**Transitions are commit-level events.** Moving a plan between
+folders happens in the same commit that lands the corresponding
+phase commit (or, for abandonment, the commit that documents the
+reason). `git mv` preserves blame.
+
+**The folder is the canonical state.** Inside each plan body, the
+`Status:` field is a self-documenting annotation that must agree
+with the folder; if they disagree, the folder wins and the field is
+the bug.
+
+Cross-references to a plan from outside the `plans/` tree (CLAUDE.md,
+proposals, source code) need to be updated when a plan transitions
+state, because the path changes. That's a small recurring cost
+accepted in exchange for state being immediately visible at a
+filesystem glance.
 
 ## Tying plans to version control
 
@@ -35,31 +63,39 @@ each plan carries three commit-hash fields near the top:
   commit is a positive signal that the phase has not yet met its
   acceptance criteria. Once a phase merges, its commit hash goes in;
   this lets future readers reconstruct exactly which change
-  implemented which phase even after the plan itself has been
-  archived.
+  implemented which phase.
 
 When the plan completes, the final phase commit is the canonical
 reference for what shipped.
 
-A plan ships when the engineer executing it could pick up the
-document cold and follow it through without re-deriving any choices.
-If a step requires judgment, the plan should say what the judgment
-hinges on and what the answer should be in the expected case.
-
 ## Current plans
 
-- [`p-02-inference-stack-tuning.md`](p-02-inference-stack-tuning.md)
-  — `draft`. Migrate M6 from Ollama to vllm-mlx and layer prefix
-  caching + speculative decoding (graduated from prop-02). Also
-  absorbs the `--concurrency` sweep BUILD_PLAN M6 followed up on.
-- [`p-04-m5-calibration.md`](p-04-m5-calibration.md) — `draft`.
-  Lock in M5's embedding model + `efSearch` via one-time benchmark
+### Backlog
+
+- [`backlog/p-02-inference-stack-tuning.md`](backlog/p-02-inference-stack-tuning.md)
+  — Migrate M6 from Ollama to vllm-mlx and layer prefix caching +
+  speculative decoding (graduated from prop-02). Also absorbs the
+  M6 `--concurrency` sweep.
+- [`backlog/p-04-m5-calibration.md`](backlog/p-04-m5-calibration.md)
+  — Lock in M5's embedding model + `efSearch` via one-time benchmark
   runs on the M5 Max. Two independent phases.
-- [`p-05-m3-cascade-follow-ups.md`](p-05-m3-cascade-follow-ups.md)
-  — `draft`. Three sequenced M3 follow-ups (F1, F2, F3) that make
+- [`backlog/p-05-m3-cascade-follow-ups.md`](backlog/p-05-m3-cascade-follow-ups.md)
+  — Three sequenced M3 follow-ups (F1, F2, F3) that make
   cascade-extracted contributions cataloguer-visible on canonical
   Works and bind them to KANTO. F3 gated on P-06's gold-set growth.
-- [`p-06-gold-set-growth.md`](p-06-gold-set-growth.md) — `draft`.
-  Grow `gold/gold.jsonl` from 17 to 50-100 cataloguer-vetted cases
-  with proper per-category holdout stratification. Hard prerequisite
-  for P-01, P-04 statistical power, and P-05 F3.
+- [`backlog/p-06-gold-set-growth.md`](backlog/p-06-gold-set-growth.md)
+  — Grow `gold/gold.jsonl` from 17 to 50-100 cataloguer-vetted
+  cases with proper per-category holdout stratification. Hard
+  prerequisite for P-01, P-04 statistical power, and P-05 F3.
+
+### In progress
+
+*(none)*
+
+### Completed
+
+*(none)*
+
+### Abandoned
+
+*(none)*

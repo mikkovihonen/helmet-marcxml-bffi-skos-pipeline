@@ -1,6 +1,6 @@
 # P-04 — M5 calibration: embedding-model bench + efSearch tuning
 
-**Status**: draft.
+**Status**: backlog.
 **Source**: `docs/archived/BUILD_PLAN.md` M5 unfinished items (lines 274 + 283 at
 plan-base). Not graduated from a proposal — these are milestone
 follow-ups that need their own execution document because they

@@ -1,6 +1,6 @@
 # P-02 — Inference-stack tuning for the M6 cascade
 
-**Status**: draft.
+**Status**: backlog.
 **Source proposal**: [`docs/proposals/prop-02-inference-stack-tuning-for-M6.md`](../proposals/prop-02-inference-stack-tuning-for-M6.md)
 (introduced in commit `334294a` while still part of the combined
 `performance-enhancements.md`; the k-NN critique that fed back into

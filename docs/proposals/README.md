@@ -82,7 +82,7 @@ plan documents *when the execution was scheduled*.
 - [`prop-02-inference-stack-tuning-for-M6.md`](prop-02-inference-stack-tuning-for-M6.md)
   — `planning (graduated)`. Migrate M6 from Ollama to vllm-mlx and
   layer prompt-prefix caching + speculative decoding on top. Plan
-  lives at [`docs/plans/p-02-inference-stack-tuning.md`](../plans/p-02-inference-stack-tuning.md).
+  lives at [`docs/plans/backlog/p-02-inference-stack-tuning.md`](../plans/backlog/p-02-inference-stack-tuning.md).
 - [`prop-03-m6-stall-watchdog.md`](prop-03-m6-stall-watchdog.md)
   — `proposed`. Detect M6 LLM calls that hang and abandon the stuck
   pair so unattended pipeline runs don't lose hours to a single
@@ -93,5 +93,5 @@ plan documents *when the execution was scheduled*.
   vllm-mlx for the dev loop too so only one inference stack needs
   maintenance. Gated on dev-loop ergonomics (model swap UX, model
   pull UX, dev-machine throughput). Note: numbering collision with
-  the unrelated `p-04-m5-calibration.md` plan — disambiguate by
+  the unrelated `backlog/p-04-m5-calibration.md` plan — disambiguate by
   path in prose.
