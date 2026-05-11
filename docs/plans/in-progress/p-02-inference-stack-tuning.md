@@ -34,7 +34,7 @@ acceptance criteria):
 - Phase A (mlx-lm bring-up + parity): `<unfilled>`
 - Phase D1-D5 (dev-loop consolidation on mlx-lm): `<rollup unfilled>`
   - D1 (per-port routing in Settings + cascade): `f3c0bea`
-  - D2 (model-pull wrapper): `<unfilled>`
+  - D2 (model-pull wrapper): `d959bf6`
   - D3 (dev-machine throughput verification): `<unfilled>`
   - D4 (flip committed defaults): `<unfilled>`
   - D5 (label Ollama secondary): `<unfilled>`
