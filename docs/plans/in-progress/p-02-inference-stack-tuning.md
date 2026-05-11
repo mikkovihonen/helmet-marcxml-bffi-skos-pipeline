@@ -31,18 +31,16 @@ Material updates since drafting:
 signal that the phase has not yet completed against the gold-set
 acceptance criteria):
 
-- Phase A (vllm-mlx bring-up + parity): `<unfilled>`
-- Phase D1-D5 (dev-loop consolidation on vllm-mlx): `<unfilled>`
+- Phase A (mlx-lm bring-up + parity): `<unfilled>`
+- Phase D1-D5 (dev-loop consolidation on mlx-lm): `<unfilled>`
 - Phase B (prefix caching): `<unfilled>`
 - Phase C (speculative decoding): `<unfilled>`
 - Phase D6 (remove Ollama install paths): `<unfilled>`
 
 **Owner**: TBD.
 **Estimated wall-time**: ~3-5 working days end to end. Phase A is
-half a day to a day; D1-D5 is ~1-2 days (was scoped pessimistically
-under the supervisor-question uncertainty — vllm-mlx's
-`--models-config` resolves that for free, so the real estimate is
-closer to 1 day); B + C remain 2-3 days; D6 is half a day plus a
+half a day to a day; D1-D5 is ~1-2 days; B + C remain 2-3 days;
+D6 is half a day plus a
 1-2 release-cycle observation window. Each phase is independently
 shippable; the partial ordering is A → D1-D5 → B → C → D6.
 
@@ -55,13 +53,14 @@ Four optimisations applied in the partial order **A → D1-D5 → B → C
 → D6**:
 
 1. **A**: Move M6 (and the M3 / M9 LLM callers) from Ollama to
-   **vllm-mlx** so the prefix-caching and speculative-decoding knobs
+   **mlx-lm** so the prefix-caching and speculative-decoding knobs
    become available.
-2. **D1-D5**: Make vllm-mlx the dev-loop default too — multi-model
-   serving via vllm-mlx's `--models-config` YAML registry,
-   one-command pull wrapper, dev-machine throughput verification,
-   default flip, Ollama labelled secondary. Until this lands, the
-   dev environment doesn't see the Phase B/C wins.
+2. **D1-D5**: Make mlx-lm the dev-loop default too — multi-model
+   serving via per-port routing (one `mlx_lm.server` per model on
+   separate ports, Settings extension to dispatch primary vs
+   fallback), one-command pull wrapper, dev-machine throughput
+   verification, default flip, Ollama labelled secondary. Until
+   this lands, the dev environment doesn't see the Phase B/C wins.
 3. **B**: Enable **prompt prefix caching** so the ~75 %-identical M6
    prompt prefix re-uses the prefill KV-cache across pairs.
 4. **C**: Add **speculative decoding** with a small draft model
@@ -73,7 +72,7 @@ Four optimisations applied in the partial order **A → D1-D5 → B → C
 
 ## Definition of done
 
-- vllm-mlx is the **default backend for dev and prod**; Ollama
+- mlx-lm is the **default backend for dev and prod**; Ollama
   install paths are removed from the committed docs and the
   `.env.example`.
 - A 200-pair bench shows ≥ **3× TTFT speedup** vs Ollama baseline
@@ -84,12 +83,14 @@ Four optimisations applied in the partial order **A → D1-D5 → B → C
 - `make eval LABEL=<phase-label>` against `gold/gold.jsonl` (17 cases)
   shows **zero verdict deltas** vs the Ollama baseline at every phase
   checkpoint A through C.
-- Multi-model serving via vllm-mlx's `--models-config` YAML
-  registry exposes both primary and fallback on one endpoint with
-  per-request model selection (Ollama UX parity).
-- `scripts/llm-pull.sh <model-slug>` wrapper around
-  `vllm-mlx download` so dev model acquisition stays a one-liner.
-- `docs/runbook.md` documents the vllm-mlx production-run procedure
+- Multi-model serving via per-port routing — two
+  `mlx_lm.server` processes on different ports, with Settings
+  carrying `llm_base_url_primary` / `llm_base_url_fallback` so the
+  cascade hits the correct backend per tier.
+- `scripts/llm-pull.sh <hf-org>/<hf-name>` wrapper around
+  `python -m mlx_lm.convert` so dev model acquisition stays a
+  one-liner.
+- `docs/runbook.md` documents the mlx-lm production-run procedure
   with the new flags; `docs/local-inference.md` documents the
   consolidated dev install.
 
@@ -101,9 +102,9 @@ Four optimisations applied in the partial order **A → D1-D5 → B → C
   - `stages/reconcile.py` (M9 KANTO/YSO picker)
   - `contrib_extract_llm.py` (M3 contributor extraction)
   - `title_lang_llm.py` (M3 title-language cascade)
-- The OpenAI-compatible API contract is the only coupling — vllm-mlx
-  exposes the same surface.
-- `docs/local-inference.md` § "vllm-mlx — production batches" already
+- The OpenAI-compatible API contract is the only coupling — mlx-lm
+  exposes the same surface (`mlx_lm.server`).
+- `docs/local-inference.md` § "mlx-lm — production batches" already
   documents the install + convert + serve commands; this plan
   executes against that baseline.
 - `.env` currently:
@@ -113,82 +114,115 @@ Four optimisations applied in the partial order **A → D1-D5 → B → C
 
 ---
 
-## Phase A — vllm-mlx bring-up + parity bench (P-02a)
+## Phase A — mlx-lm bring-up + parity bench (P-02a)
 
 Estimated wall-time: half a day to one full day.
 
-### A1. Install vllm-mlx
+### A1. Install mlx-lm
 
-The target project is [`waybarrios/vllm-mlx`](https://github.com/waybarrios/vllm-mlx)
-— a vLLM-style server with continuous batching, prefix caching,
-speculative prefill, MCP, and YAML-driven multi-model registry,
-all native to Apple Silicon via MLX. It depends transitively on
-`mlx`, `mlx-lm`, and `mlx-vlm`; PyPI pulls those in automatically.
+**Stack decision (recorded for future readers)**: we install
+[`ml-explore/mlx-lm`](https://github.com/ml-explore/mlx-lm) (Apple's
+MLX team's reference LLM inference library) directly rather than the
+higher-level wrapper [`waybarrios/vllm-mlx`](https://github.com/waybarrios/vllm-mlx).
+Both work for our needs and were evaluated during A1 execution; the
+tie-breakers favouring mlx-lm:
 
-(An earlier draft of this plan referenced `Blaizzy/mlx_lm.git`
-which is a typo — the closest existing repo `Blaizzy/mlx-vlm` is
-for **vision-language** models, not the LLM serving stack we
-need here. Corrected during P-02 Phase A1 execution.)
+| Concern | mlx-lm | vllm-mlx |
+|---|---|---|
+| Maintenance | Apple MLX team | Single contributor (active, but tail risk over the pipeline's multi-year horizon for the NLF hand-off) |
+| Install footprint | ~15 transitive deps | ~50 transitive deps (pulls torch / torchvision / mlx-vlm / mlx-audio / mlx-embeddings etc.) |
+| Blast radius for upstream churn | Smaller | Larger (multiple feature surfaces) |
+| Continuous batching | `--decode-concurrency` + `--prompt-concurrency` | `--continuous-batching` + paged KV cache (richer) |
+| Prefix caching | `--prompt-cache-size` + `--prompt-cache-bytes` | `--enable-prefix-cache` (default-on; richer config) |
+| Speculative decoding | `--draft-model` + `--num-draft-tokens` | `--specprefill` + MTP (richer; two modes) |
+| Multi-model serving on one endpoint | ✗ (one process per model) | ✓ (`--models-config` YAML) |
+| Tool calling / reasoning parsers / MCP | ✗ | ✓ |
+
+The vllm-mlx wins (paged KV cache, `--models-config`, MTP, MCP)
+are nice-to-have rather than load-bearing for our specific workload
+(M6 batch sizes, tens of thousands of pairs, not high-QPS serving).
+The maintenance + install-footprint arguments tip toward mlx-lm.
+
+The cost: **D1's multi-model serving becomes a real code change**
+(~30 LOC of per-port routing in `Settings` + dispatch in
+`_build_chain`) rather than a YAML config. Tractable, and the code
+lives where the rest of M6's LLM config already lives.
+
+(An earlier draft referenced `Blaizzy/mlx_lm.git` — a typo. The
+closest match `Blaizzy/mlx-vlm` is for vision-language models, not
+text-only LLMs. Corrected during P-02 Phase A1 execution.)
+
+mlx-lm is on PyPI as `mlx-lm`. No source clone needed; just create
+a standalone venv for it (kept separate from the bffi_pipeline
+venv so its deps don't pollute or version-clash) and `uv pip
+install`:
 
 ```bash
-mkdir -p ~/Workspace/vendor/vllm-mlx && cd ~/Workspace/vendor/vllm-mlx
-uv venv .venv-mlx --python 3.12
-source .venv-mlx/bin/activate
-uv pip install vllm-mlx
-python -c "import vllm_mlx; print(vllm_mlx.__version__)"
+# Pick any host directory; ~/.venvs/mlx-lm keeps it out of the way.
+mkdir -p ~/.venvs && uv venv ~/.venvs/mlx-lm --python 3.12
+source ~/.venvs/mlx-lm/bin/activate
+uv pip install mlx-lm
+python -c "import mlx_lm; print(mlx_lm.__version__)"
 ```
 
-**Verification**: the import prints a version string (`0.3.0` at
-time of writing). Confirm the CLI is on PATH:
+**Verification**: the import prints a version string (`0.31.3` at
+time of writing). Confirm the CLIs are on PATH:
 
 ```bash
-vllm-mlx --help                      # top-level dispatcher
-vllm-mlx serve --help                # the server entry point
-vllm-mlx download --help             # model acquisition
+python -m mlx_lm.server --help       # the server entry point
+python -m mlx_lm.convert --help      # model conversion
+python -m mlx_lm.generate --help     # one-shot generation (handy for smoke tests)
 ```
 
-### A2. Download the two judge models (pre-quantised MLX 4-bit)
+### A2. Convert the two judge models to MLX 4-bit
 
-vllm-mlx ships a `download` subcommand that pulls pre-quantised
-MLX checkpoints from the `mlx-community` HF org — no separate
-`mlx_lm.convert` ceremony.
+The easiest path is to pull a pre-quantised checkpoint from the
+`mlx-community` HF org if one exists; otherwise convert from the
+raw HF weights via `mlx_lm.convert`.
 
 ```bash
-# Primary (~5 GB)
-vllm-mlx download mlx-community/Qwen3-8B-Instruct-4bit
-# Fallback (~18 GB; ~1-2 h on typical bandwidth)
-vllm-mlx download mlx-community/Qwen3-32B-Instruct-4bit
+mkdir -p ~/.mlx_models
+# Primary (8B; ~5 GB on disk after 4-bit quant): ~30-45 min on M5 Max
+python -m mlx_lm.convert --hf-path Qwen/Qwen3-8B-Instruct -q --q-bits 4 \
+    --mlx-path ~/.mlx_models/Qwen3-8B-Instruct-4bit
+# Fallback (32B; ~18 GB on disk after 4-bit quant): ~1-2 h
+python -m mlx_lm.convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
+    --mlx-path ~/.mlx_models/Qwen3-32B-Instruct-4bit
 ```
 
-Downloads land in the local HF cache (`~/.cache/huggingface/hub/`)
-and are reused on every subsequent `vllm-mlx serve …` invocation.
+(Alternative: clone pre-quantised checkpoints from
+`mlx-community/Qwen3-8B-Instruct-4bit` etc. directly via `huggingface-cli
+download`; faster if the upstream re-quantisation matches what we'd
+have produced locally.)
 
-**Fallback** if the pre-quantised checkpoints are missing or stale,
-`vllm-mlx model convert` converts from raw HF weights at run time
-(check `vllm-mlx model --help`).
+**Verification**: `ls -la ~/.mlx_models/Qwen3-8B-Instruct-4bit/` shows
+the expected `weights.npz` (or sharded variant), `config.json`, and
+tokenizer files. Total size on disk ≈ 5 GB for 8B, ≈ 18 GB for 32B.
 
-### A3. Start the vllm-mlx server on a dedicated port
+**Fallback if HF download is unreliable**: pull the GGUF blobs Ollama
+already has at `~/.ollama/models/blobs/`, identify them by manifest,
+and convert via `mlx_lm.convert --hf-path` against the GGUF path.
+Documented but flakier — only use if HF download repeatedly fails.
+
+### A3. Start the mlx-lm server on a dedicated port
 
 ```bash
 # In a separate terminal (or via nohup); keep Ollama running on :11434.
-vllm-mlx serve mlx-community/Qwen3-8B-Instruct-4bit \
+python -m mlx_lm.server \
+    --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --host 127.0.0.1 --port 8001 \
-    --continuous-batching \
-    --enable-prefix-cache \
-    > /tmp/vllm-mlx-server-8b.log 2>&1 &
+    > /tmp/mlx-lm-server-8b.log 2>&1 &
 # Probe:
 curl -s http://127.0.0.1:8001/v1/models | jq
 ```
 
-(`--enable-prefix-cache` is on by default in vllm-mlx 0.3.0 but
-spelling it out makes the operator intent explicit. `--continuous-
-batching` activates the vLLM-style scheduler.)
-
 **Verification**: the `/v1/models` response lists exactly the
 loaded model. The pipeline's `LLM_MODEL_PRIMARY` env value must
-match what vllm-mlx serves — note the model identifier (the HF
-slug `mlx-community/Qwen3-8B-Instruct-4bit` by default; override
-via `--served-model-name <alias>` if you want a shorter handle).
+match what mlx-lm reports — likely the model-path basename like
+`Qwen3-8B-Instruct-4bit`, not `qwen3:8b-q4_K_M`. Adjust
+`.env.vllm-mlx` (yes, the file is still named that for continuity
+with the original prop-04 naming; the contents point at mlx-lm)
+accordingly.
 
 ### A4. Swap `.env` for the parity bench only
 
@@ -241,8 +275,9 @@ gets exercised by reading the failure diff.
 
 Once parity is established, sweep concurrent request counts to find
 the value that maximises throughput without OOMing — this is the
-BUILD_PLAN M6 L302 follow-up that vllm-mlx unblocks. Continuous
-batching is exactly what vllm-mlx provides over Ollama, so the
+BUILD_PLAN M6 L302 follow-up that mlx-lm unblocks. The richer
+client-side concurrency mlx-lm permits over Ollama (via
+`--decode-concurrency` / `--prompt-concurrency`) is what makes the
 sweep is meaningful here in a way it wouldn't be against an Ollama
 backend.
 
@@ -265,8 +300,8 @@ versions" and the `M6_CONCURRENCY` env default in
 
 ### A7. Phase A acceptance
 
-- [ ] vllm-mlx server starts cleanly on port 8001.
-- [ ] `make eval` against vllm-mlx matches Ollama on all 17 gold
+- [ ] mlx-lm server starts cleanly on port 8001.
+- [ ] `make eval` against mlx-lm matches Ollama on all 17 gold
       cases (or only differs on documented numerical-noise pairs).
 - [ ] `.env.ollama-baseline` exists for instant rollback.
 - [ ] `--concurrency` sweep complete; chosen value documented in
@@ -276,66 +311,100 @@ versions" and the `M6_CONCURRENCY` env default in
 
 ```bash
 cp .env.ollama-baseline .env
-# Optionally stop the vllm-mlx server, but harmless to leave running.
+# Optionally stop the mlx-lm server, but harmless to leave running.
 ```
 
 The pipeline is back on Ollama. No code changes were made.
 
 ---
 
-## Phase D1-D5 — Dev-loop consolidation on vllm-mlx (absorbed from prop-04)
+## Phase D1-D5 — Dev-loop consolidation on mlx-lm (absorbed from prop-04)
 
 Estimated wall-time: ~1-2 days. Each sub-item is independently
 shippable, but they're listed in execution order. The full set is
 gating the dev-loop benefit from Phases B and C — until D1-D5 ships,
 the perf wins apply only to production batches.
 
-### D1. Multi-model serving via vllm-mlx's `--models-config`
+### D1. Multi-model serving via per-port routing
 
-**Resolved at A1 execution time**: the earlier
-"supervisor-vs-per-port" question is moot. vllm-mlx ships a
-built-in YAML-driven multi-model registry exposed at one OpenAI-
-compatible endpoint. A single `vllm-mlx serve --models-config
-<file>.yaml` process owns both primary and fallback; the API client
-selects via the standard `model` request field, and vllm-mlx
-dispatches internally — same UX as Ollama's per-request model
-selection.
+`mlx_lm.server` serves one model per process. To match Ollama's
+per-request model selection (so the cascade can flip between
+primary and fallback without restarting the server), run two
+`mlx_lm.server` processes on different ports and extend `Settings`
+to carry both URLs.
 
-Create `~/.config/vllm-mlx/models.yaml`:
+**Settings change** (~30 LOC in `src/bffi_pipeline/config.py`):
 
-```yaml
-models:
-  - name: qwen3-8b
-    path: mlx-community/Qwen3-8B-Instruct-4bit
-    served_model_name: qwen3-8b
-  - name: qwen3-32b
-    path: mlx-community/Qwen3-32B-Instruct-4bit
-    served_model_name: qwen3-32b
+```python
+# New fields, alongside the existing llm_base_url:
+llm_base_url_primary:  str = Field(
+    default="",  # falls back to llm_base_url if empty
+    alias="LLM_BASE_URL_PRIMARY",
+)
+llm_base_url_fallback: str = Field(
+    default="",
+    alias="LLM_BASE_URL_FALLBACK",
+)
 ```
 
-Start the server once:
+**Dispatch change** in `_build_chain` (`src/bffi_pipeline/stages/judge.py`):
+the cascade already maintains separate `primary_chain` and
+`fallback_chain` objects; route each at the matching URL.
+
+```python
+def _build_chain(*, model_name: str, base_url: str, ...) -> Any:
+    # ... unchanged downstream of base_url
+```
+
+Call sites in `cascade_judge` resolve the per-tier URL with the
+existing `llm_base_url` as a fallback for backward compatibility:
+
+```python
+primary_url = settings.llm_base_url_primary or settings.llm_base_url
+fallback_url = settings.llm_base_url_fallback or settings.llm_base_url
+```
+
+**Operator setup**: start two servers on different ports:
 
 ```bash
-vllm-mlx serve --models-config ~/.config/vllm-mlx/models.yaml \
+# Primary on 8001
+python -m mlx_lm.server \
+    --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --host 127.0.0.1 --port 8001 \
-    --continuous-batching \
-    --enable-prefix-cache
+    --prompt-cache-size 200 --prompt-cache-bytes 1073741824 &
+
+# Fallback on 8002 (memory permitting)
+python -m mlx_lm.server \
+    --model ~/.mlx_models/Qwen3-32B-Instruct-4bit \
+    --host 127.0.0.1 --port 8002 \
+    --prompt-cache-size 200 --prompt-cache-bytes 1073741824 &
 ```
 
-`LLM_MODEL_PRIMARY=qwen3-8b` / `LLM_MODEL_FALLBACK=qwen3-32b` in
-the pipeline's `.env.vllm-mlx` then hit the same endpoint with
-different model names. `LLM_BASE_URL` is one URL, no per-port
-routing in Settings needed. **D1 ships as documentation + the
-YAML file template** — no code change.
+`.env.vllm-mlx` (kept under that filename for continuity with the
+original prop-04 naming; contents now reference mlx-lm endpoints):
 
-Confirm by hitting `/v1/models`: both should be listed (lazy-
-loaded; first request to each triggers the load).
+```
+LLM_BASE_URL_PRIMARY=http://127.0.0.1:8001/v1
+LLM_BASE_URL_FALLBACK=http://127.0.0.1:8002/v1
+LLM_MODEL_PRIMARY=Qwen3-8B-Instruct-4bit
+LLM_MODEL_FALLBACK=Qwen3-32B-Instruct-4bit
+```
+
+**Tests**: `tests/unit/test_judge.py` gains coverage that the
+cascade hits `LLM_BASE_URL_FALLBACK` when escalating to fallback.
+The existing chain-injection pattern means we mock both URLs
+separately — no real HTTP needed.
+
+**Acceptance**: cascade fallback flips between ports without
+restarts; tier 1 hits 8001, tier 2 hits 8002 (verify via the
+mlx-lm server logs).
 
 ### D2. One-command model-pull wrapper
 
 ```bash
-# scripts/llm-pull.sh <mlx-community-slug>
-vllm-mlx download "$1"
+# scripts/llm-pull.sh <hf-org>/<hf-name>
+python -m mlx_lm.convert --hf-path "$1" -q --q-bits 4 \
+    --mlx-path "$HOME/.mlx_models/$(basename "$1")-4bit"
 ```
 
 Stash the wrapper under `scripts/`, doc it in
@@ -344,34 +413,35 @@ command UX without the rest of Ollama.
 
 ### D3. Dev-machine throughput verification
 
-vllm-mlx targets server-class Apple Silicon; the M5 Max is its
-design target. Smaller dev boxes (M1 Pro / M2 Air) may struggle
-with the continuous-batching overhead on the serial requests
-typical of dev iteration. Bench `judge_pair` serial throughput on
+mlx-lm is calibrated for Apple Silicon generally; the M5 Max is
+Apple's reference. Smaller dev boxes (M1 Pro / M2 Air) might be
+memory-constrained when loading the 32B fallback, and per-call
+latency may be higher than on the M5 Max. Bench `judge_pair`
+serial throughput on
 the **smallest dev machine in actual team use** at the chosen
 primary model. Compare against the pre-migration Ollama baseline.
 
-**Acceptance**: vllm-mlx serial throughput on the smallest dev box
+**Acceptance**: mlx-lm serial throughput on the smallest dev box
 matches Ollama within ~20 %. If it's worse, dev keeps a per-machine
 escape hatch (a `BFFI_LOCAL_BACKEND=ollama` env var that selects
 the legacy path) and D4-D6 land only for machines that pass D3.
 
 ### D4. Flip the committed defaults
 
-- `.env.example` updates: `LLM_BASE_URL` points at the vllm-mlx
+- `.env.example` updates: `LLM_BASE_URL` points at the mlx-lm
   port; `LLM_MODEL_PRIMARY` / `LLM_MODEL_FALLBACK` use MLX-style
   identifiers.
-- `docs/local-inference.md` `## Installation` re-orders vllm-mlx
+- `docs/local-inference.md` `## Installation` re-orders mlx-lm
   ahead of Ollama; Ollama section is labelled "Supported but no
   longer recommended" with a one-paragraph rationale and a pointer
   back to the runbook for the rollback path.
-- README's Quick start uses vllm-mlx commands.
+- README's Quick start uses mlx-lm commands.
 
 ### D5. Label Ollama secondary (no removal yet)
 
 Old Ollama install paths stay in the docs but with a "Supported,
 not recommended" banner. This is the trial period — Ollama remains
-usable as the emergency fallback while the team uses vllm-mlx as
+usable as the emergency fallback while the team uses mlx-lm as
 the dev default.
 
 **Phase D1-D5 acceptance**:
@@ -382,15 +452,15 @@ the dev default.
 - [ ] D3 throughput bench logged in
       `eval-runs/dev-throughput-<date>.json` (one row per dev box).
 - [ ] `.env.example` + `docs/local-inference.md` + README flipped
-      to vllm-mlx-default.
-- [ ] Gold-set eval (`make eval`) passes under vllm-mlx-only.
+      to mlx-lm-default.
+- [ ] Gold-set eval (`make eval`) passes under mlx-lm-only.
 
 ### D1-D5 rollback
 
 Re-flip `.env.example` and `docs/local-inference.md` defaults to
 Ollama. The models-config and pull-wrapper additions are non-breaking;
 they stay in place even if the default reverts (they help anyone
-on vllm-mlx regardless of which is default).
+on mlx-lm regardless of which is default).
 
 ---
 
@@ -407,7 +477,7 @@ payload into the static prefix.
 **Action**: factor the static prefix out so it is constructed once
 at module-import time and the per-pair section is appended verbatim.
 Today the builder string-interpolates the whole thing each call — a
-vllm-mlx prefix cache would still recognise repeats but at a small
+mlx-lm prefix cache would still recognise repeats but at a small
 hashing cost we can eliminate.
 
 Concretely:
@@ -424,7 +494,7 @@ Concretely:
 
 ```python
 def test_m6_prompt_prefix_is_byte_stable() -> None:
-    """The M6 prompt prefix must not drift across releases — vllm-mlx
+    """The M6 prompt prefix must not drift across releases — mlx-lm
     prefix-cache hit rate silently drops to 0 % if any byte changes.
     The recorded fixture is the contract."""
     from bffi_pipeline.stages.judge import _M6_PROMPT_PREFIX
@@ -435,44 +505,32 @@ def test_m6_prompt_prefix_is_byte_stable() -> None:
 When the prompt intentionally changes, the fixture is updated
 deliberately — the test failure forces the conversation.
 
-### B3. Enable vllm-mlx prefix caching
+### B3. Enable mlx-lm prefix caching
 
-`--enable-prefix-cache` is already ON by default in vllm-mlx 0.3.0
-(confirmed by `vllm-mlx serve --help`); B3 is mainly about
-**verifying it's actually firing** and tuning the cache size for
-the M6 workload. The recommended setup also adds `--warm-prompts`
-to pre-populate the cache with the static prompt prefix at boot —
-the upstream README cites a 1.3-2.3× cold-TTFT drop on agent
-workloads.
-
-Pre-build a warm-prompts file (one entry, the static prefix in
-`messages` shape):
+mlx-lm 0.31.3 exposes `--prompt-cache-size` (entries) and
+`--prompt-cache-bytes` (byte budget) on the server CLI. Start the
+server with both knobs set:
 
 ```bash
-# scripts/p02-build-warm-prompts.py emits warm-prompts.json from
-# tests/fixtures/m6_prompt_prefix.txt — covered separately.
-vllm-mlx-warm-prompts > ~/.config/vllm-mlx/warm.json
-```
-
-Restart the server:
-
-```bash
-pkill -f "vllm-mlx serve" || true
-vllm-mlx serve --models-config ~/.config/vllm-mlx/models.yaml \
+pkill -f "mlx_lm.server" || true
+python -m mlx_lm.server \
+    --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --host 127.0.0.1 --port 8001 \
-    --continuous-batching \
-    --enable-prefix-cache \
-    --prefix-cache-size 200 \
-    --cache-memory-percent 0.30 \
-    --warm-prompts ~/.config/vllm-mlx/warm.json \
-    > /tmp/vllm-mlx-server-cached.log 2>&1 &
+    --prompt-cache-size 200 \
+    --prompt-cache-bytes 1073741824 \
+    > /tmp/mlx-lm-server-cached.log 2>&1 &
 ```
+
+(`--prompt-cache-bytes 1073741824` is 1 GB. M6's static prefix is
+~10-20 KB per cached entry; 200 entries × 20 KB ≈ 4 MB, so the
+byte cap won't bind in practice — set it generously to leave
+headroom for occasional long-prefix outliers.)
 
 **Verification**: hit the endpoint with two near-identical prompts
-(same M6 prefix, different per-pair suffix). The server log should
-report a cache hit on the second call. The vllm-mlx server exposes
-metrics via `--enable-metrics`; cache hit rate ends up in the
-metrics endpoint.
+(same M6 prefix, different per-pair suffix). The second response's
+TTFT (time-to-first-token) should drop sharply vs the first. mlx-lm
+doesn't expose cache-hit metrics directly; observe via TTFT delta
+in the B4 bench rather than via a metrics endpoint.
 
 ### B4. Bench prefix caching
 
@@ -497,7 +555,7 @@ calls.
 ### B5. Gold-set regression check
 
 ```bash
-make eval LABEL=vllm-mlx-qwen3-8b-prefix-cache
+make eval LABEL=mlx-lm-qwen3-8b-prefix-cache
 ```
 
 Verdicts must still match the Ollama baseline.
@@ -505,14 +563,14 @@ Verdicts must still match the Ollama baseline.
 ### B6. Phase B acceptance
 
 - [ ] `_M6_PROMPT_PREFIX` factored out and pinned by unit test.
-- [ ] Prefix-cache enabled flag confirmed in the vllm-mlx logs.
+- [ ] Prefix cache active (via TTFT delta on the B4 bench; mlx-lm doesn't expose per-cache metrics).
 - [ ] ≥ 3× TTFT speedup on the bench.
 - [ ] Gold-set parity holds.
 
 ### B7. Rollback
 
 Revert the prompt-builder change via `git revert <commit>`, restart
-vllm-mlx without `--enable-prefix-cache`. The unit test failure
+mlx-lm without `--prompt-cache-size` / `--prompt-cache-bytes`. The unit test failure
 catches accidental partial reverts.
 
 ---
@@ -524,42 +582,34 @@ Estimated wall-time: ~1 day.
 ### C1. Download the draft model
 
 ```bash
-vllm-mlx download mlx-community/Qwen3-1.7B-Instruct-4bit
+python -m mlx_lm.convert --hf-path Qwen/Qwen3-1.7B-Instruct -q --q-bits 4 \
+    --mlx-path ~/.mlx_models/Qwen3-1.7B-Instruct-4bit
 ```
 
-~5 min. The 1.7B model is small (~1 GB on disk) and download
-rarely fails.
+~5-10 min. The 1.7B model is small (~1 GB on disk after 4-bit
+quant) and conversion rarely fails.
 
-### C2. Configure vllm-mlx with speculative prefill
+### C2. Configure mlx-lm with speculative decoding
 
-vllm-mlx exposes two speculative-style modes (per `vllm-mlx serve
---help`): **`--specprefill`** (speculative prefill — a small draft
-model accelerates the prefill phase) and **`--enable-mtp`**
-(multi-token-prediction — draft-then-verify across multiple tokens
-of generation). Speculative prefill is the closer match to the
-"prefill is the slow part of M6 because the rationale prompt
-prefix is long" diagnosis; ship that first.
+`mlx_lm.server` exposes `--draft-model` + `--num-draft-tokens` for
+classical speculative decoding (draft model generates K tokens
+speculatively; target model verifies in a single forward pass).
+Restart the primary server with both flags:
 
 ```bash
-pkill -f "vllm-mlx serve" || true
-vllm-mlx serve mlx-community/Qwen3-8B-Instruct-4bit \
+pkill -f "mlx_lm.server" || true
+python -m mlx_lm.server \
+    --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
+    --draft-model ~/.mlx_models/Qwen3-1.7B-Instruct-4bit \
+    --num-draft-tokens 5 \
     --host 127.0.0.1 --port 8001 \
-    --continuous-batching \
-    --enable-prefix-cache \
-    --specprefill \
-    --specprefill-draft-model mlx-community/Qwen3-1.7B-Instruct-4bit \
-    --specprefill-threshold 0.5 \
-    --specprefill-keep-pct 0.8 \
-    > /tmp/vllm-mlx-server-8b-spec.log 2>&1 &
+    --prompt-cache-size 200 --prompt-cache-bytes 1073741824 \
+    > /tmp/mlx-lm-server-8b-spec.log 2>&1 &
 ```
 
-The `--specprefill-threshold` / `--specprefill-keep-pct` knobs are
-calibration parameters that the C3 bench dials in. Defaults from
-the upstream README are reasonable starting points.
-
-If speculative prefill underperforms, swap for `--enable-mtp` +
-`--mtp-num-draft-tokens 5` (`--mtp-optimistic` for an aggressive
-acceptance policy).
+`--num-draft-tokens 5` is the upstream default. The C3 bench
+measures token-acceptance rate; if below ~50 % the speculative
+path is overhead — abandon C and ship B alone.
 
 ### C3. Bench speculative decoding
 
@@ -570,7 +620,7 @@ LLM_BASE_URL=http://127.0.0.1:8001/v1 \
     --force | tee /tmp/bench-spec-decode.log
 ```
 
-Capture the **token-acceptance rate** from the vllm-mlx server log
+Capture the **token-acceptance rate** from the mlx-lm server log
 (should appear per-request). Compute end-to-end wall-time vs Phase B
 baseline.
 
@@ -585,21 +635,21 @@ baseline.
 ### C4. Gold-set regression check
 
 ```bash
-make eval LABEL=vllm-mlx-qwen3-8b-prefix-cache-spec
+make eval LABEL=mlx-lm-qwen3-8b-prefix-cache-spec
 ```
 
 Verdicts must still match the Ollama baseline.
 
 ### C5. Phase C acceptance
 
-- [ ] Draft model converted and loaded by vllm-mlx.
+- [ ] Draft model converted and loaded by mlx-lm.
 - [ ] Token-acceptance rate ≥ 70 % observed in the bench.
 - [ ] ≥ 2× speedup vs Phase B baseline on fast-mode outputs.
 - [ ] Gold-set parity holds.
 
 ### C6. Rollback
 
-Restart vllm-mlx without `--specprefill` / `--specprefill-draft-model`.
+Restart mlx-lm without `--draft-model` / `--num-draft-tokens`.
 No code changes were made.
 
 ---
@@ -617,7 +667,7 @@ once:
 - Phase C has shipped (so the full perf stack is in operation; we're
   not removing the safety net mid-migration).
 - At least 1-2 release cycles have passed without contributor
-  complaints about the vllm-mlx default.
+  complaints about the mlx-lm default.
 - No open issues / PRs depend on the Ollama install path.
 
 If any of those gates fail, **stay at D5**. The plan can ship
@@ -628,17 +678,17 @@ backend documentation burden permanently.
 ### D6.1. Sweep
 
 - Remove the Ollama bullet from `.env.example`'s LLM section
-  (`LLM_BASE_URL` defaults to vllm-mlx).
+  (`LLM_BASE_URL` defaults to mlx-lm).
 - Cut the "Default: Ollama" section in
   `docs/local-inference.md`'s "Server choice" table; rewrite the
-  page to describe vllm-mlx as the only documented backend.
+  page to describe mlx-lm as the only documented backend.
 - Remove the Ollama Quick-start in README.
 - Audit `tests/integration/` for any `requires_llm` tests that
   assume `OLLAMA_HOST` or per-request model swapping; refactor or
   delete.
 - The `BFFI_LOCAL_BACKEND=ollama` escape hatch from D3 is the last
   thing to go; if it's still needed (some dev still can't run
-  vllm-mlx), leave D6 unshipped and revisit when the dev-box mix
+  mlx-lm), leave D6 unshipped and revisit when the dev-box mix
   changes.
 
 ### D6.2. Acceptance
@@ -662,8 +712,8 @@ mechanical.
 
 After Phase C lands, update **`docs/runbook.md`** with:
 
-- The exact flag combination to start the production-batch vllm-mlx
-  server (`--continuous-batching --enable-prefix-cache --specprefill --specprefill-draft-model …`).
+- The exact flag combination to start the production-batch mlx-lm
+  server (`--prompt-cache-size 200 --prompt-cache-bytes 1073741824 --draft-model … --num-draft-tokens 5`).
 - The throughput numbers measured in the bench (replace the speculative
   4-8x estimate with the actual observed value).
 - A "rollback to Ollama" pointer for incidents.
@@ -678,39 +728,45 @@ After Phase C lands, update **`docs/runbook.md`** with:
 | Model conversion produces different outputs from Ollama's GGUF | Medium | Phase A5 gold-set parity is the gate. Different ≠ wrong, but it has to be documented. |
 | Prefix cache silently invalidated by a prompt-builder change | Medium | The B2 unit test is the contract. Failures force the conversation. |
 | Draft-model token acceptance below 50 % | Medium-low | C3's bench detects this before we commit to the change. Plan explicitly allows aborting C and shipping B. |
-| vllm-mlx flag names drift across versions | Medium | This plan refers to flag names by intent (`--enable-prefix-cache`, `--draft-model`); the executor checks `--help` of the installed version before running. |
+| mlx-lm flag names drift across versions | Medium | This plan refers to flag names by intent (`--prompt-cache-size`, `--draft-model`, `--num-draft-tokens`); the executor checks `--help` of the installed version before running. |
 | Per-batch verdict drift not caught by the 17-case gold set | High | The current gold set is too small. P-01's prerequisite of growing gold to 50-100 cases also benefits P-02. Until then, manually spot-check 20 random pairs per phase that the LLM previously decided. |
-| D3 throughput regression on smaller dev machines (M1 Pro / M2 Air) | Medium | The D3 bench is the gate. If vllm-mlx is materially slower than Ollama on those boxes, ship D1-D2 but hold D4-D6; keep a `BFFI_LOCAL_BACKEND=ollama` escape hatch documented for the affected machines. |
-| Multi-model serving turns out to need bespoke routing | Low | Resolved during A1 execution — vllm-mlx's --models-config YAML registry handles it without supervisor or per-port routing. Row preserved for the historical record. |
+| D3 throughput regression on smaller dev machines (M1 Pro / M2 Air) | Medium | The D3 bench is the gate. If mlx-lm is materially slower than Ollama on those boxes, ship D1-D2 but hold D4-D6; keep a `BFFI_LOCAL_BACKEND=ollama` escape hatch documented for the affected machines. |
+| Per-port routing for D1 turns out to need bespoke complexity | Low-medium | The Settings extension is ~30 LOC and the cascade code already separates primary/fallback chains. If unexpected complexity surfaces (e.g. shared cache state between the two mlx-lm servers), fall back to running only the primary on mlx-lm and keeping the fallback on Ollama until D6 closes the gap. |
 | D6 fires while a contributor is still mid-flight on Ollama | Low-medium | The 1-2 release-cycle observation window after D5 is the safety net. D6's commit is isolated so it reverts cleanly. |
 
 ## Open issues to close before / during execution
 
-- ~~**vllm-mlx CLI flag names** — confirm `--enable-prefix-cache`,
-  `--draft-model`, `--num-speculative-tokens` against the installed
-  upstream version.~~ **Resolved during A1 execution**: real flags are
-  `--enable-prefix-cache` (default on), `--specprefill --specprefill-draft-model`
-  (not `--draft-model`/`--num-speculative-tokens`),
-  `--continuous-batching --max-num-seqs N` (concurrency).
+- **mlx-lm CLI flag names** — confirmed against installed
+  `mlx_lm.server --help` (mlx-lm 0.31.3) during A1 execution:
+  prefix caching = `--prompt-cache-size N` + `--prompt-cache-bytes N`
+  (no default-on; explicit config needed); speculative decoding =
+  `--draft-model PATH` + `--num-draft-tokens N`; concurrency =
+  `--decode-concurrency N` + `--prompt-concurrency N` (separate
+  knobs for prefill and decode).
 - **Concurrency setting** — the current Ollama baseline runs
-  `--concurrency 1`. vllm-mlx's continuous batching wants higher
-  values (`{4, 8, 16}` per runbook). Decide whether to bench at
-  matched concurrency (apples-to-apples) or at recommended
-  concurrency (real production timing). Recommendation: do both,
-  cite both in the runbook update.
+  `--concurrency 1`. mlx-lm's `--decode-concurrency` / `--prompt-
+  concurrency` accept higher values; the M6 client-side
+  `--concurrency` sweep range stays `{4, 8, 16, 32}` per BUILD_PLAN
+  M6 L302. Decide whether to bench at matched concurrency
+  (apples-to-apples vs Ollama) or at recommended concurrency (real
+  production timing). Recommendation: do both, cite both in the
+  runbook update.
 - **Model name strings** — `LLM_MODEL_PRIMARY` and `LLM_MODEL_FALLBACK`
-  must match what vllm-mlx serves. Decide whether to rename Ollama's
-  identifiers (`qwen3:8b-q4_K_M`) to match vllm-mlx
-  (`Qwen3-8B-4bit`), or vice versa, or keep them differing per
-  backend in `.env.ollama-baseline` / `.env.vllm-mlx`.
-- **Supervisor vs. per-port** for D1 — pick at execution time after
-  surveying the upstream `mlx_lm` ecosystem. **Resolved during
-  A1 execution**: vllm-mlx ships `--models-config` natively; no
-  supervisor or per-port routing needed.
+  must match what mlx-lm reports via `/v1/models`. Decide whether to
+  rename Ollama's identifiers (`qwen3:8b-q4_K_M`) to match mlx-lm
+  (`Qwen3-8B-Instruct-4bit` per the model-path basename), or vice
+  versa, or keep them differing per backend in
+  `.env.ollama-baseline` / `.env.vllm-mlx`.
+- **Supervisor vs. per-port** for D1 — **resolved during the
+  mlx-lm-vs-vllm-mlx decision in A1**: chose per-port routing
+  (cheaper code change, fits the existing cascade primary/fallback
+  shape) over a hand-rolled supervisor. vllm-mlx's `--models-config`
+  registry would have avoided this work entirely but was rejected
+  for maintenance reasons (see A1 trade-off table).
 - **D6 observation window** — does "1-2 release cycles" map to
   calendar time or commit-count? The project doesn't have a formal
   release cadence; pragmatic default: hold D6 for at least 4 weeks
-  of vllm-mlx-default-only operation before sweeping the docs.
+  of mlx-lm-default-only operation before sweeping the docs.
 
 ## Review questions
 
@@ -727,15 +783,16 @@ real design considerations and one memory bound to plan around:
 
 | Phase | Concurrency interaction |
 |---|---|
-| **A6** (the `--concurrency` sweep absorbed from BUILD_PLAN M6 L302) | Concurrency is the *subject* of the sweep — `{4, 8, 16, 32}` against a 1000-pair sample on vllm-mlx. |
-| **B** (prefix caching) | Concurrency *multiplies* the gain. The static prompt prefix is cached once per server; N concurrent requests on the same vllm-mlx server all benefit from the same prefill. Higher concurrency → bigger win. |
+| **A6** (the `--concurrency` sweep absorbed from BUILD_PLAN M6 L302) | Concurrency is the *subject* of the sweep — `{4, 8, 16, 32}` against a 1000-pair sample on mlx-lm. |
+| **B** (prefix caching) | Concurrency *multiplies* the gain. The static prompt prefix is cached once per server; N concurrent requests on the same mlx-lm server all benefit from the same prefill. Higher concurrency → bigger win. |
 | **C** (speculative decoding) | vLLM's scheduler handles batched draft + verify across concurrent requests transparently. Throughput scales near-linearly until the draft-model GPU time saturates. |
 
 **Two design questions the plan accommodates**:
 
-1. **D1's multi-model serving** turned out to be a built-in
-   `--models-config` YAML feature of vllm-mlx (resolved during
-   A1 execution). `mlx_lm.server` (Apple's lower-level tool) is one process per
+1. **D1's multi-model serving** lands as per-port routing in
+   mlx-lm (the vllm-mlx alternative would have offered an integrated
+   `--models-config` YAML, but was rejected in A1 for maintenance
+   reasons — see the A1 trade-off table). `mlx_lm.server` (Apple's lower-level tool) is one process per
    model, so the cascade either runs against two ports (each with
    its own scheduler / KV-cache pool) or behind a supervisor that
    routes by model name. Per-port is the smaller change (the
@@ -747,7 +804,10 @@ real design considerations and one memory bound to plan around:
    — that stays the right call, slight bias toward per-port for
    minimal code churn.
 2. **D3's dev-machine throughput verification** is where
-   concurrency becomes a real risk. vllm-mlx is designed for
+   concurrency becomes a real risk. mlx-lm is the framework's
+   reference inference layer, so it works on any Apple Silicon, but
+   per-call latency and memory pressure scale with model size; the
+   32B fallback is the constraint on smaller dev boxes. Effectively
    server-class Apple Silicon; on smaller dev boxes
    (M1 Pro / M2 Air) the continuous-batching overhead on
    serial-request dev iteration may underperform Ollama. If D3
@@ -772,10 +832,10 @@ operational ceiling per machine.
 ### Q2. Cross-cutting with P-03 budgets
 
 P-03's per-call and per-pair watchdog budgets were calibrated
-against Ollama at `--concurrency=1`. When P-02 ships vllm-mlx +
+against Ollama at `--concurrency=1`. When P-02 ships mlx-lm +
 raises concurrency, those budgets need re-pinning because the
 queueing behaviour changes (Ollama serializes server-side and
-inflates the per-call timeout with queue wait; vllm-mlx
+inflates the per-call timeout with queue wait; mlx-lm
 continuous-batches and doesn't). The full reasoning lives in
 P-03's "Review questions" Q2; the cross-reference here is to
 ensure the calibration happens **as part of P-02's A8 / B6 dry-
@@ -788,7 +848,7 @@ answers.
 
 ## Out of scope
 
-- Migrating M5 (sentence-transformers / BGE-M3) to vllm-mlx. M5 is
+- Migrating M5 (sentence-transformers / BGE-M3) to mlx-lm. M5 is
   not an LLM workload.
 - Cost-modelling vs cloud inference. The pipeline is committed to
   local inference per project constraints.
@@ -799,7 +859,7 @@ answers.
 ## Cross-references
 
 - `docs/proposals/performance-enhancements.md` § P-02 — origin proposal.
-- `docs/local-inference.md` § "vllm-mlx — production batches" —
+- `docs/local-inference.md` § "mlx-lm — production batches" —
   prerequisite documentation for the install commands.
 - `docs/runbook.md` § "End-to-end command sequence" — updated as
   the documentation deliverable.
