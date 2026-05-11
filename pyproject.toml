@@ -26,6 +26,10 @@ dependencies = [
     "httpx>=0.27",
     "requests>=2.32",
     "lingua-language-detector>=2.0",
+    # `marcxml_export_pipeline.sierra` — Sierra Postgres replica → MARCXML
+    # export, migrated from the (now-archived) helmet-sierra-data-tools repo.
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
 ]
 
 [dependency-groups]
@@ -40,13 +44,14 @@ dev = [
 
 [project.scripts]
 bffi-pipeline = "bffi_pipeline.cli:app"
+marcxml-export-sierra = "marcxml_export_pipeline.sierra.marcxml:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bffi_pipeline"]
+packages = ["src/bffi_pipeline", "src/marcxml_export_pipeline"]
 
 [tool.ruff]
 line-length = 100
@@ -75,6 +80,11 @@ ignore = ["PLR0913"]
 "src/bffi_pipeline/stages/load_finto.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/merge.py" = ["PLR0915"]
 "src/bffi_pipeline/cli.py" = ["PLC0415"]
+# SQLAlchemy + dotenv are deferred to function bodies so the CLI
+# entry point starts quickly when not actually streaming from the
+# DB (e.g. invoking just for `--help`), and so the module imports
+# cleanly without optional dotenv installed.
+"src/marcxml_export_pipeline/sierra/marcxml.py" = ["PLC0415"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -100,6 +110,15 @@ module = [
     "pymarc.*",
 ]
 ignore_missing_imports = true
+
+# pymarc 5.x ships ``py.typed`` but several methods (Record.add_field,
+# marcxml.record_to_xml, …) are unannotated. Silence the cascading
+# "Call to untyped function" errors on the one module that uses these
+# calls heavily; the rest of the Sierra-export logic stays under
+# --strict so dataclass / DTO contracts are fully type-checked.
+[[tool.mypy.overrides]]
+module = ["marcxml_export_pipeline.sierra.marcxml"]
+disable_error_code = ["no-untyped-call"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
