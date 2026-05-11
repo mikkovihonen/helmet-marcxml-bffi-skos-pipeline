@@ -10,7 +10,7 @@ src/bffi_pipeline/stages/judge.py src/bffi_pipeline/cli.py
 scripts/run-full-pipeline.sh`.
 **Phase commits**:
 
-- Phase A (in-process timeout + retry + structured logging): `<unfilled>`
+- Phase A (in-process timeout + retry + structured logging): `f3367b1` (code, tests, docs; the overnight-grade dry-run measurement is the remaining operator step before Phase A is fully done).
 - Phase B (out-of-process heartbeat watchdog, contingent): `<unfilled>`
 
 **Owner**: TBD.
