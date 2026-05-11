@@ -85,3 +85,8 @@ plan documents *when the execution was scheduled*.
   — `planning (graduated)`. Migrate M6 from Ollama to vllm-mlx and
   layer prompt-prefix caching + speculative decoding on top. Plan
   lives at [`docs/plans/p-02-inference-stack-tuning.md`](../plans/p-02-inference-stack-tuning.md).
+- [`prop-03-m6-stall-watchdog.md`](prop-03-m6-stall-watchdog.md)
+  — `proposed`. Detect M6 LLM calls that hang and abandon the stuck
+  pair so unattended pipeline runs don't lose hours to a single
+  pathological pair. Two options: per-call timeout (recommended MVP)
+  or out-of-process heartbeat watchdog.
