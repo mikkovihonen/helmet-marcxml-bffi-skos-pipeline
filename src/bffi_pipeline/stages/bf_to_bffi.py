@@ -118,6 +118,71 @@ def _expression_query() -> str:
 # --- CONSTRUCT runner -----------------------------------------------------
 
 
+_WHITESPACE_PERCENT_ENCODE: Final[dict[str, str]] = {
+    " ": "%20",
+    "\t": "%09",
+    "\n": "%0A",
+    "\r": "%0D",
+}
+
+
+def _sanitize_uri(uri: str) -> str:
+    """Strip leading/trailing whitespace from a URI string and percent-
+    encode any remaining internal whitespace.
+
+    Cataloguer-supplied ``$0`` values occasionally carry stray
+    whitespace (trailing newlines, embedded spaces from two IDs
+    accidentally concatenated). rdflib refuses to serialize those as
+    N3/Turtle. Stripping is safe for leading/trailing — the URI was
+    typo'd, not semantically different. Internal whitespace gets
+    percent-encoded so the URI remains lexically valid and auditable
+    rather than dropped silently.
+    """
+    stripped = uri.strip()
+    if not any(ws in stripped for ws in _WHITESPACE_PERCENT_ENCODE):
+        return stripped
+    result = stripped
+    for ws, encoded in _WHITESPACE_PERCENT_ENCODE.items():
+        result = result.replace(ws, encoded)
+    return result
+
+
+def _sanitize_uri_whitespace(graph: Graph) -> int:
+    """Rewrite URIRef terms in ``graph`` so none carry literal whitespace.
+
+    Walks every position (subject, predicate, object) and rebuilds the
+    affected triples in place. Returns the number of distinct URIs
+    rewritten — callers can log this if they want to surface cataloguer
+    data-quality counts.
+    """
+    rewrites: dict[URIRef, URIRef] = {}
+    for term in set(graph.all_nodes()):
+        if not isinstance(term, URIRef):
+            continue
+        sanitized = _sanitize_uri(str(term))
+        if sanitized != str(term):
+            rewrites[term] = URIRef(sanitized)
+    # rdflib's predicates aren't returned by all_nodes(); walk them too.
+    for _s, p, _o in graph:
+        if isinstance(p, URIRef) and p not in rewrites:
+            sanitized = _sanitize_uri(str(p))
+            if sanitized != str(p):
+                rewrites[p] = URIRef(sanitized)
+    if not rewrites:
+        return 0
+    triples_to_replace: list[tuple[tuple[Node, Node, Node], tuple[Node, Node, Node]]] = []
+    for s, p, o in graph:
+        new_s = rewrites.get(s, s) if isinstance(s, URIRef) else s
+        new_p = rewrites.get(p, p) if isinstance(p, URIRef) else p
+        new_o = rewrites.get(o, o) if isinstance(o, URIRef) else o
+        if (new_s, new_p, new_o) != (s, p, o):
+            triples_to_replace.append(((s, p, o), (new_s, new_p, new_o)))
+    for old, new in triples_to_replace:
+        graph.remove(old)
+        graph.add(new)
+    return len(rewrites)
+
+
 def construct_bffi(source: Graph) -> Graph:
     """Run both CONSTRUCT passes against ``source`` and merge into one graph."""
     register_sparql_functions()
@@ -540,6 +605,12 @@ def _convert_one(
 ) -> Graph:
     source = Graph()
     source.parse(str(input_path), format="xml")
+    # Cataloguer $0 values occasionally carry stray whitespace that
+    # marc2bibframe2 passes through unchanged; rdflib refuses to
+    # serialize those as Turtle and the whole record's M3 conversion
+    # would fail hard. Sanitize the parsed source so the CONSTRUCT
+    # pass sees clean URIs.
+    _sanitize_uri_whitespace(source)
     bffi_graph = construct_bffi(source)
     post_process(
         bffi_graph,

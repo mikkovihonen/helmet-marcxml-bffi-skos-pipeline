@@ -21,7 +21,13 @@ from bffi_pipeline.contrib_extract_llm import (
 )
 from bffi_pipeline.contrib_variants import load_variant_claims
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.bf_to_bffi import construct_bffi, post_process
+from bffi_pipeline.stages.bf_to_bffi import (
+    _convert_one,
+    _sanitize_uri,
+    _sanitize_uri_whitespace,
+    construct_bffi,
+    post_process,
+)
 from bffi_pipeline.uris import mint_raw_expression_uri, mint_raw_work_uri
 
 BF_WORK = "http://urn.fi/URN:NBN:fi:bib:raw/10000001#Work"
@@ -653,3 +659,90 @@ def test_post_process_does_not_touch_sidecar_when_path_is_none() -> None:
     bffi = construct_bffi(source)
     # No path → no sidecar I/O. Should not raise.
     post_process(bffi, source, contrib_extractor=extractor, variants_sidecar_path=None)
+
+
+# --- _sanitize_uri / _sanitize_uri_whitespace ---------------------------
+
+
+def test_sanitize_uri_strips_trailing_whitespace() -> None:
+    assert _sanitize_uri("http://urn.fi/URN:NBN:fi:au:slm:s1288 ") == (
+        "http://urn.fi/URN:NBN:fi:au:slm:s1288"
+    )
+
+
+def test_sanitize_uri_strips_leading_whitespace() -> None:
+    assert _sanitize_uri(" http://example.org/x") == "http://example.org/x"
+
+
+def test_sanitize_uri_strips_multiple_trailing_spaces() -> None:
+    assert _sanitize_uri("http://www.yso.fi/onto/kauno/p2755  ") == (
+        "http://www.yso.fi/onto/kauno/p2755"
+    )
+
+
+def test_sanitize_uri_percent_encodes_internal_space() -> None:
+    """Embedded whitespace probably means two cataloguer IDs got
+    accidentally concatenated. Percent-encode rather than drop so the
+    URI is lexically valid + auditable."""
+    assert _sanitize_uri("http://urn.fi/URN:NBN:fi:au:slm:s1140655 7") == (
+        "http://urn.fi/URN:NBN:fi:au:slm:s1140655%207"
+    )
+
+
+def test_sanitize_uri_passes_clean_uri_unchanged() -> None:
+    assert _sanitize_uri("http://www.yso.fi/onto/yso/p1018") == ("http://www.yso.fi/onto/yso/p1018")
+
+
+def test_sanitize_uri_whitespace_rewrites_graph_in_place() -> None:
+    """Walking the graph rewrites every position (subject, predicate,
+    object) so a single sanitization pass before the CONSTRUCT clears
+    every malformed authority $0."""
+    g = Graph()
+    bad = URIRef("http://urn.fi/URN:NBN:fi:au:slm:s1288 ")
+    clean = URIRef("http://urn.fi/URN:NBN:fi:au:slm:s1288")
+    g.add((URIRef("http://example.org/work/1"), URIRef("http://example.org/p"), bad))
+    n_rewrites = _sanitize_uri_whitespace(g)
+    assert n_rewrites == 1
+    assert (URIRef("http://example.org/work/1"), URIRef("http://example.org/p"), clean) in g
+    assert (URIRef("http://example.org/work/1"), URIRef("http://example.org/p"), bad) not in g
+
+
+def test_sanitize_uri_whitespace_handles_zero_rewrites() -> None:
+    """A clean graph passes through unchanged with rewrite-count zero."""
+    g = Graph()
+    g.add(
+        (
+            URIRef("http://example.org/w/1"),
+            URIRef("http://example.org/p"),
+            URIRef("http://example.org/o"),
+        )
+    )
+    assert _sanitize_uri_whitespace(g) == 0
+    assert len(g) == 1
+
+
+def test_convert_one_serialises_sanitised_uris_to_valid_turtle(tmp_path: Path) -> None:
+    """End-to-end: a BIBFRAME source carrying a whitespace-tainted $0
+    URI now round-trips through M3 to clean Turtle that Fuseki + rdflib
+    can parse downstream. Before the sanitization, rdflib emitted a
+    'does not look like a valid URI' warning and the conversion
+    skipped the record entirely."""
+    bib_root = "http://urn.fi/URN:NBN:fi:bib:raw/sanitize-test"
+    source_ttl = f"""
+    @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+    @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+    <{bib_root}#Work> a bf:Work ;
+        bf:title [ a bf:Title ; bf:mainTitle "Test" ] ;
+        bf:language <http://id.loc.gov/vocabulary/languages/fin> ;
+        bf:subject <http://urn.fi/URN:NBN:fi:au:slm:s1288 > .
+    """
+    input_path = tmp_path / "src.rdf"
+    g = Graph()
+    g.parse(data=source_ttl, format="turtle")
+    g.serialize(destination=str(input_path), format="xml")
+    output_path = tmp_path / "out.ttl"
+    _convert_one(input_path, output_path, llm_detector=None, contrib_extractor=None)
+    body = output_path.read_text(encoding="utf-8")
+    # The cleaned URI is in the output; the whitespace-tainted form is not.
+    assert "URN:NBN:fi:au:slm:s1288>" in body
+    assert "s1288 >" not in body
