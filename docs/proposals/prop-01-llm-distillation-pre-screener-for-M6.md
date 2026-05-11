@@ -1,30 +1,10 @@
-# Performance enhancement proposals
-
-A running list of ideas to reduce wall-time, LLM volume, or compute
-cost in the BFFI pipeline. Each entry is a **proposal**, not a
-committed milestone — promote one into `docs/BUILD_PLAN.md` when it
-graduates from "interesting" to "next on the list".
-
-Each section follows the same template:
-
-- **Motivation** — what the current pipeline does, and what's
-  expensive about it.
-- **Approach** — the proposed change, kept high-level.
-- **Prerequisites** — what has to be true before we can start.
-- **Risks** — what could go wrong, and how we'd notice.
-- **Scope** — rough size (half-day / 1-2 days / 1-2 weeks / milestone).
-- **Status** — `proposed` / `accepted` / `in-progress` / `done` /
-  `rejected (reason)`.
-
----
-
-## P-01 — LLM-distillation pre-screener for M6
+# P-01 — LLM-distillation pre-screener for M6
 
 **Status**: proposed.
 **Scope**: 1-2 days for the MVP (Option 1 below); milestone-sized if
 we also want Options 2 + 3.
 
-### Motivation
+## Motivation
 
 M6 is the wall-time and compute bottleneck of the whole pipeline.
 A spec-tightened cascade still takes hours to days per 50 k escalate
@@ -46,12 +26,12 @@ overlap, creator distance, language match, date proximity,
 identifier overlap — without needing to invoke a 32B-parameter model
 to re-derive them.
 
-### Approach
+## Approach
 
 Three options of increasing ambition. Start with **Option 1**; the
 other two are listed for completeness so we know the ceiling.
 
-#### Option 1 — Gradient-boosted pre-screener inside the cascade
+### Option 1 — Gradient-boosted pre-screener inside the cascade
 
 1. **Feature logging during M6.** For every escalate pair the LLM
    judges, persist a feature row to a new artifact
@@ -92,7 +72,7 @@ other two are listed for completeness so we know the ceiling.
    `bffi-prov:model_hash` triple pointing at the trained model
    artifact.
 
-#### Option 2 — k-NN over judged history
+### Option 2 — k-NN over judged history
 
 A simpler intermediate: index every LLM-judged pair by its feature
 vector; for each new pair, retrieve the top-k nearest judged pairs;
@@ -101,7 +81,7 @@ feature-space distance, reuse the verdict. Memorization, not
 extrapolation. Half-day to ship, lower ceiling than Option 1, but
 zero risk of mis-generalising to unseen feature combinations.
 
-#### Option 3 — Fine-tuned BGE-M3 contrastive head
+### Option 3 — Fine-tuned BGE-M3 contrastive head
 
 Train a small contrastive head on top of the M5 embeddings using LLM
 verdicts as supervision. The similarity score itself becomes a
@@ -110,7 +90,7 @@ band in the first place. High ceiling but invasive: changes the M5
 contract, needs GPU training cycles, and the M5 → M6 boundary
 becomes fuzzier in the spec.
 
-### Prerequisites
+## Prerequisites
 
 - **Sufficient training data.** ~10 k LLM-judged escalate pairs at
   minimum; the v2 full-corpus run will produce roughly that.
@@ -123,7 +103,7 @@ becomes fuzzier in the spec.
   need them as a typed `PairFeatures` dataclass with a single source
   of truth for both the prompt and the classifier.
 
-### Risks
+## Risks
 
 - **LLM bias propagates.** If the LLM is systematically wrong on
   some bib class (e.g. false-merges on similarly-titled music
@@ -147,7 +127,7 @@ becomes fuzzier in the spec.
   with the threshold disabled until the cataloguer review approves
   the model.
 
-### Open questions
+## Open questions
 
 - Does the auto-merge band (M5 sim ≥ 0.90 → spec § 6 → synthetic
   `same_work` without LLM) already capture most of the "easy"
@@ -211,20 +191,3 @@ becomes fuzzier in the spec.
   in the data the LLM treats inconsistently?" — a useful
   diagnostic that surfaces the very LLM blind spots Option 1's
   classifier needs to be evaluated against.
-
----
-
-## P-02 — Inference-stack tuning for the M6 cascade
-
-**Status**: planning (graduated). See
-[`docs/plans/p-02-inference-stack-tuning.md`](../plans/p-02-inference-stack-tuning.md)
-for the full plan with sequenced phases, verification checkpoints,
-and rollback procedures.
-
-Origin: external feedback raised speculative decoding and prompt
-prefix caching as M6 wall-time wins. The deferred-rationale half of
-the same feedback was already shipped as `--full-rationale` (commit
-`491c1b5`); the speculative-decoding and prefix-caching halves
-graduated into the plan.
-
-<!-- Add new proposals below as ## P-03, P-04, … -->
