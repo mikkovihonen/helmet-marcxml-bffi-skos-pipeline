@@ -87,11 +87,11 @@ reference for what shipped.
 ### In progress
 
 - [`in-progress/p-02-inference-stack-tuning.md`](in-progress/p-02-inference-stack-tuning.md)
-  — Migrate M6 from Ollama to vllm-mlx (Phase A), consolidate dev
-  loop on vllm-mlx (D1-D5), layer prefix caching + speculative
+  — Migrate M6 from Ollama to mlx-lm (Phase A), consolidate dev
+  loop on mlx-lm (D1-D5), layer prefix caching + speculative
   decoding (B, C), remove Ollama install paths (D6). Tooling
   shipped: `scripts/p02-parity-bench.sh` automates the A5 gold-set
-  parity diff. Pending: operator install of `mlx_lm` + model
+  parity diff. Pending: operator install of `mlx-lm` + model
   conversion (A1-A2) before A5 can run.
 - [`in-progress/p-03-m6-stall-watchdog.md`](in-progress/p-03-m6-stall-watchdog.md)
   — Per-call LLM timeout + watchdog event logging (stderr +

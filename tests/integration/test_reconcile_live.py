@@ -1,7 +1,7 @@
 """Live reconciliation test against the local LLM + real Finto (M9 phase 2).
 
 Marked ``requires_llm``: excluded from CI by ``-m "not requires_llm"``.
-Runs on the user's M5 Max where Ollama / vllm-mlx is alive *and* the
+Runs on the user's M5 Max where Ollama / mlx-lm is alive *and* the
 machine has internet access to ``api.finto.fi``. Skipped automatically
 if either prerequisite is missing.
 

@@ -1,4 +1,4 @@
-# P-04 — Consolidate on vllm-mlx (deprecate Ollama)
+# P-04 — Consolidate on mlx-lm (deprecate Ollama)
 
 **Status**: merged into P-02 plan. See
 [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](../plans/in-progress/p-02-inference-stack-tuning.md)
@@ -24,8 +24,8 @@ Material updates since drafting:
 
 ## Motivation
 
-P-02 introduces vllm-mlx alongside Ollama and explicitly keeps both:
-Ollama as the dev / gold-set-eval default, vllm-mlx for production
+P-02 introduces mlx-lm alongside Ollama and explicitly keeps both:
+Ollama as the dev / gold-set-eval default, mlx-lm for production
 batches. That's a defensible choice while the production switch is
 unproven, but it locks in some recurring costs:
 
@@ -37,11 +37,11 @@ unproven, but it locks in some recurring costs:
   incident that's hard to reason about when "is it the model or
   the server?" is on the table.
 - **Two install paths.** Operators have to set up Ollama for dev
-  and vllm-mlx for production. Each has its own model-conversion
+  and mlx-lm for production. Each has its own model-conversion
   story (GGUF vs MLX 4-bit), its own model-management commands,
   and its own debug knobs.
 - **Eval drift.** Gold-set evaluation runs on Ollama; production
-  ships on vllm-mlx. If they ever drift, the gold-set's authority
+  ships on mlx-lm. If they ever drift, the gold-set's authority
   weakens (which is exactly the catch P-02 Phase A's parity bench
   protects against, but the protection has to be re-asserted every
   time models or backends update).
@@ -49,7 +49,7 @@ unproven, but it locks in some recurring costs:
   from whichever backend is in play. Reducing to one backend
   shrinks the failure-mode catalogue the watchdog has to cover.
 
-If vllm-mlx is "good enough" for dev too — meaning the dev-loop
+If mlx-lm is "good enough" for dev too — meaning the dev-loop
 ergonomics don't kill iteration speed — consolidating on it removes
 all four costs at once. The proposal is gated on answering that
 ergonomics question.
@@ -61,7 +61,7 @@ sequenced execution detail were absorbed into
 [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](../plans/in-progress/p-02-inference-stack-tuning.md)
 as Phase D (the dev-loop consolidation work) and Phase D6 (the
 eventual removal of Ollama install paths). The plan's partial
-order is **A → D1-D5 → B → C → D6** — A is the vllm-mlx bring-up,
+order is **A → D1-D5 → B → C → D6** — A is the mlx-lm bring-up,
 D1-D5 is everything this proposal called for short of removing
 Ollama, and D6 is the deferred removal once Phase C has shipped
 and 1-2 release cycles have passed without contributor

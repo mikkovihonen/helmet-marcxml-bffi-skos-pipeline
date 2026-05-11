@@ -7,7 +7,7 @@
 `performance-enhancements.md`; k-NN critique that fed back into P-01
 landed in `9789c20`; per-proposal file split in the commit that also
 introduced the initial plan) and
-[`docs/proposals/prop-04-consolidate-on-vllm-mlx.md`](../../proposals/prop-04-consolidate-on-vllm-mlx.md)
+[`docs/proposals/prop-04-consolidate-on-mlx-lm.md`](../../proposals/prop-04-consolidate-on-mlx-lm.md)
 (merged into this plan as Phase D; see "Material updates" below).
 **Plan-base commit**: `d0af171`. The "Current state" section is
 accurate against this commit. If `main` has moved before execution
@@ -19,7 +19,7 @@ docs/local-inference.md`.
 
 Material updates since drafting:
 
-- `d0af171` — folded prop-04 (Consolidate on vllm-mlx; deprecate
+- `d0af171` — folded prop-04 (Consolidate on mlx-lm; deprecate
   Ollama) into this plan as Phase D. The dev-loop ergonomics work
   (multi-model serving, model-pull wrapper, throughput verification
   on smaller dev machines, default flip, Ollama labelled secondary)
@@ -123,7 +123,7 @@ Estimated wall-time: half a day to one full day.
 **Stack decision (recorded for future readers)**: we install
 [`ml-explore/mlx-lm`](https://github.com/ml-explore/mlx-lm) (Apple's
 MLX team's reference LLM inference library) directly rather than the
-higher-level wrapper [`waybarrios/vllm-mlx`](https://github.com/waybarrios/vllm-mlx).
+higher-level wrapper [`waybarrios/mlx-lm`](https://github.com/waybarrios/vllm-mlx).
 Both work for our needs and were evaluated during A1 execution; the
 tie-breakers favouring mlx-lm:
 
@@ -147,10 +147,6 @@ The cost: **D1's multi-model serving becomes a real code change**
 (~30 LOC of per-port routing in `Settings` + dispatch in
 `_build_chain`) rather than a YAML config. Tractable, and the code
 lives where the rest of M6's LLM config already lives.
-
-(An earlier draft referenced `Blaizzy/mlx_lm.git` — a typo. The
-closest match `Blaizzy/mlx-vlm` is for vision-language models, not
-text-only LLMs. Corrected during P-02 Phase A1 execution.)
 
 mlx-lm is on PyPI as `mlx-lm`. No source clone needed; just create
 a standalone venv for it (kept separate from the bffi_pipeline

@@ -1,7 +1,7 @@
 """Live cascade test against the local LLM (M3 contributor extraction).
 
 Marked ``requires_llm``: excluded from CI by ``-m "not requires_llm"``.
-Runs on the user's M5 Max where Ollama (`:11434`) or vllm-mlx
+Runs on the user's M5 Max where Ollama (`:11434`) or mlx-lm
 (`:8000`) is alive, the configured Qwen3 8B model is pulled, and
 ``LLM_BASE_URL`` points at the right port.
 
@@ -110,7 +110,7 @@ def test_contrib_cascade_handles_three_representative_cases() -> None:
     if not os.environ.get("LLM_BASE_URL"):
         pytest.skip(
             "LLM_BASE_URL not set; live contributor-extraction test requires "
-            "a running Ollama / vllm-mlx server."
+            "a running Ollama / mlx-lm server."
         )
 
     extractor = LangChainContribExtractor()

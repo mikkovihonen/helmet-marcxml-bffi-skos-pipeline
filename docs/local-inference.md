@@ -33,7 +33,7 @@ uv pip install mlx-lm
 python -c "import mlx_lm; print(mlx_lm.__version__)"   # expect 0.31+
 ```
 
-Activate the venv any time you want to run `python -m mlx_lm.*` commands. The bffi_pipeline CLI itself talks to mlx-lm over HTTP and doesn't need this venv on its PATH.
+Activate the venv any time you want to run `python -m mlx-lm.*` commands. The bffi_pipeline CLI itself talks to mlx-lm over HTTP and doesn't need this venv on its PATH.
 
 ## Model conversion
 

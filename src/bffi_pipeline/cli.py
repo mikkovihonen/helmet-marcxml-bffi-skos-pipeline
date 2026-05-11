@@ -554,7 +554,7 @@ def judge_command(
         typer.Option(
             "--concurrency",
             help=(
-                "Pairs to judge in parallel. Default 1 (Ollama serial); vllm-mlx "
+                "Pairs to judge in parallel. Default 1 (Ollama serial); mlx-lm "
                 "production runs sweep {4, 8, 16, 32} per spec § 11. Output JSONL "
                 "stays in input order; the checkpoint advances contiguously."
             ),

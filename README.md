@@ -80,7 +80,7 @@ the development stack and the gold-set eval, but the
 Toolchain:
 
 - **Python 3.12** via [uv](https://github.com/astral-sh/uv) — the project pins everything in `uv.lock`.
-- **Ollama** (or mlx_lm for production) on `:11434` for the LLM judge + reconciliation picker. Full installation walkthrough in [`docs/local-inference.md`](docs/local-inference.md#installation).
+- **Ollama** (or mlx-lm for production) on `:11434` for the LLM judge + reconciliation picker. Full installation walkthrough in [`docs/local-inference.md`](docs/local-inference.md#installation).
 - **Docker** (or Podman with `docker-compose`) for Fuseki and Skosmos. Both containers build from source — NatLibFi's Skosmos doesn't publish a Docker image, and we pin Apache Jena Fuseki via the JAR version Skosmos's vendored Dockerfile downloads at build time.
 - **git** with submodule support — `marc2bibframe2` and `Skosmos` (pinned at `v3.2`) are vendored under `third_party/`.
 
@@ -102,7 +102,7 @@ docker compose up -d                       # Fuseki + Skosmos
 
 The judge and reconciliation picker both call a local OpenAI-compatible
 server. The end-to-end install — Ollama for development and gold-set
-runs, mlx_lm for production batches, model conversion, the
+runs, mlx-lm for production batches, model conversion, the
 `.env` wiring, and a one-shot verification probe — is documented in
 **[`docs/local-inference.md`](docs/local-inference.md#installation)**.
 Follow that section before running `bffi-pipeline judge` or
@@ -189,7 +189,7 @@ CI via `-m "not requires_llm"` and run on demand on the M5 Max.
 ## Operating constraints
 
 - **Apache 2.0** code (matching NLF tools); **CC0** published RDF data (matching Finto vocabularies).
-- **No paid API services** for inference. Ollama or mlx_lm, locally.
+- **No paid API services** for inference. Ollama or mlx-lm, locally.
 - **No telemetry / error reporting.** Provenance is in-graph (`bffi-prov:` namespace).
 - **`mypy --strict` everywhere** in `src/`. Pydantic v2 at module boundaries; frozen dataclasses for internal value objects.
 - **Stage isolation:** modules under `src/bffi_pipeline/stages/` don't import each other; orchestration goes through `cli.py`. Cross-stage helpers live at the package root (`uris.py`, `blocking.py`).

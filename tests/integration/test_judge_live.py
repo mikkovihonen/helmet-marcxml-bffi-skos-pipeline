@@ -1,7 +1,7 @@
 """Live cascade test against the local LLM (M6 phase 1).
 
 Marked ``requires_llm``: excluded from CI by ``-m "not requires_llm"``.
-Runs on the user's M5 Max where Ollama (`:11434`) or vllm-mlx (`:8000`)
+Runs on the user's M5 Max where Ollama (`:11434`) or mlx-lm (`:8000`)
 is alive, the configured Qwen3 32 B / 72 B models are pulled, and
 ``LLM_BASE_URL`` points at the right port.
 
@@ -86,7 +86,7 @@ def _summarise(outcome: JudgeOutcome) -> str:
 def test_cascade_handles_five_categories() -> None:
     if not os.environ.get("LLM_BASE_URL"):
         pytest.skip(
-            "LLM_BASE_URL not set; live judge test requires a running Ollama/vllm-mlx server."
+            "LLM_BASE_URL not set; live judge test requires a running Ollama/mlx-lm server."
         )
 
     cases = load_gold_set()

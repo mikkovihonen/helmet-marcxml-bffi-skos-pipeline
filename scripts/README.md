@@ -76,7 +76,7 @@ M6_CONCURRENCY=16 \
     scripts/run-full-pipeline.sh
 ```
 
-`LLM_BASE_URL` points at vllm-mlx (per `docs/runbook.md`);
+`LLM_BASE_URL` points at mlx-lm (per `docs/runbook.md`);
 `M6_CONCURRENCY` should match the value you locked in via the
 runbook's `--concurrency` tuning sweep on your hardware.
 

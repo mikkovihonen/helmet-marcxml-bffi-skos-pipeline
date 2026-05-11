@@ -84,7 +84,7 @@ plan documents *when the execution was scheduled*.
   classifier that short-circuits the obvious pairs on subsequent
   batches.
 - [`prop-02-inference-stack-tuning-for-M6.md`](prop-02-inference-stack-tuning-for-M6.md)
-  — `planning (graduated)`. Migrate M6 from Ollama to vllm-mlx and
+  — `planning (graduated)`. Migrate M6 from Ollama to mlx-lm and
   layer prompt-prefix caching + speculative decoding on top. Plan
   lives at [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](../plans/in-progress/p-02-inference-stack-tuning.md).
 - [`prop-03-m6-stall-watchdog.md`](prop-03-m6-stall-watchdog.md)
@@ -92,8 +92,8 @@ plan documents *when the execution was scheduled*.
   the stuck pair so unattended overnight runs don't lose hours to a
   single transient Ollama wedge. Plan lives at
   [`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](../plans/in-progress/p-03-m6-stall-watchdog.md).
-- [`prop-04-consolidate-on-vllm-mlx.md`](prop-04-consolidate-on-vllm-mlx.md)
-  — `merged into P-02 plan`. Dev-loop consolidation on vllm-mlx
+- [`prop-04-consolidate-on-mlx-lm.md`](prop-04-consolidate-on-mlx-lm.md)
+  — `merged into P-02 plan`. Dev-loop consolidation on mlx-lm
   (supervisor / pull wrapper / throughput verification / default
   flip / Ollama deprecation) absorbed into
   [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](../plans/in-progress/p-02-inference-stack-tuning.md)

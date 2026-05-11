@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# P-02 Phase A5 — vllm-mlx parity bench against Ollama baseline.
+# P-02 Phase A5 — mlx-lm parity bench against Ollama baseline.
 #
 # Runs the gold-set eval (`bffi-pipeline eval`) twice — once against
-# the Ollama-backed defaults, once against the vllm-mlx-backed ones
+# the Ollama-backed defaults, once against the mlx-lm-backed ones
 # — then diffs the per-case verdicts and reports parity.
 #
 # Two named env files drive the swap:
@@ -10,8 +10,8 @@
 #   .env.ollama-baseline   — the operator's current Ollama setup
 #                            (created by `cp .env .env.ollama-baseline`
 #                            at the start of Phase A4).
-#   .env.vllm-mlx          — same shape, but LLM_BASE_URL points at
-#                            the vllm-mlx server port (e.g. 8001) and
+#   .env.mlx-lm          — same shape, but LLM_BASE_URL points at
+#                            the mlx-lm server port (e.g. 8001) and
 #                            LLM_MODEL_PRIMARY / _FALLBACK use the
 #                            MLX-style identifiers (e.g. Qwen3-8B-4bit).
 #
@@ -32,9 +32,9 @@
 set -euo pipefail
 
 BASELINE_LABEL="${1:-p02-phase-a-ollama-baseline}"
-CANDIDATE_LABEL="${2:-p02-phase-a-vllm-mlx-parity}"
+CANDIDATE_LABEL="${2:-p02-phase-a-mlx-lm-parity}"
 BASELINE_ENV="${BASELINE_ENV:-.env.ollama-baseline}"
-CANDIDATE_ENV="${CANDIDATE_ENV:-.env.vllm-mlx}"
+CANDIDATE_ENV="${CANDIDATE_ENV:-.env.mlx-lm}"
 
 for env_file in "$BASELINE_ENV" "$CANDIDATE_ENV"; do
     if [ ! -f "$env_file" ]; then

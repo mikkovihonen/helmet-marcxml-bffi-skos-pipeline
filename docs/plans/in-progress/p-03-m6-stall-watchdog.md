@@ -86,14 +86,14 @@ per-call (Phase A) and per-pair (Phase B):
   decide whether to tighten / loosen for the production pass.
 
   P-03's done-state is *backend-scoped* by design. When P-02
-  Phase A ships and mlx_lm becomes the production backend, the
+  Phase A ships and mlx-lm becomes the production backend, the
   watchdog budgets get **re-pinned** as part of P-02's
   "Concurrency setting" sweep — not by re-running this P-03 dry-
   run. The watchdog code itself is backend-agnostic, so no P-03
   code changes are involved; only the defaults move. See
   "Review questions Q3" below for the rationale (Option A
   trade-off — pin the Ollama-backend defaults now for v2's M6,
-  let P-02 own the mlx_lm-backend re-pin once that backend
+  let P-02 own the mlx-lm-backend re-pin once that backend
   ships).
 
 ## Current state
@@ -500,7 +500,7 @@ measurement at the committed defaults (90 s / 300 s) against a
 5000-pair slice from the v2 corpus once M6 starts.
 
 **Per Q3 (Option A)**: that dry-run runs against Ollama since v2's
-M6 pass is Ollama-backed. P-02 Phase A's later mlx_lm re-pin
+M6 pass is Ollama-backed. P-02 Phase A's later mlx-lm re-pin
 happens inside P-02's A6 sweep; it doesn't reopen P-03. The
 calibration is backend-scoped by design.
 
@@ -532,11 +532,11 @@ calibration is backend-scoped by design.
 - **CLI flag default visibility** — `--abort-budget-seconds` not
   appearing in `--help` would surprise operators looking for an
   override. Confirm typer surfaces it; if not, raise it to top-level.
-- **Interaction with --concurrency (mlx_lm future)** — once
-  P-02 ships mlx_lm, `--concurrency > 1` means multiple in-flight
+- **Interaction with --concurrency (mlx-lm future)** — once
+  P-02 ships mlx-lm, `--concurrency > 1` means multiple in-flight
   LLM calls. Each needs its own timeout clock. The Settings value
   applies per-call (not per-batch), so this should work, but verify
-  with an explicit test once mlx_lm is in the picture.
+  with an explicit test once mlx-lm is in the picture.
 
 ## Review questions
 
@@ -581,7 +581,7 @@ Three layers, each handled differently:
    plumbing happens once in the parent, so workers see the right
    value via env-var inheritance.
 
-### Q2. Are there differences in concurrency handling between Ollama and mlx_lm?
+### Q2. Are there differences in concurrency handling between Ollama and mlx-lm?
 
 Yes — at the budget-*calibration* level, not at the watchdog-code
 level. The watchdog code is backend-agnostic (both speak OpenAI-
@@ -597,7 +597,7 @@ differently:
   concurrency the per-call watchdog can fire on benign server-side
   queueing rather than on a real wedge. Current M6 runs at
   `--concurrency=1` on Ollama precisely to avoid this.
-- **mlx_lm** continuous-batches: N concurrent requests share GPU
+- **mlx-lm** continuous-batches: N concurrent requests share GPU
   time at the token level with effectively no head-of-line waiting
   (until the scheduler starts swapping batches at memory pressure).
   Per-call wall time reflects real generation time; the budgets
@@ -609,11 +609,11 @@ Calibration guidance:
 |---|---|
 | Ollama, `--concurrency=1` (current default) | 90 s / 300 s (defaults). Budgets reflect real wall time. |
 | Ollama, `--concurrency > 1` | Raise proportionally — `--concurrency=4` ≈ 180 s / 600 s — otherwise expect false-positive timeouts from queueing rather than wedging. |
-| mlx_lm, any concurrency (post-P-02 Phase A) | Re-pin via the Phase A8 / B6 dry-run on the new backend. Expect tighter, not looser, defaults given prefix-caching + speculative-decoding wins. |
+| mlx-lm, any concurrency (post-P-02 Phase A) | Re-pin via the Phase A8 / B6 dry-run on the new backend. Expect tighter, not looser, defaults given prefix-caching + speculative-decoding wins. |
 
 This question intersects with P-02's "Concurrency setting" open
 issue — budget calibration and concurrency tuning should be done
-together once mlx_lm is in operation; treat them as one
+together once mlx-lm is in operation; treat them as one
 coordinated bench sweep, not two separate ones.
 
 ### Q3. Does shipping P-02 reopen P-03's done check?
@@ -621,14 +621,14 @@ coordinated bench sweep, not two separate ones.
 No — but the *calibration* of P-03's defaults is backend-scoped.
 The decision recorded here (Option A): pin the defaults against
 **Ollama now** so v2's M6 pass has a calibrated watchdog, and
-**let P-02 own the mlx_lm re-pin** once that backend ships.
+**let P-02 own the mlx-lm re-pin** once that backend ships.
 
 The trade-off was between two pragmatic options:
 
 | Option | Description | Trade-off |
 |---|---|---|
-| **A** (chosen) | Do the dry-run against Ollama now; mark P-03 done; re-pin defaults inside P-02 Phase A6's concurrency sweep when mlx_lm lands. | Calibrated watchdog *immediately*, relevant because v2's M6 pass starts before P-02 Phase A's operator setup completes. The Ollama-backend defaults become "stale" once P-02 ships, but P-02 already owns that re-pin — no double-work. |
-| **B** (not chosen) | Defer P-03's dry-run until after P-02 Phase A ships; run once against mlx_lm; calibration is final. | Cleaner single-calibration story, but P-03 stays ``in-progress`` until P-02 Phase A ships (multi-day operator setup). v2's M6 in the interim would run with un-dry-run-validated defaults — implementation is verified by the smoke (see "End-to-end smoke verification" section above), but the *defaults* aren't pinned by a real overnight slice. |
+| **A** (chosen) | Do the dry-run against Ollama now; mark P-03 done; re-pin defaults inside P-02 Phase A6's concurrency sweep when mlx-lm lands. | Calibrated watchdog *immediately*, relevant because v2's M6 pass starts before P-02 Phase A's operator setup completes. The Ollama-backend defaults become "stale" once P-02 ships, but P-02 already owns that re-pin — no double-work. |
+| **B** (not chosen) | Defer P-03's dry-run until after P-02 Phase A ships; run once against mlx-lm; calibration is final. | Cleaner single-calibration story, but P-03 stays ``in-progress`` until P-02 Phase A ships (multi-day operator setup). v2's M6 in the interim would run with un-dry-run-validated defaults — implementation is verified by the smoke (see "End-to-end smoke verification" section above), but the *defaults* aren't pinned by a real overnight slice. |
 
 What this means in practice:
 
@@ -660,7 +660,7 @@ without re-litigating P-03's design.
   the `"watchdog-aborted"` value, and the live enum reference lives in
   `CLAUDE.md` § "Committed identifiers".
 - [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](p-02-inference-stack-tuning.md)
-  — the mlx_lm migration that interacts with this plan (per-call
+  — the mlx-lm migration that interacts with this plan (per-call
   timeouts must continue to work under continuous batching).
 - [`scripts/run-full-pipeline.sh`](../../../scripts/run-full-pipeline.sh)
   — the orchestrator whose Monitor filter pattern broadens to include

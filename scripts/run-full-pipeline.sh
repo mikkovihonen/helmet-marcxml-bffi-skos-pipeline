@@ -17,7 +17,7 @@
 # Optional env (with defaults):
 #   BFFI_DATA_DIR     Output base (./data).
 #   PIPELINE_LOG      Per-stage log (<BFFI_DATA_DIR>/pipeline.log).
-#   M6_CONCURRENCY    Judge concurrency (1 for Ollama serial; 16 for vllm-mlx batched).
+#   M6_CONCURRENCY    Judge concurrency (1 for Ollama serial; 16 for mlx-lm batched).
 #   SKIP_M5_M6        Set to "1" to skip embeddings + LLM judge (writes an
 #                     empty judge-decisions.jsonl so M8 still has its
 #                     expected input). Useful for fast pattern-mining runs.

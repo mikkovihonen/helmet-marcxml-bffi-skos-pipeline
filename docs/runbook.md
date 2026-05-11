@@ -29,7 +29,7 @@ LLM_MODEL_FALLBACK=qwen2.5:72b-instruct-q4_K_M
 BFFI_DATA_DIR=./data
 ```
 
-Local-LLM install (Ollama for development, vllm-mlx for production
+Local-LLM install (Ollama for development, mlx-lm for production
 batches), model pulls, and the verification probe live in
 [`docs/local-inference.md`](local-inference.md#installation).
 
@@ -43,7 +43,7 @@ batches), model pulls, and the verification probe live in
 | M5 embedding build | sentence-transformers `mps` | 30-60 min | ~5 GB index + 2.5 GB model |
 | M5 candidate query | top-k=20 | seconds | reuses index |
 | M6 cascade | Ollama serial | 70-170 hours per 50 k pairs | ~20 GB primary; +40 GB if loading fallback |
-| M6 cascade | vllm-mlx batched | 10-25 hours per 50 k pairs | same |
+| M6 cascade | mlx-lm batched | 10-25 hours per 50 k pairs | same |
 
 Two things to plan around:
 
@@ -51,9 +51,9 @@ Two things to plan around:
    to ≥ 0.90 / ≤ 0.78 thresholds; the embed-stats output tells you
    how many pairs land in each band. If "escalate" is > 100 k pairs,
    re-tighten before committing to a multi-night run.
-2. **vllm-mlx + concurrency for production.** Ollama is fine for
+2. **mlx-lm + concurrency for production.** Ollama is fine for
    gold-set runs and the few-hundred-pair test sweeps. Production
-   passes use `--concurrency` ≥ 4 and the vllm-mlx server.
+   passes use `--concurrency` ≥ 4 and the mlx-lm server.
 
 ## Source-data export — Helmet Sierra Postgres replica
 
@@ -144,7 +144,7 @@ bffi-pipeline embed
 #    Default --concurrency=1 (Ollama serial). Crash-safe: --resume
 #    is the default and picks up from <output>.checkpoint.
 bffi-pipeline judge
-# Production batch (vllm-mlx on :8000):
+# Production batch (mlx-lm on :8000):
 LLM_BASE_URL=http://localhost:8000/v1 \
     bffi-pipeline judge --concurrency 16
 # → writes <BFFI_DATA_DIR>/judge-decisions.jsonl,
@@ -283,7 +283,7 @@ If any of those fail, log a bug and check:
 ## --concurrency tuning sweep (one-time, before the production batch)
 
 Per spec § 7 / BUILD_PLAN M6, sweep `{4, 8, 16, 32}` against a fixed
-1 k-pair sample on vllm-mlx, measure throughput, and record the
+1 k-pair sample on mlx-lm, measure throughput, and record the
 chosen value here. Until the sweep runs, treat the 16-concurrency
 default in the example above as a placeholder.
 

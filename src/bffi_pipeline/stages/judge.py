@@ -1,7 +1,7 @@
 """Stage M6: LLM judge — structured output + two-model cascade.
 
 The judge runs against a local OpenAI-compatible server (Ollama for
-development, vllm-mlx for production batches; both speak the same
+development, mlx-lm for production batches; both speak the same
 chat-completions API). Application code talks through
 ``langchain-openai`` with ``LLM_BASE_URL`` from ``Settings``.
 
@@ -30,7 +30,7 @@ Phase 1 (this module) lands the structural pieces:
 
 Phase 2 (separate commit) will add the batch driver that consumes
 M5's ``embed-candidates.jsonl``, the checkpoint file, the
-vllm-mlx concurrent mode, and the ``bffi-pipeline judge`` CLI
+mlx-lm concurrent mode, and the ``bffi-pipeline judge`` CLI
 subcommand.
 
 Heavy LangChain client construction is deferred to

@@ -4,7 +4,7 @@ The real LLM is never contacted. ``judge_pair`` and ``cascade_judge``
 both accept an injectable ``chain`` (any object exposing
 ``.invoke(payload)``); the tests pass scripted fakes whose behaviour
 is deterministic, so retry / cache / cascade logic can be exercised
-without an Ollama or vllm-mlx server.
+without an Ollama or mlx-lm server.
 """
 
 from __future__ import annotations
