@@ -466,6 +466,84 @@ if removed from `.env`.
   applies per-call (not per-batch), so this should work, but verify
   with an explicit test once vllm-mlx is in the picture.
 
+## Review questions
+
+Surfaced during review of the Phase A + B implementation. Answers
+folded back into the plan so a future reader / re-implementer
+doesn't re-discover them.
+
+### Q1. How does the implementation handle concurrency?
+
+Three layers, each handled differently:
+
+1. **Threads within one judge process** (the only model M6 actually
+   uses today, via `ThreadPoolExecutor` at `--concurrency > 1`).
+   Every piece of P-03 state is either:
+   - Thread-local (`pair_deadline` is a `float` passed by-value
+     through the `cascade_judge → judge_pair` call chain — each
+     worker carries its own copy on its stack);
+   - Atomic-int (`Settings.llm_call_timeout_seconds` and
+     `llm_pair_timeout_seconds` are simple `int`s, atomically loaded
+     in CPython; the CLI override mutates once at startup before
+     threads spawn);
+   - Reliant on POSIX `O_APPEND` atomicity (the
+     `watchdog-events.jsonl` sidecar opens-writes-closes per event;
+     payloads are ~200 bytes, well under `PIPE_BUF` ~4 KB, so
+     concurrent writes never interleave at the byte level).
+   `time.monotonic()` is per-process but consistent across threads,
+   so deadlines set in one thread are comparable in another. No new
+   locks needed beyond what was already in M6 (SQLite cache lock).
+2. **Multiple judge processes running side-by-side** (operator
+   kicks off two `bffi-pipeline judge` invocations against disjoint
+   slices). Each process owns its own `Settings`, thread pool,
+   httpx client, deadline computations. The only shared resource is
+   the sidecar JSONL — `O_APPEND` semantics apply across processes
+   the same way they apply across threads, so writes don't
+   interleave. If both processes target the same `BFFI_DATA_DIR`,
+   events from both end up in one file; if different, each gets
+   its own.
+3. **Future `ProcessPoolExecutor` for M6** (not currently in use).
+   `pair_deadline` is a plain `float` and pickles trivially — no
+   marshalling work needed to ship the deadline to a worker
+   process. Settings is re-instantiated per worker; the override
+   plumbing happens once in the parent, so workers see the right
+   value via env-var inheritance.
+
+### Q2. Are there differences in concurrency handling between Ollama and vllm-mlx?
+
+Yes — at the budget-*calibration* level, not at the watchdog-code
+level. The watchdog code is backend-agnostic (both speak OpenAI-
+compatible HTTP, both surface `httpx.ReadTimeout` the same way).
+The budgets behave differently because the backends queue requests
+differently:
+
+- **Ollama** serializes at the server. `OLLAMA_NUM_PARALLEL` caps
+  how many requests one loaded model handles in parallel (default
+  4 on recent releases; was 1 on older ones). When the pipeline's
+  `--concurrency` exceeds that, requests queue server-side. The
+  `httpx` per-call timeout includes the queue wait, so at high
+  concurrency the per-call watchdog can fire on benign server-side
+  queueing rather than on a real wedge. Current M6 runs at
+  `--concurrency=1` on Ollama precisely to avoid this.
+- **vllm-mlx** continuous-batches: N concurrent requests share GPU
+  time at the token level with effectively no head-of-line waiting
+  (until the scheduler starts swapping batches at memory pressure).
+  Per-call wall time reflects real generation time; the budgets
+  apply cleanly without inflation.
+
+Calibration guidance:
+
+| Scenario | Budget setting |
+|---|---|
+| Ollama, `--concurrency=1` (current default) | 90 s / 300 s (defaults). Budgets reflect real wall time. |
+| Ollama, `--concurrency > 1` | Raise proportionally — `--concurrency=4` ≈ 180 s / 600 s — otherwise expect false-positive timeouts from queueing rather than wedging. |
+| vllm-mlx, any concurrency (post-P-02 Phase A) | Re-pin via the Phase A8 / B6 dry-run on the new backend. Expect tighter, not looser, defaults given prefix-caching + speculative-decoding wins. |
+
+This question intersects with P-02's "Concurrency setting" open
+issue — budget calibration and concurrency tuning should be done
+together once vllm-mlx is in operation; treat them as one
+coordinated bench sweep, not two separate ones.
+
 ## Cross-references
 
 - [`docs/proposals/prop-03-m6-stall-watchdog.md`](../../proposals/prop-03-m6-stall-watchdog.md)
