@@ -22,11 +22,13 @@ from bffi_pipeline.stages.judge import (
     FALLBACK_CONFIDENCE_THRESHOLD,
     MAX_CONNECTION_RETRIES,
     MAX_VALIDATION_RETRIES,
+    MIN_RATIONALE_CHARS,
     STAGE_AUTO_MERGE,
     STAGE_PRIMARY,
     STAGE_SECOND_OPINION,
     JudgeCache,
     WorkMatchDecision,
+    WorkMatchDecisionFast,
     WorkRecord,
     _cache_key,
     cascade_judge,
@@ -604,3 +606,226 @@ def test_synthesize_auto_merge_preserves_similarity_as_confidence() -> None:
     outcome = synthesize_auto_merge_outcome(row)
     assert outcome.final.confidence == pytest.approx(0.927)
     assert outcome.steps[0].decision.confidence == pytest.approx(0.927)
+
+
+# --- WorkMatchDecisionFast (fast-mode schema) ----------------------------
+
+
+def test_fast_schema_accepts_null_rationale_on_high_confidence_same_work() -> None:
+    """Confident ``same_work`` decisions may omit rationale entirely
+    (default ``None``) — the structured matching_fields list is the
+    evidence the audit trail keeps."""
+    d = WorkMatchDecisionFast(
+        decision="same_work",
+        confidence=0.97,
+        rationale=None,
+        matching_fields=["creator", "preferred_title"],
+    )
+    assert d.rationale is None
+
+
+def test_fast_schema_accepts_null_rationale_on_high_confidence_different_work() -> None:
+    d = WorkMatchDecisionFast(
+        decision="different_work",
+        confidence=0.92,
+        rationale=None,
+        diverging_fields=["creator"],
+    )
+    assert d.rationale is None
+
+
+def test_fast_schema_requires_rationale_when_uncertain() -> None:
+    """``decision="uncertain"`` always requires rationale (cataloguer
+    review queue needs the prose). Confidence stays low to satisfy
+    the existing uncertain-coherence rule."""
+    with pytest.raises(ValidationError, match="required for 'uncertain'"):
+        WorkMatchDecisionFast(
+            decision="uncertain",
+            confidence=0.5,
+            rationale=None,
+            matching_fields=["creator"],
+        )
+
+
+def test_fast_schema_requires_rationale_when_low_confidence() -> None:
+    """Below the 0.85 cascade-trigger threshold the rationale is
+    required regardless of decision — the rationale is what feeds
+    the cascade's 72B second-opinion decision."""
+    with pytest.raises(ValidationError, match=r"required for 'uncertain' or confidence"):
+        WorkMatchDecisionFast(
+            decision="same_work",
+            confidence=0.80,
+            rationale=None,
+            matching_fields=["creator"],
+        )
+
+
+def test_fast_schema_rejects_short_rationale_when_required() -> None:
+    """When rationale IS required (uncertain / low-conf), it must
+    still clear the ≥ MIN_RATIONALE_CHARS bar."""
+    with pytest.raises(ValidationError, match=f"≥ {MIN_RATIONALE_CHARS}"):
+        WorkMatchDecisionFast(
+            decision="same_work",
+            confidence=0.80,
+            rationale="too short",
+            matching_fields=["creator"],
+        )
+
+
+def test_fast_schema_rejects_stub_phrase_even_on_high_confidence() -> None:
+    """Stub-phrase guard fires on EVERY non-empty rationale, even when
+    rationale is optional. Stops a hallucinating model from emitting
+    'n/a' as a rationale instead of just leaving it null."""
+    with pytest.raises(ValidationError, match="stub phrase"):
+        WorkMatchDecisionFast(
+            decision="same_work",
+            confidence=0.97,
+            rationale="N/A, see structured fields.",
+            matching_fields=["creator"],
+        )
+
+
+def test_fast_schema_to_strict_synthesises_rationale_when_null() -> None:
+    """High-conf decision with rationale=None converts to the strict
+    :class:`WorkMatchDecision` by synthesising a structured-fields
+    rationale that clears Boundary-4."""
+    d = WorkMatchDecisionFast(
+        decision="same_work",
+        confidence=0.97,
+        rationale=None,
+        matching_fields=["creator", "preferred_title"],
+        diverging_fields=["expression_language"],
+    )
+    strict = d.to_strict()
+    assert isinstance(strict, WorkMatchDecision)
+    assert strict.decision == "same_work"
+    assert strict.confidence == pytest.approx(0.97)
+    assert "Fast-mode decision" in strict.rationale
+    assert "creator, preferred_title" in strict.rationale
+    assert "expression_language" in strict.rationale
+    assert len(strict.rationale) >= MIN_RATIONALE_CHARS
+
+
+def test_fast_schema_to_strict_preserves_supplied_rationale() -> None:
+    """If the model DID supply a substantive rationale (low-conf or
+    uncertain case), to_strict() carries it through unchanged."""
+    text = "Same creator under transliteration variants; date and title diverge clearly."
+    d = WorkMatchDecisionFast(
+        decision="uncertain",
+        confidence=0.6,
+        rationale=text,
+        matching_fields=["creator"],
+    )
+    strict = d.to_strict()
+    assert strict.rationale == text
+
+
+def test_fast_schema_same_work_still_needs_matching_fields() -> None:
+    """The :func:`_same_work_needs_evidence` invariant is preserved in
+    fast mode — saving rationale tokens doesn't loosen the
+    Boundary-4 evidence requirement."""
+    with pytest.raises(ValidationError, match="matching_field"):
+        WorkMatchDecisionFast(
+            decision="same_work",
+            confidence=0.97,
+            rationale=None,
+            matching_fields=[],
+        )
+
+
+def test_fast_schema_uncertain_still_requires_low_confidence() -> None:
+    """The :func:`_coherent_uncertain` invariant is preserved in fast
+    mode — uncertain + high confidence is still incoherent."""
+    with pytest.raises(ValidationError, match="incoherent with confidence"):
+        WorkMatchDecisionFast(
+            decision="uncertain",
+            confidence=0.95,
+            rationale="Plenty of substantive rationale here, easily over twenty characters total.",
+        )
+
+
+# --- judge_pair full_rationale flag --------------------------------------
+
+
+def test_judge_pair_fast_mode_returns_strict_decision_with_synthetic_rationale(
+    tmp_cache: JudgeCache,
+) -> None:
+    """End-to-end: ``judge_pair(..., full_rationale=False)`` feeds the
+    LLM the fast schema. The model returns a high-conf decision with
+    rationale=None; the boundary conversion synthesises a structured-
+    fields rationale so the cached + returned decision is the strict
+    :class:`WorkMatchDecision` shape."""
+    fast_no_rationale = WorkMatchDecisionFast(
+        decision="same_work",
+        confidence=0.97,
+        rationale=None,
+        matching_fields=["creator", "preferred_title"],
+        diverging_fields=["expression_language"],
+    )
+    chain = _ScriptedChain([fast_no_rationale])
+    decision, cache_hit, _latency = judge_pair(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.97,
+        chain=chain,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+        full_rationale=False,
+    )
+    # Returned shape is the strict WorkMatchDecision (not Fast).
+    assert isinstance(decision, WorkMatchDecision)
+    assert decision.decision == "same_work"
+    assert decision.confidence == pytest.approx(0.97)
+    # Rationale was synthesised from the structured fields and clears Boundary-4.
+    assert decision.rationale is not None
+    assert len(decision.rationale) >= MIN_RATIONALE_CHARS
+    assert "creator, preferred_title" in decision.rationale
+    assert "expression_language" in decision.rationale
+    assert cache_hit is False
+
+
+def test_judge_pair_fast_mode_passes_through_supplied_rationale_when_low_confidence(
+    tmp_cache: JudgeCache,
+) -> None:
+    """Low-confidence outcomes still carry a substantive rationale —
+    the model populated it because the fast prompt requires it. The
+    boundary conversion preserves that rationale verbatim."""
+    text = "Same author, different publication year (1962 vs 2014); likely separate compilations."
+    fast = WorkMatchDecisionFast(
+        decision="same_work",
+        confidence=0.80,
+        rationale=text,
+        matching_fields=["creator", "preferred_title"],
+    )
+    chain = _ScriptedChain([fast])
+    decision, _hit, _lat = judge_pair(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.80,
+        chain=chain,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+        full_rationale=False,
+    )
+    assert decision.rationale == text
+
+
+def test_judge_pair_full_rationale_mode_keeps_strict_schema_path(
+    tmp_cache: JudgeCache,
+) -> None:
+    """Default ``full_rationale=True`` uses the strict
+    :class:`WorkMatchDecision` schema unchanged — same path as before
+    the fast-mode addition."""
+    strict = _make_decision(rationale="Strict-mode rationale supplied by the model directly.")
+    chain = _ScriptedChain([strict])
+    decision, _hit, _lat = judge_pair(
+        _make_record("a"),
+        _make_record("b"),
+        sim=0.97,
+        chain=chain,
+        cache=tmp_cache,
+        sleep=_no_sleep,
+        full_rationale=True,
+    )
+    assert isinstance(decision, WorkMatchDecision)
+    assert decision.rationale == "Strict-mode rationale supplied by the model directly."

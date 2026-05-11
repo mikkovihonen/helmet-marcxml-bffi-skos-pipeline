@@ -552,6 +552,24 @@ def judge_command(
             min=1,
         ),
     ] = judge.DEFAULT_CONCURRENCY,
+    full_rationale: Annotated[
+        bool,
+        typer.Option(
+            "--full-rationale/--no-full-rationale",
+            help=(
+                "Require a substantive natural-language rationale on every "
+                "judge call (default on). Pass --no-full-rationale to switch "
+                "to the fast prompt (judge_v1_fast.txt): the LLM may set "
+                "rationale=null for 'same_work' / 'different_work' decisions "
+                "with confidence ≥ 0.85. Rationale stays required for "
+                "'uncertain' or lower-confidence outcomes (where it drives "
+                "the human-review queue and the cascade re-run). At corpus "
+                "scale fast mode cuts ~50-200 generation tokens per high-"
+                "confidence pair; the audit trail keeps the structured "
+                "matching_fields / diverging_fields / confidence evidence."
+            ),
+        ),
+    ] = True,
 ) -> None:
     """Run the cascade judge over M5's escalate-band candidate pairs (M6)."""
     settings = get_settings()
@@ -572,6 +590,7 @@ def judge_command(
                 progress_callback=_on_progress,
                 provenance_writer=writer,
                 concurrency=concurrency,
+                full_rationale=full_rationale,
             )
     else:
         result = judge.judge_batch(
@@ -583,6 +602,7 @@ def judge_command(
             fallback_model=fallback_model,
             progress_callback=_on_progress,
             concurrency=concurrency,
+            full_rationale=full_rationale,
         )
     typer.echo(result.render())
 

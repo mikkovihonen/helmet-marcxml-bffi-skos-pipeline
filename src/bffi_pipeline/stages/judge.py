@@ -67,6 +67,13 @@ from bffi_pipeline.provenance.writer import ProvenanceWriter
 #: Two-shot prompt source. Hashed at startup; the hash is logged with every
 #: provenance record so a future audit can reproduce or regress a decision.
 PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[3] / "prompts" / "judge_v1.txt"
+#: Fast-mode prompt — rationale required only for ``uncertain`` or
+#: ``confidence < FALLBACK_CONFIDENCE_THRESHOLD`` decisions. Used when
+#: ``judge_pair`` is called with ``full_rationale=False`` to save the
+#: rationale-generation tokens on confident clear-cut calls.
+PROMPT_PATH_FAST: Final[Path] = (
+    Path(__file__).resolve().parents[3] / "prompts" / "judge_v1_fast.txt"
+)
 
 #: Section markers in ``judge_v1.txt`` (the file is plain text — no YAML).
 _PROMPT_SECTION_RE: Final[re.Pattern[str]] = re.compile(r"^### (\w+)\s*$", re.MULTILINE)
@@ -188,6 +195,126 @@ class WorkMatchDecision(BaseModel):
         return self
 
 
+class WorkMatchDecisionFast(BaseModel):
+    """Fast-mode structured judgment with conditional rationale.
+
+    Boundary-4 contract is preserved exactly where it matters
+    (``uncertain`` or ``confidence < FALLBACK_CONFIDENCE_THRESHOLD``);
+    high-confidence ``same_work`` / ``different_work`` decisions may
+    set ``rationale=None`` to save the rationale-generation tokens.
+    Converted to :class:`WorkMatchDecision` at the boundary —
+    :func:`_synthesize_fast_rationale` fills the strict schema's
+    rationale from the structured fields so downstream serialisation,
+    caching, and provenance writers see one unified shape.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["same_work", "different_work", "uncertain"]
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="0.0-1.0. Use <0.7 when uncertain; reserve >0.9 for clear cases.",
+    )
+    rationale: str | None = Field(
+        default=None,
+        description=(
+            "Set to null when decision is 'same_work'/'different_work' AND "
+            "confidence ≥ 0.85. Required (2-4 sentences citing field values) "
+            "when decision is 'uncertain' or confidence < 0.85."
+        ),
+    )
+    matching_fields: list[str] = Field(default_factory=list)
+    diverging_fields: list[str] = Field(default_factory=list)
+
+    # --- Boundary 4 semantic validators (spec § 10 + § 7) -----------------
+
+    @model_validator(mode="after")
+    def _coherent_uncertain(self) -> WorkMatchDecisionFast:
+        if self.decision == "uncertain" and self.confidence > UNCERTAIN_MAX_CONFIDENCE:
+            raise ValueError(
+                f"decision='uncertain' is incoherent with confidence > {UNCERTAIN_MAX_CONFIDENCE}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _same_work_needs_evidence(self) -> WorkMatchDecisionFast:
+        if self.decision == "same_work" and not self.matching_fields:
+            raise ValueError("decision='same_work' requires at least one matching_field")
+        return self
+
+    @model_validator(mode="after")
+    def _rationale_required_when_low_confidence(self) -> WorkMatchDecisionFast:
+        needs_rationale = (
+            self.decision == "uncertain" or self.confidence < FALLBACK_CONFIDENCE_THRESHOLD
+        )
+        text = (self.rationale or "").strip()
+        if needs_rationale:
+            if len(text) < MIN_RATIONALE_CHARS:
+                raise ValueError(
+                    f"rationale ≥ {MIN_RATIONALE_CHARS} chars required for 'uncertain' "
+                    f"or confidence < {FALLBACK_CONFIDENCE_THRESHOLD} decisions"
+                )
+            lowered = text.lower()
+            for phrase in STUB_PHRASES:
+                if re.search(rf"\b{re.escape(phrase)}\b", lowered):
+                    raise ValueError(f"rationale contains stub phrase: {phrase!r}")
+        elif text:
+            # Optional rationale supplied on a high-conf decision —
+            # still guard against stub phrases so a "n/a" placeholder
+            # can't sneak through.
+            lowered = text.lower()
+            for phrase in STUB_PHRASES:
+                if re.search(rf"\b{re.escape(phrase)}\b", lowered):
+                    raise ValueError(f"rationale contains stub phrase: {phrase!r}")
+        return self
+
+    def to_strict(self) -> WorkMatchDecision:
+        """Convert to the strict :class:`WorkMatchDecision`.
+
+        Synthesises a placeholder rationale from the structured fields
+        when the fast-mode response left it null, so downstream code
+        (provenance writer, JSONL row, cache) sees one unified shape
+        regardless of mode.
+        """
+        rationale = (self.rationale or "").strip()
+        if not rationale:
+            rationale = _synthesize_fast_rationale(
+                decision=self.decision,
+                confidence=self.confidence,
+                matching_fields=self.matching_fields,
+                diverging_fields=self.diverging_fields,
+            )
+        return WorkMatchDecision(
+            decision=self.decision,
+            confidence=self.confidence,
+            rationale=rationale,
+            matching_fields=list(self.matching_fields),
+            diverging_fields=list(self.diverging_fields),
+        )
+
+
+def _synthesize_fast_rationale(
+    *,
+    decision: str,
+    confidence: float,
+    matching_fields: list[str],
+    diverging_fields: list[str],
+) -> str:
+    """Build a one-sentence rationale from structured fields for
+    fast-mode high-confidence decisions that omitted natural-language
+    reasoning. Passes Boundary-4 (≥ MIN_RATIONALE_CHARS chars, no
+    stub phrases) so it round-trips through the strict schema.
+    """
+    matching = ", ".join(matching_fields) if matching_fields else "(none cited)"
+    diverging = ", ".join(diverging_fields) if diverging_fields else "(none cited)"
+    return (
+        f"Fast-mode decision: {decision} at confidence {confidence:.2f}. "
+        f"Matching fields: {matching}. Diverging fields: {diverging}. "
+        "Rationale omitted by --no-full-rationale; structured fields are the evidence."
+    )
+
+
 # --- Cascade record -------------------------------------------------------
 
 
@@ -236,19 +363,33 @@ def prompt_text() -> str:
 
 
 @lru_cache(maxsize=1)
+def prompt_text_fast() -> str:
+    """Return the raw ``prompts/judge_v1_fast.txt`` contents."""
+    if not PROMPT_PATH_FAST.is_file():
+        raise FileNotFoundError(f"Fast judge prompt not found at {PROMPT_PATH_FAST!s}.")
+    return PROMPT_PATH_FAST.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
 def prompt_hash() -> str:
     """SHA-256 of :func:`prompt_text`. Logged with every provenance record."""
     return "sha256:" + hashlib.sha256(prompt_text().encode("utf-8")).hexdigest()[:16]
 
 
 @lru_cache(maxsize=1)
-def _parse_prompt_sections() -> dict[str, str]:
-    """Split ``judge_v1.txt`` into ``SYSTEM`` / ``EXAMPLES`` / ``USER`` blocks."""
-    raw = prompt_text()
+def prompt_hash_fast() -> str:
+    """SHA-256 of :func:`prompt_text_fast`. Logged separately so a re-run
+    that switches modes invalidates the cache automatically (different
+    prompt → different ``cache_key`` per :func:`_cache_key`)."""
+    return "sha256:" + hashlib.sha256(prompt_text_fast().encode("utf-8")).hexdigest()[:16]
+
+
+def _parse_sections(raw: str, source_path: Path) -> dict[str, str]:
+    """Shared section-splitter for SYSTEM / EXAMPLES / USER blocks."""
     sections: dict[str, str] = {}
     matches = list(_PROMPT_SECTION_RE.finditer(raw))
     if not matches:
-        raise ValueError(f"No '### SECTION' markers found in {PROMPT_PATH!s}.")
+        raise ValueError(f"No '### SECTION' markers found in {source_path!s}.")
     for i, m in enumerate(matches):
         name = m.group(1)
         start = m.end()
@@ -256,8 +397,20 @@ def _parse_prompt_sections() -> dict[str, str]:
         sections[name] = raw[start:end].strip()
     for required in ("SYSTEM", "EXAMPLES", "USER"):
         if required not in sections:
-            raise ValueError(f"{PROMPT_PATH!s} is missing required '### {required}' section.")
+            raise ValueError(f"{source_path!s} is missing required '### {required}' section.")
     return sections
+
+
+@lru_cache(maxsize=1)
+def _parse_prompt_sections() -> dict[str, str]:
+    """Split ``judge_v1.txt`` into ``SYSTEM`` / ``EXAMPLES`` / ``USER`` blocks."""
+    return _parse_sections(prompt_text(), PROMPT_PATH)
+
+
+@lru_cache(maxsize=1)
+def _parse_prompt_sections_fast() -> dict[str, str]:
+    """Split ``judge_v1_fast.txt`` into ``SYSTEM`` / ``EXAMPLES`` / ``USER`` blocks."""
+    return _parse_sections(prompt_text_fast(), PROMPT_PATH_FAST)
 
 
 # --- Custom SQLite cache (post-validation only) ---------------------------
@@ -406,13 +559,27 @@ def _build_chain(
     api_key: str,
     temperature: float = 0.0,
     seed: int = 42,
+    full_rationale: bool = True,
 ) -> Any:
-    """Compose ``ChatOpenAI(...).with_structured_output(WorkMatchDecision)``."""
+    """Compose ``ChatOpenAI(...).with_structured_output(schema)``.
+
+    ``full_rationale=True`` (default) uses the strict
+    :class:`WorkMatchDecision` schema + the original prompt — every
+    decision returns a substantive ≥ MIN_RATIONALE_CHARS rationale.
+
+    ``full_rationale=False`` swaps in :class:`WorkMatchDecisionFast`
+    and ``judge_v1_fast.txt``. The model is instructed (and
+    structured-output schema permits) to set ``rationale=null`` for
+    confident ``same_work``/``different_work`` decisions; rationale
+    stays required for ``uncertain`` or ``confidence < 0.85``. Saves
+    ~50-200 tokens per high-conf pair at the cost of a thinner
+    natural-language audit trail.
+    """
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_openai import ChatOpenAI
     from pydantic import SecretStr
 
-    sections = _parse_prompt_sections()
+    sections = _parse_prompt_sections() if full_rationale else _parse_prompt_sections_fast()
     template = ChatPromptTemplate.from_messages(
         [
             ("system", sections["SYSTEM"] + "\n\n" + sections["EXAMPLES"]),
@@ -426,7 +593,8 @@ def _build_chain(
         temperature=temperature,
         seed=seed,
     )
-    return template | llm.with_structured_output(WorkMatchDecision, method="json_schema")
+    schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
+    return template | llm.with_structured_output(schema, method="json_schema")
 
 
 # Type alias for the injectable chain — anything with .invoke({record_a, record_b, sim}).
@@ -466,7 +634,7 @@ def _uncertain_decision(reason: str) -> WorkMatchDecision:
     )
 
 
-def judge_pair(  # noqa: PLR0912 — two retry layers (connection + validation) keep this single-purpose, splitting would scatter state.
+def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + validation) keep this single-purpose, splitting would scatter state.
     record_a: WorkRecord,
     record_b: WorkRecord,
     sim: float,
@@ -475,6 +643,7 @@ def judge_pair(  # noqa: PLR0912 — two retry layers (connection + validation) 
     chain: ChainLike | None = None,
     cache: JudgeCache | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    full_rationale: bool = True,
 ) -> tuple[WorkMatchDecision, bool, float]:
     """Judge a single Work-pair with retry, post-validation cache.
 
@@ -486,6 +655,16 @@ def judge_pair(  # noqa: PLR0912 — two retry layers (connection + validation) 
     callers leave them ``None`` so the defaults — a fresh
     ``ChatOpenAI`` chain pointed at the configured base URL, and the
     SQLite cache under ``data_dir`` — are constructed lazily.
+
+    ``full_rationale=True`` (default) uses the strict
+    :class:`WorkMatchDecision` schema; the LLM must produce a
+    substantive rationale on every call. ``full_rationale=False``
+    swaps in :class:`WorkMatchDecisionFast` + ``judge_v1_fast.txt`` so
+    confident ``same_work``/``different_work`` decisions may set
+    ``rationale=null``; the boundary conversion synthesises a
+    placeholder rationale from ``matching_fields`` /
+    ``diverging_fields`` so cached + JSONL + provenance outputs see
+    one unified shape regardless of mode.
     """
     settings = get_settings()
     effective_model = model_name or settings.llm_model_primary
@@ -493,6 +672,7 @@ def judge_pair(  # noqa: PLR0912 — two retry layers (connection + validation) 
         model_name=effective_model,
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key,
+        full_rationale=full_rationale,
     )
 
     own_cache = cache is None
@@ -501,7 +681,9 @@ def judge_pair(  # noqa: PLR0912 — two retry layers (connection + validation) 
 
     started = time.monotonic()
     try:
-        ph = prompt_hash()
+        # Prompt hash discriminates strict vs. fast — a re-run that
+        # flips the flag invalidates cached entries automatically.
+        ph = prompt_hash() if full_rationale else prompt_hash_fast()
         key = _cache_key(
             model_name=effective_model,
             prompt_hash_value=ph,
@@ -522,6 +704,7 @@ def judge_pair(  # noqa: PLR0912 — two retry layers (connection + validation) 
         connection_attempts = 0
         validation_attempts = 0
         last_error: str = "unknown failure"
+        schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
 
         while True:
             try:
@@ -544,10 +727,7 @@ def judge_pair(  # noqa: PLR0912 — two retry layers (connection + validation) 
                 break
 
             try:
-                if isinstance(raw, WorkMatchDecision):
-                    decision = raw
-                else:
-                    decision = WorkMatchDecision.model_validate(raw)
+                parsed = raw if isinstance(raw, schema) else schema.model_validate(raw)
             except (ValidationError, ValueError) as exc:
                 if validation_attempts < MAX_VALIDATION_RETRIES:
                     validation_attempts += 1
@@ -555,6 +735,14 @@ def judge_pair(  # noqa: PLR0912 — two retry layers (connection + validation) 
                     continue
                 last_error = f"validation failed after {MAX_VALIDATION_RETRIES} retries: {exc!s}"
                 break
+
+            # Convert fast → strict at the boundary so downstream code
+            # (cache.set, JSONL serialiser, provenance writer) sees one
+            # consistent schema regardless of mode.
+            if isinstance(parsed, WorkMatchDecisionFast):
+                decision: WorkMatchDecision = parsed.to_strict()
+            else:
+                decision = parsed  # type: ignore[assignment]
 
             if cache is not None:
                 cache.set(key, decision, model_name=effective_model, prompt_hash_value=ph)
@@ -586,6 +774,7 @@ def cascade_judge(
     fallback_chain: ChainLike | None = None,
     cache: JudgeCache | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    full_rationale: bool = True,
 ) -> JudgeOutcome:
     """Two-stage cascade per spec § 7 / docs/local-inference.md.
 
@@ -595,6 +784,12 @@ def cascade_judge(
     in :attr:`JudgeOutcome.steps` so the future provenance writer can
     log them with the ``llm-judge-primary`` and
     ``llm-judge-second-opinion`` ``bffi-prov:stage`` tags.
+
+    ``full_rationale`` is propagated to both per-stage ``judge_pair``
+    calls. The fast-mode prompt instructs the LLM to skip rationale
+    for high-confidence ``same_work``/``different_work``; the fallback
+    stage always fires for ``uncertain`` or low-confidence primaries
+    where rationale is required regardless of mode.
     """
     settings = get_settings()
     primary_name = primary_model or settings.llm_model_primary
@@ -613,6 +808,7 @@ def cascade_judge(
             chain=primary_chain,
             cache=cache,
             sleep=sleep,
+            full_rationale=full_rationale,
         )
         steps = [
             CascadeStep(
@@ -634,6 +830,7 @@ def cascade_judge(
             chain=fallback_chain,
             cache=cache,
             sleep=sleep,
+            full_rationale=full_rationale,
         )
         steps.append(
             CascadeStep(
@@ -1063,6 +1260,7 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
     provenance_writer: ProvenanceWriter | None = None,
     concurrency: int = DEFAULT_CONCURRENCY,
     sleep: Callable[[float], None] = time.sleep,
+    full_rationale: bool = True,
 ) -> JudgeBatchResult:
     """Run the cascade over every escalate-band pair from M5.
 
@@ -1155,6 +1353,7 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
             fallback_chain=fallback_chain,
             cache=cache,
             sleep=sleep,
+            full_rationale=full_rationale,
         )
 
     def _record_outcome(
@@ -1299,6 +1498,7 @@ __all__ = [
     "MAX_CONNECTION_RETRIES",
     "MAX_VALIDATION_RETRIES",
     "PROMPT_PATH",
+    "PROMPT_PATH_FAST",
     "STAGE_AUTO_MERGE",
     "STAGE_PRIMARY",
     "STAGE_SECOND_OPINION",
@@ -1310,6 +1510,7 @@ __all__ = [
     "JudgeCheckpoint",
     "JudgeOutcome",
     "WorkMatchDecision",
+    "WorkMatchDecisionFast",
     "WorkRecord",
     "cascade_judge",
     "default_cache_path",
@@ -1317,6 +1518,8 @@ __all__ = [
     "judge_batch",
     "judge_pair",
     "prompt_hash",
+    "prompt_hash_fast",
     "prompt_text",
+    "prompt_text_fast",
     "synthesize_auto_merge_outcome",
 ]
