@@ -31,7 +31,20 @@ Material updates since drafting:
 signal that the phase has not yet completed against the gold-set
 acceptance criteria):
 
-- Phase A (mlx-lm bring-up + parity): `<unfilled>`
+- Phase A (mlx-lm bring-up + parity): `<rollup unfilled>`
+  - A1 (mlx-lm 0.31.3 installed in `~/.venvs/mlx-lm`): operator-side
+    step, no commit; verified by `python -c "import mlx_lm;
+    print(mlx_lm.__version__)"`.
+  - A4 (`.env.ollama-baseline` + `.env.mlx-lm` written): operator-side
+    step, both files local + gitignored. The committed plan + doc
+    sweep that documented the rename and the upstream
+    `python -m mlx_lm.<sub>` → `python -m mlx_lm <sub>` migration
+    accompanies A1/A4: `<unfilled>` (filled when the commit lands).
+  - A2 (Qwen3-8B-Instruct-4bit + Qwen3-32B-Instruct-4bit converted): `<unfilled>`
+  - A3 (`mlx_lm server` running on :8001 + :8002): `<unfilled>`
+  - A5 (`scripts/p02-parity-bench.sh` parity verdict captured): `<unfilled>`
+  - A6 (concurrency sweep run; chosen value recorded): `<unfilled>`
+  - A7 (acceptance gate passed): `<unfilled>`
 - Phase D1-D5 (dev-loop consolidation on mlx-lm): `<rollup unfilled>`
   - D1 (per-port routing in Settings + cascade): `f3c0bea`
   - D2 (model-pull wrapper): `d959bf6`
@@ -93,7 +106,7 @@ Four optimisations applied in the partial order **A → D1-D5 → B → C
   carrying `llm_base_url_primary` / `llm_base_url_fallback` so the
   cascade hits the correct backend per tier.
 - `scripts/llm-pull.sh <hf-org>/<hf-name>` wrapper around
-  `python -m mlx_lm.convert` so dev model acquisition stays a
+  `python -m mlx_lm convert` so dev model acquisition stays a
   one-liner.
 - `docs/runbook.md` documents the mlx-lm production-run procedure
   with the new flags; `docs/local-inference.md` documents the
@@ -170,9 +183,9 @@ python -c "import mlx_lm; print(mlx_lm.__version__)"
 time of writing). Confirm the CLIs are on PATH:
 
 ```bash
-python -m mlx_lm.server --help       # the server entry point
-python -m mlx_lm.convert --help      # model conversion
-python -m mlx_lm.generate --help     # one-shot generation (handy for smoke tests)
+python -m mlx_lm server --help       # the server entry point
+python -m mlx_lm convert --help      # model conversion
+python -m mlx_lm generate --help     # one-shot generation (handy for smoke tests)
 ```
 
 ### A2. Convert the two judge models to MLX 4-bit
@@ -184,10 +197,10 @@ raw HF weights via `mlx_lm.convert`.
 ```bash
 mkdir -p ~/.mlx_models
 # Primary (8B; ~5 GB on disk after 4-bit quant): ~30-45 min on M5 Max
-python -m mlx_lm.convert --hf-path Qwen/Qwen3-8B-Instruct -q --q-bits 4 \
+python -m mlx_lm convert --hf-path Qwen/Qwen3-8B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-8B-Instruct-4bit
 # Fallback (32B; ~18 GB on disk after 4-bit quant): ~1-2 h
-python -m mlx_lm.convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
+python -m mlx_lm convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-32B-Instruct-4bit
 ```
 
@@ -209,7 +222,7 @@ Documented but flakier — only use if HF download repeatedly fails.
 
 ```bash
 # In a separate terminal (or via nohup); keep Ollama running on :11434.
-python -m mlx_lm.server \
+python -m mlx_lm server \
     --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --host 127.0.0.1 --port 8001 \
     > /tmp/mlx-lm-server-8b.log 2>&1 &
@@ -220,24 +233,36 @@ curl -s http://127.0.0.1:8001/v1/models | jq
 **Verification**: the `/v1/models` response lists exactly the
 loaded model. The pipeline's `LLM_MODEL_PRIMARY` env value must
 match what mlx-lm reports — likely the model-path basename like
-`Qwen3-8B-Instruct-4bit`, not `qwen3:8b-q4_K_M`. Adjust
-`.env.vllm-mlx` (yes, the file is still named that for continuity
-with the original prop-04 naming; the contents point at mlx-lm)
-accordingly.
+`Qwen3-8B-Instruct-4bit`, not `qwen3:8b-q4_K_M`. Update
+`.env.mlx-lm` (see A4) accordingly.
 
-### A4. Swap `.env` for the parity bench only
+### A4. Write the two parity-bench env files
 
-Create a sibling env override so we can flip back instantly:
+`scripts/p02-parity-bench.sh` reads two named env files in
+subshells — `.env.ollama-baseline` and `.env.mlx-lm` — so the
+parity bench can run end-to-end without touching the live `.env`.
+Both files stay local (gitignored by `.env.*` with a negation for
+`.env.example`); they each carry the same secrets as `.env`.
 
 ```bash
+# 1. Snapshot the current Ollama-backed .env. This is the rollback
+#    target if mlx-lm fails A7 acceptance.
 cp .env .env.ollama-baseline
-sed -i.bak \
-    -e 's|^LLM_BASE_URL=.*|LLM_BASE_URL=http://127.0.0.1:8001/v1|' \
-    -e 's|^LLM_MODEL_PRIMARY=.*|LLM_MODEL_PRIMARY=Qwen3-8B-4bit|' \
-    -e 's|^LLM_MODEL_FALLBACK=.*|LLM_MODEL_FALLBACK=Qwen3-32B-4bit|' \
-    .env
-rm -f .env.bak
-diff .env.ollama-baseline .env
+
+# 2. Write .env.mlx-lm by copying .env.ollama-baseline and
+#    overriding the LLM_ section. Carry the D1 per-tier URLs
+#    explicitly so the cascade routes primary/fallback correctly:
+#      LLM_BASE_URL=http://127.0.0.1:8001/v1
+#      LLM_BASE_URL_PRIMARY=http://127.0.0.1:8001/v1
+#      LLM_BASE_URL_FALLBACK=http://127.0.0.1:8002/v1
+#      LLM_API_KEY=mlx-lm
+#      LLM_MODEL_PRIMARY=Qwen3-8B-Instruct-4bit
+#      LLM_MODEL_FALLBACK=Qwen3-32B-Instruct-4bit
+#    Model names must match what `mlx_lm server` reports at /v1/models
+#    (basename of the path you converted into during A2).
+
+# 3. Sanity diff:
+diff .env.ollama-baseline .env.mlx-lm
 ```
 
 (Verify the fallback only — the 32B server isn't running yet; the
@@ -248,7 +273,7 @@ fallback will only matter when escalation actually fires.)
 ```bash
 # One command — runs both evals, diffs the per-case verdicts, exits
 # 0 on parity and 1 on drift. Reads .env.ollama-baseline and
-# .env.vllm-mlx for the two backend configurations.
+# .env.mlx-lm for the two backend configurations.
 scripts/p02-parity-bench.sh
 ```
 
@@ -369,20 +394,20 @@ fallback_url = settings.llm_base_url_fallback or settings.llm_base_url
 
 ```bash
 # Primary on 8001
-python -m mlx_lm.server \
+python -m mlx_lm server \
     --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --host 127.0.0.1 --port 8001 \
     --prompt-cache-size 200 --prompt-cache-bytes 1073741824 &
 
 # Fallback on 8002 (memory permitting)
-python -m mlx_lm.server \
+python -m mlx_lm server \
     --model ~/.mlx_models/Qwen3-32B-Instruct-4bit \
     --host 127.0.0.1 --port 8002 \
     --prompt-cache-size 200 --prompt-cache-bytes 1073741824 &
 ```
 
-`.env.vllm-mlx` (kept under that filename for continuity with the
-original prop-04 naming; contents now reference mlx-lm endpoints):
+`.env.mlx-lm` (the file the parity bench reads as its mlx-lm-side
+config; gitignored alongside `.env`):
 
 ```
 LLM_BASE_URL_PRIMARY=http://127.0.0.1:8001/v1
@@ -404,7 +429,7 @@ mlx-lm server logs).
 
 ```bash
 # scripts/llm-pull.sh <hf-org>/<hf-name>
-python -m mlx_lm.convert --hf-path "$1" -q --q-bits 4 \
+python -m mlx_lm convert --hf-path "$1" -q --q-bits 4 \
     --mlx-path "$HOME/.mlx_models/$(basename "$1")-4bit"
 ```
 
@@ -514,7 +539,7 @@ server with both knobs set:
 
 ```bash
 pkill -f "mlx_lm.server" || true
-python -m mlx_lm.server \
+python -m mlx_lm server \
     --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --host 127.0.0.1 --port 8001 \
     --prompt-cache-size 200 \
@@ -583,7 +608,7 @@ Estimated wall-time: ~1 day.
 ### C1. Download the draft model
 
 ```bash
-python -m mlx_lm.convert --hf-path Qwen/Qwen3-1.7B-Instruct -q --q-bits 4 \
+python -m mlx_lm convert --hf-path Qwen/Qwen3-1.7B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-1.7B-Instruct-4bit
 ```
 
@@ -599,7 +624,7 @@ Restart the primary server with both flags:
 
 ```bash
 pkill -f "mlx_lm.server" || true
-python -m mlx_lm.server \
+python -m mlx_lm server \
     --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --draft-model ~/.mlx_models/Qwen3-1.7B-Instruct-4bit \
     --num-draft-tokens 5 \
@@ -757,7 +782,7 @@ After Phase C lands, update **`docs/runbook.md`** with:
   rename Ollama's identifiers (`qwen3:8b-q4_K_M`) to match mlx-lm
   (`Qwen3-8B-Instruct-4bit` per the model-path basename), or vice
   versa, or keep them differing per backend in
-  `.env.ollama-baseline` / `.env.vllm-mlx`.
+  `.env.ollama-baseline` / `.env.mlx-lm`.
 - **Supervisor vs. per-port** for D1 — **resolved during the
   mlx-lm-vs-vllm-mlx decision in A1**: chose per-port routing
   (cheaper code change, fits the existing cascade primary/fallback

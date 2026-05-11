@@ -49,15 +49,15 @@ scripts/llm-pull.sh Qwen/Qwen3-32B-Instruct
 scripts/llm-pull.sh Qwen/Qwen3-1.7B-Instruct
 ```
 
-The wrapper just calls `python -m mlx_lm.convert -q --q-bits 4` under the hood; equivalent long-form if you need to pin a different quantisation or output path:
+The wrapper just calls `python -m mlx_lm convert -q --q-bits 4` under the hood; equivalent long-form if you need to pin a different quantisation or output path:
 
 ```bash
 mkdir -p ~/.mlx_models
-python -m mlx_lm.convert --hf-path Qwen/Qwen3-8B-Instruct -q --q-bits 4 \
+python -m mlx_lm convert --hf-path Qwen/Qwen3-8B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-8B-Instruct-4bit
-python -m mlx_lm.convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
+python -m mlx_lm convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-32B-Instruct-4bit
-python -m mlx_lm.convert --hf-path Qwen/Qwen3-1.7B-Instruct -q --q-bits 4 \
+python -m mlx_lm convert --hf-path Qwen/Qwen3-1.7B-Instruct -q --q-bits 4 \
     --mlx-path ~/.mlx_models/Qwen3-1.7B-Instruct-4bit
 ```
 
@@ -73,21 +73,21 @@ Times on the M5 Max: ~30-45 min for the 8B, ~1-2 h for the 32B, ~10 min for the 
 
 ```bash
 # Primary on 8001
-python -m mlx_lm.server \
+python -m mlx_lm server \
     --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --host 127.0.0.1 --port 8001 \
     --prompt-cache-size 200 \
     --prompt-cache-bytes 1073741824 &
 
 # Fallback on 8002 (skip if RAM is tight; the cascade tolerates a single-port setup)
-python -m mlx_lm.server \
+python -m mlx_lm server \
     --model ~/.mlx_models/Qwen3-32B-Instruct-4bit \
     --host 127.0.0.1 --port 8002 \
     --prompt-cache-size 200 \
     --prompt-cache-bytes 1073741824 &
 ```
 
-Useful flags (run `python -m mlx_lm.server --help` for the full list):
+Useful flags (run `python -m mlx_lm server --help` for the full list):
 
 | Flag | Purpose |
 |---|---|
@@ -164,7 +164,7 @@ curl -s http://127.0.0.1:8001/v1/models | jq
 
 # A one-shot generation against the loaded model.
 source ~/.venvs/mlx-lm/bin/activate
-python -m mlx_lm.generate \
+python -m mlx_lm generate \
     --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
     --prompt "Say 'hello'" --max-tokens 16
 ```

@@ -53,5 +53,5 @@ if [[ -d "$out" && -n "$(ls -A "$out" 2>/dev/null)" ]]; then
 fi
 
 echo "converting $slug → $out (4-bit quantisation, ~5-90 min depending on model size)"
-python -m mlx_lm.convert --hf-path "$slug" -q --q-bits 4 --mlx-path "$out"
+python -m mlx_lm convert --hf-path "$slug" -q --q-bits 4 --mlx-path "$out"
 echo "done: $out"

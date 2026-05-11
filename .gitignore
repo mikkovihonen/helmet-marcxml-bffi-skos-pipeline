@@ -6,8 +6,13 @@
 /marcxml/
 /scratchpad/
 
-# Local environment
+# Local environment. Live .env and any operator-side rollback / swap
+# copies (e.g. .env.ollama-baseline, .env.mlx-lm) stay local — they
+# carry secrets like DB_PASSWORD. .env.example is the tracked
+# template.
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
