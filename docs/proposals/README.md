@@ -25,9 +25,13 @@ prose.
 
 Each proposal carries these sections:
 
-- **Status** — `proposed` / `planning (graduated)` / `done` /
-  `rejected (reason)`. Read that first before treating anything in
-  here as a plan of record.
+- **Status** — `proposed` / `planning (graduated)` /
+  `merged into <plan>` / `done` / `rejected (reason)`. Read that
+  first before treating anything in here as a plan of record.
+  `merged into <plan>` means the proposal's content was absorbed
+  into an existing plan rather than spawning its own — used when
+  two proposals are tightly coupled enough to share one execution
+  plan.
 - **Scope** — rough size (half-day / 1-2 days / 1-2 weeks / milestone).
 - **Proposal-base commit** — see "Tying proposals to version
   control" below.
@@ -89,9 +93,10 @@ plan documents *when the execution was scheduled*.
   single transient Ollama wedge. Plan lives at
   [`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](../plans/in-progress/p-03-m6-stall-watchdog.md).
 - [`prop-04-consolidate-on-vllm-mlx.md`](prop-04-consolidate-on-vllm-mlx.md)
-  — `proposed`. After P-02 ships, consider replacing Ollama with
-  vllm-mlx for the dev loop too so only one inference stack needs
-  maintenance. Gated on dev-loop ergonomics (model swap UX, model
-  pull UX, dev-machine throughput). Note: numbering collision with
-  the unrelated `backlog/p-04-m5-calibration.md` plan — disambiguate by
-  path in prose.
+  — `merged into P-02 plan`. Dev-loop consolidation on vllm-mlx
+  (supervisor / pull wrapper / throughput verification / default
+  flip / Ollama deprecation) absorbed into
+  [`docs/plans/backlog/p-02-inference-stack-tuning.md`](../plans/backlog/p-02-inference-stack-tuning.md)
+  as Phase D1-D5 (after A) and D6 (after C). Note: numbering
+  collision with the unrelated `backlog/p-04-m5-calibration.md`
+  plan — disambiguate by path in prose.

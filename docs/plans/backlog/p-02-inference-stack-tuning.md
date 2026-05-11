@@ -1,48 +1,79 @@
 # P-02 — Inference-stack tuning for the M6 cascade
 
 **Status**: backlog.
-**Source proposal**: [`docs/proposals/prop-02-inference-stack-tuning-for-M6.md`](../proposals/prop-02-inference-stack-tuning-for-M6.md)
+**Source proposals**:
+[`docs/proposals/prop-02-inference-stack-tuning-for-M6.md`](../../proposals/prop-02-inference-stack-tuning-for-M6.md)
 (introduced in commit `334294a` while still part of the combined
-`performance-enhancements.md`; the k-NN critique that fed back into
-P-01 landed in `9789c20`; the per-proposal file split landed in the
-commit that also introduces this update).
-**Plan-base commit**: `9789c20`. The "Current state" section is
+`performance-enhancements.md`; k-NN critique that fed back into P-01
+landed in `9789c20`; per-proposal file split in the commit that also
+introduced the initial plan) and
+[`docs/proposals/prop-04-consolidate-on-vllm-mlx.md`](../../proposals/prop-04-consolidate-on-vllm-mlx.md)
+(merged into this plan as Phase D; see "Material updates" below).
+**Plan-base commit**: `d0af171`. The "Current state" section is
 accurate against this commit. If `main` has moved before execution
 begins, re-verify with
-`git diff 9789c20..HEAD -- src/bffi_pipeline/stages/judge.py
+`git diff d0af171..HEAD -- src/bffi_pipeline/stages/judge.py
 src/bffi_pipeline/stages/reconcile.py src/bffi_pipeline/contrib_extract_llm.py
-src/bffi_pipeline/title_lang_llm.py src/bffi_pipeline/config.py .env.example`.
+src/bffi_pipeline/title_lang_llm.py src/bffi_pipeline/config.py .env.example
+docs/local-inference.md`.
+
+Material updates since drafting:
+
+- `d0af171` — folded prop-04 (Consolidate on vllm-mlx; deprecate
+  Ollama) into this plan as Phase D. The dev-loop ergonomics work
+  (multi-model serving, model-pull wrapper, throughput verification
+  on smaller dev machines, default flip, Ollama labelled secondary)
+  becomes D1-D5 between Phases A and B so the perf wins from B/C
+  apply to both dev and prod once D1-D5 ships. The actual removal
+  of Ollama install paths is D6, held until after Phase C.
+
 **Phase commits** (filled in as phases ship; empty fields here are a
 signal that the phase has not yet completed against the gold-set
 acceptance criteria):
 
 - Phase A (vllm-mlx bring-up + parity): `<unfilled>`
+- Phase D1-D5 (dev-loop consolidation on vllm-mlx): `<unfilled>`
 - Phase B (prefix caching): `<unfilled>`
 - Phase C (speculative decoding): `<unfilled>`
+- Phase D6 (remove Ollama install paths): `<unfilled>`
 
 **Owner**: TBD.
-**Estimated wall-time**: 2-3 working days end to end, split into three
-sequenced phases (each phase is independently shippable).
+**Estimated wall-time**: ~3-5 working days end to end. Phase A is
+half a day to a day; D1-D5 is ~1-2 days (depends on whether a
+supervisor is needed); B + C remain 2-3 days; D6 is half a day plus
+a 1-2 release-cycle observation window. Each phase is independently
+shippable; the partial ordering is A → D1-D5 → B → C → D6.
 
 ## Goal
 
 Reduce the wall-time and compute cost of every M6 LLM call without
-changing M6's output contract. Specifically, three optimisations
-applied in sequence:
+changing M6's output contract, and consolidate the inference stack
+on a single backend so the perf wins apply uniformly to dev and prod.
+Four optimisations applied in the partial order **A → D1-D5 → B → C
+→ D6**:
 
-1. Move M6 (and the M3 / M9 LLM callers) from Ollama to **vllm-mlx**
-   so the prefix-caching and speculative-decoding knobs become
-   available.
-2. Enable **prompt prefix caching** so the ~75 %-identical M6 prompt
-   prefix re-uses the prefill KV-cache across pairs.
-3. Add **speculative decoding** with a small draft model (`qwen3:1.7b`)
-   so the structurally-predictable parts of the JSON output emit
-   without invoking the full target model.
+1. **A**: Move M6 (and the M3 / M9 LLM callers) from Ollama to
+   **vllm-mlx** so the prefix-caching and speculative-decoding knobs
+   become available.
+2. **D1-D5**: Make vllm-mlx the dev-loop default too — supervisor or
+   per-port multi-model serving, one-command pull wrapper,
+   dev-machine throughput verification, default flip,
+   Ollama labelled secondary. Until this lands, the dev environment
+   doesn't see the Phase B/C wins.
+3. **B**: Enable **prompt prefix caching** so the ~75 %-identical M6
+   prompt prefix re-uses the prefill KV-cache across pairs.
+4. **C**: Add **speculative decoding** with a small draft model
+   (`qwen3:1.7b`) so the structurally-predictable parts of the JSON
+   output emit without invoking the full target model.
+5. **D6**: Remove Ollama install paths from `.env.example` and
+   `docs/local-inference.md` once Phase C has shipped and 1-2
+   release cycles have gone by without complaints.
 
 ## Definition of done
 
-- M6 production runs use vllm-mlx by default; Ollama remains the
-  development / gold-set-eval default.
+- vllm-mlx is the **default backend for dev and prod**; Ollama
+  install paths are removed from the committed docs and the
+  `.env.example`.
 - A 200-pair bench shows ≥ **3× TTFT speedup** vs Ollama baseline
   (prefix caching contribution).
 - A 200-pair bench shows ≥ **2× end-to-end speedup** on fast-mode
@@ -50,9 +81,15 @@ applied in sequence:
   contribution).
 - `make eval LABEL=<phase-label>` against `gold/gold.jsonl` (17 cases)
   shows **zero verdict deltas** vs the Ollama baseline at every phase
-  checkpoint.
+  checkpoint A through C.
+- A multi-model serving setup (supervisor or per-port routing)
+  matches Ollama's per-request model-selection ergonomics with sub-
+  second model switch time.
+- `scripts/llm-pull.sh <model-tag>` wrapper hides the
+  `mlx_lm.convert` ceremony so dev model acquisition is one command.
 - `docs/runbook.md` documents the vllm-mlx production-run procedure
-  with the new flags.
+  with the new flags; `docs/local-inference.md` documents the
+  consolidated dev install.
 
 ## Current state
 
@@ -219,6 +256,98 @@ cp .env.ollama-baseline .env
 ```
 
 The pipeline is back on Ollama. No code changes were made.
+
+---
+
+## Phase D1-D5 — Dev-loop consolidation on vllm-mlx (absorbed from prop-04)
+
+Estimated wall-time: ~1-2 days. Each sub-item is independently
+shippable, but they're listed in execution order. The full set is
+gating the dev-loop benefit from Phases B and C — until D1-D5 ships,
+the perf wins apply only to production batches.
+
+### D1. Multi-model serving (supervisor or per-port routing)
+
+`mlx_lm.server` takes one `--model` at startup. To match Ollama's
+per-request model-selection ergonomics for the dev cascade (primary
++ fallback flipping during debugging) we need either:
+
+- **Per-port routing.** One `mlx_lm.server` process per model on
+  separate ports; `LLM_BASE_URL` becomes a per-model dict.
+  ~30 LOC change in `Settings` (`llm_base_url_primary` /
+  `llm_base_url_fallback`) plus matching dispatch in `_build_chain`.
+- **Supervisor process.** A small (~100 LOC) Python script that owns
+  multiple `mlx_lm.server` instances and exposes one
+  OpenAI-compatible endpoint that routes by model name. Matches
+  Ollama's UX without forking the rest of the stack.
+
+Pick at execution time per how the upstream `mlx_lm` ecosystem looks
+then; if `mlx-router` or equivalent exists, adopt it instead of
+hand-rolling. Either way the gate is **sub-second model switch
+time** so the dev loop's cascade iteration isn't slower than it was
+under Ollama.
+
+### D2. One-command model-pull wrapper
+
+```bash
+# scripts/llm-pull.sh <hf-org>/<hf-name>
+python -m mlx_lm.convert --hf-path "$1" -q --q-bits 4 \
+    --mlx-path "$HOME/.mlx_models/$(basename "$1")-4bit"
+```
+
+Stash the wrapper under `scripts/`, doc it in
+`docs/local-inference.md`. Restores the `ollama pull qwen3:8b` one-
+command UX without the rest of Ollama.
+
+### D3. Dev-machine throughput verification
+
+vllm-mlx targets server-class Apple Silicon; the M5 Max is its
+design target. Smaller dev boxes (M1 Pro / M2 Air) may struggle
+with the continuous-batching overhead on the serial requests
+typical of dev iteration. Bench `judge_pair` serial throughput on
+the **smallest dev machine in actual team use** at the chosen
+primary model. Compare against the pre-migration Ollama baseline.
+
+**Acceptance**: vllm-mlx serial throughput on the smallest dev box
+matches Ollama within ~20 %. If it's worse, dev keeps a per-machine
+escape hatch (a `BFFI_LOCAL_BACKEND=ollama` env var that selects
+the legacy path) and D4-D6 land only for machines that pass D3.
+
+### D4. Flip the committed defaults
+
+- `.env.example` updates: `LLM_BASE_URL` points at the vllm-mlx
+  port; `LLM_MODEL_PRIMARY` / `LLM_MODEL_FALLBACK` use MLX-style
+  identifiers.
+- `docs/local-inference.md` `## Installation` re-orders vllm-mlx
+  ahead of Ollama; Ollama section is labelled "Supported but no
+  longer recommended" with a one-paragraph rationale and a pointer
+  back to the runbook for the rollback path.
+- README's Quick start uses vllm-mlx commands.
+
+### D5. Label Ollama secondary (no removal yet)
+
+Old Ollama install paths stay in the docs but with a "Supported,
+not recommended" banner. This is the trial period — Ollama remains
+usable as the emergency fallback while the team uses vllm-mlx as
+the dev default.
+
+**Phase D1-D5 acceptance**:
+
+- [ ] Multi-model serving in place, sub-second model switch
+      measured.
+- [ ] `scripts/llm-pull.sh` exists, doc updated.
+- [ ] D3 throughput bench logged in
+      `eval-runs/dev-throughput-<date>.json` (one row per dev box).
+- [ ] `.env.example` + `docs/local-inference.md` + README flipped
+      to vllm-mlx-default.
+- [ ] Gold-set eval (`make eval`) passes under vllm-mlx-only.
+
+### D1-D5 rollback
+
+Re-flip `.env.example` and `docs/local-inference.md` defaults to
+Ollama. The supervisor and pull-wrapper additions are non-breaking;
+they stay in place even if the default reverts (they help anyone
+on vllm-mlx regardless of which is default).
 
 ---
 
@@ -400,6 +529,60 @@ No code changes were made.
 
 ---
 
+## Phase D6 — Remove Ollama install paths (absorbed from prop-04)
+
+Estimated wall-time: half a day, plus a **1-2 release-cycle
+observation window** before D6 actually fires.
+
+The observation window is the safety mechanism: after D5 ships,
+Ollama is labelled "supported but not recommended" but its install
+docs stay in place. Phase D6 is the eventual removal — only fires
+once:
+
+- Phase C has shipped (so the full perf stack is in operation; we're
+  not removing the safety net mid-migration).
+- At least 1-2 release cycles have passed without contributor
+  complaints about the vllm-mlx default.
+- No open issues / PRs depend on the Ollama install path.
+
+If any of those gates fail, **stay at D5**. The plan can ship
+A → D1-D5 → B → C without D6 and still claim performance + dev-loop
+consolidation as the win. D6 is the cleanup that removes the dual-
+backend documentation burden permanently.
+
+### D6.1. Sweep
+
+- Remove the Ollama bullet from `.env.example`'s LLM section
+  (`LLM_BASE_URL` defaults to vllm-mlx).
+- Cut the "Default: Ollama" section in
+  `docs/local-inference.md`'s "Server choice" table; rewrite the
+  page to describe vllm-mlx as the only documented backend.
+- Remove the Ollama Quick-start in README.
+- Audit `tests/integration/` for any `requires_llm` tests that
+  assume `OLLAMA_HOST` or per-request model swapping; refactor or
+  delete.
+- The `BFFI_LOCAL_BACKEND=ollama` escape hatch from D3 is the last
+  thing to go; if it's still needed (some dev still can't run
+  vllm-mlx), leave D6 unshipped and revisit when the dev-box mix
+  changes.
+
+### D6.2. Acceptance
+
+- [ ] Grep for `ollama` in `docs/` and `.env.example` returns zero
+      live references (archived BUILD_PLAN excluded).
+- [ ] CI green with the simplified docs.
+- [ ] First post-D6 PR from someone unfamiliar with the project
+      bootstraps successfully against the simplified install.
+
+### D6.3. Rollback
+
+If a contributor breaks on D6, the supervisor and pull wrapper from
+D1-D2 still work — Ollama can be reinstated by reverting the D6
+commit. Keep D6 isolated to a single commit so the revert is
+mechanical.
+
+---
+
 ## Documentation deliverable
 
 After Phase C lands, update **`docs/runbook.md`** with:
@@ -422,6 +605,9 @@ After Phase C lands, update **`docs/runbook.md`** with:
 | Draft-model token acceptance below 50 % | Medium-low | C3's bench detects this before we commit to the change. Plan explicitly allows aborting C and shipping B. |
 | vllm-mlx flag names drift across versions | Medium | This plan refers to flag names by intent (`--enable-prefix-cache`, `--draft-model`); the executor checks `--help` of the installed version before running. |
 | Per-batch verdict drift not caught by the 17-case gold set | High | The current gold set is too small. P-01's prerequisite of growing gold to 50-100 cases also benefits P-02. Until then, manually spot-check 20 random pairs per phase that the LLM previously decided. |
+| D3 throughput regression on smaller dev machines (M1 Pro / M2 Air) | Medium | The D3 bench is the gate. If vllm-mlx is materially slower than Ollama on those boxes, ship D1-D2 but hold D4-D6; keep a `BFFI_LOCAL_BACKEND=ollama` escape hatch documented for the affected machines. |
+| Multi-model serving via a hand-rolled supervisor accrues maintenance | Medium | Prefer an upstream `mlx_lm.server`-compatible supervisor if one exists at D1 execution time; only fork our own if the upstream landscape is bare. |
+| D6 fires while a contributor is still mid-flight on Ollama | Low-medium | The 1-2 release-cycle observation window after D5 is the safety net. D6's commit is isolated so it reverts cleanly. |
 
 ## Open issues to close before / during execution
 
@@ -439,6 +625,15 @@ After Phase C lands, update **`docs/runbook.md`** with:
   identifiers (`qwen3:8b-q4_K_M`) to match vllm-mlx
   (`Qwen3-8B-4bit`), or vice versa, or keep them differing per
   backend in `.env.ollama-baseline` / `.env.vllm-mlx`.
+- **Supervisor vs. per-port** for D1 — pick at execution time after
+  surveying the upstream `mlx_lm` ecosystem. If an off-the-shelf
+  router exists, adopt it; otherwise default to per-port routing
+  (smaller change in `Settings` + dispatch) over a hand-rolled
+  supervisor.
+- **D6 observation window** — does "1-2 release cycles" map to
+  calendar time or commit-count? The project doesn't have a formal
+  release cadence; pragmatic default: hold D6 for at least 4 weeks
+  of vllm-mlx-default-only operation before sweeping the docs.
 
 ## Out of scope
 
