@@ -366,6 +366,18 @@ def _validate_keys(actual: tuple[str, ...]) -> None:
         raise ValueError(f"Incompatible SQL result keys: expected {EXPECTED_KEYS}, got {actual}")
 
 
+def _apply_limit(sql: str, limit: int) -> str:
+    """Append a top-level ``LIMIT n`` to the bundled query for smoke runs.
+
+    The bundled SQL ends with ``ORDER BY b.record_id`` and has no
+    top-level ``LIMIT``, so plain appending applies to the outermost
+    SELECT (not to any of the JSON-aggregating subqueries).
+    """
+    if limit <= 0:
+        raise ValueError(f"--limit must be a positive integer, got {limit}")
+    return f"{sql.rstrip().rstrip(';')}\nLIMIT {limit}\n"
+
+
 class _Pool:
     """ProcessPoolExecutor wrapper that streams ``(filename, bytes)``
     pairs from the row-processing workers into the output directory.
@@ -495,7 +507,18 @@ def main() -> None:
             "(default 100) so a slow disk doesn't let memory grow unbounded."
         ),
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Cap the export at the first N rows after ORDER BY record_id. "
+            "Smoke-test only — production runs leave this unset."
+        ),
+    )
     args = parser.parse_args()
+
+    sql_override = _apply_limit(_load_sql(), args.limit) if args.limit else None
 
     asyncio.run(
         export_async(
@@ -503,6 +526,7 @@ def main() -> None:
             batch_size=args.batchsize,
             max_workers=args.max_workers,
             queue_depth=args.queue_depth,
+            sql_override=sql_override,
         )
     )
 

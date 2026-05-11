@@ -20,6 +20,7 @@ from marcxml_export_pipeline.sierra.dtos import Leaderfield, Subfield, Varfield
 from marcxml_export_pipeline.sierra.marcxml import (
     AGENCY_CODE,
     SIERRA_LOCAL_TAG,
+    _apply_limit,
     _flatten_inline_subfields,
     _format_005,
     _strip_subfield_prefix,
@@ -121,6 +122,32 @@ def test_validate_keys_raises_on_schema_drift() -> None:
     run loudly rather than silently producing garbled records."""
     with pytest.raises(ValueError, match="Incompatible SQL result keys"):
         _validate_keys(("record_num", "varfields", "leader"))  # wrong order + missing cols
+
+
+# --- _apply_limit --------------------------------------------------------
+
+
+def test_apply_limit_appends_top_level_limit_clause() -> None:
+    """``--limit 500`` wraps the bundled SQL so only the first N rows
+    of the outermost SELECT come back from the streaming session."""
+    base = "SELECT * FROM sierra_view.bib_record b\nORDER BY b.record_id"
+    assert _apply_limit(base, 500).rstrip().endswith("LIMIT 500")
+
+
+def test_apply_limit_strips_trailing_semicolon_before_appending() -> None:
+    """Postgres rejects ``ORDER BY ...; LIMIT n`` — strip the trailing
+    semicolon if the bundled query ends with one."""
+    base = "SELECT * FROM sierra_view.bib_record;"
+    out = _apply_limit(base, 10)
+    assert ";LIMIT" not in out.replace("\n", "").replace(" ", "")
+    assert out.rstrip().endswith("LIMIT 10")
+
+
+def test_apply_limit_rejects_non_positive_n() -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        _apply_limit("SELECT 1", 0)
+    with pytest.raises(ValueError, match="positive integer"):
+        _apply_limit("SELECT 1", -5)
 
 
 # --- build_leader --------------------------------------------------------
