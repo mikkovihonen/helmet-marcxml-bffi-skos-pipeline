@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import uuid
 from collections.abc import Iterator
@@ -154,6 +155,77 @@ def marc2bibframe2_version() -> str:
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+#: MARCXML element/attribute names. lxml expanded form keeps the
+#: comparison cheap and namespace-correct under
+#: ``http://www.loc.gov/MARC21/slim``.
+_MARC_NS: Final[str] = "http://www.loc.gov/MARC21/slim"
+_SUBFIELD_TAG: Final[str] = f"{{{_MARC_NS}}}subfield"
+
+#: Regex for the cataloguer-pasted subfield separator. ``‡`` (U+2021,
+#: DOUBLE DAGGER) was used as a visible separator in some legacy ILS
+#: displays — operators sometimes copy-paste from those displays into
+#: a single ``$a`` value, producing strings like
+#: ``"taidemusiikki‡2slm/fin‡0http://urn.fi/URN:NBN:fi:au:slm:s474"``.
+#: The capture group is the MARC subfield code (single alphanumeric);
+#: the alternation excludes bare ``‡`` (e.g. a footnote dagger inside
+#: a title) so we don't split legitimate uses.
+_TAGGED_DAGGER_RE: Final[re.Pattern[str]] = re.compile(r"‡([0-9a-z])")
+
+#: Length of the ``re.split`` result that has at least one capture
+#: group fired — ``[leading_text, code1, content1]``.
+_MIN_SPLIT_PARTS: Final[int] = 3
+
+
+def _sanitize_subfield_separators(tree: etree._ElementTree) -> int:
+    """Split cataloguer-pasted ``‡<code>`` separators into proper
+    MARCXML subfields, in place.
+
+    Walks every ``<marc:subfield>`` element; for each value containing
+    ``‡`` followed by a MARC subfield code (a-z / 0-9), splits the
+    text at every such marker and rewrites the parent ``<datafield>``
+    so the recovered subfield codes / values appear as proper
+    sibling ``<subfield code="N">value</subfield>`` elements. The
+    original subfield is kept in place (with its truncated leading
+    value); the new subfields are inserted right after it, preserving
+    cataloguer-intended order.
+
+    Returns the count of *original* subfields rewritten, for operator
+    visibility. The marc2bibframe2 XSLT then processes the corrected
+    tree as if the cataloguer had typed the subfields correctly —
+    proper ``bf:source`` and ``$0`` URI handling fall out automatically.
+    """
+    fixed = 0
+    for subfield in tree.iter(_SUBFIELD_TAG):
+        text = subfield.text or ""
+        if "‡" not in text:
+            continue
+        parts = _TAGGED_DAGGER_RE.split(text)
+        # re.split with one capture group yields:
+        #   [leading_text, code1, content1, code2, content2, ...].
+        # If no markers matched, parts == [text] — leave alone.
+        if len(parts) < _MIN_SPLIT_PARTS:
+            continue
+        leading, *pairs = parts[0], *parts[1:]
+        subfield.text = leading
+        parent = subfield.getparent()
+        if parent is None:
+            continue
+        insertion_index = list(parent).index(subfield) + 1
+        # pairs alternates (code, content); build sibling subfields.
+        for i in range(0, len(pairs), 2):
+            code = pairs[i]
+            content = pairs[i + 1] if i + 1 < len(pairs) else ""
+            new_sf = etree.SubElement(parent, _SUBFIELD_TAG)
+            new_sf.set("code", code)
+            new_sf.text = content
+            # SubElement appends; move into the right position.
+            parent.remove(new_sf)
+            parent.insert(insertion_index, new_sf)
+            insertion_index += 1
+        fixed += 1
+    return fixed
 
 
 def _run_xslt(tree: etree._ElementTree, helmet_id: str) -> etree._ElementTree:
@@ -363,6 +435,14 @@ def _convert_one(
         return None, "skipped"
 
     converted_at = _utc_now()
+    # Recover ``‡<code>``-separator copy-paste before the XSLT sees it:
+    # cataloguers sometimes paste from a legacy ILS display that uses
+    # ``‡`` as a visible subfield boundary, producing
+    # ``<subfield code="a">value‡2slm/fin‡0http://...</subfield>``.
+    # The split puts the right $2 / $0 / etc. content back under
+    # proper subfield codes so marc2bibframe2 emits a proper
+    # bf:source + cataloguer-supplied $0 URI binding.
+    _sanitize_subfield_separators(validated.tree)
     rdf_tree = _run_xslt(validated.tree, helmet_id)
     rdf_bytes = etree.tostring(rdf_tree, xml_declaration=True, encoding="utf-8")
     g = _parse_to_graph(rdf_bytes)
