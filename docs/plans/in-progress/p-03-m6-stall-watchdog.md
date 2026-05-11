@@ -657,7 +657,7 @@ without re-litigating P-03's design.
 - [`docs/marcxml-to-bffi-skosmos-pipeline.md`](../../marcxml-to-bffi-skosmos-pipeline.md)
   § 8 — provenance stage enum; Phase A6 extends it with the
   `"watchdog-aborted"` value.
-- [`docs/plans/backlog/p-02-inference-stack-tuning.md`](p-02-inference-stack-tuning.md)
+- [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](p-02-inference-stack-tuning.md)
   — the vllm-mlx migration that interacts with this plan (per-call
   timeouts must continue to work under continuous batching).
 - [`scripts/run-full-pipeline.sh`](../../../scripts/run-full-pipeline.sh)

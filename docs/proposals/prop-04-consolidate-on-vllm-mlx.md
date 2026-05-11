@@ -1,12 +1,12 @@
 # P-04 — Consolidate on vllm-mlx (deprecate Ollama)
 
 **Status**: merged into P-02 plan. See
-[`docs/plans/backlog/p-02-inference-stack-tuning.md`](../plans/backlog/p-02-inference-stack-tuning.md)
+[`docs/plans/in-progress/p-02-inference-stack-tuning.md`](../plans/in-progress/p-02-inference-stack-tuning.md)
 § Phase D1-D5 and § Phase D6 for the execution detail.
 **Proposal-base commit**: `be5dbf6`. To gauge drift, run
 `git diff be5dbf6..HEAD -- src/bffi_pipeline/config.py
 src/bffi_pipeline/stages/judge.py docs/local-inference.md
-docs/plans/backlog/p-02-inference-stack-tuning.md`.
+docs/plans/in-progress/p-02-inference-stack-tuning.md`.
 
 Material updates since drafting:
 
@@ -58,7 +58,7 @@ ergonomics question.
 
 Approach, prerequisites, risks, open questions, and the full
 sequenced execution detail were absorbed into
-[`docs/plans/backlog/p-02-inference-stack-tuning.md`](../plans/backlog/p-02-inference-stack-tuning.md)
+[`docs/plans/in-progress/p-02-inference-stack-tuning.md`](../plans/in-progress/p-02-inference-stack-tuning.md)
 as Phase D (the dev-loop consolidation work) and Phase D6 (the
 eventual removal of Ollama install paths). The plan's partial
 order is **A → D1-D5 → B → C → D6** — A is the vllm-mlx bring-up,

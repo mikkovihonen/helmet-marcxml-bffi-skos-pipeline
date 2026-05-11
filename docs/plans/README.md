@@ -72,10 +72,6 @@ reference for what shipped.
 
 ### Backlog
 
-- [`backlog/p-02-inference-stack-tuning.md`](backlog/p-02-inference-stack-tuning.md)
-  — Migrate M6 from Ollama to vllm-mlx and layer prefix caching +
-  speculative decoding (graduated from prop-02). Also absorbs the
-  M6 `--concurrency` sweep.
 - [`backlog/p-04-m5-calibration.md`](backlog/p-04-m5-calibration.md)
   — Lock in M5's embedding model + `efSearch` via one-time benchmark
   runs on the M5 Max. Two independent phases.
@@ -90,12 +86,19 @@ reference for what shipped.
 
 ### In progress
 
+- [`in-progress/p-02-inference-stack-tuning.md`](in-progress/p-02-inference-stack-tuning.md)
+  — Migrate M6 from Ollama to vllm-mlx (Phase A), consolidate dev
+  loop on vllm-mlx (D1-D5), layer prefix caching + speculative
+  decoding (B, C), remove Ollama install paths (D6). Tooling
+  shipped: `scripts/p02-parity-bench.sh` automates the A5 gold-set
+  parity diff. Pending: operator install of `mlx_lm` + model
+  conversion (A1-A2) before A5 can run.
 - [`in-progress/p-03-m6-stall-watchdog.md`](in-progress/p-03-m6-stall-watchdog.md)
   — Per-call LLM timeout + watchdog event logging (stderr +
   `watchdog-events.jsonl` sidecar) + kill-and-retry-same-pair, so
   unattended overnight runs don't lose hours to a single transient
-  Ollama wedge. Phase A code shipped; awaits the dry-run measurement
-  step against a 5,000-pair slice.
+  Ollama wedge. Phase A + Phase B code shipped; awaits the Ollama
+  dry-run measurement on v2's M6 candidates.
 
 ### Completed
 

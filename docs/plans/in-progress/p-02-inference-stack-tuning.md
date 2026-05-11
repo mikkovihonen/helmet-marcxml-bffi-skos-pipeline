@@ -1,6 +1,6 @@
 # P-02 — Inference-stack tuning for the M6 cascade
 
-**Status**: backlog.
+**Status**: in-progress.
 **Source proposals**:
 [`docs/proposals/prop-02-inference-stack-tuning-for-M6.md`](../../proposals/prop-02-inference-stack-tuning-for-M6.md)
 (introduced in commit `334294a` while still part of the combined
@@ -194,24 +194,31 @@ fallback will only matter when escalation actually fires.)
 ### A5. Gold-set parity bench
 
 ```bash
-# Already-recorded Ollama baseline:
-make eval LABEL=ollama-qwen3-8b-baseline
-# Now under vllm-mlx (env points there):
-make eval LABEL=vllm-mlx-qwen3-8b-parity
+# One command — runs both evals, diffs the per-case verdicts, exits
+# 0 on parity and 1 on drift. Reads .env.ollama-baseline and
+# .env.vllm-mlx for the two backend configurations.
+scripts/p02-parity-bench.sh
 ```
 
-**Verification**: compare the two eval-runs directories under
-`eval-runs/` — per-case verdict + confidence should be **identical**
-or within numerical noise. If any verdict differs, **stop here**:
-the parity bench is the contract that the rest of P-02 assumes. A
-verdict delta means we're not running the same inference and the
-prefix-caching / speculative-decoding speedups can't be cleanly
-attributed.
+(See [`scripts/p02-parity-bench.sh`](../../../scripts/p02-parity-bench.sh)
+— the helper sources each env file in a subshell, runs `bffi-pipeline
+eval --run-label <label>`, then loads the two `eval-runs/<label>.json`
+artefacts and reports parity via three checks: accuracy match, failure
+case-id set match, predicted-value match per failure. Override labels
+via positional args; override env-file paths via `BASELINE_ENV` /
+`CANDIDATE_ENV`.)
+
+**Verification**: the script exits 0 with `PARITY OK — every case
+produced identical verdicts on both backends` if the two backends
+agree on every gold case. Non-zero exit means drift; the script
+prints which cases disagreed and how.
 
 If verdicts differ on numerical-noise pairs only (very-low-confidence
 calls where the model is genuinely uncertain), record the delta and
 proceed — but document it in the plan's "Open issues" section before
-moving on.
+moving on. The parity-bench script's drift detection is strict (any
+delta = exit 1); a soft-parity policy lives outside the script and
+gets exercised by reading the failure diff.
 
 ### A6. `--concurrency` sweep (BUILD_PLAN M6 follow-up)
 
