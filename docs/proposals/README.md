@@ -100,3 +100,10 @@ plan documents *when the execution was scheduled*.
   as Phase D1-D5 (after A) and D6 (after C). Note: numbering
   collision with the unrelated `backlog/p-04-m5-calibration.md`
   plan — disambiguate by path in prose.
+- [`prop-05-anonymous-work-canonicalisation.md`](prop-05-anonymous-work-canonicalisation.md)
+  — `proposed`. M8 currently mints canonical Works only when a MARC
+  100/110 → URI agent → prefLabel chain exists, sending the rest to
+  `canonical-conflicts.jsonl`. On the preview-373 corpus that's
+  365 / 372 unique work URIs held back from Skosmos. Proposes a
+  fallback URI-minting policy for anonymous / secondary-creator-only
+  records, with three options of increasing ambition.
