@@ -46,3 +46,21 @@ A plan ships when the engineer executing it could pick up the
 document cold and follow it through without re-deriving any choices.
 If a step requires judgment, the plan should say what the judgment
 hinges on and what the answer should be in the expected case.
+
+## Current plans
+
+- [`p-02-inference-stack-tuning.md`](p-02-inference-stack-tuning.md)
+  — `draft`. Migrate M6 from Ollama to vllm-mlx and layer prefix
+  caching + speculative decoding (graduated from prop-02). Also
+  absorbs the `--concurrency` sweep BUILD_PLAN M6 followed up on.
+- [`p-04-m5-calibration.md`](p-04-m5-calibration.md) — `draft`.
+  Lock in M5's embedding model + `efSearch` via one-time benchmark
+  runs on the M5 Max. Two independent phases.
+- [`p-05-m3-cascade-follow-ups.md`](p-05-m3-cascade-follow-ups.md)
+  — `draft`. Three sequenced M3 follow-ups (F1, F2, F3) that make
+  cascade-extracted contributions cataloguer-visible on canonical
+  Works and bind them to KANTO. F3 gated on P-06's gold-set growth.
+- [`p-06-gold-set-growth.md`](p-06-gold-set-growth.md) — `draft`.
+  Grow `gold/gold.jsonl` from 17 to 50-100 cataloguer-vetted cases
+  with proper per-category holdout stratification. Hard prerequisite
+  for P-01, P-04 statistical power, and P-05 F3.

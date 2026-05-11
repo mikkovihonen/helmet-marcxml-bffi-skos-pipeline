@@ -176,14 +176,42 @@ calls where the model is genuinely uncertain), record the delta and
 proceed — but document it in the plan's "Open issues" section before
 moving on.
 
-### A6. Phase A acceptance
+### A6. `--concurrency` sweep (BUILD_PLAN M6 follow-up)
+
+Once parity is established, sweep concurrent request counts to find
+the value that maximises throughput without OOMing — this is the
+BUILD_PLAN M6 L302 follow-up that vllm-mlx unblocks. Continuous
+batching is exactly what vllm-mlx provides over Ollama, so the
+sweep is meaningful here in a way it wouldn't be against an Ollama
+backend.
+
+```bash
+# 1000-pair sample slice — pull from the v2 escalate band or a
+# replayable cache.
+for c in 4 8 16 32; do
+  LLM_BASE_URL=http://127.0.0.1:8001/v1 \
+      uv run bffi-pipeline judge --concurrency $c \
+      --candidates-dir <slice> --output-dir <slice> --force \
+      | tee /tmp/bench-concurrency-$c.log
+done
+```
+
+Record per-`c` throughput (pairs/min) and peak resident memory.
+Pick the value at the throughput knee that fits the M5 Max memory
+budget; document the chosen value in `docs/runbook.md` § "Pinned
+versions" and the `M6_CONCURRENCY` env default in
+`scripts/run-full-pipeline.sh`.
+
+### A7. Phase A acceptance
 
 - [ ] vllm-mlx server starts cleanly on port 8001.
 - [ ] `make eval` against vllm-mlx matches Ollama on all 17 gold
       cases (or only differs on documented numerical-noise pairs).
 - [ ] `.env.ollama-baseline` exists for instant rollback.
+- [ ] `--concurrency` sweep complete; chosen value documented in
+      runbook and committed as the new `M6_CONCURRENCY` default.
 
-### A7. Rollback
+### A8. Rollback
 
 ```bash
 cp .env.ollama-baseline .env
