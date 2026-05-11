@@ -4,6 +4,7 @@
 /logs/
 /eval-runs/
 /marcxml/
+/scratchpad/
 
 # Local environment
 .env
