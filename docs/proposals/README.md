@@ -88,3 +88,10 @@ plan documents *when the execution was scheduled*.
   pair so unattended pipeline runs don't lose hours to a single
   pathological pair. Two options: per-call timeout (recommended MVP)
   or out-of-process heartbeat watchdog.
+- [`prop-04-consolidate-on-vllm-mlx.md`](prop-04-consolidate-on-vllm-mlx.md)
+  — `proposed`. After P-02 ships, consider replacing Ollama with
+  vllm-mlx for the dev loop too so only one inference stack needs
+  maintenance. Gated on dev-loop ergonomics (model swap UX, model
+  pull UX, dev-machine throughput). Note: numbering collision with
+  the unrelated `p-04-m5-calibration.md` plan — disambiguate by
+  path in prose.
