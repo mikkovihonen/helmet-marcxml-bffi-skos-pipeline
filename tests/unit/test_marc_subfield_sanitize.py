@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from lxml import etree
 
-from bffi_pipeline.stages.marc_to_bf import _sanitize_subfield_separators
+from bffi_pipeline.stages.marc_to_bf import _ensure_marc_001, _sanitize_subfield_separators
 
 _MARC_NS = "http://www.loc.gov/MARC21/slim"
 _NSMAP = {None: _MARC_NS}
@@ -212,3 +212,146 @@ def test_consecutive_daggers_treated_as_separate_markers() -> None:
         ("2", ""),
         ("0", "urn:A"),
     ]
+
+
+# --- _ensure_marc_001 ---------------------------------------------------
+
+
+def _controlfield_text(tree: etree._ElementTree, tag: str) -> str | None:
+    """Return the text of ``<controlfield tag="...">`` or ``None`` if absent."""
+    for cf in tree.iter(f"{{{_MARC_NS}}}controlfield"):
+        if cf.get("tag") == tag:
+            return cf.text
+    return None
+
+
+def test_ensure_marc_001_injects_helmet_id_when_missing() -> None:
+    """The SupaRed bug: BTJ-imported records routinely omit MARC 001.
+    Inject helmet_bib_id so marc2bibframe2 doesn't fall back to the
+    ``id1`` placeholder and collapse every such record into one
+    canonical Work."""
+    record_xml = (
+        f'<record xmlns="{_MARC_NS}">'
+        "<leader>00000najm a2200000ua 4500</leader>"
+        '<controlfield tag="008">211227s2021    xx</controlfield>'
+        '<datafield tag="245" ind1="1" ind2="0">'
+        '<subfield code="a">Test record</subfield>'
+        "</datafield>"
+        "</record>"
+    )
+    tree = etree.ElementTree(etree.fromstring(record_xml))
+    injected = _ensure_marc_001(tree, "1256526")
+    assert injected is True
+    assert _controlfield_text(tree, "001") == "1256526"
+
+
+def test_ensure_marc_001_preserves_existing_value() -> None:
+    """Records with a real ``001`` (Sierra control number, BTJ ID)
+    are left untouched — the original identifier carries audit-trail
+    value that injecting helmet_bib_id would erase."""
+    record_xml = (
+        f'<record xmlns="{_MARC_NS}">'
+        "<leader>00000najm a2200000ua 4500</leader>"
+        '<controlfield tag="001">cls0093490</controlfield>'
+        '<controlfield tag="008">211227s2021    xx</controlfield>'
+        "</record>"
+    )
+    tree = etree.ElementTree(etree.fromstring(record_xml))
+    injected = _ensure_marc_001(tree, "2496350")
+    assert injected is False
+    assert _controlfield_text(tree, "001") == "cls0093490"
+
+
+def test_ensure_marc_001_injects_when_existing_is_empty() -> None:
+    """``<controlfield tag="001"></controlfield>`` (empty body) is
+    treated as missing — marc2bibframe2's idfield read of an empty
+    001 would still trigger the ``id1`` fallback."""
+    record_xml = (
+        f'<record xmlns="{_MARC_NS}">'
+        "<leader>00000najm a2200000ua 4500</leader>"
+        '<controlfield tag="001"></controlfield>'
+        '<controlfield tag="008">211227s2021    xx</controlfield>'
+        "</record>"
+    )
+    tree = etree.ElementTree(etree.fromstring(record_xml))
+    injected = _ensure_marc_001(tree, "1256526")
+    assert injected is True
+    # The injected 001 replaces the empty one as the FIRST 001 found.
+    # (lxml.etree.iter returns elements in document order; injected
+    # goes to position 0, then the original empty 001 follows.)
+    assert _controlfield_text(tree, "001") == "1256526"
+
+
+def test_ensure_marc_001_injects_when_existing_is_whitespace_only() -> None:
+    """Whitespace-only ``001`` body is also a fallback trigger."""
+    record_xml = (
+        f'<record xmlns="{_MARC_NS}">'
+        "<leader>00000najm a2200000ua 4500</leader>"
+        '<controlfield tag="001">   </controlfield>'
+        "</record>"
+    )
+    tree = etree.ElementTree(etree.fromstring(record_xml))
+    assert _ensure_marc_001(tree, "9876543") is True
+    assert _controlfield_text(tree, "001") == "9876543"
+
+
+def test_ensure_marc_001_inserts_at_record_start() -> None:
+    """MARC ordering convention: controlfields (00X) come before
+    datafields. The injected 001 must be position 0 inside <record>
+    so the resulting XML matches what marc2bibframe2 + downstream
+    tools expect."""
+    record_xml = (
+        f'<record xmlns="{_MARC_NS}">'
+        "<leader>00000najm a2200000ua 4500</leader>"
+        '<controlfield tag="008">211227s2021    xx</controlfield>'
+        '<datafield tag="245" ind1="1" ind2="0">'
+        '<subfield code="a">Test record</subfield>'
+        "</datafield>"
+        "</record>"
+    )
+    tree = etree.ElementTree(etree.fromstring(record_xml))
+    _ensure_marc_001(tree, "1256526")
+    first_child = tree.getroot()[0]
+    assert first_child.tag == f"{{{_MARC_NS}}}controlfield"
+    assert first_child.get("tag") == "001"
+    assert first_child.text == "1256526"
+
+
+def test_ensure_marc_001_does_not_double_inject_on_re_invocation() -> None:
+    """Idempotent: a second call after a successful injection leaves
+    the tree unchanged — re-running M2 with ``--force`` on the same
+    record produces the same XML."""
+    record_xml = (
+        f'<record xmlns="{_MARC_NS}">'
+        "<leader>00000najm a2200000ua 4500</leader>"
+        '<controlfield tag="008">211227s2021    xx</controlfield>'
+        "</record>"
+    )
+    tree = etree.ElementTree(etree.fromstring(record_xml))
+    assert _ensure_marc_001(tree, "1256526") is True
+    assert _ensure_marc_001(tree, "1256526") is False
+    # Only one 001 controlfield should exist.
+    cfs = [cf for cf in tree.iter(f"{{{_MARC_NS}}}controlfield") if cf.get("tag") == "001"]
+    assert len(cfs) == 1
+
+
+def test_ensure_marc_001_distinct_helmet_ids_produce_distinct_001() -> None:
+    """Trivial but spec-load-bearing: two empty-001 records call
+    _ensure_marc_001 with different helmet_bib_ids and end up with
+    DIFFERENT 001 values — which is the entire point (downstream
+    marc2bibframe2 + mint_raw_work_uri then produce distinct URIs)."""
+    bib_ids = ("1256526", "1627537", "1666269", "1714651")
+    seen: set[str] = set()
+    for bib in bib_ids:
+        record_xml = (
+            f'<record xmlns="{_MARC_NS}">'
+            "<leader>00000najm a2200000ua 4500</leader>"
+            '<controlfield tag="008">211227s2021    xx</controlfield>'
+            "</record>"
+        )
+        tree = etree.ElementTree(etree.fromstring(record_xml))
+        _ensure_marc_001(tree, bib)
+        value = _controlfield_text(tree, "001")
+        assert value == bib
+        seen.add(str(value))
+    assert seen == set(bib_ids)
