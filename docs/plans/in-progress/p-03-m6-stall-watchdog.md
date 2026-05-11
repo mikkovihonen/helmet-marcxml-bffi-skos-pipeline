@@ -77,10 +77,24 @@ per-call (Phase A) and per-pair (Phase B):
   `bffi-prov:stage = "watchdog-aborted"` (and the same string in the
   cascade-step `model_name` for the retry chain). The spec § 8 stage
   enum gains this value in the same commit as the code change.
-- An overnight-grade dry run succeeds: pipeline against a 5,000-pair
-  slice with `LLM_CALL_TIMEOUT_SECONDS=20` (aggressive on purpose so
-  the watchdog fires often) completes without operator intervention
-  and produces a non-zero `watchdog-events.jsonl`.
+- An overnight-grade dry run succeeds against **the production
+  backend in play at the time** (currently Ollama; v2's M6 pass
+  runs against Ollama). The run uses the committed defaults
+  (`LLM_CALL_TIMEOUT_SECONDS=90`, `LLM_PAIR_TIMEOUT_SECONDS=300`)
+  against a 5,000-pair slice; goal is **measurement**, not stress
+  — count how often each event type fires at the defaults and
+  decide whether to tighten / loosen for the production pass.
+
+  P-03's done-state is *backend-scoped* by design. When P-02
+  Phase A ships and vllm-mlx becomes the production backend, the
+  watchdog budgets get **re-pinned** as part of P-02's
+  "Concurrency setting" sweep — not by re-running this P-03 dry-
+  run. The watchdog code itself is backend-agnostic, so no P-03
+  code changes are involved; only the defaults move. See
+  "Review questions Q3" below for the rationale (Option A
+  trade-off — pin the Ollama-backend defaults now for v2's M6,
+  let P-02 own the vllm-mlx-backend re-pin once that backend
+  ships).
 
 ## Current state
 
@@ -480,9 +494,14 @@ fed through `bffi-pipeline judge` with the aggressive flags.
 
 **Conclusion**: Phase A + Phase B's implementation is verified
 end-to-end against real backend + real cascade. The remaining
-acceptance step is the operator's dry-run measurement at default
-budgets, against a 5000-pair slice from the v2 corpus once M6
-starts.
+acceptance step is the operator's overnight-grade dry-run
+measurement at the committed defaults (90 s / 300 s) against a
+5000-pair slice from the v2 corpus once M6 starts.
+
+**Per Q3 (Option A)**: that dry-run runs against Ollama since v2's
+M6 pass is Ollama-backed. P-02 Phase A's later vllm-mlx re-pin
+happens inside P-02's A6 sweep; it doesn't reopen P-03. The
+calibration is backend-scoped by design.
 
 ## Risks
 
@@ -595,6 +614,40 @@ This question intersects with P-02's "Concurrency setting" open
 issue — budget calibration and concurrency tuning should be done
 together once vllm-mlx is in operation; treat them as one
 coordinated bench sweep, not two separate ones.
+
+### Q3. Does shipping P-02 reopen P-03's done check?
+
+No — but the *calibration* of P-03's defaults is backend-scoped.
+The decision recorded here (Option A): pin the defaults against
+**Ollama now** so v2's M6 pass has a calibrated watchdog, and
+**let P-02 own the vllm-mlx re-pin** once that backend ships.
+
+The trade-off was between two pragmatic options:
+
+| Option | Description | Trade-off |
+|---|---|---|
+| **A** (chosen) | Do the dry-run against Ollama now; mark P-03 done; re-pin defaults inside P-02 Phase A6's concurrency sweep when vllm-mlx lands. | Calibrated watchdog *immediately*, relevant because v2's M6 pass starts before P-02 Phase A's operator setup completes. The Ollama-backend defaults become "stale" once P-02 ships, but P-02 already owns that re-pin — no double-work. |
+| **B** (not chosen) | Defer P-03's dry-run until after P-02 Phase A ships; run once against vllm-mlx; calibration is final. | Cleaner single-calibration story, but P-03 stays ``in-progress`` until P-02 Phase A ships (multi-day operator setup). v2's M6 in the interim would run with un-dry-run-validated defaults — implementation is verified by the smoke (see "End-to-end smoke verification" section above), but the *defaults* aren't pinned by a real overnight slice. |
+
+What this means in practice:
+
+- P-03 done = "Ollama-backend defaults pinned by overnight-grade
+  dry-run on a 5,000-pair slice", regardless of what backend
+  P-02 eventually serves.
+- P-02 Phase A ships → its A6 / "Concurrency setting" open
+  issue inherits the responsibility of re-pinning the budgets
+  for the new backend. **The re-pin does NOT reopen P-03**;
+  it's a P-02 deliverable that touches P-03's default values
+  in-place.
+- The watchdog code itself stays untouched across the
+  transition. Only the two integer defaults in
+  `src/bffi_pipeline/config.py` move.
+
+If a later backend swap (say, P-04's full Ollama removal) happens
+without going through P-02's bench, the operator runs the dry-
+run again on whichever backend is current at the time. The
+"backend-scoped calibration" framing keeps re-pins lightweight
+without re-litigating P-03's design.
 
 ## Cross-references
 
