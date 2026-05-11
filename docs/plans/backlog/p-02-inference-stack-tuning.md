@@ -635,14 +635,88 @@ After Phase C lands, update **`docs/runbook.md`** with:
   release cadence; pragmatic default: hold D6 for at least 4 weeks
   of vllm-mlx-default-only operation before sweeping the docs.
 
+## Review questions
+
+Surfaced during review of the plan. Answers folded back here so a
+future reader / re-implementer doesn't re-discover them.
+
+### Q1. Is concurrency a problem for P-02?
+
+Not a blocker. Concurrency is a *parameter* P-02 is built around;
+three phases (A6, B, C) explicitly handle or benefit from it. Two
+real design considerations and one memory bound to plan around:
+
+**Where concurrency is positively used by P-02**:
+
+| Phase | Concurrency interaction |
+|---|---|
+| **A6** (the `--concurrency` sweep absorbed from BUILD_PLAN M6 L302) | Concurrency is the *subject* of the sweep — `{4, 8, 16, 32}` against a 1000-pair sample on vllm-mlx. |
+| **B** (prefix caching) | Concurrency *multiplies* the gain. The static prompt prefix is cached once per server; N concurrent requests on the same vllm-mlx server all benefit from the same prefill. Higher concurrency → bigger win. |
+| **C** (speculative decoding) | vLLM's scheduler handles batched draft + verify across concurrent requests transparently. Throughput scales near-linearly until the draft-model GPU time saturates. |
+
+**Two design questions the plan accommodates**:
+
+1. **D1's supervisor-vs-per-port routing** is fundamentally a
+   concurrency-shape question. `mlx_lm.server` is one process per
+   model, so the cascade either runs against two ports (each with
+   its own scheduler / KV-cache pool) or behind a supervisor that
+   routes by model name. Per-port is the smaller change (the
+   cascade code already maintains separate `primary_chain` /
+   `fallback_chain` objects; pointing them at different `LLM_BASE_URL`s
+   is a ~5-line Settings change). Supervisor matches Ollama's UX
+   more closely but adds a hand-rolled component. Both work for
+   our concurrency needs; the plan flags "pick at execution time"
+   — that stays the right call, slight bias toward per-port for
+   minimal code churn.
+2. **D3's dev-machine throughput verification** is where
+   concurrency becomes a real risk. vllm-mlx is designed for
+   server-class Apple Silicon; on smaller dev boxes
+   (M1 Pro / M2 Air) the continuous-batching overhead on
+   serial-request dev iteration may underperform Ollama. If D3
+   fails on a dev box, that machine keeps the
+   `BFFI_LOCAL_BACKEND=ollama` escape hatch (already in the plan's
+   D3 acceptance) and D6 doesn't fire team-wide until everyone's
+   machine passes D3. This is documented in the risk register.
+
+**Memory budget at high concurrency** (informs the A6 sweep range):
+
+```
+Primary  (qwen3:8b-4bit):  ~5  GB resident
+Fallback (qwen3:32b-4bit): ~18 GB resident
+Per-request KV cache at typical M6 prompt: ~200-500 MB
+At concurrency=32 (both models loaded): 23 GB models + ~16 GB KV ~ 40 GB
+```
+
+Comfortable on the 128 GB M5 Max; caps at ~8-16 on 64 GB dev boxes
+before swap kicks in. D3's bench is what determines the actual
+operational ceiling per machine.
+
+### Q2. Cross-cutting with P-03 budgets
+
+P-03's per-call and per-pair watchdog budgets were calibrated
+against Ollama at `--concurrency=1`. When P-02 ships vllm-mlx +
+raises concurrency, those budgets need re-pinning because the
+queueing behaviour changes (Ollama serializes server-side and
+inflates the per-call timeout with queue wait; vllm-mlx
+continuous-batches and doesn't). The full reasoning lives in
+P-03's "Review questions" Q2; the cross-reference here is to
+ensure the calibration happens **as part of P-02's A8 / B6 dry-
+runs**, not as a separate exercise. One coordinated bench, not two.
+
+The "Open issues" entry on `Concurrency setting` is the same
+issue from a different angle — it's about choosing the
+*production* `--concurrency` value, which the same dry-run
+answers.
+
 ## Out of scope
 
 - Migrating M5 (sentence-transformers / BGE-M3) to vllm-mlx. M5 is
   not an LLM workload.
-- Replacing Ollama in the dev loop. Ollama stays the default for
-  fast iteration and gold-set evaluation.
 - Cost-modelling vs cloud inference. The pipeline is committed to
   local inference per project constraints.
+- The original prop-02 framing kept Ollama as the dev default; the
+  merge with prop-04 reversed that — Ollama deprecation IS in
+  scope, through Phases D4-D6.
 
 ## Cross-references
 
