@@ -89,6 +89,10 @@ CONNECTION_BACKOFF_SECONDS: Final[tuple[float, ...]] = (5.0, 30.0, 120.0)
 #: distinguish 32 B-only decisions from cascade-resolved ones.
 STAGE_PRIMARY: Final[str] = "llm-judge-primary"
 STAGE_SECOND_OPINION: Final[str] = "llm-judge-second-opinion"
+#: ``bffi-prov:stage`` for pairs above the M5 auto-merge band ceiling
+#: (similarity ≥ 0.90 per spec § 6). These are merged deterministically
+#: without an LLM call — the embedding similarity is the entire signal.
+STAGE_AUTO_MERGE: Final[str] = "auto-merge-embedding"
 
 #: Stub phrases the rationale must NOT contain. Stored already lower-cased.
 STUB_PHRASES: Final[tuple[str, ...]] = (
@@ -825,6 +829,7 @@ class JudgeBatchResult:
     cache_hits: int
     fresh_calls: int
     cascade_used: int
+    auto_merged: int = 0
     decision_counts: dict[str, int] = field(default_factory=dict)
     elapsed_seconds: float = 0.0
     output_path: str = ""
@@ -836,6 +841,7 @@ class JudgeBatchResult:
             "M6 judge batch complete",
             f"  total candidates: {self.total_pairs:,}",
             f"  completed:        {self.completed:,}",
+            f"  auto-merged:      {self.auto_merged:,}",
             f"  cache hits:       {self.cache_hits:,}",
             f"  fresh calls:      {self.fresh_calls:,}",
             f"  cascade used:     {self.cascade_used:,}",
@@ -851,6 +857,7 @@ class JudgeBatchResult:
 
 CHECKPOINT_INTERVAL: Final[int] = 100
 ESCALATE_BAND: Final[str] = "escalate"
+AUTO_MERGE_BAND: Final[str] = "auto-merge"
 DECISIONS_FILENAME: Final[str] = "judge-decisions.jsonl"
 CHECKPOINT_SUFFIX: Final[str] = ".checkpoint"
 DEFAULT_CONCURRENCY: Final[int] = 1
@@ -911,6 +918,76 @@ def _load_candidate_jsonl(path: Path) -> list[dict[str, Any]]:
             continue
         rows.append(row)
     return rows
+
+
+def _load_auto_merge_candidates(path: Path) -> list[dict[str, Any]]:
+    """Load M5's ``embed-candidates.jsonl`` keeping only the auto-merge band.
+
+    These pairs cleared the M5 ceiling (similarity ≥ 0.90, spec § 6)
+    and merge deterministically without an LLM call — the embedding
+    similarity alone is the merge signal. Loading them separately
+    from the escalate band keeps the LLM cascade path unchanged.
+    """
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Candidates JSONL not found at {path!s}. Run `bffi-pipeline embed` first."
+        )
+    rows: list[dict[str, Any]] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = _json.loads(line)
+        except _json.JSONDecodeError as exc:
+            raise ValueError(f"Bad JSON at {path!s}:{line_no}: {exc}") from exc
+        if row.get("band") != AUTO_MERGE_BAND:
+            continue
+        rows.append(row)
+    return rows
+
+
+def synthesize_auto_merge_outcome(
+    row: dict[str, Any],
+    *,
+    embedding_model: str = "BAAI/bge-m3",
+) -> JudgeOutcome:
+    """Build a :class:`JudgeOutcome` for an M5 auto-merge-band pair.
+
+    Per spec § 6, similarity ≥ 0.90 pairs merge deterministically
+    without an LLM call. The synthetic outcome carries one
+    ``CascadeStep`` tagged with :data:`STAGE_AUTO_MERGE` and the M5
+    embedding model as ``model_name`` so provenance still reflects
+    which agent made the decision (the embedding model, not an LLM).
+
+    ``confidence`` reuses the embedding similarity directly — it's
+    already on a [0, 1] scale and exceeds the ≥ 0.90 floor.
+    Boundary-4 validators require ``matching_fields`` non-empty for
+    ``same_work``; ``"embedding_similarity"`` is the literal signal.
+    """
+    similarity = float(row.get("similarity", 0.0))
+    block_a = row.get("block_a", "")
+    block_b = row.get("block_b", "")
+    rationale = (
+        f"M5 auto-merge band: embedding similarity {similarity:.3f} ≥ 0.90 "
+        f"(spec § 6 ceiling). Same blocking key ({block_a}); LLM judge "
+        "skipped — same_work signal is unambiguous at this similarity. "
+        f"Block_a={block_a!r} block_b={block_b!r}."
+    )
+    decision = WorkMatchDecision(
+        decision="same_work",
+        confidence=similarity,
+        matching_fields=["embedding_similarity"],
+        diverging_fields=[],
+        rationale=rationale,
+    )
+    step = CascadeStep(
+        stage=STAGE_AUTO_MERGE,
+        model_name=embedding_model,
+        decision=decision,
+        cache_hit=False,
+        latency_seconds=0.0,
+    )
+    return JudgeOutcome(final=decision, steps=[step])
 
 
 def _load_checkpoint(path: Path) -> JudgeCheckpoint | None:
@@ -1134,8 +1211,32 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
                     )
                 )
 
+    auto_merge_rows = _load_auto_merge_candidates(candidates_path)
+    auto_merge_written = 0
+
     try:
         with output_path.open(write_mode, encoding="utf-8") as fh:
+            # Auto-merge band: spec § 6 says sim ≥ 0.90 merges without
+            # an LLM call. Write these synthetic same_work decisions
+            # once per fresh run (write_mode == "w"); resumed runs
+            # ("a" mode) leave them in place from the prior invocation.
+            if write_mode == "w":
+                for am_row in auto_merge_rows:
+                    am_outcome = synthesize_auto_merge_outcome(am_row)
+                    fh.write(
+                        _json.dumps(_serialise_decision(am_row, am_outcome), ensure_ascii=False)
+                        + "\n"
+                    )
+                    if decision_callback is not None:
+                        decision_callback(am_row, am_outcome)
+                    if provenance_writer is not None:
+                        _emit_provenance(provenance_writer, am_row, am_outcome, seen_models)
+                    decision_counts[am_outcome.final.decision] = (
+                        decision_counts.get(am_outcome.final.decision, 0) + 1
+                    )
+                    auto_merge_written += 1
+                fh.flush()
+
             if concurrency == 1:
                 for idx in range(start_idx, total):
                     row, outcome = _judge_one(idx)
@@ -1164,6 +1265,7 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
         cache_hits=cache_hits,
         fresh_calls=fresh_calls,
         cascade_used=cascade_used,
+        auto_merged=auto_merge_written,
         decision_counts=decision_counts,
         elapsed_seconds=time.monotonic() - started,
         output_path=str(output_path),
@@ -1187,6 +1289,7 @@ def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, WorkRecord]:
 
 
 __all__ = [
+    "AUTO_MERGE_BAND",
     "CHECKPOINT_INTERVAL",
     "CHECKPOINT_SUFFIX",
     "CONNECTION_BACKOFF_SECONDS",
@@ -1196,6 +1299,7 @@ __all__ = [
     "MAX_CONNECTION_RETRIES",
     "MAX_VALIDATION_RETRIES",
     "PROMPT_PATH",
+    "STAGE_AUTO_MERGE",
     "STAGE_PRIMARY",
     "STAGE_SECOND_OPINION",
     "STUB_PHRASES",
@@ -1214,4 +1318,5 @@ __all__ = [
     "judge_pair",
     "prompt_hash",
     "prompt_text",
+    "synthesize_auto_merge_outcome",
 ]

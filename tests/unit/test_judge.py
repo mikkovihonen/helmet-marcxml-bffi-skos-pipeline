@@ -22,6 +22,7 @@ from bffi_pipeline.stages.judge import (
     FALLBACK_CONFIDENCE_THRESHOLD,
     MAX_CONNECTION_RETRIES,
     MAX_VALIDATION_RETRIES,
+    STAGE_AUTO_MERGE,
     STAGE_PRIMARY,
     STAGE_SECOND_OPINION,
     JudgeCache,
@@ -31,6 +32,7 @@ from bffi_pipeline.stages.judge import (
     cascade_judge,
     judge_pair,
     prompt_hash,
+    synthesize_auto_merge_outcome,
 )
 
 # --- Helpers --------------------------------------------------------------
@@ -536,3 +538,69 @@ def test_cascade_does_not_run_fallback_on_different_work_low_confidence(
     )
     assert outcome.used_cascade is False
     assert fallback.calls == []
+
+
+# --- synthesize_auto_merge_outcome --------------------------------------
+
+
+def test_synthesize_auto_merge_emits_same_work_with_embedding_stage() -> None:
+    """A pair from M5's auto-merge band (≥ 0.90) collapses into a
+    JudgeOutcome with one synthetic CascadeStep tagged
+    ``auto-merge-embedding``. No LLM call; the embedding similarity
+    becomes the decision's confidence and the matching-fields list
+    cites the embedding directly so Boundary-4 validation passes."""
+    row = {
+        "work_a": "http://urn.fi/URN:NBN:fi:bib:work:a",
+        "work_b": "http://urn.fi/URN:NBN:fi:bib:work:b",
+        "similarity": 1.0,
+        "block_a": "mahavishnu|birds|prm",
+        "block_b": "mahavishnu|birds|prm",
+        "band": "auto-merge",
+    }
+    outcome = synthesize_auto_merge_outcome(row)
+    assert outcome.final.decision == "same_work"
+    assert outcome.final.confidence == pytest.approx(1.0)
+    assert outcome.final.matching_fields == ["embedding_similarity"]
+    assert outcome.used_cascade is False
+    assert len(outcome.steps) == 1
+    step = outcome.steps[0]
+    assert step.stage == STAGE_AUTO_MERGE
+    assert step.model_name == "BAAI/bge-m3"
+    assert step.cache_hit is False
+    assert step.latency_seconds == pytest.approx(0.0)
+
+
+def test_synthesize_auto_merge_rationale_passes_boundary_4_validators() -> None:
+    """The auto-generated rationale must be ≥ 20 chars and free of
+    stub phrases — same Boundary-4 invariants as LLM-judged decisions
+    so cached pipelines treat both uniformly."""
+    row = {
+        "work_a": "http://example.org/a",
+        "work_b": "http://example.org/b",
+        "similarity": 0.95,
+        "block_a": "blk",
+        "block_b": "blk",
+    }
+    outcome = synthesize_auto_merge_outcome(row)
+    text = outcome.final.rationale.strip()
+    assert len(text) >= 20
+    lowered = text.lower()
+    for phrase in ("i don't know", "unable to determine", "n/a", "not sure"):
+        assert phrase not in lowered
+
+
+def test_synthesize_auto_merge_preserves_similarity_as_confidence() -> None:
+    """The synthetic decision's confidence equals the embedding
+    similarity that triggered the auto-merge band. This keeps the
+    audit trail tight — downstream review queries can find the M5
+    similarity from the prov:Activity's confidence field directly."""
+    row = {
+        "work_a": "http://example.org/a",
+        "work_b": "http://example.org/b",
+        "similarity": 0.927,
+        "block_a": "blk",
+        "block_b": "blk",
+    }
+    outcome = synthesize_auto_merge_outcome(row)
+    assert outcome.final.confidence == pytest.approx(0.927)
+    assert outcome.steps[0].decision.confidence == pytest.approx(0.927)

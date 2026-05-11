@@ -221,14 +221,16 @@ def _outcome(
 # --- judge_batch: input filtering + output JSONL --------------------------
 
 
-def test_batch_skips_non_escalate_bands(tmp_path: Path) -> None:
+def test_batch_processes_escalate_via_cascade_skips_reject(tmp_path: Path) -> None:
+    """Escalate band feeds the LLM cascade; reject band is dropped
+    entirely. Auto-merge band gets its own path — see
+    :func:`test_batch_writes_synthetic_same_work_for_auto_merge_band`."""
     candidates = tmp_path / "candidates.jsonl"
     out = tmp_path / "decisions.jsonl"
     _write_candidates(
         candidates,
         [
             _candidate(WORK_A, WORK_B, band="escalate"),
-            _candidate(WORK_A, WORK_C, band="auto-merge"),  # filtered out
             _candidate(WORK_B, WORK_C, band="reject"),  # filtered out
         ],
     )
@@ -240,7 +242,8 @@ def test_batch_skips_non_escalate_bands(tmp_path: Path) -> None:
         work_records=_records(),
         cascade=_scripted_cascade(decisions),
     )
-    assert result.total_pairs == 1
+    assert result.total_pairs == 1  # escalate-band count
+    assert result.auto_merged == 0
     rows = [
         json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
@@ -249,6 +252,83 @@ def test_batch_skips_non_escalate_bands(tmp_path: Path) -> None:
     assert rows[0]["work_b"] == WORK_B
     assert rows[0]["decision"] == "same_work"
     assert rows[0]["used_cascade"] is False
+
+
+def test_batch_writes_synthetic_same_work_for_auto_merge_band(tmp_path: Path) -> None:
+    """Spec § 6: similarity ≥ 0.90 auto-merge band merges without an
+    LLM call. The batch driver emits one synthetic ``same_work`` row
+    per auto-merge candidate, tagged with the embedding stage so
+    provenance can distinguish embedding-only from LLM-judged
+    decisions. The LLM cascade is NOT invoked for these."""
+    candidates = tmp_path / "candidates.jsonl"
+    out = tmp_path / "decisions.jsonl"
+    _write_candidates(
+        candidates,
+        [
+            _candidate(WORK_A, WORK_B, band="auto-merge", sim=1.0),
+            _candidate(WORK_A, WORK_C, band="auto-merge", sim=0.95),
+            _candidate(WORK_B, WORK_C, band="reject"),  # still skipped
+        ],
+    )
+
+    def _exploding_cascade(*args: object, **kwargs: object) -> object:
+        msg = "cascade must NOT be invoked for auto-merge band"
+        raise AssertionError(msg)
+
+    result = judge_batch(
+        candidates,
+        out,
+        work_records=_records(),
+        cascade=_exploding_cascade,
+    )
+    assert result.total_pairs == 0  # zero escalate-band candidates
+    assert result.auto_merged == 2
+    rows = [
+        json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    assert len(rows) == 2
+    for row in rows:
+        assert row["decision"] == "same_work"
+        assert row["used_cascade"] is False
+        assert row["cascade"][0]["stage"] == "auto-merge-embedding"
+        assert row["cascade"][0]["model"] == "BAAI/bge-m3"
+        # Confidence equals the embedding similarity for auto-merge rows.
+        assert row["confidence"] == row["cascade"][0]["confidence"]
+
+
+def test_batch_processes_mixed_band_input_into_separate_decision_streams(
+    tmp_path: Path,
+) -> None:
+    """Real M5 output mixes auto-merge + escalate + reject. The
+    auto-merge rows write first (deterministic, no LLM); the escalate
+    rows then go through the cascade. Reject rows never appear in the
+    output."""
+    candidates = tmp_path / "candidates.jsonl"
+    out = tmp_path / "decisions.jsonl"
+    _write_candidates(
+        candidates,
+        [
+            _candidate(WORK_A, WORK_B, band="auto-merge", sim=0.97),
+            _candidate(WORK_A, WORK_C, band="escalate"),
+            _candidate(WORK_B, WORK_C, band="reject"),
+        ],
+    )
+    decisions = {(WORK_A, WORK_C): _outcome(_make_decision())}
+    result = judge_batch(
+        candidates,
+        out,
+        work_records=_records(),
+        cascade=_scripted_cascade(decisions),
+    )
+    assert result.total_pairs == 1  # escalate-band only counted in total_pairs
+    assert result.auto_merged == 1
+    rows = [
+        json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    # Auto-merge written first, then escalate.
+    assert len(rows) == 2
+    assert rows[0]["cascade"][0]["stage"] == "auto-merge-embedding"
+    assert rows[1]["cascade"][0]["stage"] != "auto-merge-embedding"
 
 
 def test_batch_writes_full_decision_payload(tmp_path: Path) -> None:
