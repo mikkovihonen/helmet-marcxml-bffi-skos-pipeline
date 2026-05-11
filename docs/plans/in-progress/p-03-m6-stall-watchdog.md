@@ -11,13 +11,13 @@ scripts/run-full-pipeline.sh`.
 **Phase commits**:
 
 - Phase A (in-process per-call timeout + retry + structured logging): `f3367b1` (code, tests, docs; overnight-grade dry-run measurement is the remaining operator step).
-- Phase B (in-process per-pair budget): `<unfilled>` — promoted from "contingent" to a tracked sub-phase after preview-373's resume showed the slow-pair pile-up the per-call ceiling can't catch.
+- Phase B (in-process per-pair budget): `051e834` (code, tests, plan revision).
 
 **Owner**: TBD.
-**Estimated wall-time**: ~1-1.5 days for Phase A (the user-visible
-unblocker for unattended overnight runs); Phase B is contingent and
-costs another ~1-2 days only if Phase A turns out to leave the
-slow-but-not-dead pathology uncovered.
+**Estimated wall-time**: ~1-1.5 days for Phase A; ~0.5 day for
+Phase B (promoted from contingent after the preview-373 evidence).
+Both phases are shipped; the remaining operator task is the dry-run
+calibration of the defaults against a 5,000-pair slice.
 
 ## Goal
 
