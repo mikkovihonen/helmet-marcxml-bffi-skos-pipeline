@@ -1,21 +1,18 @@
 #!/usr/bin/env bash
-# Sierra → MARCXML export, the *offline* portion of the pipeline-refresh
-# sequence. Runs with DB access enabled and internet unreachable.
-#
-# Three phases, gated by an explicit ack between phases so a botched
-# smoke export never silently rolls into the 800 k-record full run:
+# Sierra → MARCXML export driver. Three phases, gated by an explicit
+# ack between phases so a botched smoke export never silently rolls
+# into the 800 k-record full run:
 #
 #   1. SMOKE    — export N=${SMOKE_LIMIT} bibs to ${SMOKE_DIR}
 #   2. VALIDATE — pipe the smoke slice through M2 (marc-to-bf) + M3
-#                 (bf-to-bffi). No DB or internet touched. Confirms the
-#                 exporter's MARCXML round-trips marc2bibframe2 cleanly
-#                 before we spend the 1-2 h on the full export.
+#                 (bf-to-bffi). Confirms the exporter's MARCXML
+#                 round-trips marc2bibframe2 cleanly before we spend
+#                 the 1-2 h on the full export.
 #   3. FULL     — only runs if you pass --confirm-full. Exports the
 #                 entire non-suppressed bib corpus to ${FULL_DIR}.
 #
-# Why a script and not three separate commands: while internet is off
-# you can't read git/notes/runbook for a forgotten step. Everything we
-# need to remember is in here.
+# Bundling all three phases into one script means the operator does
+# not have to look up every step in the runbook mid-export.
 #
 # Required environment (typically from .env):
 #   DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME

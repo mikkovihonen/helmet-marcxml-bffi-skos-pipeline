@@ -68,23 +68,24 @@ work-key contract clean downstream (records with a blank 001 get
 clustered into a single bogus canonical Work, the "SupaRed"
 incident).
 
-The Helmet operator runs this with **DB access enabled and
-public-internet disabled** (network policy). The pre-flight
-+ offline export + smoke + validate + full sequence lives in
-[`scripts/run-sierra-export.sh`](../scripts/run-sierra-export.sh).
+The export and the rest of the pipeline are decoupled — the
+exporter writes MARCXML to disk and the downstream stages read
+from disk. The driver script
+[`scripts/run-sierra-export.sh`](../scripts/run-sierra-export.sh)
+gates the full corpus run behind a smoke-export and a local
+validation pass:
 
 ```bash
 # .env should carry: DB_HOST / DB_PORT / DB_USER / DB_PASSWORD /
 # DB_NAME (Sierra Postgres replica) and optionally
 # MARCXML_EXPORT_AGENCY_CODE (defaults to FI-HELME).
 
-# 1. With internet still on: seed local Fuseki with vocab dumps
-#    and confirm the Ollama judge models are pulled.
+# 1. Pre-flight: seed local Fuseki with vocab dumps and confirm
+#    the Ollama judge models are pulled.
 uv run bffi-pipeline load-finto
 ollama list                       # expect the LLM_MODEL_PRIMARY/FALLBACK tags
 
-# 2. Switch DB on, internet off. Smoke export + local validation,
-#    no full export yet.
+# 2. Smoke export + local validation, no full export yet.
 scripts/run-sierra-export.sh
 # → /tmp/sierra-smoke/<bib_id>.xml (500 rows)
 # → /tmp/sierra-smoke-validated/bibframe/*.rdf via marc2bibframe2
@@ -94,9 +95,6 @@ scripts/run-sierra-export.sh
 scripts/run-sierra-export.sh --confirm-full
 # → ./marcxml/sierra/<bib_id>.xml for every non-suppressed bib
 #   (~800 k rows; 1-2 h on a healthy replica).
-
-# 4. Switch DB off, internet on. The downstream pipeline reads the
-#    on-disk MARCXML and never touches the ILS again.
 ```
 
 The exporter is shipped as a sibling Python package
