@@ -157,8 +157,12 @@ def test_post_process_tags_pref_labels_with_language() -> None:
     assert str(work_label) == "Sota ja rauha"
 
 
-def test_pref_label_untagged_when_language_not_in_priority_set() -> None:
-    """A French original would leave prefLabel untagged (fr is not in fi/sv/en)."""
+def test_pref_label_tagged_via_single_declared_language_fast_path() -> None:
+    """When MARC 041 declares a single language outside the Lingua-
+    detectable set (here ``fre``→``fr``) and the title has no RDA
+    parallel-title separator, tag the prefLabel with the cataloguer's
+    declared BCP-47 code. No detection needed — the declaration is
+    authoritative for mono-language titles."""
     source = Graph()
     source.parse(
         data=textwrap.dedent(
@@ -167,6 +171,55 @@ def test_pref_label_untagged_when_language_not_in_priority_set() -> None:
             <{BF_WORK}> a bf:Work ;
                 bf:title [ bf:mainTitle "Étranger" ] ;
                 bf:language <http://id.loc.gov/vocabulary/languages/fre> .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
+    assert isinstance(label, Literal)
+    assert label.language == "fr"
+
+
+def test_pref_label_untagged_when_marc_language_code_unmapped() -> None:
+    """A MARC 041 code outside ``_LANG_3_TO_2`` (e.g. an obscure code
+    we haven't curated) still leaves the prefLabel untagged — we never
+    invent a BCP-47 tag we don't trust."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ bf:mainTitle "Klingon test title" ] ;
+                bf:language <http://id.loc.gov/vocabulary/languages/tlh> .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    label = next(bffi.objects(EXPECTED_WORK, V.SKOS.prefLabel))
+    assert isinstance(label, Literal)
+    assert label.language is None
+
+
+def test_pref_label_untagged_when_declared_language_is_parallel_title() -> None:
+    """If the literal contains an RDA parallel-title separator the fast
+    path must not fire — we don't have enough information to claim the
+    *whole* string is in the single declared language. Falls back to
+    Lingua detection, which (for declared-only languages like German)
+    has no overlap with its supported set and emits nothing → label
+    stays untagged."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ bf:mainTitle "Buddenbrooks = Die Buddenbrooks" ] ;
+                bf:language <http://id.loc.gov/vocabulary/languages/ger> .
             """
         ).strip(),
         format="turtle",

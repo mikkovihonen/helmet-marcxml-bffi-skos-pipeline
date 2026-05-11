@@ -46,13 +46,62 @@ _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 _SPARQL_DIR: Final[Path] = _BFFI_PIPELINE_REPO_ROOT / "sparql"
 
 _LANG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
-# 3-letter MARC language code -> BCP-47 2-letter for the languages this
-# pipeline displays (fi/sv/en); other codes leave prefLabel untagged.
+# 3-letter MARC language code -> BCP-47 2-letter. The first three —
+# fi/sv/en — are the *primary* display languages per CLAUDE.md and the
+# ones the Lingua + LLM title-language detector is calibrated against.
+# The rest are *declared-only* languages: when MARC 041 says the record
+# is in (say) German, we trust the cataloguer's declaration and tag the
+# prefLabel ``@de`` — but we don't try to disambiguate German from any
+# other Latin-script language via detection. The single-declared-
+# language fast path in ``_retag_pref_labels`` handles the typical
+# case (one MARC 041 code, no parallel-title separator).
 _LANG_3_TO_2: Final[dict[str, str]] = {
+    # Primary display languages — Lingua/LLM-detectable.
     "fin": "fi",
     "swe": "sv",
     "eng": "en",
+    "rus": "ru",
+    # Other European languages common in the Helmet collection.
+    "ger": "de",
+    "fre": "fr",
+    "spa": "es",
+    "ita": "it",
+    "por": "pt",
+    "dan": "da",
+    "nor": "no",
+    "ice": "is",
+    "est": "et",
+    "pol": "pl",
+    "gre": "el",
+    "hun": "hu",
+    "cze": "cs",
+    "ukr": "uk",
+    "lat": "la",
+    # Major immigrant-collection languages.
+    "ara": "ar",
+    "per": "fa",
+    "tur": "tr",
+    "chi": "zh",
+    "jpn": "ja",
+    "kor": "ko",
+    "vie": "vi",
+    "tha": "th",
+    "hin": "hi",
+    "urd": "ur",
+    "som": "so",
+    "swa": "sw",
+    "kur": "ku",
 }
+# Subset that the Lingua/LLM detector knows how to disambiguate — these
+# are the codes ``tag_title`` will actually try to identify on
+# whitespace-segmented parallel titles. Codes in ``_LANG_3_TO_2`` but
+# not here only get applied via the single-declared-language fast path.
+_DETECTABLE_LANGS: Final[frozenset[str]] = frozenset({"fi", "sv", "en", "ru"})
+
+# RDA-style parallel-title separators. Matches ``title_lang._RDA_SEPARATORS``
+# but kept local to avoid the import cycle the deferred title_lang import
+# in ``_retag_pref_labels`` exists to dodge.
+_RDA_PARALLEL_SEPARATORS: Final[tuple[str, ...]] = (" = ", " / ", " -- ", " — ", " | ")
 
 SKOS_prefLabel: Final[URIRef] = URIRef("http://www.w3.org/2004/02/skos/core#prefLabel")
 
@@ -321,8 +370,6 @@ def _candidate_languages(source: Graph) -> frozenset[str]:
                 code3 = str(lang)[len(_LANG_URI_PREFIX) :]
                 if code3 in _LANG_3_TO_2:
                     codes.add(_LANG_3_TO_2[code3])
-                elif code3 == "rus":
-                    codes.add("ru")
     return frozenset(codes)
 
 
@@ -354,12 +401,35 @@ def _retag_pref_labels(
     # right shape (or None). The annotation casts for mypy's benefit.
     typed_detector = cast("TitleLangDetector | None", llm_detector)
 
+    # Single-declared-language fast path: when the cataloguer declared
+    # exactly one language in MARC 041 (e.g. ``ger``) and the literal
+    # has no RDA parallel-title separator, tag the whole literal with
+    # that BCP-47 code — no detection needed, the cataloguer's
+    # declaration is authoritative for mono-language titles. This is
+    # what gives us ``@de``, ``@fr``, ``@ar`` etc. tags on records
+    # whose declared language is outside the Lingua-detectable set.
+    declared_only: str | None = None
+    if len(candidates) == 1:
+        declared_only = next(iter(candidates))
+
     to_remove: list[tuple[URIRef, URIRef, Literal]] = []
     to_add: list[tuple[URIRef, URIRef, Literal]] = []
     for s, _, o in graph.triples((None, SKOS_prefLabel, None)):
         if not isinstance(o, Literal) or o.language or not isinstance(s, URIRef):
             continue
-        tagged = tag_title(str(o), candidates, llm_detector=typed_detector)
+        text = str(o)
+        if declared_only and not any(sep in text for sep in _RDA_PARALLEL_SEPARATORS):
+            to_remove.append((s, SKOS_prefLabel, o))
+            to_add.append((s, SKOS_prefLabel, Literal(text, lang=declared_only)))
+            continue
+        # Detector-driven path: only fi/sv/en/ru get disambiguated.
+        # When ``candidates`` contains codes outside that set (e.g. de),
+        # ``tag_title`` intersects internally and returns nothing →
+        # this label stays untagged. That's intentional: we don't
+        # claim per-segment language for a parallel German/French
+        # title we can't actually disambiguate.
+        detectable = candidates & _DETECTABLE_LANGS
+        tagged = tag_title(text, detectable, llm_detector=typed_detector)
         if not tagged:
             continue
         to_remove.append((s, SKOS_prefLabel, o))
