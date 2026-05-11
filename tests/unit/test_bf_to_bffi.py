@@ -23,6 +23,8 @@ from bffi_pipeline.contrib_variants import load_variant_claims
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import (
     _convert_one,
+    _is_parseable_date,
+    _sanitize_date_literals,
     _sanitize_uri,
     _sanitize_uri_whitespace,
     construct_bffi,
@@ -746,3 +748,125 @@ def test_convert_one_serialises_sanitised_uris_to_valid_turtle(tmp_path: Path) -
     # The cleaned URI is in the output; the whitespace-tainted form is not.
     assert "URN:NBN:fi:au:slm:s1288>" in body
     assert "s1288 >" not in body
+
+
+# --- _is_parseable_date / _sanitize_date_literals -----------------------
+
+
+def test_parseable_date_accepts_valid_datetime() -> None:
+    assert _is_parseable_date(
+        "2026-05-09T14:30:00", URIRef("http://www.w3.org/2001/XMLSchema#dateTime")
+    )
+
+
+def test_parseable_date_rejects_cataloguer_placeholder_datetime() -> None:
+    """The 200-record corpus smoke surfaced ``'19  -  -  T00:00:00'``
+    as a cataloguer placeholder for "year not yet entered". rdflib
+    coerces this on load and raises ValueError, crashing the
+    downstream merge. The sanitizer must reject the bad lexical form."""
+    assert not _is_parseable_date(
+        "19  -  -  T00:00:00",
+        URIRef("http://www.w3.org/2001/XMLSchema#dateTime"),
+    )
+
+
+def test_parseable_date_accepts_valid_gyear() -> None:
+    assert _is_parseable_date("2026", URIRef("http://www.w3.org/2001/XMLSchema#gYear"))
+
+
+def test_parseable_date_rejects_short_gyear() -> None:
+    assert not _is_parseable_date("26", URIRef("http://www.w3.org/2001/XMLSchema#gYear"))
+
+
+def test_parseable_date_accepts_valid_gyearmonth() -> None:
+    assert _is_parseable_date("2026-05", URIRef("http://www.w3.org/2001/XMLSchema#gYearMonth"))
+
+
+def test_parseable_date_rejects_gyearmonth_with_bad_month() -> None:
+    assert not _is_parseable_date("2026-13", URIRef("http://www.w3.org/2001/XMLSchema#gYearMonth"))
+
+
+def test_sanitize_strips_datatype_on_bad_datetime() -> None:
+    """A malformed xsd:dateTime literal loses its datatype tag and
+    survives as a plain string — value visible for audit, no
+    downstream rdflib crash on load."""
+    g = Graph()
+    work = URIRef("http://example.org/w/1")
+    g.add(
+        (
+            work,
+            V.BFFI.descriptionChangeDate,
+            Literal(
+                "19  -  -  T00:00:00",
+                datatype=URIRef("http://www.w3.org/2001/XMLSchema#dateTime"),
+            ),
+        )
+    )
+    n = _sanitize_date_literals(g)
+    assert n == 1
+    # Round-trip: the value is still present but no longer typed.
+    [value] = list(g.objects(work, V.BFFI.descriptionChangeDate))
+    assert isinstance(value, Literal)
+    assert str(value) == "19  -  -  T00:00:00"
+    assert value.datatype is None
+
+
+def test_sanitize_keeps_valid_datetime_unchanged() -> None:
+    g = Graph()
+    g.add(
+        (
+            URIRef("http://example.org/w/1"),
+            V.BFFI.descriptionChangeDate,
+            Literal(
+                "2026-05-09T14:30:00",
+                datatype=URIRef("http://www.w3.org/2001/XMLSchema#dateTime"),
+            ),
+        )
+    )
+    assert _sanitize_date_literals(g) == 0
+
+
+def test_sanitize_does_not_touch_non_date_literals() -> None:
+    """Plain xsd:string literals (e.g. titles, labels) must pass
+    through untouched even if they happen to contain digits or
+    look-like-date text — the sanitizer is scoped to the four
+    XSD date datatypes."""
+    g = Graph()
+    g.add(
+        (
+            URIRef("http://example.org/w/1"),
+            V.RDFS.label,
+            Literal("Year 19  -  -  T00:00:00 (an art title)"),  # untyped
+        )
+    )
+    assert _sanitize_date_literals(g) == 0
+
+
+def test_convert_one_survives_record_with_malformed_date(tmp_path: Path) -> None:
+    """End-to-end: a BIBFRAME source carrying a bad ``xsd:dateTime``
+    placeholder now round-trips through M3 to Turtle that the M8
+    merge can load without raising ValueError."""
+    bib_root = "http://urn.fi/URN:NBN:fi:bib:raw/baddate-test"
+    source_ttl = f"""
+    @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+    @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+    <{bib_root}#Work> a bf:Work ;
+        bf:title [ a bf:Title ; bf:mainTitle "Test" ] ;
+        bf:language <http://id.loc.gov/vocabulary/languages/fin> ;
+        bf:originDate "19  -  -  T00:00:00"^^xsd:dateTime .
+    """
+    input_path = tmp_path / "src.rdf"
+    g = Graph()
+    g.parse(data=source_ttl, format="turtle")
+    g.serialize(destination=str(input_path), format="xml")
+    output_path = tmp_path / "out.ttl"
+    _convert_one(input_path, output_path, llm_detector=None, contrib_extractor=None)
+    # The value survives as untyped text — no xsd:dateTime suffix.
+    body = output_path.read_text(encoding="utf-8")
+    assert "19  -  -  T00:00:00" in body
+    # And the previously-failing typed form is gone.
+    assert '"19  -  -  T00:00:00"^^xsd:dateTime' not in body
+    # Sanity: the merge load shouldn't raise (which would happen if
+    # rdflib re-coerced the bad lexical form to datetime).
+    reloaded = Graph()
+    reloaded.parse(str(output_path), format="turtle")
