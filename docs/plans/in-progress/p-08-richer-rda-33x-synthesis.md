@@ -12,7 +12,7 @@ src/bffi_pipeline/validation/marcxml.py
 tests/unit/sierra/test_marcxml.py`.
 **Phase commits**:
 
-- Phase A (coverage analysis + layer-set revision): `<unfilled>`
+- Phase A (coverage analysis + layer-set revision): `10c508a`
 - Phase B (cascade scaffolding + (leader/06, 008-form) layer + 007 refinement): `<unfilled>`
 - Phase C (300$a extent fallback + adapter layers for existing material/itype): `<unfilled>`
 - Phase D (`$5` provenance marker + cataloguer-facing docs): `<unfilled>`
