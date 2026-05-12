@@ -61,8 +61,15 @@ acceptance criteria):
     sweep that documented the rename and the upstream
     `python -m mlx_lm.<sub>` → `python -m mlx_lm <sub>` migration
     accompanies A1/A4: `7cde2bf`.
-  - A2 (Qwen3-8B-Instruct-4bit + Qwen3-32B-Instruct-4bit converted): `<unfilled>`
-  - A3 (`mlx_lm server` running on :8001 + :8002): `<unfilled>`
+  - A2 (Qwen3-8B-4bit + Qwen3-32B-4bit pre-quantised checkpoints
+    pulled to `~/.mlx_models/`): operator-side step, models stored
+    locally. The committed doc + plan sweep that recorded the
+    pre-quantised path and the Qwen3 `-Instruct`-suffix drop
+    accompanies A2/A3: `ad188ad`.
+  - A3 (`mlx_lm server` running on :8001 + :8002 with
+    `--chat-template-args '{"enable_thinking":false}'`): operator-
+    side step. Same commit as A2 — `ad188ad` — captures the
+    thinking-mode discovery and the full-path-as-model-ID quirk.
   - A5 (`scripts/p02-parity-bench.sh` parity verdict captured): `<unfilled>`
   - A6 (concurrency sweep run; chosen value recorded): `<unfilled>`
   - A7 (acceptance gate passed): `<unfilled>`
