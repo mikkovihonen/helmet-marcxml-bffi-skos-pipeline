@@ -1,9 +1,12 @@
-"""Structured event emission for the M6 LLM-call watchdog (plan P-03).
+"""Structured event emission for the LLM-call watchdog (plans P-03, P-10).
 
 Watchdog events fire when an LLM call's per-call wall-time budget
-(``LLM_CALL_TIMEOUT_SECONDS``) is exceeded. The retry behaviour
-itself lives in :func:`bffi_pipeline.stages.judge.judge_pair`'s
-existing connection-error retry stack; this module is the
+(``LLM_CALL_TIMEOUT_SECONDS``) is exceeded, or — for M6 — when the
+cumulative per-pair budget is exceeded, or — for M9 — when the
+per-field budget is exceeded. The retry behaviour itself lives in
+:func:`bffi_pipeline.stages.judge.judge_pair`'s and
+:class:`bffi_pipeline.stages.reconcile.LangChainLLMPicker`'s
+existing connection-error retry stacks; this module is the
 observability surface that lets an operator running an unattended
 overnight batch see watchdog activity in real time *and* audit it
 after the fact.
@@ -37,9 +40,26 @@ Event vocabulary (one line per call):
                               The pair is abandoned with no further
                               retries; same ``watchdog-aborted``
                               provenance stage as ``give_up``.
+                              M6-side.
+- ``field_budget_exceeded`` — cumulative wall time for one M9
+                              reconciliation field (one
+                              ``(work, predicate, literal)`` tuple)
+                              exceeded
+                              ``LLM_M9_FIELD_TIMEOUT_SECONDS``. The
+                              field is abandoned, marked
+                              ``bffi-prov:stage = "watchdog-aborted"``,
+                              and falls through to tier-3 (highest-
+                              lexical candidate + needs-review).
+                              M9-side analogue of
+                              ``pair_budget_exceeded``.
 
 No shared state, no module-level config — the caller passes every
 field explicitly so the function stays trivially testable.
+
+The ``pair_id`` parameter is semantically overloaded: M6 callers
+pass a ``"raw_a+raw_b"`` pair identifier; M9 callers pass a
+``"<work_uri>|<predicate>|<literal>"`` field identifier. The function
+itself treats it as an opaque string key.
 """
 
 from __future__ import annotations
@@ -56,6 +76,7 @@ WatchdogEvent = Literal[
     "escalate",
     "give_up",
     "pair_budget_exceeded",
+    "field_budget_exceeded",
 ]
 
 #: stderr prefix; pipeline.log tails / Monitor filters match on this

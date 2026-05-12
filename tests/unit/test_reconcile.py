@@ -7,6 +7,8 @@ so the JSON-shape parsing is verified without touching the network.
 
 from __future__ import annotations
 
+import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -1234,3 +1236,276 @@ def test_all_authority_kinds_constant_covers_every_authority_kind() -> None:
         }
     )
     assert expected == ALL_AUTHORITY_KINDS
+
+
+# --- P-10 Phase A: concurrency + watchdog ---------------------------------
+
+
+def _build_canonical_with_n_creators(creator_labels: list[str]) -> Graph:
+    """Build a canonical graph with N creators, one Contribution each.
+
+    Each creator label needs an authority lookup; the fixture is paired
+    with a ``StubAuthorityClient`` that returns multiple high-similarity
+    candidates per label so the picker (tier-2) fires for every creator.
+    """
+    g = Graph()
+    for i, label in enumerate(creator_labels):
+        work = URIRef(f"http://urn.fi/URN:NBN:fi:bib:work:multi-{i}")
+        contrib = URIRef(f"http://example.org/contrib/multi-{i}")
+        agent = URIRef(f"http://example.org/agent/multi-{i}")
+        admin = URIRef(f"http://urn.fi/URN:NBN:fi:bib:adminmeta/multi-{i}")
+        g.add((work, RDF.type, V.BFFI.Work))
+        g.add((work, V.BFFI.contribution, contrib))
+        g.add((contrib, RDF.type, V.BFFI.PrimaryContribution))
+        g.add((contrib, V.BFFI.agent, agent))
+        g.add((agent, V.RDFS.label, Literal(label)))
+        g.add((work, V.adminMetadata, admin))
+        g.add((admin, RDF.type, V.AdminMetadata))
+        g.add((admin, V.adminMetadataFor, work))
+        g.add(
+            (
+                admin,
+                V.descriptionChangeDate,
+                Literal("2026-05-01T00:00:00+00:00", datatype=V.XSD.dateTime),
+            )
+        )
+        g.add((admin, V.descriptionAuthentication, V.AUTH_AUTO_MERGED))
+    return g
+
+
+def _twelve_ambiguous_creators() -> tuple[
+    list[str],
+    StubAuthorityClient,
+    StubPicker,
+]:
+    """Helper: 12 creators each with 2 high-similarity candidates so the picker fires."""
+    labels = [
+        "Tolstoy, Leo,",
+        "Pushkin, Aleksandr,",
+        "Dostoevsky, Fyodor,",
+        "Chekhov, Anton,",
+        "Gogol, Nikolai,",
+        "Turgenev, Ivan,",
+        "Bulgakov, Mikhail,",
+        "Nabokov, Vladimir,",
+        "Pasternak, Boris,",
+        "Akhmatova, Anna,",
+        "Mandelstam, Osip,",
+        "Tsvetaeva, Marina,",
+    ]
+    fixtures: dict[tuple[str, str], list[AuthorityCandidate]] = {}
+    decisions: dict[tuple[str, str], PickerDecision] = {}
+    for i, label in enumerate(labels):
+        # Two candidates, both ≥ 0.96 → multiple high-similarity → tier-2 picker.
+        fixtures[("person", label)] = [
+            _candidate(f"http://kanto/multi-{i}-a", f"{label[:-1]} A", 0.97),
+            _candidate(f"http://kanto/multi-{i}-b", f"{label[:-1]} B", 0.96),
+        ]
+        work_uri = f"http://urn.fi/URN:NBN:fi:bib:work:multi-{i}"
+        decisions[(work_uri, label)] = PickerDecision(
+            decision="chose",
+            chosen_uri=f"http://kanto/multi-{i}-a",
+            confidence=0.95,
+            rationale=(
+                f"StubPicker wired decision for {label!r}: candidate A "
+                f"binds with confidence 0.95 (testing the byte-stability gate)."
+            ),
+        )
+    return labels, StubAuthorityClient(fixtures=fixtures), StubPicker(decisions=decisions)
+
+
+def test_apply_reconciliation_byte_stable_at_c1_vs_c4() -> None:
+    """Canonical graph mutations must be deterministic regardless of M9 concurrency.
+
+    With 12 picker-routed creators and a deterministic ``StubPicker``,
+    a c=1 run and a c=4 run should produce byte-identical canonical
+    Turtle. This is the load-bearing gate for Phase A: thread-pool
+    dispatch is allowed only if it preserves determinism.
+    """
+    # c=1 (sequential): existing behaviour.
+    labels, client_seq, picker_seq = _twelve_ambiguous_creators()
+    g_seq = _build_canonical_with_n_creators(labels)
+    apply_reconciliation(
+        client=client_seq,
+        picker=picker_seq,
+        graph=g_seq,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=1,
+        field_timeout_seconds=0,
+    )
+    bytes_seq = g_seq.serialize(format="turtle")
+
+    # c=4 (concurrent): new path.
+    labels2, client_par, picker_par = _twelve_ambiguous_creators()
+    g_par = _build_canonical_with_n_creators(labels2)
+    apply_reconciliation(
+        client=client_par,
+        # picker_factory builds one StubPicker per worker thread; each
+        # carries the same decisions dict, so they're observationally
+        # identical to a shared picker.
+        picker_factory=lambda decisions=picker_par.decisions: StubPicker(decisions=dict(decisions)),
+        graph=g_par,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+    )
+    bytes_par = g_par.serialize(format="turtle")
+
+    assert bytes_seq == bytes_par, (
+        "Canonical Turtle diverged between c=1 and c=4 — the concurrent "
+        "orchestrator is not order-stable."
+    )
+
+
+class _SleepingPicker:
+    """Picker that blocks longer than the per-field budget on every ``pick`` call.
+
+    Used to exercise the orchestrator's ``field_budget_exceeded`` path
+    without depending on a real LLM backend.
+    """
+
+    model_name = "stub-sleeping"
+
+    def __init__(self, sleep_seconds: float) -> None:
+        self.sleep_seconds = sleep_seconds
+        self.call_count = 0
+
+    def pick(
+        self,
+        *,
+        request: EntityRequest,
+        candidates: list[AuthorityCandidate],
+    ) -> PickerDecision:
+        self.call_count += 1
+        time.sleep(self.sleep_seconds)
+        # Should never be reached when the orchestrator enforces a budget.
+        return PickerDecision(
+            decision="chose",
+            chosen_uri=candidates[0].uri if candidates else None,
+            confidence=0.99,
+            rationale=(
+                "SleepingPicker returned a verdict after sleeping — "
+                "the orchestrator failed to enforce the per-field budget."
+            ),
+        )
+
+
+def test_apply_reconciliation_picker_hang_triggers_field_budget_event(
+    tmp_path: Path,
+) -> None:
+    """A picker that sleeps past the budget must be aborted by the orchestrator.
+
+    The field falls through to tier-3 (highest-lexical + needs-review)
+    with ``was_watchdog_aborted=True``; a ``field_budget_exceeded``
+    event is written to the sidecar; the orchestrator does not
+    deadlock.
+    """
+    g = _build_canonical_with_n_creators(["Tolstoy, Leo,"])
+    client = StubAuthorityClient(
+        fixtures={
+            ("person", "Tolstoy, Leo,"): [
+                _candidate("http://kanto/a", "Tolstoy, Lev A", 0.97),
+                _candidate("http://kanto/b", "Tolstoy, Lev B", 0.96),
+            ]
+        }
+    )
+    sidecar = tmp_path / "watchdog-events.jsonl"
+    # Budget of 1 s; picker sleeps for 5 s → guaranteed budget violation.
+    picker = _SleepingPicker(sleep_seconds=5.0)
+
+    summary, outcomes = apply_reconciliation(
+        client=client,
+        picker=picker,
+        graph=g,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=1,
+        field_timeout_seconds=1,
+        watchdog_sidecar_path=sidecar,
+    )
+
+    # The field landed as tier-3 with watchdog marker; the picker never
+    # got to complete (so its return value didn't influence the binding).
+    assert summary.fallback == 1
+    assert summary.watchdog_aborted == 1
+    assert len(outcomes) == 1
+    assert outcomes[0].was_watchdog_aborted is True
+    assert outcomes[0].needs_review is True
+    assert outcomes[0].chosen_uri == "http://kanto/a"  # highest-lexical
+
+    # Sidecar contains exactly one field_budget_exceeded event.
+    lines = [json.loads(line) for line in sidecar.read_text().splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert lines[0]["event"] == "field_budget_exceeded"
+    assert lines[0]["model"] == "stub-sleeping"
+    assert lines[0]["elapsed_s"] >= 1.0
+
+
+def test_apply_reconciliation_zero_budget_disables_watchdog() -> None:
+    """``field_timeout_seconds=0`` must skip the budget wrap entirely.
+
+    The picker runs to completion (or natural failure) and the
+    outcome reflects the picker's real verdict. This is the Phase A
+    rollback knob — operators set
+    ``LLM_M9_FIELD_TIMEOUT_SECONDS=0`` to disable the watchdog
+    without code revert.
+    """
+    g = _build_canonical_with_n_creators(["Tolstoy, Leo,"])
+    client = StubAuthorityClient(
+        fixtures={
+            ("person", "Tolstoy, Leo,"): [
+                _candidate("http://kanto/a", "Tolstoy, Lev A", 0.97),
+                _candidate("http://kanto/b", "Tolstoy, Lev B", 0.96),
+            ]
+        }
+    )
+    picker = StubPicker(
+        decisions={
+            (
+                "http://urn.fi/URN:NBN:fi:bib:work:multi-0",
+                "Tolstoy, Leo,",
+            ): PickerDecision(
+                decision="chose",
+                chosen_uri="http://kanto/a",
+                confidence=0.95,
+                rationale="StubPicker chose candidate A for the zero-budget test.",
+            )
+        }
+    )
+
+    summary, outcomes = apply_reconciliation(
+        client=client,
+        picker=picker,
+        graph=g,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=1,
+        field_timeout_seconds=0,
+    )
+
+    assert summary.llm_pick == 1
+    assert summary.watchdog_aborted == 0
+    assert outcomes[0].was_watchdog_aborted is False
+    assert outcomes[0].chosen_uri == "http://kanto/a"
+
+
+def test_apply_reconciliation_requires_picker_or_factory() -> None:
+    """Either ``picker`` or ``picker_factory`` must be supplied."""
+    g = _build_canonical_with_n_creators(["Tolstoy, Leo,"])
+    with pytest.raises(ValueError, match="picker or picker_factory"):
+        apply_reconciliation(
+            client=StubAuthorityClient(fixtures={}),
+            graph=g,
+            now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        )
+
+
+def test_apply_reconciliation_concurrent_path_requires_factory() -> None:
+    """At c>=2 a ``picker_factory`` is required (one picker per worker)."""
+    g = _build_canonical_with_n_creators(["Tolstoy, Leo,"])
+    with pytest.raises(ValueError, match="picker_factory when concurrency"):
+        apply_reconciliation(
+            client=StubAuthorityClient(fixtures={}),
+            picker=StubPicker(),
+            graph=g,
+            now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+            concurrency=4,
+        )

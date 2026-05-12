@@ -842,17 +842,59 @@ def reconcile_command(
             ),
         ),
     ] = True,
+    concurrency: Annotated[
+        int,
+        typer.Option(
+            "--concurrency",
+            help=(
+                "ThreadPoolExecutor max_workers for the tier-2 picker dispatch. "
+                "tier-0 / tier-1 / tier-3 stay single-threaded. Defaults to "
+                "M9_CONCURRENCY from the env / .env (typically 4). Set 1 to "
+                "restore pre-Phase-A sequential behaviour. See "
+                "docs/plans/backlog/p-10-m9-reconcile-throughput.md Phase A."
+            ),
+        ),
+    ] = -1,
+    field_timeout: Annotated[
+        int,
+        typer.Option(
+            "--field-timeout-seconds",
+            help=(
+                "Per-field wall budget for the picker (tier-2). On exceed, the "
+                "field is marked bffi-prov:stage='watchdog-aborted' and falls "
+                "through to tier-3 fallback. Defaults to "
+                "LLM_M9_FIELD_TIMEOUT_SECONDS. Set 0 to disable the budget."
+            ),
+        ),
+    ] = -1,
 ) -> None:
     """Reconcile canonical Work creators + subjects against KANTO / VIAF / YSO / KAUNO / MUSO."""
     settings = get_settings()
     target = output_path or canonical_path or (settings.data_dir / "canonical.ttl")
     selected_kinds = _parse_reconcile_kinds(kinds)
+    # ``-1`` sentinels mean "fall through to settings"; explicit 0 / 1 / 4 from
+    # the CLI override the env. This keeps Phase A's rollback knob ergonomic
+    # (`--concurrency 1 --field-timeout-seconds 0`) without forcing the
+    # operator to also unset the env vars.
+    effective_concurrency = settings.m9_concurrency if concurrency < 0 else concurrency
+    effective_field_timeout = (
+        settings.llm_m9_field_timeout_seconds if field_timeout < 0 else field_timeout
+    )
+    watchdog_sidecar = settings.data_dir / "watchdog-events.jsonl"
 
     http_client = httpx.Client(timeout=10.0)
     try:
         client = reconcile.FintoSkosmosClient(http_client=http_client)
         fallback = reconcile.ViafClient(http_client=http_client)
-        picker = reconcile.LangChainLLMPicker(model_name=primary_model)
+
+        # Picker factory: at c>=2 the orchestrator builds one
+        # ``LangChainLLMPicker`` per worker thread (LangChain's
+        # underlying OpenAI-compat client has no documented
+        # thread-safety guarantee; one client per thread is cheap).
+        # At c=1 the factory is called once.
+        def picker_factory() -> reconcile.LLMPicker:
+            return reconcile.LangChainLLMPicker(model_name=primary_model)
+
         resolver: local_concept_resolver.LocalConceptResolver | None = (
             local_concept_resolver.FusekiConceptResolver(
                 http_client=http_client,
@@ -869,10 +911,13 @@ def reconcile_command(
                     output_path=target,
                     client=client,
                     fallback_client=fallback,
-                    picker=picker,
+                    picker_factory=picker_factory,
                     provenance_graph=writer.graph,
                     kinds=selected_kinds,
                     local_resolver=resolver,
+                    concurrency=effective_concurrency,
+                    field_timeout_seconds=effective_field_timeout,
+                    watchdog_sidecar_path=watchdog_sidecar,
                 )
         else:
             summary, _outcomes = reconcile.apply_reconciliation(
@@ -880,9 +925,12 @@ def reconcile_command(
                 output_path=target,
                 client=client,
                 fallback_client=fallback,
-                picker=picker,
+                picker_factory=picker_factory,
                 kinds=selected_kinds,
                 local_resolver=resolver,
+                concurrency=effective_concurrency,
+                field_timeout_seconds=effective_field_timeout,
+                watchdog_sidecar_path=watchdog_sidecar,
             )
     finally:
         http_client.close()

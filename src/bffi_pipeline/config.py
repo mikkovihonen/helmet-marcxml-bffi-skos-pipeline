@@ -93,6 +93,34 @@ class Settings(BaseSettings):
         default=300,
         alias="LLM_PAIR_TIMEOUT_SECONDS",
     )
+    # M9 reconcile concurrency. ThreadPoolExecutor max_workers for
+    # the picker (tier-2) dispatch in
+    # ``bffi_pipeline.stages.reconcile.apply_reconciliation``.
+    # tier-0 / tier-1 / tier-3 stay single-threaded — they're cheap
+    # and write back to the canonical graph. Default 4 matches
+    # M6's c=4 throughput knee on M2 Max (P-02 § A6). Setting to 1
+    # restores the pre-Phase-A sequential behaviour without code
+    # revert. See ``docs/plans/backlog/p-10-m9-reconcile-throughput.md``.
+    m9_concurrency: int = Field(
+        default=4,
+        alias="M9_CONCURRENCY",
+    )
+    # Per-field wall-time ceiling for the M9 picker. M9 analogue of
+    # ``llm_pair_timeout_seconds``: the outer budget that catches a
+    # hung tier-2 call from sterilising a worker thread under
+    # ``m9_concurrency``. The picker's connection-error retry stack
+    # is 5 / 30 / 120 s backoff x 3 retries + per-call timeout, so
+    # 180 s absorbs ~1 retry comfortably; a field that exceeds the
+    # budget is treated as stuck, marked
+    # ``bffi-prov:stage = "watchdog-aborted"``, and falls through to
+    # tier-3 fallback (highest-lexical + needs-review). 0 disables
+    # the budget — used by tests and by the Phase A rollback knob.
+    # Re-tune against ``docs/performance/`` snapshots if the 5k bench
+    # surfaces non-zero ``field_budget_exceeded`` events.
+    llm_m9_field_timeout_seconds: int = Field(
+        default=180,
+        alias="LLM_M9_FIELD_TIMEOUT_SECONDS",
+    )
 
     # Triple store.
     fuseki_url: str = Field(

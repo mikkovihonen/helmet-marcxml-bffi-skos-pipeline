@@ -34,8 +34,10 @@ tests against Finto.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import re
+import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
@@ -63,6 +65,7 @@ from bffi_pipeline.config import get_settings
 from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import logger as P
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.watchdog import emit_watchdog_event
 
 # --- Constants ------------------------------------------------------------
 
@@ -249,7 +252,16 @@ ReconciliationStage = LiteralType[
 
 @dataclass(frozen=True)
 class ReconciliationOutcome:
-    """Final outcome for one ``EntityRequest``."""
+    """Final outcome for one ``EntityRequest``.
+
+    ``was_watchdog_aborted`` is the M9 analogue of M6's
+    ``STAGE_WATCHDOG``: the picker call exceeded
+    ``LLM_M9_FIELD_TIMEOUT_SECONDS`` so the outcome was built from
+    tier-3 fallback (highest-lexical + needs-review). The flag drives
+    the ``bffi-prov:stage = "watchdog-aborted"`` literal in the
+    provenance graph (overrides ``stage`` for provenance purposes);
+    the canonical-graph mutation stays the same as a normal fallback.
+    """
 
     request: EntityRequest
     stage: ReconciliationStage
@@ -258,6 +270,7 @@ class ReconciliationOutcome:
     rationale: str
     candidates: list[AuthorityCandidate]
     needs_review: bool
+    was_watchdog_aborted: bool = False
 
     @property
     def is_success(self) -> bool:
@@ -275,6 +288,7 @@ class ReconciliationSummary:
     fallback: int = 0
     no_candidate: int = 0
     fictional: int = 0
+    watchdog_aborted: int = 0
     total: int = 0
 
     def render(self) -> str:
@@ -289,6 +303,7 @@ class ReconciliationSummary:
                 f"  reconciliation-fallback:                 {self.fallback:,}",
                 f"  reconciliation-no-candidate:             {self.no_candidate:,}",
                 f"  reconciliation-fictional-character:      {self.fictional:,}",
+                f"  watchdog-aborted (subset of fallback):   {self.watchdog_aborted:,}",
             )
         )
 
@@ -456,8 +471,17 @@ def _build_picker_chain(
     api_key: str,
     temperature: float = 0.0,
     seed: int = 42,
+    request_timeout_seconds: float | None = None,
 ) -> Any:
-    """Compose ``ChatOpenAI(...).with_structured_output(PickerDecision)``."""
+    """Compose ``ChatOpenAI(...).with_structured_output(PickerDecision)``.
+
+    ``request_timeout_seconds`` plumbs the per-call HTTP timeout
+    (``LLM_CALL_TIMEOUT_SECONDS``) onto the LangChain client so a
+    stuck mlx-lm response is bounded at the HTTP layer rather than
+    relying solely on the orchestrator-level per-field budget (plan
+    P-10 Phase A.4). ``None`` means "rely on LangChain's own default"
+    — used by the existing single-threaded callers and tests.
+    """
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_openai import ChatOpenAI
     from pydantic import SecretStr
@@ -479,13 +503,16 @@ def _build_picker_chain(
             ("user", sections["USER"]),
         ]
     )
-    llm = ChatOpenAI(
-        base_url=base_url,
-        api_key=SecretStr(api_key),
-        model=model_name,
-        temperature=temperature,
-        seed=seed,
-    )
+    chat_kwargs: dict[str, Any] = {
+        "base_url": base_url,
+        "api_key": SecretStr(api_key),
+        "model": model_name,
+        "temperature": temperature,
+        "seed": seed,
+    }
+    if request_timeout_seconds is not None:
+        chat_kwargs["request_timeout"] = request_timeout_seconds
+    llm = ChatOpenAI(**chat_kwargs)
     return template | llm.with_structured_output(PickerDecision, method="json_mode")
 
 
@@ -538,6 +565,7 @@ class LangChainLLMPicker:
             model_name=self.model_name or settings.llm_model_primary,
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
+            request_timeout_seconds=float(settings.llm_call_timeout_seconds),
         )
 
     def pick(
@@ -619,46 +647,52 @@ class LangChainLLMPicker:
         return _picker_uncertain(last_error)
 
 
-def decide_reconciliation(
+def _decide_before_picker(
     *,
     request: EntityRequest,
     candidates: list[AuthorityCandidate],
-    picker: LLMPicker,
-) -> ReconciliationOutcome:
-    """Apply the four-tier logic from spec § 6 + BUILD_PLAN M9.
+) -> tuple[ReconciliationOutcome | None, list[AuthorityCandidate]]:
+    """Tier-0/1 short-circuits without touching the picker.
 
-    The ordering matters and is committed:
-    1. lexical-direct (one candidate ≥ 0.95, no other candidate ≥ 0.95);
-    2. llm-pick (multiple high-similarity candidates) when LLM commits;
-    3. fallback (LLM uncertain or low-conf) — take highest-lexical;
-    4. no-candidate (none clear the lexical floor) — leave unreconciled.
+    Returns ``(outcome, sorted_candidates)``. When ``outcome`` is not
+    ``None``, the decision was made by the deterministic tiers
+    (no-candidate / lexical-direct) and the picker is unnecessary.
+    When ``outcome`` is ``None``, the caller must call
+    :func:`_decide_with_pick` with a ``PickerDecision`` (or build a
+    watchdog-aborted fallback) to finish the decision.
     """
     if not candidates:
-        return ReconciliationOutcome(
-            request=request,
-            stage=STAGE_NO_CANDIDATE,
-            chosen_uri=None,
-            confidence=0.0,
-            rationale="No candidates returned by the authority client.",
-            candidates=[],
-            needs_review=False,
+        return (
+            ReconciliationOutcome(
+                request=request,
+                stage=STAGE_NO_CANDIDATE,
+                chosen_uri=None,
+                confidence=0.0,
+                rationale="No candidates returned by the authority client.",
+                candidates=[],
+                needs_review=False,
+            ),
+            [],
         )
 
     sorted_candidates = sorted(candidates, key=lambda c: c.lexical_similarity, reverse=True)
     top = sorted_candidates[0]
 
     if top.lexical_similarity < LEXICAL_FLOOR:
-        return ReconciliationOutcome(
-            request=request,
-            stage=STAGE_NO_CANDIDATE,
-            chosen_uri=None,
-            confidence=top.lexical_similarity,
-            rationale=(
-                f"Top lexical similarity {top.lexical_similarity:.3f} below "
-                f"the {LEXICAL_FLOOR:.2f} floor; left unreconciled."
+        return (
+            ReconciliationOutcome(
+                request=request,
+                stage=STAGE_NO_CANDIDATE,
+                chosen_uri=None,
+                confidence=top.lexical_similarity,
+                rationale=(
+                    f"Top lexical similarity {top.lexical_similarity:.3f} below "
+                    f"the {LEXICAL_FLOOR:.2f} floor; left unreconciled."
+                ),
+                candidates=sorted_candidates,
+                needs_review=False,
             ),
-            candidates=sorted_candidates,
-            needs_review=False,
+            sorted_candidates,
         )
 
     high_similarity = [
@@ -666,21 +700,33 @@ def decide_reconciliation(
     ]
     if len(high_similarity) == 1:
         winner = high_similarity[0]
-        return ReconciliationOutcome(
-            request=request,
-            stage=STAGE_LEXICAL,
-            chosen_uri=winner.uri,
-            confidence=winner.lexical_similarity,
-            rationale=(
-                f"Single candidate cleared the {LEXICAL_DIRECT_THRESHOLD:.2f} "
-                f"lexical floor: {winner.pref_label!r} "
-                f"({winner.lexical_similarity:.3f})."
+        return (
+            ReconciliationOutcome(
+                request=request,
+                stage=STAGE_LEXICAL,
+                chosen_uri=winner.uri,
+                confidence=winner.lexical_similarity,
+                rationale=(
+                    f"Single candidate cleared the {LEXICAL_DIRECT_THRESHOLD:.2f} "
+                    f"lexical floor: {winner.pref_label!r} "
+                    f"({winner.lexical_similarity:.3f})."
+                ),
+                candidates=sorted_candidates,
+                needs_review=False,
             ),
-            candidates=sorted_candidates,
-            needs_review=False,
+            sorted_candidates,
         )
 
-    pick = picker.pick(request=request, candidates=sorted_candidates)
+    return None, sorted_candidates
+
+
+def _decide_with_pick(
+    *,
+    request: EntityRequest,
+    sorted_candidates: list[AuthorityCandidate],
+    pick: PickerDecision,
+) -> ReconciliationOutcome:
+    """Apply tier-2 / tier-3 given an already-computed picker decision."""
     if (
         pick.decision == "chose"
         and pick.chosen_uri is not None
@@ -696,6 +742,7 @@ def decide_reconciliation(
             needs_review=False,
         )
 
+    top = sorted_candidates[0]
     return ReconciliationOutcome(
         request=request,
         stage=STAGE_FALLBACK,
@@ -709,6 +756,61 @@ def decide_reconciliation(
         candidates=sorted_candidates,
         needs_review=True,
     )
+
+
+def _watchdog_aborted_outcome(
+    *,
+    request: EntityRequest,
+    sorted_candidates: list[AuthorityCandidate],
+    elapsed_seconds: float,
+    budget_seconds: int,
+) -> ReconciliationOutcome:
+    """Build a tier-3-shaped outcome for a picker call that exceeded its budget.
+
+    The canonical-graph mutation is identical to a normal fallback
+    (highest-lexical + needs-review), so cataloguers see the same
+    Skosmos UX. The ``was_watchdog_aborted`` flag drives the
+    ``bffi-prov:stage = "watchdog-aborted"`` literal in the provenance
+    graph so the audit trail distinguishes "LLM said uncertain" from
+    "LLM never answered in time".
+    """
+    top = sorted_candidates[0]
+    return ReconciliationOutcome(
+        request=request,
+        stage=STAGE_FALLBACK,
+        chosen_uri=top.uri,
+        confidence=top.lexical_similarity,
+        rationale=(
+            f"Picker exceeded the {budget_seconds}s per-field budget "
+            f"(elapsed {elapsed_seconds:.1f}s); falling back to highest-lexical "
+            f"candidate {top.pref_label!r} ({top.lexical_similarity:.3f}). "
+            f"Flagged needs-review and bffi-prov:stage=watchdog-aborted."
+        ),
+        candidates=sorted_candidates,
+        needs_review=True,
+        was_watchdog_aborted=True,
+    )
+
+
+def decide_reconciliation(
+    *,
+    request: EntityRequest,
+    candidates: list[AuthorityCandidate],
+    picker: LLMPicker,
+) -> ReconciliationOutcome:
+    """Apply the four-tier logic from spec § 6 + BUILD_PLAN M9.
+
+    Kept for backwards compatibility with the ``reconcile_one``
+    single-threaded path and existing unit tests. The P-10 Phase A
+    concurrent orchestrator uses :func:`_decide_before_picker` and
+    :func:`_decide_with_pick` directly so the picker dispatch can be
+    parallelised and budget-wrapped.
+    """
+    outcome, sorted_candidates = _decide_before_picker(request=request, candidates=candidates)
+    if outcome is not None:
+        return outcome
+    pick = picker.pick(request=request, candidates=sorted_candidates)
+    return _decide_with_pick(request=request, sorted_candidates=sorted_candidates, pick=pick)
 
 
 # --- Authority clients ----------------------------------------------------
@@ -1180,6 +1282,13 @@ def _apply_canonical_link(graph: Graph, request: EntityRequest, chosen_uri: str)
     )
 
 
+#: Provenance ``bffi-prov:stage`` literal for outcomes where the picker
+#: exceeded its per-field budget. Mirrors M6's ``STAGE_WATCHDOG`` literal
+#: in ``stages/judge.py`` so cataloguers see one consistent marker
+#: across stages.
+STAGE_WATCHDOG_ABORTED: Final[str] = "watchdog-aborted"
+
+
 def _emit_provenance(
     writer_graph: Graph | None,
     *,
@@ -1189,6 +1298,13 @@ def _emit_provenance(
 ) -> None:
     if writer_graph is None:
         return
+    # Watchdog-aborted outcomes are recorded as ``"watchdog-aborted"`` in
+    # provenance (matching M6's contract). The ``outcome.stage`` field
+    # stays ``STAGE_FALLBACK`` for canonical-graph purposes — the
+    # binding *is* a fallback — but the provenance Activity distinguishes
+    # "LLM said uncertain" (``reconciliation-fallback``) from "LLM never
+    # answered in time" (``watchdog-aborted``).
+    stage_literal: str = STAGE_WATCHDOG_ABORTED if outcome.was_watchdog_aborted else outcome.stage
     P.log_reconciliation(
         writer_graph,
         work_uri=outcome.request.work_uri,
@@ -1196,7 +1312,7 @@ def _emit_provenance(
         source_vocabulary=(
             outcome.candidates[0].source_vocabulary if outcome.candidates else "none"
         ),
-        stage=outcome.stage,
+        stage=stage_literal,
         chosen_authority_uri=outcome.chosen_uri,
         candidates=[(c.uri, c.lexical_similarity) for c in outcome.candidates],
         confidence=outcome.confidence,
@@ -1325,13 +1441,166 @@ def _collect_requests(
     return out
 
 
-def apply_reconciliation(
+def _field_id(request: EntityRequest) -> str:
+    """Stable key for one M9 reconciliation field.
+
+    Used as the ``pair_id`` argument when emitting watchdog events
+    (the watchdog API uses ``pair_id`` for both M6 pairs and M9
+    fields). The format mirrors what cataloguers see in the
+    canonical graph: ``<work_uri>|<predicate>|<literal>``.
+    """
+    predicate = request.predicate_uri or request.kind
+    return f"{request.work_uri}|{predicate}|{request.literal}"
+
+
+def _picker_phase_seq(
+    deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]],
+    *,
+    picker: LLMPicker,
+    field_timeout_seconds: int,
+    model_name: str,
+    watchdog_sidecar_path: Path | None,
+) -> list[tuple[int, ReconciliationOutcome]]:
+    """Sequential (c=1) path: call the shared picker inline per field."""
+    results: list[tuple[int, ReconciliationOutcome]] = []
+    for idx, request, sorted_candidates in deferred:
+        outcome, _events = _picker_call_with_budget(
+            picker=picker,
+            request=request,
+            sorted_candidates=sorted_candidates,
+            field_timeout_seconds=field_timeout_seconds,
+            model_name=model_name,
+            watchdog_sidecar_path=watchdog_sidecar_path,
+        )
+        results.append((idx, outcome))
+    return results
+
+
+def _picker_phase_pool(
+    deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]],
+    *,
+    picker_factory: Callable[[], LLMPicker],
+    concurrency: int,
+    field_timeout_seconds: int,
+    model_name: str,
+    watchdog_sidecar_path: Path | None,
+) -> list[tuple[int, ReconciliationOutcome]]:
+    """Concurrent (c>=2) path: thread-local pickers, parallel dispatch.
+
+    Each worker thread constructs its own ``LLMPicker`` on first use
+    via ``threading.local()``. LangChain's underlying OpenAI-compat
+    client has no documented thread-safety guarantee, and building
+    one picker per worker is cheap.
+
+    Worker results are collected and returned in submission-index
+    order so the caller can apply graph mutations deterministically
+    regardless of completion order.
+    """
+    thread_local = threading.local()
+    _RunArgs = tuple[int, EntityRequest, list[AuthorityCandidate]]
+    _RunResult = tuple[int, ReconciliationOutcome]
+
+    def _run(args: _RunArgs) -> _RunResult:
+        idx, request, sorted_candidates = args
+        picker = getattr(thread_local, "picker", None)
+        if picker is None:
+            picker = picker_factory()
+            thread_local.picker = picker
+        outcome, _events = _picker_call_with_budget(
+            picker=picker,
+            request=request,
+            sorted_candidates=sorted_candidates,
+            field_timeout_seconds=field_timeout_seconds,
+            model_name=model_name,
+            watchdog_sidecar_path=watchdog_sidecar_path,
+        )
+        return idx, outcome
+
+    results: list[tuple[int, ReconciliationOutcome]] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(_run, item) for item in deferred]
+        for fut in concurrent.futures.as_completed(futures):
+            results.append(fut.result())
+    results.sort(key=lambda t: t[0])
+    return results
+
+
+def _picker_call_with_budget(
+    *,
+    picker: LLMPicker,
+    request: EntityRequest,
+    sorted_candidates: list[AuthorityCandidate],
+    field_timeout_seconds: int,
+    model_name: str,
+    watchdog_sidecar_path: Path | None,
+) -> tuple[ReconciliationOutcome, int]:
+    """Run ``picker.pick`` with a per-field wall budget.
+
+    Returns ``(outcome, watchdog_event_count)``. When the budget is
+    exceeded, the outcome is a tier-3 fallback marked
+    ``was_watchdog_aborted=True`` and one
+    ``field_budget_exceeded`` event is emitted to stderr +
+    ``watchdog_sidecar_path``. ``field_timeout_seconds <= 0`` disables
+    budget enforcement (test / rollback use case).
+
+    Budget enforcement uses a single-thread ``ThreadPoolExecutor``
+    inside the worker so a stuck picker call doesn't block the outer
+    thread's progress. The inner thread is then ``shutdown(wait=False)``
+    — the stuck call eventually completes (bounded by
+    ``LLM_CALL_TIMEOUT_SECONDS`` times the picker retry count via the
+    underlying httpx client) and reclaims its slot.
+    """
+    pair_id = _field_id(request)
+    started = time.monotonic()
+
+    if field_timeout_seconds <= 0:
+        pick = picker.pick(request=request, candidates=sorted_candidates)
+        outcome = _decide_with_pick(request=request, sorted_candidates=sorted_candidates, pick=pick)
+        return outcome, 0
+
+    inner = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix=f"picker-budget-{pair_id[:32]}"
+    )
+    fut = inner.submit(picker.pick, request=request, candidates=sorted_candidates)
+    try:
+        pick = fut.result(timeout=field_timeout_seconds)
+    except concurrent.futures.TimeoutError:
+        elapsed = time.monotonic() - started
+        inner.shutdown(wait=False)
+        emit_watchdog_event(
+            pair_id=pair_id,
+            event="field_budget_exceeded",
+            model_name=model_name,
+            elapsed_seconds=elapsed,
+            retry_n=0,
+            sidecar_path=watchdog_sidecar_path,
+        )
+        outcome = _watchdog_aborted_outcome(
+            request=request,
+            sorted_candidates=sorted_candidates,
+            elapsed_seconds=elapsed,
+            budget_seconds=field_timeout_seconds,
+        )
+        return outcome, 1
+
+    inner.shutdown(wait=False)
+    outcome = _decide_with_pick(request=request, sorted_candidates=sorted_candidates, pick=pick)
+    return outcome, 0
+
+
+#: Concurrency value at or above which ``picker_factory`` becomes
+#: mandatory (each worker thread builds its own LLMPicker).
+_MIN_CONCURRENCY_FOR_FACTORY: Final[int] = 2
+
+
+def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator (tier-0/1, picker dispatch, mutation + provenance); splitting fragments shared state across phases.
     canonical_path: Path | None = None,
     *,
     output_path: Path | None = None,
     client: AuthorityClient,
     fallback_client: AuthorityClient | None = None,
-    picker: LLMPicker,
+    picker: LLMPicker | None = None,
+    picker_factory: Callable[[], LLMPicker] | None = None,
     provenance_graph: Graph | None = None,
     requests: Iterable[EntityRequest] | None = None,
     graph: Graph | None = None,
@@ -1339,6 +1608,9 @@ def apply_reconciliation(
     now: datetime | None = None,
     kinds: set[AuthorityKind] | frozenset[AuthorityKind] | None = None,
     local_resolver: LocalConceptResolver | None = None,
+    concurrency: int = 1,
+    field_timeout_seconds: int = 0,
+    watchdog_sidecar_path: Path | None = None,
 ) -> tuple[ReconciliationSummary, list[ReconciliationOutcome]]:
     """Walk canonical.ttl, reconcile creators + subjects, and write the graph back.
 
@@ -1353,6 +1625,21 @@ def apply_reconciliation(
     ``{"subject", "genre_form", "music_form"}`` to limit to the subject
     side. Explicit ``requests=`` overrides this filter — the caller is
     assumed to have done the filtering already.
+
+    P-10 Phase A: tier-2 picker calls are dispatched through a
+    ``ThreadPoolExecutor(max_workers=concurrency)``; tier-0, tier-1,
+    tier-3 (no-candidate) stay single-threaded. ``concurrency == 1``
+    keeps the pre-Phase-A sequential behaviour for rollback /
+    deterministic tests. Each picker call is wrapped in a
+    ``field_timeout_seconds``-second wall budget; on exceed, the field
+    falls through to tier-3 fallback (highest-lexical + needs-review)
+    with the provenance Activity stamped
+    ``bffi-prov:stage = "watchdog-aborted"``.
+
+    Pass ``picker_factory`` for concurrent runs (one ``LLMPicker`` is
+    built per worker thread). Pass ``picker`` for single-threaded
+    runs (existing callers / tests). At least one of the two must be
+    supplied.
     """
     settings = get_settings()
     canonical_path = canonical_path or (settings.data_dir / "canonical.ttl")
@@ -1361,6 +1648,19 @@ def apply_reconciliation(
     selected_kinds: frozenset[AuthorityKind] = (
         ALL_AUTHORITY_KINDS if kinds is None else frozenset(kinds)
     )
+
+    if picker is None and picker_factory is None:
+        raise ValueError("apply_reconciliation requires picker or picker_factory")
+    if concurrency >= _MIN_CONCURRENCY_FOR_FACTORY and picker_factory is None:
+        raise ValueError(
+            "apply_reconciliation requires picker_factory when concurrency >= 2 "
+            "(each worker thread builds its own LLMPicker)"
+        )
+    # Single picker for the c=1 path. ``picker`` takes precedence if both are
+    # supplied so tests that inject a ``StubPicker`` continue to work.
+    seq_picker: LLMPicker | None = picker
+    if seq_picker is None and picker_factory is not None:
+        seq_picker = picker_factory()
 
     own_graph = graph is None
     target_graph: Graph
@@ -1376,21 +1676,83 @@ def apply_reconciliation(
     )
 
     summary = ReconciliationSummary(total=len(request_list))
-    outcomes: list[ReconciliationOutcome] = []
 
-    for request in request_list:
-        started = datetime.now(UTC)
-        outcome = reconcile_one(
-            request=request,
-            client=client,
-            fallback_client=fallback_client,
-            picker=picker,
-            top_k=top_k,
-            local_resolver=local_resolver,
+    # --- Phase 1: walk requests serially through tier-0 + candidate-query --
+    # Collect either a decided outcome (tier-0 / no-candidate / lexical) or a
+    # picker-needed entry ``(idx, request, sorted_candidates)`` for Phase 2.
+    pre_outcomes: dict[int, ReconciliationOutcome] = {}
+    deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]] = []
+    started_at: dict[int, datetime] = {}
+
+    for idx, request in enumerate(request_list):
+        started_at[idx] = datetime.now(UTC)
+        # Fictional-character marker short-circuit (tier-0 sibling).
+        if request.kind == "fictional_character":
+            pre_outcomes[idx] = _fictional_outcome(request)
+            continue
+        # Tier-0: local exact-prefLabel match.
+        if local_resolver is not None:
+            hit = local_resolver.resolve(literal=request.literal, kind=request.kind)
+            if hit is not None:
+                pre_outcomes[idx] = _local_outcome(request, hit)
+                continue
+        # Authority client candidate query (network — kept serial for now).
+        candidates = client.query(request=request, top_k=top_k)
+        if not candidates and fallback_client is not None:
+            candidates = fallback_client.query(request=request, top_k=top_k)
+        # Tier-1 short-circuit OR queue for picker dispatch.
+        outcome_or_none, sorted_candidates = _decide_before_picker(
+            request=request, candidates=candidates
         )
-        ended = datetime.now(UTC)
+        if outcome_or_none is not None:
+            pre_outcomes[idx] = outcome_or_none
+        else:
+            deferred.append((idx, request, sorted_candidates))
+
+    # --- Phase 2: dispatch deferred picker calls --------------------------
+    picker_results: list[tuple[int, ReconciliationOutcome]] = []
+    if deferred:
+        # Derive a model_name string for watchdog events. Falls back to "
+        # unknown" if the picker is a stub or doesn't expose model_name.
+        probe_picker = (
+            seq_picker
+            if seq_picker is not None
+            else (picker_factory() if picker_factory is not None else None)
+        )
+        model_name = getattr(probe_picker, "model_name", None) or "unknown"
+
+        if concurrency <= 1:
+            assert seq_picker is not None  # narrow for mypy; validated above
+            picker_results = _picker_phase_seq(
+                deferred,
+                picker=seq_picker,
+                field_timeout_seconds=field_timeout_seconds,
+                model_name=model_name,
+                watchdog_sidecar_path=watchdog_sidecar_path,
+            )
+        else:
+            assert picker_factory is not None  # narrow; validated above
+            picker_results = _picker_phase_pool(
+                deferred,
+                picker_factory=picker_factory,
+                concurrency=concurrency,
+                field_timeout_seconds=field_timeout_seconds,
+                model_name=model_name,
+                watchdog_sidecar_path=watchdog_sidecar_path,
+            )
+
+    for idx, outcome in picker_results:
+        pre_outcomes[idx] = outcome
+
+    # --- Phase 3: apply graph mutations + provenance in request order -----
+    # Deterministic by construction: sorted by the original request index.
+    outcomes: list[ReconciliationOutcome] = []
+    for idx in range(len(request_list)):
+        outcome = pre_outcomes[idx]
         outcomes.append(outcome)
 
+        if outcome.was_watchdog_aborted:
+            summary.watchdog_aborted += 1
         if outcome.stage == STAGE_LOCAL:
             summary.local += 1
         elif outcome.stage == STAGE_LEXICAL:
@@ -1413,7 +1775,12 @@ def apply_reconciliation(
                 needs_review=outcome.needs_review,
                 now=moment,
             )
-        _emit_provenance(provenance_graph, outcome=outcome, started_at=started, ended_at=ended)
+        _emit_provenance(
+            provenance_graph,
+            outcome=outcome,
+            started_at=started_at[idx],
+            ended_at=datetime.now(UTC),
+        )
 
     if own_graph:
         tmp = output_path.with_suffix(output_path.suffix + ".tmp")
@@ -1443,6 +1810,7 @@ __all__ = [
     "STAGE_LLM",
     "STAGE_LOCAL",
     "STAGE_NO_CANDIDATE",
+    "STAGE_WATCHDOG_ABORTED",
     "VOCAB_KANTO",
     "VOCAB_KAUNO",
     "VOCAB_MUSO",
