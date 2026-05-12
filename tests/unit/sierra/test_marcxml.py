@@ -392,6 +392,113 @@ def test_row_to_marcxml_round_trips_through_pymarc() -> None:
     assert title_245[0].get_subfields("a") == ["Sota ja rauha"]
 
 
+def _subfields_of(record: Record, tag: str) -> list[dict[str, str]]:
+    """Return one dict per datafield with the given tag, mapping subfield
+    code → content. Used to assert RDA 33X synthesis encoding-
+    agnostically (pymarc HTML-encodes the Finnish diacritics in the raw
+    bytes, so direct string-matching is brittle)."""
+    out: list[dict[str, str]] = []
+    for field in record.get_fields(tag):
+        out.append({sf.code: sf.value for sf in field.subfields})
+    return out
+
+
+def test_row_to_marcxml_synthesises_33x_from_itype_book() -> None:
+    """Bib without 336/337/338 + one Adult book 28 item (itype 100)
+    → synthesised text/unmediated/volume tuple. Recovers the pre-RDA
+    records that drop on the M2 ``marcxml-content-minimum`` gate."""
+    items = [
+        {"location_code": "kk", "copy_num": 1, "item_type_num": 100, "barcode": None, "call_number": None},
+    ]
+    _filename, xml_bytes = build_marcxml_for_row(_row(items=items))
+    record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
+    assert _subfields_of(record, "336") == [
+        {"a": "teksti", "b": "txt", "2": "rdacontent"},
+    ]
+    assert _subfields_of(record, "337") == [
+        {"a": "käytettävissä ilman laitetta", "b": "n", "2": "rdamedia"},
+    ]
+    assert _subfields_of(record, "338") == [
+        {"a": "nide", "b": "nc", "2": "rdacarrier"},
+    ]
+
+
+def test_row_to_marcxml_synthesises_two_336_for_console_game() -> None:
+    """Console-game itypes idiomatically carry **two** 336 datafields —
+    ``tdi`` (2-D moving image: the in-game visuals) AND ``cop`` (the
+    game is a computer program). Mapping reproduces both."""
+    items = [
+        {"location_code": "kk", "copy_num": 1, "item_type_num": 116, "barcode": None, "call_number": None},
+    ]
+    _filename, xml_bytes = build_marcxml_for_row(_row(items=items))
+    record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
+    f336 = _subfields_of(record, "336")
+    assert len(f336) == 2
+    assert {sf["b"] for sf in f336} == {"tdi", "cop"}
+    assert _subfields_of(record, "337")[0]["b"] == "c"
+    assert _subfields_of(record, "338")[0]["b"] == "cd"
+
+
+def test_row_to_marcxml_no_33x_synth_when_itype_unmapped() -> None:
+    """An itype not in the mapping (e.g. a niche object type or any of
+    the unnamed reserved slots) should leave the bib without
+    synthesised 33X — the strict M2 gate then drops the record, which
+    is the deliberate behaviour while cataloguer input is pending."""
+    items = [
+        {"location_code": "kk", "copy_num": 1, "item_type_num": 999, "barcode": None, "call_number": None},
+    ]
+    _filename, xml_bytes = build_marcxml_for_row(_row(items=items))
+    body = xml_bytes.decode("utf-8")
+    assert 'tag="336"' not in body
+    assert 'tag="337"' not in body
+    assert 'tag="338"' not in body
+
+
+def test_row_to_marcxml_preserves_existing_33x_varfield() -> None:
+    """Cataloguer-supplied 33X always wins — the synth path runs only
+    when no Sierra-side 33X varfield is present. Verifies the gate."""
+    varfields = [
+        {
+            "id": 1,
+            "marc_tag": "336",
+            "marc_ind1": " ",
+            "marc_ind2": " ",
+            "field_content": "",
+            "subfields": [
+                {"tag": "a", "content": "cartographic image", "display_order": 0},
+                {"tag": "b", "content": "cri", "display_order": 1},
+                {"tag": "2", "content": "rdacontent", "display_order": 2},
+            ],
+        }
+    ]
+    items = [
+        {"location_code": "kk", "copy_num": 1, "item_type_num": 100, "barcode": None, "call_number": None},
+    ]
+    _filename, xml_bytes = build_marcxml_for_row(_row(varfields=varfields, items=items))
+    body = xml_bytes.decode("utf-8")
+    # The cataloguer's cri / cartographic image wins; teksti / txt
+    # would only appear if synth fired (it shouldn't here).
+    assert "cartographic image" in body
+    assert "teksti" not in body
+
+
+def test_row_to_marcxml_picks_lowest_mapped_itype_for_mixed_bib() -> None:
+    """A bib with multiple items of different itypes — synth path
+    picks the lowest-numbered *mapped* itype (matches the
+    ``MIN(itype_code_num)`` convention of the empirical discovery
+    query). Here itype 116 (Adult console game K12) sorts before
+    itype 200 (Juvenile book) so the console-game RDA tuple wins."""
+    items = [
+        {"location_code": "kk", "copy_num": 1, "item_type_num": 200, "barcode": None, "call_number": None},
+        {"location_code": "etk", "copy_num": 1, "item_type_num": 116, "barcode": None, "call_number": None},
+    ]
+    _filename, xml_bytes = build_marcxml_for_row(_row(items=items))
+    record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
+    f336 = _subfields_of(record, "336")
+    # Console game's two-336 signature, not the book's one-336.
+    assert {sf["b"] for sf in f336} == {"tdi", "cop"}
+
+
 def test_build_record_drops_datafield_with_no_valid_subfields() -> None:
     """A varfield whose subfield list is empty (or whose every subfield
     has an invalid tag) should be skipped entirely — emitting a bare

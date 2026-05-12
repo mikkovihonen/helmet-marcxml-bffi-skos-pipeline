@@ -47,6 +47,7 @@ from pymarc import Field, Indicators, Record, marcxml
 from pymarc import Subfield as PymarcSubfield
 
 from marcxml_export_pipeline.sierra.dtos import Leaderfield, Subfield, Varfield
+from marcxml_export_pipeline.sierra.itype_to_rda import lookup_rda_for_items
 
 # --- Constants ----------------------------------------------------------
 
@@ -203,6 +204,28 @@ def build_leader(lf: Leaderfield | None) -> str:
         f"{lf.multipart_level_code or ' '}"
         "4500"
     )
+
+
+def _build_rda_varfield(tag: str, label: str, code: str, source: str) -> Varfield:
+    """Return a synthetic :class:`Varfield` for an RDA 336/337/338 entry.
+
+    Three subfields: ``$a`` localised label, ``$b`` RDA code, ``$2`` source
+    vocabulary (``rdacontent`` / ``rdamedia`` / ``rdacarrier``). Matches the
+    cataloguer-canonical shape observed across the corpus.
+    """
+    vf = Varfield(
+        id=None,
+        marc_tag=tag,
+        marc_ind1=" ",
+        marc_ind2=" ",
+        field_content="",
+    )
+    vf.subfields = [
+        Subfield(tag="a", content=label, display_order=0),
+        Subfield(tag="b", content=code, display_order=1),
+        Subfield(tag="2", content=source, display_order=2),
+    ]
+    return vf
 
 
 def build_holdings_fields(item_dicts: list[dict[str, Any]]) -> list[Field]:
@@ -386,6 +409,27 @@ def build_marcxml_for_row(row: tuple[Any, ...]) -> tuple[str, bytes]:
         ts = _format_005(last_updated)
         if ts:
             controlfields.append(("005", ts))
+
+    # Synthesise RDA 33X (336/337/338) from item types when the bib
+    # carries no cataloguer-coded 33X. Recovers the pre-RDA records
+    # (~10 % of the corpus in the 2026-05-12 5k run) that the M2
+    # ``marcxml-content-minimum`` gate otherwise drops. The mapping
+    # itype → RDA tuple was derived empirically from cataloguer-voted
+    # 33X coding on bibs that do have 33X. See
+    # ``marcxml_export_pipeline.sierra.itype_to_rda`` for the source of
+    # truth.
+    if not present_tags & {"336", "337", "338"}:
+        rda = lookup_rda_for_items(item_dicts)
+        if rda is not None:
+            for c_label, c_code in rda.content_types:
+                varfields.append(_build_rda_varfield("336", c_label, c_code, "rdacontent"))
+            varfields.append(
+                _build_rda_varfield("337", rda.media[0], rda.media[1], "rdamedia")
+            )
+            varfields.append(
+                _build_rda_varfield("338", rda.carrier[0], rda.carrier[1], "rdacarrier")
+            )
+            present_tags.update({"336", "337", "338"})
 
     extra_fields = build_holdings_fields(item_dicts)
 

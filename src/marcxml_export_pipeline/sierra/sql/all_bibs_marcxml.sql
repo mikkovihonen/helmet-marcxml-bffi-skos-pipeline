@@ -78,11 +78,18 @@ SELECT
     (
         -- One entry per non-suppressed linked item. Processor maps these to
         -- 852 datafields: $b=location_code, $h=call_number,
-        -- $p=barcode, $t=copy_num (when > 1).
+        -- $p=barcode, $t=copy_num (when > 1). ``itype_code_num`` joins to
+        -- ``sierra_view.itype_property_myuser.code`` for the cataloguer-
+        -- assigned item type; ``marcxml_export_pipeline.sierra.itype_to_rda``
+        -- maps that code to RDA 336/337/338 codes that the processor
+        -- synthesises onto the bib when no Sierra-side 33X varfield is
+        -- coded (else the M2 marcxml-content-minimum gate drops the
+        -- whole record).
         SELECT jsonb_agg(
             jsonb_build_object(
                 'location_code', i.location_code,
                 'copy_num', i.copy_num,
+                'item_type_num', i.itype_code_num,
                 'call_number', (
                     SELECT vf.field_content
                     FROM sierra_view.varfield vf
