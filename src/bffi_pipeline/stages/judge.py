@@ -44,6 +44,7 @@ import hashlib
 import json as _json
 import re
 import sqlite3
+import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -507,12 +508,20 @@ class JudgeCache:
 
     def __init__(self, path: Path | str):
         self._path = path
-        # check_same_thread=False so the cache can be shared across worker
-        # threads in the M6 concurrent batch driver. SQLite serialises
-        # writes through its own write lock; concurrent reads are fine.
+        # check_same_thread=False permits cross-thread use of the connection,
+        # but the sqlite3 module does NOT serialise concurrent statement
+        # execution on a shared connection (an unlocked concurrent
+        # ``execute()`` raises ``sqlite3.InterfaceError: bad parameter or
+        # other API misuse``, surfaced during the M6_CONCURRENCY=4
+        # production-scale run). ``_lock`` serialises every ``execute()`` /
+        # ``commit()``. Held only for the SQLite call itself, so contention
+        # is negligible compared to the seconds-long LLM call each thread
+        # spends elsewhere.
+        self._lock = threading.Lock()
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
-        self._conn.execute(self._SCHEMA)
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(self._SCHEMA)
+            self._conn.commit()
 
     def __enter__(self) -> JudgeCache:
         return self
@@ -522,15 +531,16 @@ class JudgeCache:
 
     def close(self) -> None:
         """Close the underlying SQLite connection (idempotent)."""
-        with suppress(sqlite3.ProgrammingError):
+        with suppress(sqlite3.ProgrammingError), self._lock:
             self._conn.close()
 
     def get(self, key: str) -> WorkMatchDecision | None:
         """Return the cached decision for ``key`` or ``None`` if not present."""
-        row = self._conn.execute(
-            "SELECT decision FROM judge_cache WHERE cache_key = ?",
-            (key,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT decision FROM judge_cache WHERE cache_key = ?",
+                (key,),
+            ).fetchone()
         if row is None:
             return None
         return WorkMatchDecision.model_validate_json(row[0])
@@ -549,19 +559,20 @@ class JudgeCache:
         the decision for audit; never silently re-cache a decision under
         a different model or prompt.
         """
-        self._conn.execute(
-            "INSERT OR REPLACE INTO judge_cache "
-            "(cache_key, model_name, prompt_hash, decision, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (
-                key,
-                model_name,
-                prompt_hash_value,
-                decision.model_dump_json(),
-                datetime.now(UTC).isoformat(),
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO judge_cache "
+                "(cache_key, model_name, prompt_hash, decision, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    key,
+                    model_name,
+                    prompt_hash_value,
+                    decision.model_dump_json(),
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            self._conn.commit()
 
 
 def default_cache_path() -> Path:
