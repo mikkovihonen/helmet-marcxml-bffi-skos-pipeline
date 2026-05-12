@@ -106,7 +106,7 @@ STAGE_AUTO_MERGE: Final[str] = "auto-merge-embedding"
 #: ``bffi-prov:stage`` for pairs that fell through the M6 cascade
 #: because every LLM call (primary + fallback) exceeded
 #: ``LLM_CALL_TIMEOUT_SECONDS`` and exhausted the retry budget.
-#: Plan: ``docs/plans/in-progress/p-03-m6-stall-watchdog.md``.
+#: Plan: ``docs/plans/completed/p-03-m6-stall-watchdog.md``.
 STAGE_WATCHDOG: Final[str] = "watchdog-aborted"
 
 #: Subset of timeout-shaped exception names that the watchdog

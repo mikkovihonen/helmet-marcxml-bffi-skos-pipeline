@@ -593,7 +593,7 @@ def judge_command(
                 "'uncertain' with bffi-prov:stage='watchdog-aborted'. "
                 "Watchdog events stream to stderr (prefix 'WATCHDOG_EVENT') "
                 "and to <BFFI_DATA_DIR>/watchdog-events.jsonl for "
-                "post-run audit. See docs/plans/in-progress/p-03-m6-stall-watchdog.md."
+                "post-run audit. See docs/plans/completed/p-03-m6-stall-watchdog.md."
             ),
             min=1,
         ),
@@ -612,7 +612,7 @@ def judge_command(
                 "Pairs exceeding this budget land as 'uncertain' with "
                 "bffi-prov:stage='watchdog-aborted' and emit a "
                 "'pair_budget_exceeded' watchdog event. See "
-                "docs/plans/in-progress/p-03-m6-stall-watchdog.md Phase B."
+                "docs/plans/completed/p-03-m6-stall-watchdog.md Phase B."
             ),
             min=1,
         ),

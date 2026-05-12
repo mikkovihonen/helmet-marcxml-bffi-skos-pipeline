@@ -91,7 +91,7 @@ plan documents *when the execution was scheduled*.
   — `planning (graduated)`. Detect M6 LLM calls that hang and retry
   the stuck pair so unattended overnight runs don't lose hours to a
   single transient Ollama wedge. Plan lives at
-  [`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](../plans/in-progress/p-03-m6-stall-watchdog.md).
+  [`docs/plans/completed/p-03-m6-stall-watchdog.md`](../plans/completed/p-03-m6-stall-watchdog.md).
 - [`prop-04-consolidate-on-mlx-lm.md`](prop-04-consolidate-on-mlx-lm.md)
   — `merged into P-02 plan`. Dev-loop consolidation on mlx-lm
   (supervisor / pull wrapper / throughput verification / default

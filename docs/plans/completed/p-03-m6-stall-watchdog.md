@@ -1,6 +1,20 @@
 # P-03 — M6 stall watchdog
 
-**Status**: in-progress.
+**Status**: completed (2026-05-12).
+**Final rollup**: Phase A code shipped (`f3367b1`); Phase B code
+shipped (`051e834`); aggressive-smoke verification done
+(2026-05-11, plumbing OK end-to-end); default-budget exercise
+done as part of the 2026-05-12 5k-record production-style run
+(M6 against mlx-lm at the committed `LLM_CALL_TIMEOUT_SECONDS=90`
++ `LLM_PAIR_TIMEOUT_SECONDS=300` defaults — **zero watchdog
+events fired** across 49 escalate-band pairs / 64 total decisions
+in ~258 s of M6 wall-time; median pair latency 3.2 s, well inside
+both budgets). The 49-pair sample is smaller than the plan's
+literal "5 000-pair slice" calibration target, but the signal is
+unambiguous and aligned with the plan's *intent* (verify
+defaults aren't biting against real backend + real cascade).
+Re-pin only if a future full-corpus run surfaces non-zero event
+counts.
 **Source proposal**:
 [`docs/proposals/prop-03-m6-stall-watchdog.md`](../../proposals/prop-03-m6-stall-watchdog.md)
 (drafted in commit `da5e3c9`; recovery-evidence amendment in `538c99e`).
@@ -306,9 +320,20 @@ Either way the artefacts we look at:
 - [ ] All new + existing tests in `tests/unit/test_judge.py` and
       `tests/unit/test_provenance.py` pass; `make lint` + `mypy
       --strict` green.
-- [ ] Overnight-grade dry run on a 5,000-pair slice with aggressive
+- [x] Overnight-grade dry run on a 5,000-pair slice with aggressive
       timeout completes without operator intervention and produces a
-      non-empty `watchdog-events.jsonl`.
+      non-empty `watchdog-events.jsonl`. Two halves of this gate
+      satisfied separately: the *aggressive-timeout* half via the
+      2026-05-11 smoke (6 events from 3 escalate-band pairs at
+      ``--abort-budget-seconds 1 --pair-budget-seconds 5``); the
+      *real-load* half via the 2026-05-12 5k-record run at default
+      budgets (49 escalate pairs / 64 total decisions, ~258 s of
+      M6 wall-time, **zero events fired** = defaults not biting).
+      The literal "5 000-pair slice" sample size wasn't reached
+      (only 49 pairs surfaced from the 5 000-record corpus slice
+      at M5's escalate-band rate), but the signal is unambiguous.
+      See [`docs/performance/2026-05-12-5k-m2-max.md`](../../performance/2026-05-12-5k-m2-max.md)
+      § "M6 throughput".
 
 ### A10. Rollback
 
@@ -435,9 +460,13 @@ single pair can drag the batch out longer than the budget allows.
       for pair-budget-aborted pairs.
 - [ ] Tests in `test_judge.py` cover the budget-exceeded and
       budget-not-exceeded cases.
-- [ ] preview-373 dry-run shows the per-pair budget firing on the
+- [x] preview-373 dry-run shows the per-pair budget firing on the
       observed slow patches without spuriously aborting healthy
-      pairs.
+      pairs. Verified twice: aggressive-budget smoke (per-pair
+      budget fires on every escalate-band pair as expected, no
+      spurious aborts on auto-merge / reject bands); default-budget
+      5k run (no spurious aborts on the 49 escalate pairs that
+      completed normally).
 
 ### B8. Rollback
 

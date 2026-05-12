@@ -1,7 +1,7 @@
 # P-03 — M6 stall watchdog
 
 **Status**: planning (graduated). See
-[`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](../plans/in-progress/p-03-m6-stall-watchdog.md)
+[`docs/plans/completed/p-03-m6-stall-watchdog.md`](../plans/completed/p-03-m6-stall-watchdog.md)
 for the full plan.
 **Proposal-base commit**: `0263f9f`. To gauge drift before acting,
 run `git diff 0263f9f..HEAD -- src/bffi_pipeline/stages/judge.py
@@ -83,7 +83,7 @@ visible.
 
 Approach detail, prerequisites, risks, open questions, and the
 sequenced execution steps live in
-[`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](../plans/in-progress/p-03-m6-stall-watchdog.md).
+[`docs/plans/completed/p-03-m6-stall-watchdog.md`](../plans/completed/p-03-m6-stall-watchdog.md).
 Refer to [`docs/plans/README.md`](../plans/README.md) for the
 state-folder convention.
 

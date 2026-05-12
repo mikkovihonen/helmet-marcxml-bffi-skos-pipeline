@@ -273,5 +273,5 @@ The eval harness uses whatever `LLM_BASE_URL` / `LLM_MODEL_*` `.env` carries.
 ## Cross-references
 
 - [`docs/plans/completed/p-02-inference-stack-tuning.md`](plans/completed/p-02-inference-stack-tuning.md) — the plan of record for the mlx-lm inference stack.
-- [`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](plans/in-progress/p-03-m6-stall-watchdog.md) — per-call + per-pair watchdog around the LLM client.
+- [`docs/plans/completed/p-03-m6-stall-watchdog.md`](plans/completed/p-03-m6-stall-watchdog.md) — per-call + per-pair watchdog around the LLM client.
 - [`docs/archived/local-inference.md`](archived/local-inference.md) — the prior version of this doc, kept for the audit trail of the install-instruction iterations.

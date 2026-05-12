@@ -89,7 +89,7 @@ The transition contract between each pair of stages is one of the five Boundary 
 | **Embedding runtime** | `sentence-transformers ≥ 3.0` on PyTorch MPS (Apple Silicon GPU) | Same |
 | **ANN index** | FAISS HNSW: `M=32 efConstruction=200 efSearch=64`, IP metric on L2-normalised vectors | M5 stage docstring + [`p-04`](plans/backlog/p-04-m5-calibration.md) Phase B |
 | **Language detection (M3 title cascade)** | [Lingua](https://github.com/pemistahl/lingua-py) `≥ 2.0` + Qwen3 cascade for parallel-title disambiguation | `src/bffi_pipeline/title_lang.py`, `title_lang_llm.py` |
-| **LLM watchdog** | Per-call + per-pair wall-time ceilings via `LLM_CALL_TIMEOUT_SECONDS` / `LLM_PAIR_TIMEOUT_SECONDS`. Plan-of-record [P-03](plans/in-progress/p-03-m6-stall-watchdog.md). | Plan |
+| **LLM watchdog** | Per-call + per-pair wall-time ceilings via `LLM_CALL_TIMEOUT_SECONDS` / `LLM_PAIR_TIMEOUT_SECONDS`. Plan-of-record [P-03](plans/completed/p-03-m6-stall-watchdog.md). | Plan |
 | **Prompt management** | Versioned text files in `prompts/`, hashed at startup, hash logged to provenance. No inline prompts in code. | Spec § 7, CLAUDE.md |
 
 **Stack decision recorded**: P-02 § A1 documents the trade-off table for mlx-lm vs the higher-level `waybarrios/vllm-mlx` wrapper. mlx-lm chosen for Apple-team maintenance + smaller transitive-dep footprint over the multi-year NLF horizon.

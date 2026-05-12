@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     # steady-state ~28 s/decision on qwen3:8b — 90 s is ~3x the
     # median, so legitimate long-rationale generations stay inside
     # the budget while a wedged Ollama session is bounded. See
-    # ``docs/plans/in-progress/p-03-m6-stall-watchdog.md`` for the
+    # ``docs/plans/completed/p-03-m6-stall-watchdog.md`` for the
     # design rationale and the dry-run procedure that calibrates this.
     llm_call_timeout_seconds: int = Field(
         default=90,
