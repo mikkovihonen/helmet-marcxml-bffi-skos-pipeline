@@ -15,11 +15,12 @@ data/finto-dumps/`.
 **Phase commits**:
 
 - Phase A (M9 concurrency knob + watchdog wiring): `0f8c3da` (code, 2026-05-12). Bench snapshot at [`docs/performance/2026-05-12-5k-m2-max-phase-a.md`](../../performance/2026-05-12-5k-m2-max-phase-a.md): zero `field_budget_exceeded` events ✓, byte-identical bindings ✓, but **1.05× speedup vs ≥3× target** because the parallelisable tier-2 LLM picker is only ~30 % of M9 wall on this corpus; serial Phase 1 (tier-0 + candidate-query) dominates. See snapshot § "Implications for P-10 Phases B and C" for the re-scoping this introduces.
+- Phase A2 (Phase 1 parallelisation — tier-0 + candidate query): `<unfilled>`
 - Phase B (persistent picker cache): `<unfilled>`
 - Phase C (tier-0 normalisation + altLabel inclusion): `<unfilled>`
 
 **Owner**: TBD.
-**Estimated wall-time**: ~3.5-4.5 days end-to-end. Phase A ~1.5 days (concurrency + watchdog wiring + bench). Phase B ~1-1.5 days. Phase C ~1-2 days (rule design + cataloguer-sample audit gate). Each phase is independently shippable and lands with its own [`docs/performance/`](../../performance/) snapshot.
+**Estimated wall-time**: ~4.5-5.5 days end-to-end. Phase A ~1.5 days (concurrency + watchdog wiring + bench) **— shipped at `0f8c3da`**. Phase A2 ~1 day (Phase 1 parallelisation — added after Phase A's bench surfaced that serial Phase 1 work, not tier-2 LLM, is the dominant cost on this corpus). Phase B ~1-1.5 days. Phase C ~1-2 days (rule design + cataloguer-sample audit gate). Each phase is independently shippable and lands with its own [`docs/performance/`](../../performance/) snapshot.
 
 ## Goal
 
@@ -27,19 +28,20 @@ Bring M9 reconcile wall-time on the full 800 k Helmet corpus from a linear-extra
 
 Concrete targets, measured on a 5 k re-run against the same sample (`data/sample-5k-marcxml/`, Python `random.seed(42)`, identical Fuseki state):
 
-| Stage | 5k baseline (2026-05-12) | Target after Phase A | Target after Phase B (warm cache) | Target after Phase C |
-|---|---|---|---|---|
-| M9 wall | **5 722 s (95:22)** | ≤ 1 900 s (≥ 3× speedup) | ≤ 100 s (≥ 90 % cache hit rate) | ≤ 70 s |
-| Tier-0 hit count | (baseline-X) | unchanged | unchanged | +30 % vs baseline-X |
-| Tier-2 (LLM) call count | (baseline-Y) | unchanged | unchanged | ≤ 0.7 × baseline-Y |
-| Bind-quality on 200 spot-checked decisions | reference | identical | identical | identical (audit gate) |
+| Stage | 5k baseline (2026-05-12) | After Phase A (measured) | Target after Phase A2 | Target after Phase B (warm cache) | Target after Phase C |
+|---|---|---|---|---|---|
+| M9 wall | **5 722 s (95:22)** | 5 460 s (1.05×) | ≤ 1 900 s (≥ 3× cum.) | ≤ 100 s (≥ 90 % cache hit rate) | ≤ 70 s |
+| Tier-0 hit count | (baseline-X) | unchanged | unchanged | unchanged | +30 % vs baseline-X |
+| Tier-2 (LLM) call count | (baseline-Y) | unchanged | unchanged | unchanged | ≤ 0.7 × baseline-Y |
+| Bind-quality on 200 spot-checked decisions | reference | identical | identical | identical | identical (audit gate) |
 
-The Phase B "warm cache" target is a second consecutive run on the same corpus with no Finto refresh between runs — the realistic operator pattern on the production M5 Max box.
+The Phase A column shows the **measured** result, not a target — see [`docs/performance/2026-05-12-5k-m2-max-phase-a.md`](../../performance/2026-05-12-5k-m2-max-phase-a.md). The Phase A2 target is the **originally-planned Phase A** target (≥3× vs baseline), now expected after both concurrency levers ship — Phase A parallelised tier-2 (~30 % of wall), Phase A2 parallelises Phase 1 (tier-0 + candidate query, ~70 % of wall). The Phase B "warm cache" target is a second consecutive run on the same corpus with no Finto refresh between runs — the realistic operator pattern on the production M5 Max box.
 
 ## Definition of done
 
-- All three phases have filled-in phase commits, each on its own commit (no batching) so a partial revert is mechanical.
+- All four phases have filled-in phase commits, each on its own commit (no batching) so a partial revert is mechanical.
 - The fresh [`docs/performance/`](../../performance/) snapshot taken after Phase C shows M9 ≤ 70 s on the 5k sample with the cache warm, and the extrapolation table in that snapshot projects ≤ 10 h for the full 800 k corpus.
+- The Phase A2 snapshot demonstrates that the **original Phase A speedup target (≥ 3×)** is achievable once both concurrency levers ship — closing the gap surfaced by the Phase A bench.
 - The 200-sample audit from Phase C is committed under `gold/reconcile-audit-200.jsonl` (feeds the P-06 backlog).
 - `docs/plans/backlog/p-10-m9-reconcile-throughput.md` has been `git mv`'d through `in-progress/` → `completed/` per the lifecycle convention in [`docs/plans/README.md`](../README.md).
 - No regression in pre-existing M9 tests; all new code is covered by unit tests against fixtures (no network).
@@ -52,6 +54,7 @@ The Phase B "warm cache" target is a second consecutive run on the same corpus w
 - **`bffi-pipeline load-finto`** writes per-vocabulary RDF files under `data/finto-dumps/`. Phase B's cache invalidation hooks into the SHA-256 of these files; Phase C's `bffi:foldedLabel` materialisation extends `load-finto` to emit a parallel folded-form triple at load time.
 - The picker uses `LangChainLLMPicker(model_name=primary_model)` (`cli.py:855`), a single 8B model — no cascade. Phase A's thread safety verification is the first place that surfaces if the LangChain client is multi-thread-safe.
 - **The watchdog from P-03 is M6-only today.** `src/bffi_pipeline/stages/watchdog.py:1` opens with "Structured event emission for the M6 LLM-call watchdog (plan P-03)." The event vocabulary at line 53 (`timeout`, `retry`, `escalate`, `give_up`, `pair_budget_exceeded`) is generic enough to extend; the budget enforcement lives in `judge.py` and has no M9 counterpart in `reconcile.py`. Phase A.4 closes this gap.
+- **Phase 1 (tier-0 + candidate query) is serial.** After Phase A shipped, `apply_reconciliation`'s pre-pass — `local_resolver.resolve` (Fuseki SPARQL) followed by `client.query` / `fallback_client.query` (Finto / VIAF HTTP) — still walks one entity at a time. The 2026-05-12 Phase A bench measured this as ~70 % of M9 wall on the May 12 corpus (5 460 s total; ~1 660 s in parallel tier-2; ~3 800 s in serial Phase 1). Phase A2 closes this gap.
 - M6 cache parallel: `data/judge-cache.sqlite` schema + the cross-thread fix in `1452a4f`. Phase B mirrors this exactly, including the same `BEGIN IMMEDIATE` write pattern.
 
 ---
@@ -124,6 +127,56 @@ Two-step revert mirroring Phase B's pattern:
 
 1. Set `M9_CONCURRENCY=1` (drops back to sequential) + `LLM_M9_FIELD_TIMEOUT_SECONDS=0` (disables the watchdog wrap; `0` is interpreted as "no budget" by the orchestrator). Operationally restores pre-Phase-A behaviour without code revert.
 2. If full revert needed: git revert the Phase A commit. `Settings.m9_concurrency` and `Settings.llm_m9_field_timeout_seconds` can stay (unused). The `WatchdogEvent` enum extension is forward-compatible — old data files don't carry the new event type. M6 is unaffected; the changes are scoped to M9's orchestrator and one-line widening of the watchdog event vocabulary.
+
+---
+
+## Phase A2 — Phase 1 parallelisation (tier-0 + Finto/VIAF candidate query)
+
+Estimated wall-time: ~1 day. Builds on Phase A's `ThreadPoolExecutor` pattern, no new mechanisms. Added to the plan after the Phase A bench surfaced that serial Phase 1 (Fuseki SPARQL + Finto/VIAF HTTP) is ~70 % of M9 wall on the May 12 corpus and was not addressed by Phase A's tier-2 lever.
+
+### A2.1. Surface the knob in config + CLI
+
+- Add `m9_phase1_concurrency: int = Field(default=8, alias="M9_PHASE1_CONCURRENCY")` to `Settings`. Default `8` — Fuseki SPARQL is local (lightweight even under load) and Finto's REST API tolerates moderate concurrency. Higher than the picker's `c=4` because mlx-lm is the binding constraint there (GPU); Phase 1's binding constraints are different services with more headroom.
+- Add `--phase1-concurrency` (Annotated `int`) to `reconcile_command`. Sentinel `-1` falls through to `settings.m9_phase1_concurrency` — same ergonomics as `--concurrency` in Phase A.
+- The CLI doesn't need a separate watchdog sidecar; Phase 1 errors surface as HTTP exceptions handled by the existing `httpx.Client(timeout=10.0)` per-request timeout.
+
+### A2.2. Thread-pool the Phase 1 walk in `apply_reconciliation`
+
+The current `for idx, request in enumerate(request_list):` block becomes:
+
+- A `_phase1_resolve(idx, request) -> tuple[int, Phase1Result]` worker function dispatched through `concurrent.futures.ThreadPoolExecutor(max_workers=phase1_concurrency)`.
+- `Phase1Result` is a tagged union: either a `ReconciliationOutcome` (the entity resolved at tier-0 / fictional / lexical / no_candidate paths) **or** a `(EntityRequest, sorted_candidates)` deferred entry for picker dispatch in Phase 2 (Phase A's existing pool).
+- Workers share the orchestrator's `client`, `fallback_client`, `local_resolver` instances. These are already built on `httpx.Client` (thread-safe) and stateless SPARQL queries.
+- Result collection sorts by `idx` so the canonical graph mutations + provenance emit in submission order — same determinism gate Phase A uses.
+- `started_at[idx]` capture happens inside the worker so the provenance Activity's `startedAtTime` is accurate per-request.
+
+### A2.3. Thread safety verification
+
+- `FintoSkosmosClient`, `ViafClient`: review for mutable state. Both wrap an `httpx.Client` (thread-safe) plus an `@lru_cache`-decorated query helper (also thread-safe per CPython).
+- `LocalConceptResolver` (Fuseki-backed): SPARQL CONSTRUCT queries are stateless. Verify the connection-pool sizing on `httpx.Client` matches `phase1_concurrency` (default 8) so workers don't queue on connections.
+- `_finto_search_query`'s `@lru_cache`: thread-safe by CPython contract. No change needed.
+- Per-request HTTP timeouts: existing `httpx.Client(timeout=10.0)` in `cli.py` covers the per-request bound; no Phase-1 watchdog event emission needed (HTTP exceptions already raise cleanly and route to `no_candidate` or fallback).
+
+### A2.4. Tests
+
+- **Byte-stability** (mirrors A.4): fixture with 50+ tier-0-resolved entities and 12+ picker-deferred entities; run at `phase1=1, phase2=4` and `phase1=8, phase2=4`; assert byte-identical canonical Turtle.
+- **Mixed-tier distribution**: fixture exercising all five outcome paths (fictional / local / lexical / picker-bound / no_candidate); assert outcome distribution and per-entity outcomes are identical across phase1 concurrency values.
+- **Stub-client call counts**: stubs that increment a thread-safe counter on each `query` / `resolve` call; assert N requests yield exactly N `query` invocations and tier-0-resolved entities skip `query` entirely (the tier-0-short-circuit still works under concurrency).
+- **Connection-error resilience**: stub `FintoSkosmosClient` raising `httpx.ReadTimeout` on one of N concurrent requests; assert that failure routes to `no_candidate` for that entity, other entities resolve normally, no thread errors.
+
+### A2.5. Acceptance
+
+- [ ] `M9_PHASE1_CONCURRENCY` env + `--phase1-concurrency` CLI flag wired through.
+- [ ] Phase 1 walk dispatched through `ThreadPoolExecutor`.
+- [ ] All Phase A2 unit tests above pass; existing M9 tests stay green.
+- [ ] 5k re-run with `--phase1-concurrency 8 --concurrency 4` on the May 12 corpus (same input the Phase A bench used) clocks M9 ≤ **1 900 s** — the original ≥3× speedup target, now achievable with both concurrency levers in place.
+- [ ] Fresh `docs/performance/<date>-5k-m2-max-phase-a2.md` snapshot committed, comparing against both the Phase A snapshot (5 460 s, single-lever) and the 5 722 s baseline (zero-lever).
+- [ ] The snapshot's extrapolation table projects A+A2 wall on the full 800k corpus; if it doesn't unblock overnight on its own, the "Implications" section informs whether Phase B/C are still needed for the overnight target or just for production polish.
+
+### A2.6. Rollback
+
+- Set `M9_PHASE1_CONCURRENCY=1` to restore the post-Phase-A serial Phase 1. Phase A's tier-2 parallelism is unaffected; M9 wall reverts to ~5 460 s on the May 12 corpus.
+- If full revert needed: git revert the Phase A2 commit. `Settings.m9_phase1_concurrency` stays (unused). No vocabulary or schema changes, so the revert is purely orchestrator-shape.
 
 ---
 
@@ -318,6 +371,9 @@ This is the safety net in case the 200-audit misses a rare collision.
 | Phase A — `LangChainLLMPicker` not thread-safe; M9 produces duplicate Activity URIs or interleaved bindings under `c=4` | Medium | One client per worker thread (`threading.local`). A.4 byte-stability test catches any non-determinism at CI time. |
 | Phase A — `httpx.Client` connection-pool exhaustion at `c=4` to Finto | Low | Reuse one client process-wide with `httpx.Limits(max_connections=10)`; the Finto API already throttles us. |
 | Phase A — Picker call hangs indefinitely, sterilising one of four worker threads | Medium (mlx-lm precedent during P-02 / P-03 exists) | Watchdog per-field budget (A.4) + `field_budget_exceeded` event. Budget-exhausted fields fall through to tier-3 fallback so the canonical graph stays valid. Mirrors P-03's M6 wiring. |
+| Phase A2 — Finto API rate-limit pressure at `phase1=8` | Medium | Finto doesn't publish a hard rate limit; 8 concurrent persistent connections is well within typical web-API tolerances. Existing `httpx.Client(timeout=10.0)` covers per-request stuck calls. On sustained 429s in the bench, drop to `phase1=4` (still 4× speedup over serial). Operator-tunable via env var. |
+| Phase A2 — Fuseki connection-pool saturation under concurrent SPARQL | Low | Local Fuseki handles 8 concurrent connections trivially (it's not a production load). If the bench surfaces queue pressure, `httpx.Limits` configured at the orchestrator entry point is the lever. |
+| Phase A2 — Non-deterministic ordering on parallel Phase 1 leaks into canonical / provenance graphs | Low | Same submit-then-sort pattern Phase A already uses for tier-2. Byte-stability test in A2.4 pins this. |
 | Phase B — Cache key collision (different `(literal, candidates)` pairs hash to the same key) | Effectively zero | 256-bit SHA. Collisions are statistically impossible at corpus scale. |
 | Phase B — Over-caching: Finto adds a new authority and the cache returns the old "no match" verdict | Low (Finto refresh is operator-controlled) | `finto_sha` in the key; refresh invalidates per-vocabulary. Operator runbook documents the daily YSO/KANTO refresh cadence. |
 | Phase B — Cross-thread SQLite `InterfaceError` (the 2026-05-12 M6 precedent) | Medium-low | Mirror M6's fix in `1452a4f`: `BEGIN IMMEDIATE`, per-thread connection. B.4 cross-thread test pins it. |

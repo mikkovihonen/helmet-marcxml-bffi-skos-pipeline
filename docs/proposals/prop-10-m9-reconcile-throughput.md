@@ -24,16 +24,26 @@ Material updates since drafting:
   is carried over into the plan with execution detail per phase
   (env vars, function names, sub-steps, acceptance checklists,
   rollback procedures).
-- This commit — folded the watchdog pattern from P-03 into Phase A
-  as sub-step A.4. Running M9 at `c=4` without per-call / per-field
-  timeout enforcement amplifies the hang-blocks-worker risk (one
-  stuck picker call would sterilise 25 % of throughput), so the
-  watchdog wiring has to land in the same phase as concurrency.
-  Adds `LLM_M9_FIELD_TIMEOUT_SECONDS` (analogous to M6's
-  `LLM_PAIR_TIMEOUT_SECONDS`) and extends the `WatchdogEvent`
-  Literal in `watchdog.py` with `field_budget_exceeded`. Phase A
-  wall-time estimate bumped from ~1 day to ~1.5 days; plan total
-  from 3-4 days to 3.5-4.5 days.
+- (watchdog-fold-in commit) — folded the watchdog pattern from P-03
+  into Phase A as sub-step A.4. Running M9 at `c=4` without per-call /
+  per-field timeout enforcement amplifies the hang-blocks-worker risk
+  (one stuck picker call would sterilise 25 % of throughput), so the
+  watchdog wiring has to land in the same phase as concurrency. Adds
+  `LLM_M9_FIELD_TIMEOUT_SECONDS` (analogous to M6's
+  `LLM_PAIR_TIMEOUT_SECONDS`) and extends the `WatchdogEvent` Literal
+  in `watchdog.py` with `field_budget_exceeded`. Phase A wall-time
+  estimate bumped from ~1 day to ~1.5 days; plan total from 3-4 days
+  to 3.5-4.5 days.
+- This commit — added **Phase A2 (Phase 1 parallelisation)** to the
+  plan after Phase A's 5k bench measured only 1.05× speedup. The
+  bench surfaced that serial Phase 1 (Fuseki SPARQL + Finto/VIAF
+  HTTP candidate query) is ~70 % of M9 wall — the original ≥3×
+  target needs both concurrency levers, not just tier-2. Adds a
+  new `M9_PHASE1_CONCURRENCY=8` knob and dispatches the tier-0 +
+  candidate-query pre-pass through a `ThreadPoolExecutor`. Plan
+  total bumped from 3.5-4.5 days to 4.5-5.5 days. See
+  [`docs/performance/2026-05-12-5k-m2-max-phase-a.md`](../performance/2026-05-12-5k-m2-max-phase-a.md)
+  for the empirical evidence that drove this addition.
 
 ## Motivation
 
