@@ -114,4 +114,6 @@ plan documents *when the execution was scheduled*.
   weighs three server-side alternatives (outlines wrapper, vllm-mlx,
   fork mlx-lm) for the case where the prompt-layer approach proves
   insufficient. Stays `proposed` unless a concrete incident
-  motivates action.
+  motivates action. Note: numbering collision with the unrelated
+  `backlog/p-06-gold-set-growth.md` plan — disambiguate by path in
+  prose.

@@ -230,6 +230,20 @@ This stops the gold set from regressing on stratification.
   excluded from the stratification gate, or kept as a forcing
   function for source-2 volunteer pairs? Recommend the latter —
   the empty-category signal is informative.
+- **`gs-0001` is defective as captured**: the gold-set entry
+  expects `same_work` because Record A's `505` field lists Dubrovsky
+  as a component of the "Jevgeni Onegin ; Proza" aggregate, but the
+  `505` content is **not** in the `record_a` block fed to the judge.
+  Both Ollama 8B and mlx-lm 8B are therefore guessing from main-title
+  evidence alone; Ollama gets lucky and lands on `same_work`,
+  mlx-lm correctly refuses the unsupported inference. Action: either
+  (a) augment `gs-0001.record_a` with the `505` component data so
+  the gold verdict is derivable from visible fields, or (b)
+  re-classify as a cascade-conservatism test and flip `expected` to
+  `different_work` (mlx-lm's answer is the principled one given
+  what the judge sees). Surfaced during P-02 § A5 parity bench;
+  see that plan's "Material updates since drafting" entry for the
+  full investigation trail.
 
 ## Cross-references
 

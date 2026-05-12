@@ -899,6 +899,31 @@ After Phase C lands, update **`docs/runbook.md`** with:
   Verified: mlx-lm-only gold-set eval went 0 % → 88 % accuracy,
   0 % uncertain. Future direction (server-side guided decoding via
   outlines / vllm-mlx) tracked as P-06.
+- **A5 parity bench captured a 1/17 gold-set drift on `gs-0001`** —
+  Ollama 8B (`qwen3:8b-q4_K_M`) predicts `same_work` (0.95);
+  mlx-lm 8B (`Qwen3-8B-4bit`) predicts `different_work` (0.85).
+  Investigation in the cache (`data/judge-cache.sqlite`) showed:
+  - The cascade did **not** escalate on either backend.
+    `_needs_second_opinion` (`src/bffi_pipeline/stages/judge.py:859`)
+    only second-guesses `uncertain` or `same_work < 0.85`;
+    `different_work` is intentionally never re-evaluated to bias
+    the cascade against false-positive merges.
+  - The gold-set entry depends on Pushkin-specific external
+    knowledge that isn't in the visible fields: Record A's main
+    title is `"Jevgeni Onegin ; Proza"` (an aggregate whose `505`
+    component carries Dubrovsky), while Record B's title is
+    `"Aatelisrosvo Dubrovskij"`. The `505` content is **not** fed
+    to the judge — both backends are guessing. Ollama 8B happens
+    to land on the correct verdict via a "creator + language
+    family" leap; mlx-lm 8B reads the diverging titles literally
+    and refuses the unsupported inference. mlx-lm's answer is the
+    more cautious one — in production this is the safer direction
+    (misses a merge rather than over-merging).
+  - Treated as accepted A5 drift; the *real* fix lives in
+    `docs/plans/backlog/p-06-gold-set-growth.md` (augment
+    `gs-0001` with the `505` component data, or re-classify as a
+    cascade-conservatism test). See that plan's "Open issues" for
+    the action item.
 - **Supervisor vs. per-port** for D1 — **resolved during the
   mlx-lm-vs-vllm-mlx decision in A1**: chose per-port routing
   (cheaper code change, fits the existing cascade primary/fallback
