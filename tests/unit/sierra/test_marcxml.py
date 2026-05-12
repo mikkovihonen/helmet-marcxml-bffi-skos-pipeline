@@ -263,34 +263,63 @@ def _row(
     )
 
 
-def test_row_to_marcxml_synthesises_001_from_record_num() -> None:
-    """The SupaRed bug's prevention: records lacking 001 (the BTJ /
-    legacy-import case) get one synthesised from the Sierra
-    ``record_metadata.record_num`` so marc2bibframe2 produces a
-    unique Work URI per record."""
+def test_row_to_marcxml_writes_sierra_bib_id_as_filename_and_001() -> None:
+    """The canonical Sierra bib ID (``b<num><check>``) is the
+    cataloguer-facing identifier; it is written both as the MARCXML
+    filename and as the ``001`` controlfield content. Prevents the
+    ``id1``-placeholder collision in marc2bibframe2 that collapsed
+    734 empty-001 records into a single canonical Work on the
+    2026-05-12 5k run."""
     filename, xml_bytes = build_marcxml_for_row(_row())
-    assert filename == "1256526.xml"
+    assert filename == "b1256526x.xml"  # sierra_check_digit(1256526) == 'x'
     body = xml_bytes.decode("utf-8")
-    assert '<controlfield tag="001">1256526</controlfield>' in body
+    assert '<controlfield tag="001">b1256526x</controlfield>' in body
 
 
-def test_row_to_marcxml_preserves_existing_001_varfield() -> None:
-    """A real ``001`` value (Sierra control number or BTJ external ID)
-    is not overwritten by the helmet_bib_id synthesis."""
+def test_row_to_marcxml_overwrites_existing_001_varfield() -> None:
+    """Per cataloguer spec (2026-05-12 review), the ``001`` controlfield
+    is set unconditionally to ``b<num><check>`` — any Sierra-supplied
+    varfield with ``marc_tag="001"`` is dropped and replaced. The
+    previous behaviour ("preserve existing 001") let empty-content
+    varfields pass through, which pymarc then dropped on serialisation
+    and produced MARCXML with no 001 at all."""
     varfields = [
         {
             "id": 1,
             "marc_tag": "001",
             "marc_ind1": " ",
             "marc_ind2": " ",
-            "field_content": "cls0093490",
+            "field_content": "cls0093490",  # legacy / BTJ external ID
             "subfields": [],
         }
     ]
     _filename, xml_bytes = build_marcxml_for_row(_row(varfields=varfields))
     body = xml_bytes.decode("utf-8")
-    assert '<controlfield tag="001">cls0093490</controlfield>' in body
-    assert "1256526" not in body.split('<controlfield tag="001">', 1)[1].split("</", 1)[0]
+    assert '<controlfield tag="001">b1256526x</controlfield>' in body
+    # The legacy ID is no longer in the document under any controlfield.
+    assert "cls0093490" not in body
+
+
+def test_row_to_marcxml_overwrites_empty_001_varfield() -> None:
+    """Sierra occasionally serialises varfield rows with
+    ``marc_tag="001"`` and ``field_content=""`` — exactly the shape
+    that drove the "Nyt" over-merge (an empty Field that pymarc
+    drops on serialisation, leaving no 001 at all). The unconditional
+    overwrite handles this case the same as a missing 001."""
+    varfields = [
+        {
+            "id": 1,
+            "marc_tag": "001",
+            "marc_ind1": " ",
+            "marc_ind2": " ",
+            "field_content": "",
+            "subfields": [],
+        }
+    ]
+    _filename, xml_bytes = build_marcxml_for_row(_row(varfields=varfields))
+    body = xml_bytes.decode("utf-8")
+    assert '<controlfield tag="001">b1256526x</controlfield>' in body
+    assert body.count('tag="001"') == 1  # exactly one 001 controlfield
 
 
 def test_row_to_marcxml_synthesises_003_with_agency_code() -> None:

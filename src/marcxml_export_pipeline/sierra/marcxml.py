@@ -154,6 +154,27 @@ def sierra_check_digit(record_num: int | str) -> str:
     return "x" if remainder == _SIERRA_CHECK_X else str(remainder)
 
 
+def sierra_bib_id(record_num: int | str) -> str:
+    """Return the canonical Sierra bib identifier — ``b<num><check>``.
+
+    Helmet cataloguers identify a bibliographic record by this string
+    (the ``b`` prefix plus the numeric record_num plus the
+    :func:`sierra_check_digit`). Used in three places at export time:
+
+    - the ``001`` controlfield content (set unconditionally; any
+      Sierra-supplied 001 is overwritten),
+    - the MARCXML filename (``<sierra_bib_id>.xml``),
+    - downstream as the canonical ``helmet_bib_id`` propagated
+      through every pipeline stage and into the BIBFRAME / canonical
+      graph's ``bf:identifiedBy`` ``rdf:value``.
+
+    The ``907 $a`` Sierra-local tag retains the legacy dot-prefix form
+    (``.b<num><check>``) for compatibility with Sierra-side tooling that
+    keys on that exact string.
+    """
+    return f"{SIERRA_BIB_PREFIX}{record_num}{sierra_check_digit(record_num)}"
+
+
 def build_leader(lf: Leaderfield | None) -> str:
     """Render the 24-character MARC 21 leader from the Sierra leader row.
 
@@ -289,7 +310,18 @@ def build_marcxml_for_row(row: tuple[Any, ...]) -> tuple[str, bytes]:
     """Build one MARCXML file (filename + bytes) from a streamed SQL row.
 
     Pure: no DB, no I/O. Returned ``filename`` is
-    ``<record_num>.xml``; ``xml_bytes`` is UTF-8 MARCXML ready to write.
+    ``<sierra_bib_id>.xml`` (``b<num><check>.xml`` — the cataloguer-
+    canonical form); ``xml_bytes`` is UTF-8 MARCXML ready to write.
+
+    The ``001`` controlfield is set unconditionally to the Sierra
+    bib ID, replacing any Sierra-supplied 001 value. Earlier
+    versions only synthesised 001 when absent, but Sierra carries
+    varfield rows with ``marc_tag="001"`` and empty content for
+    some records; pymarc then dropped the empty controlfield on
+    serialisation and the resulting MARCXML had no 001, which
+    collapses downstream into a single canonical Work via
+    marc2bibframe2's ``id1`` placeholder fallback (the "Nyt"
+    over-merge of 734 records observed in the 2026-05-12 5k run).
     """
     record_num = row[0]
     leader_dict = _decode(row[1])
@@ -338,8 +370,16 @@ def build_marcxml_for_row(row: tuple[Any, ...]) -> tuple[str, bytes]:
     present_tags = {vf.marc_tag for vf in varfields if vf.marc_tag}
     present_tags.update(t for t, _ in controlfields)
 
-    if "001" not in present_tags and record_num is not None:
-        controlfields.append(("001", str(record_num)))
+    # 001 is forced to the canonical Sierra bib ID (b<num><check>),
+    # unconditionally — see the function docstring for the over-merge
+    # incident that motivated this. Drop any Sierra-supplied
+    # ``marc_tag="001"`` varfield so build_record doesn't emit a
+    # conflicting Field that pymarc then has to deduplicate.
+    if record_num is not None:
+        varfields = [vf for vf in varfields if vf.marc_tag != "001"]
+        controlfields = [(t, c) for t, c in controlfields if t != "001"]
+        controlfields.append(("001", sierra_bib_id(record_num)))
+        present_tags.add("001")
     if "003" not in present_tags:
         controlfields.append(("003", AGENCY_CODE))
     if "005" not in present_tags:
@@ -361,7 +401,8 @@ def build_marcxml_for_row(row: tuple[Any, ...]) -> tuple[str, bytes]:
 
     record = build_record(leader, varfields, controlfields, extra_fields)
     xml_bytes: bytes = marcxml.record_to_xml(record, quiet=True, namespace=True)
-    return f"{record_num}.xml", xml_bytes
+    filename = f"{sierra_bib_id(record_num)}.xml" if record_num is not None else f"{record_num}.xml"
+    return filename, xml_bytes
 
 
 # --- Async streaming entry point ----------------------------------------

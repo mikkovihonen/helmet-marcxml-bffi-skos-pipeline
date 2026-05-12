@@ -17,17 +17,40 @@ from bffi_pipeline.validation.marcxml import (
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"
 
 
-def test_filename_pattern_accepts_numeric_xml(tmp_path: Path) -> None:
-    valid = tmp_path / "12345678.xml"
+@pytest.mark.parametrize(
+    "name",
+    [
+        "12345678.xml",  # legacy bare-digits form
+        "b12345678x.xml",  # Sierra bib-id form, check 'x'
+        "b11007849.xml",  # Sierra bib-id form, check '0-9'
+    ],
+)
+def test_filename_pattern_accepts_both_forms(tmp_path: Path, name: str) -> None:
+    """Boundary-1 accepts both the legacy bare-digits filename
+    (``<num>.xml``) and the canonical Sierra-bib-id form
+    (``b<num><check>.xml``) — see
+    ``src/marcxml_export_pipeline/sierra/marcxml.py``'s
+    ``sierra_bib_id`` for the format the exporter writes after
+    2026-05-12."""
+    valid = tmp_path / name
     valid.write_text("<x/>")
     validate_filename(valid)
 
 
 @pytest.mark.parametrize(
     "name",
-    ["bad-name.xml", "abc.xml", "12345678.txt", "12345678.XML", "12345678"],
+    [
+        "bad-name.xml",
+        "abc.xml",
+        "12345678.txt",
+        "12345678.XML",
+        "12345678",
+        "b.xml",  # b with no digits/check
+        "b123y.xml",  # b with digits + invalid check (not 0-9 or x)
+        "B12345678.xml",  # uppercase B not accepted
+    ],
 )
-def test_filename_pattern_rejects_non_numeric(tmp_path: Path, name: str) -> None:
+def test_filename_pattern_rejects_malformed(tmp_path: Path, name: str) -> None:
     bad = tmp_path / name
     bad.write_text("<x/>")
     with pytest.raises(MarcXmlValidationError) as exc:
@@ -35,8 +58,15 @@ def test_filename_pattern_rejects_non_numeric(tmp_path: Path, name: str) -> None
     assert exc.value.error_type == "marcxml-filename"
 
 
-def test_helmet_bib_id_from_filename() -> None:
+def test_helmet_bib_id_from_filename_legacy_form() -> None:
     assert helmet_bib_id_from_filename(Path("/x/12345678.xml")) == "12345678"
+
+
+def test_helmet_bib_id_from_filename_sierra_bib_id_form() -> None:
+    """``b<num><check>.xml`` → ``b<num><check>`` returned verbatim.
+    Downstream stages carry the canonical Sierra bib ID as the
+    pipeline-internal ``helmet_bib_id``."""
+    assert helmet_bib_id_from_filename(Path("/x/b11007849.xml")) == "b11007849"
 
 
 def test_validate_accepts_synthetic_valid_records() -> None:

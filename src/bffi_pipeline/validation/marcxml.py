@@ -27,7 +27,13 @@ from lxml import etree
 from bffi_pipeline.schemas import marc21slim_xsd_path
 
 MARC_NS: Final[str] = "http://www.loc.gov/MARC21/slim"
-_FILENAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\d+\.xml$")
+# Accepts both the canonical Sierra bib-ID form (``b<digits><check>.xml``,
+# e.g. ``b11007849.xml`` — check digit is ``0-9|x``) and the legacy
+# bare-digits form (``<digits>.xml``) so MARCXML exported before the
+# bib-ID format change still validates. ``helmet_bib_id_from_filename``
+# returns the stem verbatim — downstream stages carry whichever form
+# the file used.
+_FILENAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^(b\d+[\dx]|\d+)\.xml$")
 
 ErrorType = Literal[
     "marcxml-filename",
@@ -60,15 +66,17 @@ class ValidatedMarcXml:
 
 
 def helmet_bib_id_from_filename(path: Path) -> str:
-    """Return the numeric bib ID from a filename matching ``^\\d+\\.xml$``.
+    """Return the bib ID from a filename matching :data:`_FILENAME_PATTERN`.
 
+    Returns the stem verbatim — either ``b<digits><check>`` (current
+    Sierra-export form) or ``<digits>`` (legacy bare-digits form).
     Caller has already checked the pattern via :func:`validate_filename`.
     """
     return path.stem
 
 
 def validate_filename(path: Path) -> None:
-    """Raise if ``path.name`` does not match ``^\\d+\\.xml$``."""
+    """Raise if ``path.name`` does not match :data:`_FILENAME_PATTERN`."""
     if not _FILENAME_PATTERN.match(path.name):
         raise MarcXmlValidationError(
             error_type="marcxml-filename",
