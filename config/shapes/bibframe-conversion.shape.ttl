@@ -52,6 +52,21 @@ bffi:HelmetIdShape
                     ?contained bf:hasInstance ?this .
                     ?ref       bf:associatedResource ?contained .
                 }
+                # marc2bibframe2 also mints secondary Work / Instance
+                # IRIs attached directly to the main Work (no
+                # bf:associatedResource chain to walk) — most commonly
+                # an `#Instance856-NN` from a MARC 856 electronic-
+                # location field. Their URI shape is the marc2bibframe2
+                # convention "<base>#<Type><tag>-<idx>" where <tag> is
+                # the MARC field number and <idx> is a per-record
+                # counter; the main Work / Instance are just
+                # "<base>#Work" / "<base>#Instance" with no suffix.
+                # Exclude the suffixed form so the shape stays focused
+                # on the main resources `post_process` actually stamps
+                # with Helmet identifier + AdminMetadata.  See
+                # docs/proposals/prop-07-bibframe-856-as-item.md for the
+                # deeper semantic question this exclusion sidesteps.
+                FILTER(!REGEX(STR(?this), "#(Work|Instance)[0-9]+-[0-9]+$"))
             }
         """ ;
     ] ;
@@ -93,6 +108,21 @@ bffi:AdminMetadataLinkShape
                     ?contained bf:hasInstance ?this .
                     ?ref       bf:associatedResource ?contained .
                 }
+                # marc2bibframe2 also mints secondary Work / Instance
+                # IRIs attached directly to the main Work (no
+                # bf:associatedResource chain to walk) — most commonly
+                # an `#Instance856-NN` from a MARC 856 electronic-
+                # location field. Their URI shape is the marc2bibframe2
+                # convention "<base>#<Type><tag>-<idx>" where <tag> is
+                # the MARC field number and <idx> is a per-record
+                # counter; the main Work / Instance are just
+                # "<base>#Work" / "<base>#Instance" with no suffix.
+                # Exclude the suffixed form so the shape stays focused
+                # on the main resources `post_process` actually stamps
+                # with Helmet identifier + AdminMetadata.  See
+                # docs/proposals/prop-07-bibframe-856-as-item.md for the
+                # deeper semantic question this exclusion sidesteps.
+                FILTER(!REGEX(STR(?this), "#(Work|Instance)[0-9]+-[0-9]+$"))
             }
         """ ;
     ] ;

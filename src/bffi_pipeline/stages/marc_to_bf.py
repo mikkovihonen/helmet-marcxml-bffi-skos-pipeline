@@ -321,7 +321,20 @@ def _find_root_resources(g: Graph) -> tuple[URIRef, URIRef]:
     instances = [o for o in g.objects(work, V.BF.hasInstance) if isinstance(o, URIRef)]
     if not instances:
         raise RuntimeError("XSLT output contains no bf:Instance linked to the Work")
-    return work, instances[0]
+    # marc2bibframe2 sometimes emits multiple bf:Instance resources
+    # attached to the same Work via bf:hasInstance — most commonly an
+    # `#Instance856-NN` secondary from a MARC 856 (Electronic Location
+    # and Access) field, alongside the main `#Instance`. Without a
+    # deterministic tie-breaker, ``instances[0]`` depends on rdflib
+    # iteration order and post_process can attach Helmet identifier +
+    # AdminMetadata to the wrong Instance; the Boundary-2 shape then
+    # fires on the un-stamped main Instance. Prefer the URI ending in
+    # ``#Instance`` (the marc2bibframe2 convention for the main
+    # Instance); fall back to the first one if the convention doesn't
+    # hold (defensive — shouldn't happen on Helmet exports).
+    main_instances = [i for i in instances if str(i).endswith("#Instance")]
+    instance = main_instances[0] if main_instances else instances[0]
+    return work, instance
 
 
 def _add_helmet_identifier(g: Graph, target: URIRef, helmet_id: str) -> None:
