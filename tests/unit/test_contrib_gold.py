@@ -112,11 +112,14 @@ def test_bootstrap_transliteration_pointers_resolve() -> None:
 
 
 def test_bootstrap_anssi_assi_case_is_present() -> None:
-    """The Karttunen case (Helmet bib 1714651) is the kickoff
+    """The Karttunen case (Helmet bib ``b17146513``) is the kickoff
     within-record-typo example and worth pinning by id so a future
-    refactor of the bootstrap set can't accidentally drop it."""
+    refactor of the bootstrap set can't accidentally drop it.
+
+    Pinned against the canonical Sierra bib-ID form (``b<num><check>``)
+    that the gold set carries post-2026-05-12 migration."""
     cases = load_contrib_gold_set()
-    matching = [c for c in cases if c.helmet_bib_id == "1714651"]
+    matching = [c for c in cases if c.helmet_bib_id == "b17146513"]
     assert len(matching) == 1
     case = matching[0]
     assert case.category == "within-record-typo"
