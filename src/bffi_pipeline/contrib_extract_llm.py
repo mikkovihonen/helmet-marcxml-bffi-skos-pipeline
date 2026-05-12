@@ -36,6 +36,7 @@ from typing import Any, Final, Protocol
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.llm_json_mode import json_mode_instruction
 
 CONTRIB_PROMPT_PATH: Final[Path] = (
     Path(__file__).resolve().parents[2] / "prompts" / "contrib_extract_v1.txt"
@@ -286,9 +287,18 @@ def _build_chain(
     from pydantic import SecretStr
 
     sections = _parse_prompt_sections()
+    # JSON-mode schema instruction — see judge.py / llm_json_mode.py for the
+    # rationale (P-02 A5).
     template = ChatPromptTemplate.from_messages(
         [
-            ("system", sections["SYSTEM"] + "\n\n" + sections["EXAMPLES"]),
+            (
+                "system",
+                sections["SYSTEM"]
+                + "\n\n"
+                + sections["EXAMPLES"]
+                + "\n\n"
+                + json_mode_instruction(ContribExtractDecision),
+            ),
             ("user", sections["USER"]),
         ]
     )
@@ -301,7 +311,7 @@ def _build_chain(
         timeout=CONTRIB_REQUEST_TIMEOUT_SECONDS,
         max_retries=0,
     )
-    return template | llm.with_structured_output(ContribExtractDecision, method="json_schema")
+    return template | llm.with_structured_output(ContribExtractDecision, method="json_mode")
 
 
 def _filter_to_valid_relators(

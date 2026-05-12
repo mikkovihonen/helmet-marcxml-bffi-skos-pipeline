@@ -59,6 +59,7 @@ from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.writer import ProvenanceWriter
 from bffi_pipeline.stages.watchdog import emit_watchdog_event
@@ -611,9 +612,23 @@ def _build_chain(
     from pydantic import SecretStr
 
     sections = _parse_prompt_sections() if full_rationale else _parse_prompt_sections_fast()
+    schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
+    # ``method="json_mode"`` only sets ``response_format={"type":"json_object"}``
+    # — LangChain does not auto-inject a schema description into the prompt.
+    # Ollama tolerates that because ``format=json`` is constrained decoding;
+    # mlx-lm 0.31 has no constrained-decoding fallback and otherwise copies
+    # the few-shot prose. The instruction below makes the JSON contract
+    # explicit on both backends. P-02 A5.
     template = ChatPromptTemplate.from_messages(
         [
-            ("system", sections["SYSTEM"] + "\n\n" + sections["EXAMPLES"]),
+            (
+                "system",
+                sections["SYSTEM"]
+                + "\n\n"
+                + sections["EXAMPLES"]
+                + "\n\n"
+                + json_mode_instruction(schema),
+            ),
             ("user", sections["USER"]),
         ]
     )
@@ -631,8 +646,7 @@ def _build_chain(
         # path in :func:`judge_pair`.
         llm_kwargs["timeout"] = timeout
     llm = ChatOpenAI(**llm_kwargs)
-    schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
-    return template | llm.with_structured_output(schema, method="json_schema")
+    return template | llm.with_structured_output(schema, method="json_mode")
 
 
 # Type alias for the injectable chain — anything with .invoke({record_a, record_b, sim}).

@@ -47,6 +47,26 @@ Material updates since drafting:
     `content`, so every Qwen3 request must disable thinking. Fixed
     server-side via `--chat-template-args '{"enable_thinking":false}'`
     — no client/code change needed.
+- A5 smoke (first mlx-lm-only run, May 2026) surfaced a fifth
+  drift item — the only one requiring a code change:
+  - mlx-lm 0.31 accepts `response_format: {"type":"json_schema",
+    "strict":true}` (HTTP 200) but **silently ignores** the schema
+    and returns prose. Ollama tolerates the same payload because
+    `format=json` enforces constrained decoding token-by-token;
+    mlx-lm has no constrained-decoding fallback. LangChain's
+    `with_structured_output(method="json_mode")` setting also
+    doesn't help — it only flips `response_format` to
+    `{"type":"json_object"}` and does *not* inject a schema
+    description into the prompt, so the model copies the prose
+    examples in `prompts/judge_v1.txt` instead. **Fix**: switched
+    all four LLM call sites from `method="json_schema"` to
+    `method="json_mode"` and added a deterministic
+    schema-instruction system-message fragment (new module
+    `src/bffi_pipeline/llm_json_mode.py`) appended to each chain's
+    system prompt. Versioned `prompts/*.txt` files stay
+    byte-identical so Phase B prefix-cache stability is preserved.
+    Server-side guided decoding (outlines / vllm-mlx / fork) was
+    considered and rejected for P-02 scope; recorded as P-06.
 
 **Phase commits** (filled in as phases ship; empty fields here are a
 signal that the phase has not yet completed against the gold-set
@@ -855,6 +875,23 @@ After Phase C lands, update **`docs/runbook.md`** with:
   `--chat-template-args '{"enable_thinking":false}'` — no
   client/code change required. Documented in `docs/local-inference.md`
   § "Running the server".
+- **mlx-lm structured-output enforcement** — **resolved during A5
+  smoke**: mlx-lm 0.31 does not implement constrained decoding for
+  `response_format: json_schema` (HTTP 200 returned, schema ignored).
+  LangChain's `with_structured_output(method="json_mode")` only sets
+  `response_format: json_object` without injecting a schema
+  description into the prompt. Net effect: every LLM call site
+  returned prose that the Pydantic validator rejected, and the
+  cascade fell through to `uncertain` on 100 % of the gold set.
+  Fix: new helper `bffi_pipeline.llm_json_mode.json_mode_instruction`
+  derives a deterministic JSON-schema instruction from the Pydantic
+  model and appends it to each chain's system message — shared
+  across `judge.py`, `reconcile.py`, `contrib_extract_llm.py`,
+  `title_lang_llm.py`. Versioned `prompts/*.txt` stay
+  byte-identical, so Phase B prefix-cache stability is preserved.
+  Verified: mlx-lm-only gold-set eval went 0 % → 88 % accuracy,
+  0 % uncertain. Future direction (server-side guided decoding via
+  outlines / vllm-mlx) tracked as P-06.
 - **Supervisor vs. per-port** for D1 — **resolved during the
   mlx-lm-vs-vllm-mlx decision in A1**: chose per-port routing
   (cheaper code change, fits the existing cascade primary/fallback

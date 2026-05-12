@@ -60,6 +60,7 @@ from rdflib.namespace import RDF
 
 from bffi_pipeline.blocking import fold_diacritics
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import logger as P
 from bffi_pipeline.provenance import vocab as V
 
@@ -462,9 +463,19 @@ def _build_picker_chain(
     from pydantic import SecretStr
 
     sections = _parse_picker_prompt_sections()
+    # JSON-mode schema instruction — see judge.py / llm_json_mode.py for the
+    # rationale (P-02 A5: mlx-lm 0.31 has no constrained decoding, model
+    # otherwise copies few-shot prose).
     template = ChatPromptTemplate.from_messages(
         [
-            ("system", sections["SYSTEM"] + "\n\n" + sections["EXAMPLES"]),
+            (
+                "system",
+                sections["SYSTEM"]
+                + "\n\n"
+                + sections["EXAMPLES"]
+                + "\n\n"
+                + json_mode_instruction(PickerDecision),
+            ),
             ("user", sections["USER"]),
         ]
     )
@@ -475,7 +486,7 @@ def _build_picker_chain(
         temperature=temperature,
         seed=seed,
     )
-    return template | llm.with_structured_output(PickerDecision, method="json_schema")
+    return template | llm.with_structured_output(PickerDecision, method="json_mode")
 
 
 def _picker_uncertain(reason: str) -> PickerDecision:

@@ -107,3 +107,11 @@ plan documents *when the execution was scheduled*.
   365 / 372 unique work URIs held back from Skosmos. Proposes a
   fallback URI-minting policy for anonymous / secondary-creator-only
   records, with three options of increasing ambition.
+- [`prop-06-structured-output-backend.md`](prop-06-structured-output-backend.md)
+  — `proposed`. P-02 A5 found mlx-lm 0.31 has no constrained decoding
+  for `response_format: json_schema`; the fix landed at the prompt
+  layer via `src/bffi_pipeline/llm_json_mode.py`. This proposal
+  weighs three server-side alternatives (outlines wrapper, vllm-mlx,
+  fork mlx-lm) for the case where the prompt-layer approach proves
+  insufficient. Stays `proposed` unless a concrete incident
+  motivates action.
