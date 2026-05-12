@@ -128,3 +128,14 @@ plan documents *when the execution was scheduled*.
   levels for the semantic fix — local M2 rewrite, configurable
   per-856 classifier, or an upstream PR to marc2bibframe2 — and
   documents what would have to be true for it to be worth shipping.
+- [`prop-08-richer-rda-33x-synthesis.md`](prop-08-richer-rda-33x-synthesis.md)
+  — `proposed`. The current Sierra-export RDA 336/337/338 synth
+  cascades bib `material_code` → item `itype_code_num` (commits
+  `3f92a09` + `46b0f8a`), which leaves bibs with no mapped signal
+  still dropping on the M2 content-minimum gate. This proposal
+  layers MARC's more precise signals — leader/06, 007 (deterministic
+  carrier), 008 / 006 material positions, 245$h GMD regex, 300$a
+  extent — into a slot-wise cascade above the existing tables,
+  with a `$5 FI-HELME/synth-v<N>` provenance marker on synthesised
+  datafields so downstream consumers can tell cataloguer-coded
+  from synth-coded 33X apart.
