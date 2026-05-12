@@ -48,7 +48,24 @@ Mirror M6's `JudgeCache` pattern:
 - Lookup happens *inside* the LLM tier, before the HTTP call. A cache hit reuses the prior decision verbatim and writes the same `prov:Activity` (with `prov:wasInfluencedBy` pointing at the cached decision's Activity for traceability — matches how the judge cache handles re-decisions).
 - Cache is regenerable, so a `make clean-caches` target wipes it; the cache file is gitignored.
 - `prompt_hash` in the key means a prompt edit invalidates the cache, same contract as the judge cache. Documented in `prompts/picker_v1.txt` header.
-- Acceptance: 5k re-run after seeding the cache (i.e. a second consecutive run on the same corpus) has cache hit rate ≥ 90 % and M9 wall in ≤ 100 s. On a fresh corpus the cache fills as it goes; the steady-state hit rate on the full 800k will be measured at the first full run.
+- **Finto-graph invalidation key**: each cache row stores the `sha256` (or `mtime`) of the local authority graph file (`data/finto-dumps/<vocab>.ttl`) for the vocabulary the decision belongs to. Lookup checks the row's hash against the current file; mismatch → cache miss. Operationally, `bffi-pipeline load-finto` refreshes the dump and the cache transparently invalidates for the touched vocabulary on the next call. No polling, no timestamp chasing.
+
+**Why the simple invalidation key is enough — Finto's actual cadence**:
+
+Empirical evidence from the [`NatLibFi/Finto-data`](https://github.com/NatLibFi/Finto-data) git history (recent commits, May 2026) shows wildly different update frequencies across the vocabularies M9 hits:
+
+| Vocabulary | Observed cadence | Most recent update |
+|---|---|---|
+| YSO published version (`yso-julkaisuversio`) | ~daily on weekdays | 2026-05-08 |
+| FINAF (= KANTO, persons + corporate bodies) | daily | 2026-05-12 |
+| YSO places (`YSO-paikat`) | daily | 2026-05-12 |
+| YSE (educational) | 1-3 × per week | 2026-05-09 |
+| **KAUNO** (fiction) | **≤ quarterly** | **2025-12-19** (prior: 2024-11, 2024-06, 2024-01) |
+| **MUSO** (music) | **near-dormant** | **2021-09-28** (years between updates) |
+
+So daily-or-coarser cache validity is the right model: the picker cache only invalidates when an operator runs `load-finto`, and operators can sensibly refresh YSO/KANTO daily while leaving KAUNO/MUSO alone for months. The cache's load-from-disk hash check is O(file-stat) so the overhead per call is negligible.
+
+- Acceptance: 5k re-run after seeding the cache (i.e. a second consecutive run on the same corpus, no Finto refresh in between) has cache hit rate ≥ 90 % and M9 wall in ≤ 100 s. On a fresh corpus the cache fills as it goes; the steady-state hit rate on the full 800k will be measured at the first full run.
 
 ### Phase C — Tier-0 normalisation + `skos:altLabel` inclusion
 
@@ -73,7 +90,7 @@ Goal: push fields out of tier-2 into tier-0, where each hit is free.
 ## Risks
 
 - **Phase A — Thread safety of `LangChainLLMPicker`**: M6's `JudgeCache` already had a SQLite cross-thread bug fixed in `1452a4f` (see the 5k snapshot). Phase A's PR re-validates the picker on the same axis before flipping the default.
-- **Phase B — Cache key brittleness**: any byte change in the picker prompt or the candidate ordering invalidates the cache. The key already includes `prompt_hash`; candidate URIs are sorted to make ordering deterministic. A second risk is *over*-caching — if Finto adds a new authority and we keep returning the cached "no match" verdict from before the update. Mitigation: include the Finto graph load timestamp in the cache key (read from the graph's `prov:generatedAtTime`), so a Finto refresh invalidates the cache for that vocabulary.
+- **Phase B — Cache key brittleness**: any byte change in the picker prompt or the candidate ordering invalidates the cache. The key already includes `prompt_hash`; candidate URIs are sorted to make ordering deterministic. A second risk is *over*-caching — if Finto adds a new authority and we keep returning the cached "no match" verdict from before the update. Mitigation: store the `sha256` of `data/finto-dumps/<vocab>.ttl` per cache row; mismatch → cache miss. Finto's actual cadence (see Phase B table) means the daily YSO/KANTO refresh is the realistic invalidation rhythm, and KAUNO/MUSO go months without touch — so the file-hash check fires rarely and refreshes cleanly when the operator chooses to.
 - **Phase C — Silent false-positive merges**: aggressive normalisation could bind a literal to the wrong URI (e.g. two distinct authors collapsed onto one KANTO record because their normalised names match). The sample audit is the primary gate; on top of that, the new bindings carry `bffi:descriptionAuthentication = <bib:auth/needs-review>` if `(fold(literal) == fold(prefLabel)) && (literal != prefLabel)` so cataloguers can audit the imperfect matches in Skosmos.
 - **Phase C — `skos:altLabel` ambiguity**: a single altLabel may be shared across multiple authority URIs (e.g. two YSO concepts both carrying "Helsinki" as alt). At tier-0, multiple-hit means we *cannot* commit deterministically and must fall through to tier-1/2 (already the behaviour in `local_concept_resolver.py`'s "skipped when no `local_resolver` is wired" branch). The tier-0 expansion must preserve this — never bind when the match count > 1.
 - **Phase A+B interaction**: the cache should be looked up *before* the concurrent dispatch, otherwise N threads can pay for the same uncached decision before any of them writes. Lookup → dispatch → write atomically; or use the same `BEGIN IMMEDIATE` pattern the judge cache uses.
@@ -96,3 +113,4 @@ Goal: push fields out of tier-2 into tier-0, where each hit is free.
 - [`docs/plans/completed/p-02-inference-stack-tuning.md`](../plans/completed/p-02-inference-stack-tuning.md) — the prefix-cache + concurrency lever set P-10 reuses on the M9 side.
 - [`docs/plans/backlog/p-06-gold-set-growth.md`](../plans/backlog/p-06-gold-set-growth.md) — Phase C's 200-sample audit feeds into the gold-set backlog.
 - M6 cache parallel: `data/judge-cache.sqlite` schema + the cross-thread fix in `1452a4f` — the model Phase B replicates for M9.
+- [`NatLibFi/Finto-data`](https://github.com/NatLibFi/Finto-data) on GitHub — the Finto-vocabulary source repository whose commit history backs the Phase B cadence table. Per-vocabulary cadence via `git log -- vocabularies/<name>/`.
