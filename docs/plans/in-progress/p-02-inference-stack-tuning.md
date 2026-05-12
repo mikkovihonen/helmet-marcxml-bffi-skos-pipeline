@@ -127,7 +127,7 @@ acceptance criteria):
   — comfortably above the ≥ 3× acceptance bar. Full results in
   [`docs/local-inference.md`](../../local-inference.md) § "TTFT
   measurement (P-02 § B4)".
-- Phase C (speculative decoding): **abandoned** — `<unfilled>`.
+- Phase C (speculative decoding): **abandoned** — `370bd0c`.
   Tried `--draft-model ~/.mlx_models/Qwen3-1.7B-4bit --num-draft-tokens 5`
   on top of Phase B's prefix-cache config. End-to-end throughput
   regressed by ~50 % (Phase B 31.6 /min → Phase C 14.0 /min on the
