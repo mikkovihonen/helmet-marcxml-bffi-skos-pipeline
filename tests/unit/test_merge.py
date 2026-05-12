@@ -284,9 +284,11 @@ def test_canonical_unions_lang_tagged_pref_labels_across_members(tmp_path: Path)
 
 
 def test_canonical_carries_dct_identifier_per_absorbed_bib_id(tmp_path: Path) -> None:
-    """Each absorbed Helmet record contributes one Sierra-style
-    ``dct:identifier`` ("b<id>0") on the canonical Work so cataloguers
-    see every bib number that rolled into a merged Work, not just one."""
+    """Each absorbed Helmet record contributes one ``dct:identifier`` on
+    the canonical Work so cataloguers see every bib number that rolled
+    into a merged Work, not just one. The literal value is the bib_id
+    string as received from upstream (Sierra display form
+    ``b<id><check>`` in production; bare numerics in these fixtures)."""
     canonical_path, _, _ = _run(
         tmp_path,
         [_decision_row(WORK_A, WORK_B, decision="same_work")],
@@ -295,10 +297,10 @@ def test_canonical_carries_dct_identifier_per_absorbed_bib_id(tmp_path: Path) ->
     g.parse(str(canonical_path), format="turtle")
     canonicals = list(g.subjects(V.RDF.type, V.BFFI.Work))
     merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
-    sierra_ids = sorted(str(o) for o in g.objects(merged, DCTERMS.identifier))
-    assert sierra_ids == ["b1119", "b2227"]
-    for sid in sierra_ids:
-        assert (merged, DCTERMS.identifier, Literal(sid)) in g
+    bib_ids = sorted(str(o) for o in g.objects(merged, DCTERMS.identifier))
+    assert bib_ids == ["111", "222"]
+    for bid in bib_ids:
+        assert (merged, DCTERMS.identifier, Literal(bid)) in g
 
 
 def test_identifiers_deduplicate_when_the_same_bib_id_appears_twice(tmp_path: Path) -> None:

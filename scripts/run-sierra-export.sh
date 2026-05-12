@@ -55,6 +55,10 @@ banner() { printf "\n=== %s ===\n" "$*"; }
 
 # --- 1. SMOKE ------------------------------------------------------------
 banner "SMOKE  ${SMOKE_LIMIT} rows → ${SMOKE_DIR}"
+# Clear prior export. Otherwise files from earlier runs accumulate and
+# the M2/M3 idempotency check ("skipped — already converted") silently
+# masks the current export's output behind stale data.
+rm -rf "$SMOKE_DIR"
 mkdir -p "$SMOKE_DIR"
 uv run marcxml-export-sierra \
     --path "$SMOKE_DIR" \
@@ -90,13 +94,15 @@ fi
 # no internet — purely local XSLT + SPARQL CONSTRUCT.
 banner "VALIDATE  smoke → marc-to-bf → bf-to-bffi"
 VALIDATE_OUT="${SMOKE_DIR}-validated"
+# Match SMOKE_DIR: clear so the validation reflects the current export.
+rm -rf "$VALIDATE_OUT"
 mkdir -p "$VALIDATE_OUT"
 uv run bffi-pipeline marc-to-bf "$SMOKE_DIR" --output-dir "$VALIDATE_OUT"
 uv run bffi-pipeline bf-to-bffi --output-dir "$VALIDATE_OUT"
 
-bibframe_count=$(find "$VALIDATE_OUT/bibframe" -name "*.ttl" -type f 2>/dev/null | wc -l | tr -d ' ')
+bibframe_count=$(find "$VALIDATE_OUT/bibframe" -name "*.rdf" -type f 2>/dev/null | wc -l | tr -d ' ')
 bffi_count=$(find "$VALIDATE_OUT/bffi" -name "*.ttl" -type f 2>/dev/null | wc -l | tr -d ' ')
-echo "Validate produced ${bibframe_count} BIBFRAME and ${bffi_count} BFFI Turtle files."
+echo "Validate produced ${bibframe_count} BIBFRAME RDF/XML and ${bffi_count} BFFI Turtle files."
 if [ "$bibframe_count" -eq 0 ] || [ "$bffi_count" -eq 0 ]; then
     echo "FATAL: validation produced no output. Inspect $VALIDATE_OUT before proceeding." >&2
     exit 1
@@ -111,6 +117,10 @@ if [ "$CONFIRM_FULL" -ne 1 ]; then
 fi
 
 banner "FULL  ~800 k bibs → ${FULL_DIR}"
+# Clear prior full export. FULL_DIR is a pure input directory for the
+# downstream pipeline (run-full-pipeline.sh writes its outputs to
+# BFFI_DATA_DIR), so nothing else lives here that could be lost.
+rm -rf "$FULL_DIR"
 mkdir -p "$FULL_DIR"
 # No --limit — full corpus. Expect 1-2 h on a healthy replica.
 uv run marcxml-export-sierra \

@@ -33,7 +33,6 @@ from bffi_pipeline.contrib_variants import (
     append_variant_claims,
     truncate_sidecar,
 )
-from bffi_pipeline.helmet import format_sierra_bib_id
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.uris import (
     mint_raw_expression_uri,
@@ -543,8 +542,9 @@ def _emit_role_on_contribution(
 
 def _emit_helmet_identifiers(graph: Graph) -> None:
     """For every Work / Expression with a Helmet ``bf:identifiedBy`` link,
-    emit a flat ``dct:identifier`` literal in Sierra-style display form
-    (e.g. ``"b100000010"``).
+    emit a flat ``dct:identifier`` literal carrying the same bib_id
+    string (Sierra-style display form, e.g. ``"b100000010"``, minted
+    upstream in ``marcxml-export-sierra``).
 
     Skosmos can't traverse the structured ``bf:Local`` blank node to
     render the identifier on the concept page; the flat predicate
@@ -561,7 +561,7 @@ def _emit_helmet_identifiers(graph: Graph) -> None:
         bib_id = graph.value(ident, RDF.value)
         if not isinstance(bib_id, Literal):
             continue
-        to_add.append((s, DCTERMS.identifier, Literal(format_sierra_bib_id(str(bib_id)))))
+        to_add.append((s, DCTERMS.identifier, Literal(str(bib_id))))
     for triple in to_add:
         graph.add(triple)
 

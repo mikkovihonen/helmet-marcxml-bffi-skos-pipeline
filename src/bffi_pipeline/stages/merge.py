@@ -49,7 +49,6 @@ from bffi_pipeline.contrib_variants import (
 from bffi_pipeline.contrib_variants import (
     load_variant_claims,
 )
-from bffi_pipeline.helmet import format_sierra_bib_id
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.logger import model_agent_uri
 from bffi_pipeline.uris import mint_work_uri
@@ -923,7 +922,7 @@ def _emit_canonical_work(
             g.add((ident, RDF.type, V.BF.Local))
             g.add((ident, RDF.value, Literal(bib_id)))
             g.add((ident, V.BF.source, V.HELMET_SOURCE_URI))
-            g.add((canonical_uri, DCTERMS.identifier, Literal(format_sierra_bib_id(bib_id))))
+            g.add((canonical_uri, DCTERMS.identifier, Literal(bib_id)))
 
     _propagate_expressions(g, canonical_uri=canonical_uri, members=members)
 

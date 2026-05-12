@@ -295,18 +295,17 @@ def test_pref_label_picks_main_work_language_not_contained_work() -> None:
 def test_post_process_emits_sierra_style_dct_identifier_on_work_and_expression() -> None:
     """Skosmos can't traverse the structured ``bf:Local`` blank node. M3
     post-processing denormalises the Helmet bib ID onto every Work and
-    Expression as a flat ``dct:identifier`` literal so cataloguers can
-    copy a Sierra-style bib number ("b<id>0") straight from the concept
-    page into discussions. The bare numeric ID for this fixture is
-    "10000001"; in Sierra-style display form that's "b100000010" — the
-    trailing "0" stands in for the (undocumented) modulus-11 check
-    digit, which the Helmet OPAC accepts in lookups."""
+    Expression as a flat ``dct:identifier`` literal carrying the same
+    string as the structured ``rdf:value`` — the Sierra display form
+    (``b<id><check>``) minted upstream by ``marcxml-export-sierra``.
+    This fixture uses the bare numeric ``10000001`` as a stand-in;
+    production data carries the full display form here."""
     source = _build_source()
     bffi = construct_bffi(source)
     post_process(bffi, source)
     for target in (EXPECTED_WORK, EXPECTED_EXPR):
         idents = list(bffi.objects(target, DCTERMS.identifier))
-        assert Literal("b100000010") in idents, f"Sierra-style id missing on {target}"
+        assert Literal("10000001") in idents, f"Helmet bib id missing on {target}"
 
 
 def test_post_process_does_not_emit_dct_identifier_for_non_helmet_sources() -> None:
