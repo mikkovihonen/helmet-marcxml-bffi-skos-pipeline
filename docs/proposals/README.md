@@ -155,15 +155,16 @@ plan documents *when the execution was scheduled*.
   one-shot `provenance migrate-v2` CLI rewrites existing
   `data/provenance.ttl`.
 - [`prop-10-m9-reconcile-throughput.md`](prop-10-m9-reconcile-throughput.md)
-  — `proposed`. M9 reconcile is the new wall after P-02 closed: the
-  2026-05-12 5k run clocked M9 at 82.9 % of total wall-time, linear-
-  extrapolating to ~10 days on the full 800k corpus. Three independent
-  levers, sequenced for biggest-multiplier-first: Phase A adds an
-  `M9_CONCURRENCY=4` knob (no equivalent of M6's `c=4` exists today);
-  Phase B introduces a persistent picker cache at
-  `data/reconcile-cache.sqlite` mirroring M6's `judge-cache.sqlite`
+  — `planning (graduated)`. M9 reconcile is the new wall after P-02
+  closed: the 2026-05-12 5k run clocked M9 at 82.9 % of total wall-
+  time, linear-extrapolating to ~10 days on the full 800k corpus.
+  Three independent levers, sequenced for biggest-multiplier-first:
+  Phase A adds an `M9_CONCURRENCY=4` knob (no equivalent of M6's
+  `c=4` exists today); Phase B introduces a persistent picker cache
+  at `data/reconcile-cache.sqlite` mirroring M6's `judge-cache.sqlite`
   pattern; Phase C extends tier-0 lookup with NFKC + `fold_diacritics`
   + casefold + date/role-marker stripping + `skos:altLabel` inclusion
   (gated by a 200-sample manual audit to catch false-positive
   authority merges). Phases D (batched picker) + E (prompt ordering
   for prefix-cache stickiness) are deferred until A+B+C are measured.
+  Plan lives at [`docs/plans/backlog/p-10-m9-reconcile-throughput.md`](../plans/backlog/p-10-m9-reconcile-throughput.md).

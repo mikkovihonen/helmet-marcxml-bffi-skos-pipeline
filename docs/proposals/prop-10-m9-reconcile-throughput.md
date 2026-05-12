@@ -1,6 +1,8 @@
 # P-10 — M9 reconcile throughput: concurrency + persistent picker cache + tier-0 expansion
 
-**Status**: proposed.
+**Status**: planning (graduated). See
+[`docs/plans/backlog/p-10-m9-reconcile-throughput.md`](../plans/backlog/p-10-m9-reconcile-throughput.md)
+for the executable plan with sub-step detail, acceptance gates, and rollback procedures per phase.
 **Scope**: 3-4 days. Phase A (concurrency knob + thread-pool the orchestrator) is half a day. Phase B (persistent picker cache, analogous to `judge-cache.sqlite`) is 1 day. Phase C (tier-0 normalisation expansion + `skos:altLabel` inclusion) is 1-2 days including the sample audit. Phases D+E are deferred until A+B+C are measured.
 **Proposal-base commit**: `ad4f6c4`. The "Motivation" reasons about the M9 stage as it ran in the [2026-05-12 5k snapshot](../performance/2026-05-12-5k-m2-max.md). If `main` has moved before this is acted on, re-verify with
 `git diff ad4f6c4..HEAD --
@@ -8,6 +10,20 @@ src/bffi_pipeline/stages/reconcile.py
 src/bffi_pipeline/stages/local_concept_resolver.py
 src/bffi_pipeline/cli.py
 prompts/picker_v1.txt`.
+
+Material updates since drafting:
+
+- `9ba54d1` — Phase B cache invalidation backed with Finto-cadence
+  evidence from `NatLibFi/Finto-data` git history. Simplified from
+  `prov:generatedAtTime` chasing to a per-row `sha256` of the
+  on-disk Finto dump (the operator-controlled `bffi-pipeline
+  load-finto` refresh is the realistic invalidation trigger).
+- This commit — graduated into the plan; the proposal's Motivation,
+  lever rationale, and Finto-cadence table are preserved here, the
+  Approach / Prerequisites / Risks / Open-questions content is
+  carried over into the plan with execution detail per phase
+  (env vars, function names, sub-steps, acceptance checklists,
+  rollback procedures).
 
 ## Motivation
 
