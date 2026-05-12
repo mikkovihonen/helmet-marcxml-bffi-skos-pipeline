@@ -12,7 +12,11 @@ from typing import Any
 
 import pytest
 
+from marcxml_export_pipeline.sierra.dtos import Subfield, Varfield
 from marcxml_export_pipeline.sierra.itype_to_rda import (
+    MAP_SHEET,
+    NOTATED_MUSIC_UNMEDIATED_VOLUME,
+    PERFORMED_MUSIC_AUDIO_CASSETTE,
     PERFORMED_MUSIC_AUDIO_DISC,
     TEXT_UNMEDIATED_VOLUME,
     VIDEO_VIDEODISC,
@@ -29,8 +33,10 @@ from marcxml_export_pipeline.sierra.rda_signals import (
     THREE_D_OBJECT,
     TWO_D_GRAPHIC_SHEET,
     VIDEO_ONLINE,
+    VIDEO_VIDEOCASSETTE,
     PartialRda,
     RecordContext,
+    from_300_a_extent,
     from_items_itype,
     from_leader_and_008,
     from_marc_007,
@@ -66,6 +72,19 @@ def _padded_008(form: str, leader_06: str = "a") -> str:
     # Books/computer/music/sound recordings → 008/23; visual/cartographic → 008/29.
     pos = 29 if leader_06 in {"e", "f", "g", "k", "o", "r"} else 23
     return " " * pos + form + " " * (40 - pos - 1)
+
+
+def _vf_300(extent: str) -> Varfield:
+    """Build a synthetic 300 :class:`Varfield` with one ``$a`` subfield."""
+    vf = Varfield(
+        id=None,
+        marc_tag="300",
+        marc_ind1=" ",
+        marc_ind2=" ",
+        field_content="",
+    )
+    vf.subfields = [Subfield(tag="a", content=extent, display_order=0)]
+    return vf
 
 
 # --- PartialRda mechanics ------------------------------------------------
@@ -320,6 +339,97 @@ def test_from_items_itype_returns_empty_when_no_items() -> None:
     assert from_items_itype(_ctx()) == PartialRda()
 
 
+# --- from_300_a_extent ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("extent", "expected"),
+    [
+        # Video forms — specific (DVD-levy) and short (DVD) variants
+        # both hit the videodisc rule.
+        ("1 DVD-levy", VIDEO_VIDEODISC),
+        ("2 DVD-levyä", VIDEO_VIDEODISC),
+        ("1 DVD", VIDEO_VIDEODISC),
+        ("1 Blu-ray-levy", VIDEO_VIDEODISC),
+        ("1 Blu-ray", VIDEO_VIDEODISC),
+        ("1 videolevy", VIDEO_VIDEODISC),
+        ("1 videokasetti", VIDEO_VIDEOCASSETTE),
+        # Audio — LP / cassette / generic disc.
+        ("1 LP-levy", PERFORMED_MUSIC_AUDIO_DISC),
+        ("2 LP-levyä", PERFORMED_MUSIC_AUDIO_DISC),
+        ("1 LP", PERFORMED_MUSIC_AUDIO_DISC),
+        ("1 äänikasetti", PERFORMED_MUSIC_AUDIO_CASSETTE),
+        ("1 C-kasetti", PERFORMED_MUSIC_AUDIO_CASSETTE),
+        ("1 äänilevy", PERFORMED_MUSIC_AUDIO_DISC),
+        ("1 CD-levy", PERFORMED_MUSIC_AUDIO_DISC),
+        ("1 CD", PERFORMED_MUSIC_AUDIO_DISC),
+        # Notated music / cartographic / 3-D.
+        ("1 nuotti", NOTATED_MUSIC_UNMEDIATED_VOLUME),
+        ("8 nuottia", NOTATED_MUSIC_UNMEDIATED_VOLUME),
+        ("1 kartta", MAP_SHEET),
+        ("3 karttaa", MAP_SHEET),
+        ("1 esine", THREE_D_OBJECT),
+        ("12 esinettä", THREE_D_OBJECT),
+        # Text — generic forms.
+        ("1 kuvateos", TEXT_UNMEDIATED_VOLUME),
+        ("1 kirja", TEXT_UNMEDIATED_VOLUME),
+        ("3 kirjaa", TEXT_UNMEDIATED_VOLUME),
+        ("1 nide", TEXT_UNMEDIATED_VOLUME),
+        ("128 sivua", TEXT_UNMEDIATED_VOLUME),
+        ("64 pages", TEXT_UNMEDIATED_VOLUME),
+    ],
+)
+def test_from_300_a_extent_resolves_known_tokens(extent: str, expected: object) -> None:
+    p = from_300_a_extent(_ctx(varfields=(_vf_300(extent),)))
+    assert p.to_carrier() == expected
+
+
+def test_from_300_a_extent_returns_empty_when_no_300_field() -> None:
+    assert from_300_a_extent(_ctx()) == PartialRda()
+
+
+def test_from_300_a_extent_returns_empty_when_300_a_unrecognised() -> None:
+    """A 300$a with no known token (e.g. an obscure unit like
+    ``1 mikroskooppimateriaali``) must return empty so the cascade
+    can keep walking — never emit a wrong tuple."""
+    p = from_300_a_extent(_ctx(varfields=(_vf_300("1 mikroskooppimateriaali"),)))
+    assert p == PartialRda()
+
+
+def test_from_300_a_extent_specific_token_beats_generic() -> None:
+    """``DVD-levy`` should hit the video rule, not the audio-disc
+    fallback (the table's ordering enforces this — first match wins
+    and DVD-levy is listed before generic ``levy``-fragments)."""
+    p = from_300_a_extent(_ctx(varfields=(_vf_300("1 DVD-levy, 120 min"),)))
+    assert p.to_carrier() == VIDEO_VIDEODISC
+
+
+def test_from_300_a_extent_concatenates_multiple_300_fields() -> None:
+    """Some bibs carry more than one 300 datafield (e.g. accompanying
+    material). The layer scans across all 300$a contents — a token in
+    any of them wins."""
+    vfs = (
+        _vf_300("1 DVD-levy"),
+        _vf_300("liiteaineisto"),
+    )
+    p = from_300_a_extent(_ctx(varfields=vfs))
+    assert p.to_carrier() == VIDEO_VIDEODISC
+
+
+def test_from_300_a_extent_ignores_non_300_varfields() -> None:
+    """Tokens in 245$h or 500$a shouldn't fire this layer — only 300$a."""
+    bogus = Varfield(
+        id=None,
+        marc_tag="500",
+        marc_ind1=" ",
+        marc_ind2=" ",
+        field_content="",
+    )
+    bogus.subfields = [Subfield(tag="a", content="1 DVD-levy", display_order=0)]
+    p = from_300_a_extent(_ctx(varfields=(bogus,)))
+    assert p == PartialRda()
+
+
 # --- DEFAULT_LAYERS cascade priority -------------------------------------
 
 
@@ -372,6 +482,29 @@ def test_default_layers_falls_through_to_items_when_material_unmapped() -> None:
     ctx = _ctx(leader="o", material_code="x", items=items)
     rda = resolve_rda(ctx, DEFAULT_LAYERS)
     assert rda == VIDEO_VIDEODISC
+
+
+def test_default_layers_falls_through_to_extent_when_all_else_fails() -> None:
+    """leader='o' + no material + no items + 300$a token → extent
+    layer resolves. Verifies the 300$a fallback is wired in at the
+    bottom of the cascade."""
+    ctx = _ctx(leader="o", varfields=(_vf_300("1 DVD-levy"),))
+    rda = resolve_rda(ctx, DEFAULT_LAYERS)
+    assert rda == VIDEO_VIDEODISC
+
+
+def test_default_layers_extent_does_not_override_leader_008() -> None:
+    """If leader+008 resolves, the 300$a extent layer must NOT
+    re-fill any slot. Verified by giving a contradicting extent and
+    checking the leader+008 result wins."""
+    ctx = _ctx(
+        leader="a",
+        controlfields=[("008", _padded_008(" "))],
+        varfields=(_vf_300("1 DVD-levy"),),  # would say videodisc
+    )
+    rda = resolve_rda(ctx, DEFAULT_LAYERS)
+    # leader+008 wins → text/n/nc, not video.
+    assert rda == TEXT_UNMEDIATED_VOLUME
 
 
 def test_default_layers_returns_none_when_no_signal_speaks() -> None:

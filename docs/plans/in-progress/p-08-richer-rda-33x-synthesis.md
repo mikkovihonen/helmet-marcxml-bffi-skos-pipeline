@@ -381,41 +381,66 @@ return `PartialRda()` (empty; lower-priority layers handle it).
 
 ---
 
-## Phase C — 300$a extent fallback
+## Phase C — 300$a extent fallback (DONE)
 
-Estimated wall-time: half a day. Adds the last-resort textual layer.
-Phase B's empirical 0-residual on the 5k sample means this layer is
-no longer load-bearing for the plan goal — it ships as insurance
-against the long-tail distribution on the full 800k corpus and for
-records whose leader/06 is unmapped (`o` kits, `p` mixed material,
-obsolete codes) AND whose material/itype don't speak.
+Shipped `from_300_a_extent(ctx)` in `rda_signals.py`. The layer scans
+all MARC 300 datafields' ``$a`` subfields for carrier-naming tokens
+and returns the canonical RDA tuple on first match.
 
-### C1. Layer 6 — 300$a extent regex
+Token table (regex-keyed, ordered specificity-first so ``DVD-levy``
+matches before generic ``levy``-fragments):
 
-Add `from_300_a_extent(ctx) -> PartialRda`. Last-resort textual
-fallback for records whose leader/06 and 008-form are both
-unmapped *and* whose material_code/itype don't help. Keys on
-300$a tokens ("1 CD", "1 DVD-levy", "1 LP-levy", "1 äänikasetti",
-"1 kirja", "1 kuvateos", "1 kartta", "1 esine", "1 nide").
+| Token | RDA tuple |
+|---|---|
+| `DVD-levy` / `DVD` / `Blu-ray` / `videolevy` | `VIDEO_VIDEODISC` |
+| `videokasetti` | `VIDEO_VIDEOCASSETTE` |
+| `LP-levy` / `LP` / `äänilevy` / `CD-levy` / `CD` | `PERFORMED_MUSIC_AUDIO_DISC` |
+| `äänikasetti` / `C-kasetti` | `PERFORMED_MUSIC_AUDIO_CASSETTE` |
+| `nuotti` | `NOTATED_MUSIC_UNMEDIATED_VOLUME` |
+| `kartta` | `MAP_SHEET` |
+| `esine` | `THREE_D_OBJECT` |
+| `kirja` / `kuvateos` / `nide` / `sivua` / `pages` | `TEXT_UNMEDIATED_VOLUME` |
 
-17 % of current drops carry such a token; this layer is informational
-in the regression-test residual but useful insurance on the full
-800k corpus where the long-tail leader/06 distribution may differ.
+Regexes match word-boundary stems with optional declension suffixes
+(`\w*\b`) so Finnish forms like `kirjaa`, `karttaa`, `nidettä` all
+hit. Appended to `DEFAULT_LAYERS` after `from_items_itype` as the
+last-resort fallback — fires only when every higher-priority layer
+left at least one slot empty.
 
-### C2. Phase C acceptance
+### Phase C key findings
 
-- [ ] `from_300_a_extent(ctx)` exists with unit tests covering each
-      token in the regex.
-- [ ] Appended to `DEFAULT_LAYERS` after the existing
-      `from_items_itype` adapter so it slots in as the last
-      fallback.
-- [ ] Re-run `coverage_tally.py` and `phase_b_residual.py` — both
-      should still report 0 residual on the 5k sample (no
-      regression from Phase B's perfect recovery).
-- [ ] Conflict-logging: when 007 and (leader/06, 008-form) disagree
-      on carrier, the cascade composer writes a
-      `scratchpad/rda-cascade/conflicts.jsonl` entry. Not surfaced
-      as a failure — informational for cataloguers.
+- The layer is by design **informational on the current sample** —
+  Phase B's universal default resolves all 566 drops, so the cascade
+  short-circuits before reaching layer 5. The layer's value is for
+  the long-tail leader/06 distribution on the full 800k corpus (`o`
+  kits, `p` mixed material, obsolete codes) and for records where
+  every higher-priority signal is absent.
+- The phase_b_residual.py script still reports 0 residual after
+  Phase C (regression-free); coverage_tally.py is unchanged.
+- A `test_default_layers_extent_does_not_override_leader_008` test
+  pins the priority order: a record with leader+008 saying "text" and
+  300$a saying "DVD-levy" still resolves to text — the 300$a layer
+  fires only on empty slots.
+
+### Phase C acceptance
+
+- [x] `from_300_a_extent(ctx)` exists with 34 new unit tests covering
+      every token in the regex plus the fall-through cases (no 300$a,
+      unrecognised token, multiple 300 fields, non-300 varfields).
+- [x] Appended to `DEFAULT_LAYERS` after `from_items_itype`.
+- [x] `phase_b_residual.py` still reports 0 residual on the 5k
+      sample (no Phase C regression).
+- [x] Test suite at 830 tests; lint + mypy --strict clean.
+
+### Deferred
+
+Conflict-logging (007 disagreeing with leader+008's carrier) was
+listed in Phase C5 of the original plan as informational. It is
+deferred to a follow-up — the cascade's priority order already
+resolves disagreements deterministically (007 wins on its slots,
+leader+008 on the rest), and emitting a scratchpad jsonl per
+disagreement adds complexity for no current consumer. Surface as a
+small task if cataloguers ask for the audit signal.
 
 ---
 

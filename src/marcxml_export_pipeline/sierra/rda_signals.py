@@ -40,6 +40,7 @@ Per the LoC MARC 21 Bibliographic spec for the per-category 007 /
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, TypeAlias
@@ -49,6 +50,7 @@ from marcxml_export_pipeline.sierra.itype_to_rda import (
     MAP_SHEET,
     MATERIAL_TO_RDA,
     NOTATED_MUSIC_UNMEDIATED_VOLUME,
+    PERFORMED_MUSIC_AUDIO_CASSETTE,
     PERFORMED_MUSIC_AUDIO_DISC,
     SPOKEN_WORD_AUDIO_DISC,
     TEXT_UNMEDIATED_VOLUME,
@@ -316,6 +318,11 @@ VIDEO_ONLINE: Final[RdaCarrier] = RdaCarrier(
     media=("tietokonekäyttöinen", "c"),
     carrier=("verkkoaineisto", "cr"),
 )
+VIDEO_VIDEOCASSETTE: Final[RdaCarrier] = RdaCarrier(
+    content_types=(("kaksiulotteinen liikkuva kuva", "tdi"),),
+    media=("video", "v"),
+    carrier=("videokasetti", "vf"),
+)
 COMPUTER_ONLINE: Final[RdaCarrier] = RdaCarrier(
     content_types=(("tietokoneohjelma", "cop"),),
     media=("tietokonekäyttöinen", "c"),
@@ -454,6 +461,80 @@ def from_items_itype(ctx: RecordContext) -> PartialRda:
     return partial_from_carrier(lookup_rda_for_items(ctx.items))
 
 
+# --- Layer 5: 300$a extent regex (last-resort textual fallback) ----------
+
+
+#: 300$a extent tokens → canonical RDA tuple. Conservative Finnish +
+#: English vocabulary; matches a word stem at a word boundary so
+#: declensions (``kirjaa``, ``kirjat``, ``nidettä``) still hit. Order
+#: matters: longer/more-specific tokens must precede shorter ones
+#: (``DVD-levy`` before ``levy`` alone) since the first match wins.
+_EXTENT_TOKEN_RDA: Final[tuple[tuple[re.Pattern[str], RdaCarrier], ...]] = (
+    # Video — DVD / Blu-ray / videocassette. Specific first.
+    (re.compile(r"\bDVD[-\s]?levy\w*\b", re.IGNORECASE), VIDEO_VIDEODISC),
+    (re.compile(r"\bBlu[-\s]?ray\w*\b", re.IGNORECASE), VIDEO_VIDEODISC),
+    (re.compile(r"\bDVD\b", re.IGNORECASE), VIDEO_VIDEODISC),
+    (re.compile(r"\bvideolevy\w*\b", re.IGNORECASE), VIDEO_VIDEODISC),
+    (re.compile(r"\bvideokasetti\w*\b", re.IGNORECASE), VIDEO_VIDEOCASSETTE),
+    # Audio — LP / cassette / generic audio disc. Music as the default
+    # 336 (matches ``MATERIAL_TO_RDA["3"]`` convention; ambiguous CDs
+    # default to music — cataloguer-coded 33X always wins anyway).
+    (re.compile(r"\bLP[-\s]?levy\w*\b", re.IGNORECASE), PERFORMED_MUSIC_AUDIO_DISC),
+    (re.compile(r"\bLP\b"), PERFORMED_MUSIC_AUDIO_DISC),
+    (re.compile(r"\bäänikasetti\w*\b", re.IGNORECASE), PERFORMED_MUSIC_AUDIO_CASSETTE),
+    (re.compile(r"\bC[-\s]?kasetti\w*\b", re.IGNORECASE), PERFORMED_MUSIC_AUDIO_CASSETTE),
+    (re.compile(r"\bäänilevy\w*\b", re.IGNORECASE), PERFORMED_MUSIC_AUDIO_DISC),
+    (re.compile(r"\bCD[-\s]?levy\w*\b", re.IGNORECASE), PERFORMED_MUSIC_AUDIO_DISC),
+    (re.compile(r"\bCD\b"), PERFORMED_MUSIC_AUDIO_DISC),
+    # Notated music
+    (re.compile(r"\bnuotti\w*\b", re.IGNORECASE), NOTATED_MUSIC_UNMEDIATED_VOLUME),
+    # Cartographic
+    (re.compile(r"\bkartta\w*\b", re.IGNORECASE), MAP_SHEET),
+    # 3-D objects
+    (re.compile(r"\besine\w*\b", re.IGNORECASE), THREE_D_OBJECT),
+    # Text — books / pages. Most generic, so last.
+    (re.compile(r"\bkuvateos\w*\b", re.IGNORECASE), TEXT_UNMEDIATED_VOLUME),
+    (re.compile(r"\bkirja\w*\b", re.IGNORECASE), TEXT_UNMEDIATED_VOLUME),
+    (re.compile(r"\bnide\w*\b", re.IGNORECASE), TEXT_UNMEDIATED_VOLUME),
+    (re.compile(r"\bnidettä\b", re.IGNORECASE), TEXT_UNMEDIATED_VOLUME),
+    (re.compile(r"\bsivua\b", re.IGNORECASE), TEXT_UNMEDIATED_VOLUME),
+    (re.compile(r"\bsivu[aät]?\w*\b", re.IGNORECASE), TEXT_UNMEDIATED_VOLUME),
+    (re.compile(r"\bpages?\b", re.IGNORECASE), TEXT_UNMEDIATED_VOLUME),
+)
+
+
+def from_300_a_extent(ctx: RecordContext) -> PartialRda:
+    """Last-resort textual fallback — scan MARC 300$a for a carrier-
+    naming token.
+
+    Phase A measured 17 % of the 5k drop list carries such a token,
+    but in practice this layer fires on essentially no records on
+    that sample because Phase B's universal default resolves
+    everything first. The layer ships as insurance for the long-
+    tail leader/06 distribution on the full 800k corpus (``o`` kits,
+    ``p`` mixed material, obsolete codes) plus records with no
+    material/itype signal at all.
+
+    First matching token in :data:`_EXTENT_TOKEN_RDA` wins. Tokens are
+    ordered specificity-first (``DVD-levy`` before ``DVD``; specific
+    text forms before generic ``sivua``).
+    """
+    extents: list[str] = []
+    for vf in ctx.varfields:
+        if vf.marc_tag != "300":
+            continue
+        for sf in vf.subfields:
+            if sf.tag == "a" and sf.content:
+                extents.append(sf.content)
+    if not extents:
+        return PartialRda()
+    haystack = " ".join(extents)
+    for pattern, rda in _EXTENT_TOKEN_RDA:
+        if pattern.search(haystack):
+            return partial_from_carrier(rda)
+    return PartialRda()
+
+
 # --- Cascade entry point -------------------------------------------------
 
 
@@ -466,6 +547,7 @@ DEFAULT_LAYERS: Final[tuple[CascadeLayer, ...]] = (
     from_leader_and_008,
     from_material_code,
     from_items_itype,
+    from_300_a_extent,
 )
 
 
@@ -482,8 +564,10 @@ __all__ = [
     "THREE_D_OBJECT",
     "TWO_D_GRAPHIC_SHEET",
     "VIDEO_ONLINE",
+    "VIDEO_VIDEOCASSETTE",
     "PartialRda",
     "RecordContext",
+    "from_300_a_extent",
     "from_items_itype",
     "from_leader_and_008",
     "from_marc_007",
