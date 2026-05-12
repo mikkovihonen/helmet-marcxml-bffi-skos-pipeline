@@ -127,7 +127,14 @@ acceptance criteria):
   — comfortably above the ≥ 3× acceptance bar. Full results in
   [`docs/local-inference.md`](../../local-inference.md) § "TTFT
   measurement (P-02 § B4)".
-- Phase C (speculative decoding): `<unfilled>`
+- Phase C (speculative decoding): **abandoned** — `<unfilled>`.
+  Tried `--draft-model ~/.mlx_models/Qwen3-1.7B-4bit --num-draft-tokens 5`
+  on top of Phase B's prefix-cache config. End-to-end throughput
+  regressed by ~50 % (Phase B 31.6 /min → Phase C 14.0 /min on the
+  M2 Max 64 GB at c=8). Per the plan's own contingency in § C5
+  ("If acceptance < 50 %, abandon C; Phase B alone is still a win"),
+  Phase C does not ship; the M5 Max production server runs without
+  the `--draft-model` flag.
 - Phase D6 (remove Ollama install paths): `<unfilled>`
 
 **Owner**: TBD.
@@ -809,10 +816,31 @@ Verdicts must still match the Ollama baseline.
 
 ### C5. Phase C acceptance
 
-- [ ] Draft model converted and loaded by mlx-lm.
-- [ ] Token-acceptance rate ≥ 70 % observed in the bench.
+- [x] Draft model downloaded and loaded by mlx-lm
+      (`Qwen/Qwen3-1.7B-MLX-4bit` → `~/.mlx_models/Qwen3-1.7B-4bit`).
+- [ ] Token-acceptance rate ≥ 70 % observed in the bench. mlx-lm
+      0.31's server does not log per-request acceptance rate, so this
+      metric isn't directly measurable. Inferred low from the
+      end-to-end regression below.
 - [ ] ≥ 2× speedup vs Phase B baseline on fast-mode outputs.
-- [ ] Gold-set parity holds.
+      **Measured: 0.46× — Phase C is *slower* than Phase B.** On the
+      M2 Max 64 GB with `--num-draft-tokens 5`, the n=32 sweep
+      produced 13.2 /14.4 /14.0 pairs/min at c=1 / 4 / 8 respectively,
+      vs Phase B's 28.4 / 31.2 / 31.6 pairs/min on the same workload.
+      The 8B-target / 1.7B-draft ratio (~5×) is likely too small to
+      amortise the draft-model overhead per decode step on Apple
+      Silicon's memory-bandwidth profile — speculative decoding
+      typically wins at 10× or larger ratios.
+- [ ] Gold-set parity holds. Not measured — abandoning the phase
+      makes this moot.
+
+**Phase C abandoned** per the contingency in C3: "If acceptance
+< 50 %, abandon C — the overhead of generating with the draft model
+isn't being amortised. Phase B alone is still a win; ship and stop
+here." Phase B's prefix-cache config remains the production
+recommendation; the 1.7B model stays on disk under `~/.mlx_models/`
+in case a future re-evaluation wants to retry with different
+`--num-draft-tokens` or a different draft-model size.
 
 ### C6. Rollback
 
@@ -984,6 +1012,15 @@ After Phase C lands, update **`docs/runbook.md`** with:
   M2 Max 64 GB measured 7.99× speedup (cold 2.87 s → warm 0.36 s)
   on cache hits — comfortably above the ≥ 3× acceptance bar.
   No prompt-file edits; only `_build_chain` and supporting code.
+- Phase C (speculative decoding) **abandoned** per § C3
+  contingency: adding `--draft-model ~/.mlx_models/Qwen3-1.7B-4bit
+  --num-draft-tokens 5` regressed throughput by ~50 % on the M2
+  Max 64 GB (Phase B 31.6 /min → Phase C 14.0 /min at c=8).
+  Likely the 8B/1.7B target/draft ratio is too small to amortise
+  the draft overhead on Apple Silicon. The 1.7B model stays on
+  disk for a future M5 Max re-evaluation but does not ship in the
+  recommended production config. Phase B is the production
+  endpoint.
 - **Supervisor vs. per-port** for D1 — **resolved during the
   mlx-lm-vs-vllm-mlx decision in A1**: chose per-port routing
   (cheaper code change, fits the existing cascade primary/fallback

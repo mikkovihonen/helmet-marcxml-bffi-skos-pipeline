@@ -235,6 +235,20 @@ runs the TTFT savings still compound: at the A6 ceiling of
 matters more if a stage downstream (e.g. M9 picker) ever needs to
 fire on every M6 verdict in real time.
 
+### Speculative decoding — not enabled (P-02 § C abandoned)
+
+The recommended production server **does not pass `--draft-model`**.
+P-02 Phase C tried `--draft-model ~/.mlx_models/Qwen3-1.7B-4bit
+--num-draft-tokens 5` on top of the Phase B prefix-cache config and
+measured a ~50 % regression on the M2 Max 64 GB (Phase B
+31.6 pairs/min → Phase C 14.0 pairs/min at c=8). Likely the
+8B-target / 1.7B-draft ratio (~5×) is too small to amortise the
+per-step draft-model overhead on Apple Silicon's memory-bandwidth
+profile. The 1.7B model stays on disk under `~/.mlx_models/` for
+future re-evaluation with different `--num-draft-tokens` settings
+or a different draft-model size on the M5 Max. See P-02 § C5 in
+the plan for the abandon trail.
+
 ## Ollama as the dev fallback
 
 Until P-02 Phase D5 ships, Ollama remains a documented option for fast iteration and gold-set runs:
