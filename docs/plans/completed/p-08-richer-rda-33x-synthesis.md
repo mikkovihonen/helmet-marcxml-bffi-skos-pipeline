@@ -15,7 +15,7 @@ tests/unit/sierra/test_marcxml.py`.
 - Phase A (coverage analysis + layer-set revision): `10c508a`
 - Phase B (cascade scaffolding + (leader/06, 008-form) + 007 refinement + adapter layers): `e87965c`
 - Phase C (300$a extent fallback): `94a7de7`
-- Phase D (`$5` provenance marker + cataloguer-facing docs): `<unfilled>` (this commit)
+- Phase D (`$5` provenance marker + cataloguer-facing docs): `10f8da1`
 
 **Owner**: TBD.
 **Estimated wall-time**: ~1 day remaining. Phase A is done; Phase B
