@@ -117,3 +117,14 @@ plan documents *when the execution was scheduled*.
   motivates action. Note: numbering collision with the unrelated
   `backlog/p-06-gold-set-growth.md` plan — disambiguate by path in
   prose.
+- [`prop-07-bibframe-856-as-item.md`](prop-07-bibframe-856-as-item.md)
+  — `proposed`. marc2bibframe2 lifts MARC 856 (Electronic Location
+  and Access) as a separate `bf:Instance`, which is semantically
+  closer to `bf:Item` for the typical Helmet usage (publisher PDF
+  links, landing pages). P-02's 5k production-style run worked
+  around the symptom in `549baa0` (URI-regex exclusion in the
+  Boundary-2 shape + deterministic main-Instance pick in
+  `_find_root_resources`). This proposal sketches three depth
+  levels for the semantic fix — local M2 rewrite, configurable
+  per-856 classifier, or an upstream PR to marc2bibframe2 — and
+  documents what would have to be true for it to be worth shipping.
