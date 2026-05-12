@@ -18,12 +18,22 @@ Material updates since drafting:
   `prov:generatedAtTime` chasing to a per-row `sha256` of the
   on-disk Finto dump (the operator-controlled `bffi-pipeline
   load-finto` refresh is the realistic invalidation trigger).
-- This commit — graduated into the plan; the proposal's Motivation,
-  lever rationale, and Finto-cadence table are preserved here, the
-  Approach / Prerequisites / Risks / Open-questions content is
-  carried over into the plan with execution detail per phase
+- (graduation commit) — graduated into the plan; the proposal's
+  Motivation, lever rationale, and Finto-cadence table are preserved
+  here, the Approach / Prerequisites / Risks / Open-questions content
+  is carried over into the plan with execution detail per phase
   (env vars, function names, sub-steps, acceptance checklists,
   rollback procedures).
+- This commit — folded the watchdog pattern from P-03 into Phase A
+  as sub-step A.4. Running M9 at `c=4` without per-call / per-field
+  timeout enforcement amplifies the hang-blocks-worker risk (one
+  stuck picker call would sterilise 25 % of throughput), so the
+  watchdog wiring has to land in the same phase as concurrency.
+  Adds `LLM_M9_FIELD_TIMEOUT_SECONDS` (analogous to M6's
+  `LLM_PAIR_TIMEOUT_SECONDS`) and extends the `WatchdogEvent`
+  Literal in `watchdog.py` with `field_budget_exceeded`. Phase A
+  wall-time estimate bumped from ~1 day to ~1.5 days; plan total
+  from 3-4 days to 3.5-4.5 days.
 
 ## Motivation
 

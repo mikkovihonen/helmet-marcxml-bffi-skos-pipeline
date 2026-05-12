@@ -19,7 +19,7 @@ data/finto-dumps/`.
 - Phase C (tier-0 normalisation + altLabel inclusion): `<unfilled>`
 
 **Owner**: TBD.
-**Estimated wall-time**: ~3-4 days end-to-end. Phase A ~1 day (½ code + ½ bench). Phase B ~1-1.5 days. Phase C ~1-2 days (rule design + cataloguer-sample audit gate). Each phase is independently shippable and lands with its own [`docs/performance/`](../../performance/) snapshot.
+**Estimated wall-time**: ~3.5-4.5 days end-to-end. Phase A ~1.5 days (concurrency + watchdog wiring + bench). Phase B ~1-1.5 days. Phase C ~1-2 days (rule design + cataloguer-sample audit gate). Each phase is independently shippable and lands with its own [`docs/performance/`](../../performance/) snapshot.
 
 ## Goal
 
@@ -51,13 +51,16 @@ The Phase B "warm cache" target is a second consecutive run on the same corpus w
 - **Tier-0 is a literal exact match.** `local_concept_resolver.py:181`'s SPARQL CONSTRUCT does `?uri skos:prefLabel ?label .` with no normalisation on either side. `reconcile.py` *imports* `fold_diacritics` from `bffi_pipeline.blocking` and uses it inside `_normalise_for_similarity` at line 310, but that path is tier-1-only.
 - **`bffi-pipeline load-finto`** writes per-vocabulary RDF files under `data/finto-dumps/`. Phase B's cache invalidation hooks into the SHA-256 of these files; Phase C's `bffi:foldedLabel` materialisation extends `load-finto` to emit a parallel folded-form triple at load time.
 - The picker uses `LangChainLLMPicker(model_name=primary_model)` (`cli.py:855`), a single 8B model — no cascade. Phase A's thread safety verification is the first place that surfaces if the LangChain client is multi-thread-safe.
+- **The watchdog from P-03 is M6-only today.** `src/bffi_pipeline/stages/watchdog.py:1` opens with "Structured event emission for the M6 LLM-call watchdog (plan P-03)." The event vocabulary at line 53 (`timeout`, `retry`, `escalate`, `give_up`, `pair_budget_exceeded`) is generic enough to extend; the budget enforcement lives in `judge.py` and has no M9 counterpart in `reconcile.py`. Phase A.4 closes this gap.
 - M6 cache parallel: `data/judge-cache.sqlite` schema + the cross-thread fix in `1452a4f`. Phase B mirrors this exactly, including the same `BEGIN IMMEDIATE` write pattern.
 
 ---
 
-## Phase A — M9 concurrency knob
+## Phase A — M9 concurrency knob + watchdog wiring
 
-Estimated wall-time: ~1 day. Independent of B and C; can ship first.
+Estimated wall-time: ~1.5 days. Independent of B and C; can ship first.
+
+Phase A combines two structurally-linked changes: introducing `c=4` worker concurrency for the picker, **and** wiring the M9 picker call site through the same watchdog pattern P-03 shipped for M6. Running M9 at `c=4` without per-call/per-field timeout enforcement amplifies the hang-blocks-worker risk — one stuck picker call would silently sterilise 25 % of throughput — so the watchdog work has to land in the same phase that introduces concurrency, not as a follow-up.
 
 ### A.1. Surface the knob in config + CLI
 
@@ -80,24 +83,47 @@ The provenance writer must produce stable Activity-URI sequencing under concurre
 
 Pick option 1 — it preserves the existing writer's single-threaded contract and keeps the determinism gate explicit (sort the futures-result list before serialising).
 
-### A.4. Tests
+### A.4. Watchdog integration on the M9 picker call site
+
+Mirror P-03's M6 watchdog wiring at the M9 picker call site so a hung picker call can't sterilise a worker thread indefinitely. The retry behaviour reuses the existing HTTP-timeout stack on the LangChain → mlx-lm path; this sub-step adds the **outer per-field budget**, the **stage marker** for budget-exhausted fields, and the **event emission** that makes the activity visible in `pipeline.log` and `watchdog-events.jsonl`.
+
+Concretely:
+
+- **New config knob**: `llm_m9_field_timeout_seconds: int` in `src/bffi_pipeline/config.py`, alias `LLM_M9_FIELD_TIMEOUT_SECONDS`. Default `180` (picker fields resolve faster than M6 pairs because the model is single-tier, but the budget needs to absorb a retry stack). Parallels the existing `llm_call_timeout_seconds` / `llm_pair_timeout_seconds` pair.
+- **Per-call timeout** (`LLM_CALL_TIMEOUT_SECONDS`) already flows through to the LangChain OpenAI-compat client's HTTP timeout — verify the picker honours it before claiming Phase A done (a one-line `client_kwargs={"timeout": settings.llm_call_timeout_seconds}` if missing).
+- **Per-field budget wrap**: inside `apply_reconciliation`, wrap the picker dispatch for each `(EntityRequest, candidate_list)` in a `concurrent.futures.Future.result(timeout=field_budget)` call. On `TimeoutError`:
+  - Emit a `field_budget_exceeded` watchdog event via `emit_watchdog_event(...)` keyed on `(canonical_work_uri, field_predicate, literal)`.
+  - Treat the field as tier-3 fallback (take the highest-lexical candidate and flag the binding with `bffi:descriptionAuthentication = <bib:auth/needs-review>`), and stamp the provenance Activity with `bffi-prov:stage = "watchdog-aborted"` matching M6's contract.
+  - Cancel the future if possible (best-effort — `concurrent.futures` can't always cancel an in-flight call).
+- **Extend the `WatchdogEvent` Literal** in `src/bffi_pipeline/stages/watchdog.py:53` from the current 5-value enum to include `"field_budget_exceeded"`. This is a one-line change; the event-emitter is already generic.
+- **Don't add an `escalate` event for M9** — the picker uses a single 8B model (`cli.py:855`'s `LangChainLLMPicker(model_name=primary_model)`), so there's no cascade hop to escalate to. If a future plan introduces an M9 cascade, that's where the `escalate` event re-applies.
+
+### A.5. Tests
 
 - Unit: synthesise a fixture canonical Work with 12 ambiguous fields; assert M9 produces the same Turtle at `concurrency=1` and `concurrency=4`. Byte-identical.
 - Unit: simulate `LangChainLLMPicker` raising on one of N concurrent calls; assert the orchestrator either retries deterministically (per existing M9 retry policy) or aborts with a typed error — never produces a partial graph.
+- Unit (watchdog): stub picker that sleeps past the field budget; assert `field_budget_exceeded` event emitted to stderr + `watchdog-events.jsonl`, the field is marked tier-3 fallback with `bffi-prov:stage = "watchdog-aborted"`, the orchestrator continues to the next field cleanly.
+- Unit (watchdog): stub picker that times out on the first attempt but succeeds on retry; assert one `timeout` + one `retry` event are emitted, the final binding matches the second-attempt verdict.
 - Integration: 50-record slice of the 5 k sample, `concurrency=4`, vs. the sequential baseline. Assert wall-time speedup ≥ 2.5× (margin for serial overhead).
 
-### A.5. Acceptance
+### A.6. Acceptance
 
 - [ ] `M9_CONCURRENCY` env var + `--concurrency` CLI flag wired through.
 - [ ] `ThreadPoolExecutor` dispatch in `apply_reconciliation` with deterministic result ordering.
 - [ ] One LangChain picker per worker thread; one shared `httpx.Client`.
 - [ ] Byte-stability test: identical Turtle at `c=1` and `c=4` on the 12-field fixture.
+- [ ] `LLM_M9_FIELD_TIMEOUT_SECONDS` env var wired through `Settings`; per-field budget wrap on picker calls; `WatchdogEvent` Literal extended with `field_budget_exceeded`.
+- [ ] Watchdog event-emission test: stubbed-hang fixture produces the expected stderr + JSONL entries; budget-exhausted fields stamp `bffi-prov:stage = "watchdog-aborted"` and fall through to tier-3.
+- [ ] 5 k re-run at `c=4` with default budgets fires **zero** `field_budget_exceeded` events (mirrors P-03's "zero events on the 5k production-style run" outcome). Non-zero count → tune budget or investigate before declaring done.
 - [ ] 5 k re-run at `c=4` clocks M9 ≤ 1 900 s (≥ 3× speedup vs. 5 722 s baseline).
 - [ ] Fresh [`docs/performance/<date>-5k-m2-max-phase-a.md`](../../performance/) snapshot committed.
 
-### A.6. Rollback
+### A.7. Rollback
 
-Revert the `cli.py` + `reconcile.py` diff. The `Settings.m9_concurrency` field can stay (unused). M6 is unaffected — the changes are scoped to M9's orchestrator.
+Two-step revert mirroring Phase B's pattern:
+
+1. Set `M9_CONCURRENCY=1` (drops back to sequential) + `LLM_M9_FIELD_TIMEOUT_SECONDS=0` (disables the watchdog wrap; `0` is interpreted as "no budget" by the orchestrator). Operationally restores pre-Phase-A behaviour without code revert.
+2. If full revert needed: git revert the Phase A commit. `Settings.m9_concurrency` and `Settings.llm_m9_field_timeout_seconds` can stay (unused). The `WatchdogEvent` enum extension is forward-compatible — old data files don't carry the new event type. M6 is unaffected; the changes are scoped to M9's orchestrator and one-line widening of the watchdog event vocabulary.
 
 ---
 
@@ -291,6 +317,7 @@ This is the safety net in case the 200-audit misses a rare collision.
 |---|---|---|
 | Phase A — `LangChainLLMPicker` not thread-safe; M9 produces duplicate Activity URIs or interleaved bindings under `c=4` | Medium | One client per worker thread (`threading.local`). A.4 byte-stability test catches any non-determinism at CI time. |
 | Phase A — `httpx.Client` connection-pool exhaustion at `c=4` to Finto | Low | Reuse one client process-wide with `httpx.Limits(max_connections=10)`; the Finto API already throttles us. |
+| Phase A — Picker call hangs indefinitely, sterilising one of four worker threads | Medium (mlx-lm precedent during P-02 / P-03 exists) | Watchdog per-field budget (A.4) + `field_budget_exceeded` event. Budget-exhausted fields fall through to tier-3 fallback so the canonical graph stays valid. Mirrors P-03's M6 wiring. |
 | Phase B — Cache key collision (different `(literal, candidates)` pairs hash to the same key) | Effectively zero | 256-bit SHA. Collisions are statistically impossible at corpus scale. |
 | Phase B — Over-caching: Finto adds a new authority and the cache returns the old "no match" verdict | Low (Finto refresh is operator-controlled) | `finto_sha` in the key; refresh invalidates per-vocabulary. Operator runbook documents the daily YSO/KANTO refresh cadence. |
 | Phase B — Cross-thread SQLite `InterfaceError` (the 2026-05-12 M6 precedent) | Medium-low | Mirror M6's fix in `1452a4f`: `BEGIN IMMEDIATE`, per-thread connection. B.4 cross-thread test pins it. |
@@ -319,3 +346,5 @@ This is the safety net in case the 200-audit misses a rare collision.
 - [`prompts/picker_v1.txt`](../../../prompts/picker_v1.txt) — picker prompt whose hash anchors Phase B's cache key.
 - M6 cache parallel: `data/judge-cache.sqlite` schema + the cross-thread fix in `1452a4f`.
 - [`NatLibFi/Finto-data`](https://github.com/NatLibFi/Finto-data) — the Finto vocabulary source repository whose commit history backs Phase B's per-vocabulary cadence (see proposal § "Finto's actual cadence").
+- [`src/bffi_pipeline/stages/watchdog.py`](../../../src/bffi_pipeline/stages/watchdog.py) — the watchdog event-emission module (originally M6-scoped per P-03); Phase A.4 extends the `WatchdogEvent` Literal with `field_budget_exceeded` and wires the M9 picker call site through `emit_watchdog_event`.
+- [`docs/plans/completed/p-03-m6-stall-watchdog.md`](../completed/p-03-m6-stall-watchdog.md) — the originating watchdog plan; the M9 wiring in A.4 mirrors its `LLM_CALL_TIMEOUT_SECONDS` + per-outer-budget pattern, with `LLM_M9_FIELD_TIMEOUT_SECONDS` as the M9-side analogue of `LLM_PAIR_TIMEOUT_SECONDS`.
