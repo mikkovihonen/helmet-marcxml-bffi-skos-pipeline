@@ -47,7 +47,7 @@ from pymarc import Field, Indicators, Record, marcxml
 from pymarc import Subfield as PymarcSubfield
 
 from marcxml_export_pipeline.sierra.dtos import Leaderfield, Subfield, Varfield
-from marcxml_export_pipeline.sierra.itype_to_rda import lookup_rda_for_items
+from marcxml_export_pipeline.sierra.itype_to_rda import lookup_rda
 
 # --- Constants ----------------------------------------------------------
 
@@ -93,7 +93,13 @@ EXPECTED_KEYS: Final[tuple[str, ...]] = (
     "controlfields",
     "record_last_updated_gmt",
     "items",
+    "material_code",
 )
+
+#: Index of ``material_code`` in the streamed SQL row tuple. Old test
+#: helpers that omit the column still work via :func:`build_marcxml_for_row`'s
+#: bounds check.
+_MATERIAL_CODE_COL: Final[int] = EXPECTED_KEYS.index("material_code")
 
 #: MARC tag boundary: tags ``< "010"`` are control fields (no
 #: indicators / subfields); tags ``>= "010"`` are data fields.
@@ -352,6 +358,7 @@ def build_marcxml_for_row(row: tuple[Any, ...]) -> tuple[str, bytes]:
     controlfield_dicts = _decode(row[3]) or []
     last_updated = row[4]
     item_dicts = _decode(row[5]) or []
+    material_code = row[_MATERIAL_CODE_COL] if len(row) > _MATERIAL_CODE_COL else None
 
     leader = Leaderfield(**leader_dict) if leader_dict is not None else None
 
@@ -410,22 +417,19 @@ def build_marcxml_for_row(row: tuple[Any, ...]) -> tuple[str, bytes]:
         if ts:
             controlfields.append(("005", ts))
 
-    # Synthesise RDA 33X (336/337/338) from item types when the bib
-    # carries no cataloguer-coded 33X. Recovers the pre-RDA records
-    # (~10 % of the corpus in the 2026-05-12 5k run) that the M2
-    # ``marcxml-content-minimum`` gate otherwise drops. The mapping
-    # itype → RDA tuple was derived empirically from cataloguer-voted
-    # 33X coding on bibs that do have 33X. See
-    # ``marcxml_export_pipeline.sierra.itype_to_rda`` for the source of
-    # truth.
+    # Synthesise RDA 33X (336/337/338) when the bib carries no
+    # cataloguer-coded 33X. Recovers the pre-RDA records (~10 % of the
+    # corpus in the 2026-05-12 5k run) that the M2
+    # ``marcxml-content-minimum`` gate otherwise drops. Two-signal
+    # lookup: bib-level ``material_code`` (authoritative for the
+    # manifestation) first, item-level ``itype_code_num`` (fallback)
+    # second. See ``marcxml_export_pipeline.sierra.itype_to_rda``.
     if not present_tags & {"336", "337", "338"}:
-        rda = lookup_rda_for_items(item_dicts)
+        rda = lookup_rda(material_code, item_dicts)
         if rda is not None:
             for c_label, c_code in rda.content_types:
                 varfields.append(_build_rda_varfield("336", c_label, c_code, "rdacontent"))
-            varfields.append(
-                _build_rda_varfield("337", rda.media[0], rda.media[1], "rdamedia")
-            )
+            varfields.append(_build_rda_varfield("337", rda.media[0], rda.media[1], "rdamedia"))
             varfields.append(
                 _build_rda_varfield("338", rda.carrier[0], rda.carrier[1], "rdacarrier")
             )

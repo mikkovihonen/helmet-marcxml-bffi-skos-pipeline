@@ -113,7 +113,15 @@ def test_format_005_returns_none_on_missing_or_non_datetime() -> None:
 
 def test_validate_keys_passes_on_expected_order() -> None:
     _validate_keys(
-        ("record_num", "leader", "varfields", "controlfields", "record_last_updated_gmt", "items"),
+        (
+            "record_num",
+            "leader",
+            "varfields",
+            "controlfields",
+            "record_last_updated_gmt",
+            "items",
+            "material_code",
+        ),
     )
 
 
@@ -251,6 +259,7 @@ def _row(
     controlfields: list[dict[str, Any]] | None = None,
     record_last_updated_gmt: datetime | None = None,
     items: list[dict[str, Any]] | None = None,
+    material_code: str | None = None,
 ) -> tuple[Any, ...]:
     """Build a streamed-row tuple matching the SELECT's column order."""
     return (
@@ -260,7 +269,27 @@ def _row(
         controlfields or [],
         record_last_updated_gmt,
         items or [],
+        material_code,
     )
+
+
+def _item(
+    *,
+    itype: int | None = None,
+    location: str = "kk",
+    copy_num: int = 1,
+    call_number: str | None = None,
+    barcode: str | None = None,
+) -> dict[str, Any]:
+    """Build a single ``items`` row dict — keeps the per-test ``items``
+    literals readable (the 33X synth tests only care about ``item_type_num``)."""
+    return {
+        "location_code": location,
+        "copy_num": copy_num,
+        "item_type_num": itype,
+        "barcode": barcode,
+        "call_number": call_number,
+    }
 
 
 def test_row_to_marcxml_writes_sierra_bib_id_as_filename_and_001() -> None:
@@ -407,10 +436,7 @@ def test_row_to_marcxml_synthesises_33x_from_itype_book() -> None:
     """Bib without 336/337/338 + one Adult book 28 item (itype 100)
     → synthesised text/unmediated/volume tuple. Recovers the pre-RDA
     records that drop on the M2 ``marcxml-content-minimum`` gate."""
-    items = [
-        {"location_code": "kk", "copy_num": 1, "item_type_num": 100, "barcode": None, "call_number": None},
-    ]
-    _filename, xml_bytes = build_marcxml_for_row(_row(items=items))
+    _filename, xml_bytes = build_marcxml_for_row(_row(items=[_item(itype=100)]))
     record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
     assert _subfields_of(record, "336") == [
         {"a": "teksti", "b": "txt", "2": "rdacontent"},
@@ -427,10 +453,7 @@ def test_row_to_marcxml_synthesises_two_336_for_console_game() -> None:
     """Console-game itypes idiomatically carry **two** 336 datafields —
     ``tdi`` (2-D moving image: the in-game visuals) AND ``cop`` (the
     game is a computer program). Mapping reproduces both."""
-    items = [
-        {"location_code": "kk", "copy_num": 1, "item_type_num": 116, "barcode": None, "call_number": None},
-    ]
-    _filename, xml_bytes = build_marcxml_for_row(_row(items=items))
+    _filename, xml_bytes = build_marcxml_for_row(_row(items=[_item(itype=116)]))
     record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
     f336 = _subfields_of(record, "336")
     assert len(f336) == 2
@@ -444,10 +467,7 @@ def test_row_to_marcxml_no_33x_synth_when_itype_unmapped() -> None:
     the unnamed reserved slots) should leave the bib without
     synthesised 33X — the strict M2 gate then drops the record, which
     is the deliberate behaviour while cataloguer input is pending."""
-    items = [
-        {"location_code": "kk", "copy_num": 1, "item_type_num": 999, "barcode": None, "call_number": None},
-    ]
-    _filename, xml_bytes = build_marcxml_for_row(_row(items=items))
+    _filename, xml_bytes = build_marcxml_for_row(_row(items=[_item(itype=999)]))
     body = xml_bytes.decode("utf-8")
     assert 'tag="336"' not in body
     assert 'tag="337"' not in body
@@ -471,10 +491,9 @@ def test_row_to_marcxml_preserves_existing_33x_varfield() -> None:
             ],
         }
     ]
-    items = [
-        {"location_code": "kk", "copy_num": 1, "item_type_num": 100, "barcode": None, "call_number": None},
-    ]
-    _filename, xml_bytes = build_marcxml_for_row(_row(varfields=varfields, items=items))
+    _filename, xml_bytes = build_marcxml_for_row(
+        _row(varfields=varfields, items=[_item(itype=100)])
+    )
     body = xml_bytes.decode("utf-8")
     # The cataloguer's cri / cartographic image wins; teksti / txt
     # would only appear if synth fired (it shouldn't here).
@@ -488,15 +507,53 @@ def test_row_to_marcxml_picks_lowest_mapped_itype_for_mixed_bib() -> None:
     ``MIN(itype_code_num)`` convention of the empirical discovery
     query). Here itype 116 (Adult console game K12) sorts before
     itype 200 (Juvenile book) so the console-game RDA tuple wins."""
-    items = [
-        {"location_code": "kk", "copy_num": 1, "item_type_num": 200, "barcode": None, "call_number": None},
-        {"location_code": "etk", "copy_num": 1, "item_type_num": 116, "barcode": None, "call_number": None},
-    ]
+    items = [_item(itype=200), _item(itype=116, location="etk")]
     _filename, xml_bytes = build_marcxml_for_row(_row(items=items))
     record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
     f336 = _subfields_of(record, "336")
     # Console game's two-336 signature, not the book's one-336.
     assert {sf["b"] for sf in f336} == {"tdi", "cop"}
+
+
+def test_row_to_marcxml_synthesises_33x_from_bib_material_code() -> None:
+    """Bib carries ``material_code='g'`` (DVD) and **no items at all** —
+    the synth path picks up the bib-level signal alone. Confirms that
+    bibs-without-items (which the item-only fallback could never
+    recover) now get RDA 33X coded too."""
+    _filename, xml_bytes = build_marcxml_for_row(_row(material_code="g", items=[]))
+    record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
+    assert _subfields_of(record, "336")[0]["b"] == "tdi"
+    assert _subfields_of(record, "337")[0]["b"] == "v"
+    assert _subfields_of(record, "338")[0]["b"] == "vd"
+
+
+def test_row_to_marcxml_bib_material_code_wins_over_items() -> None:
+    """When both signals are present and disagree, the **bib-level**
+    material code wins — RDA 33X describes the manifestation, not the
+    specific physical copy. Material ``"1"`` (Book) here overrides an
+    item-side itype 116 (console game) that would otherwise produce a
+    two-336 ``tdi``/``cop`` tuple."""
+    _filename, xml_bytes = build_marcxml_for_row(_row(material_code="1", items=[_item(itype=116)]))
+    record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
+    f336 = _subfields_of(record, "336")
+    assert len(f336) == 1  # the book's single 336, not the game's two
+    assert f336[0]["b"] == "txt"
+    assert _subfields_of(record, "337")[0]["b"] == "n"
+    assert _subfields_of(record, "338")[0]["b"] == "nc"
+
+
+def test_row_to_marcxml_falls_back_to_items_when_material_unmapped() -> None:
+    """``material_code="x"`` (E-material) is intentionally omitted from
+    :data:`MATERIAL_TO_RDA` (cataloguer vote split across three tuples on
+    only three records). When the bib-level signal yields no tuple, the
+    synth path falls back to the item-level itype — preserving the
+    behaviour where item-only-mapped bibs still get 33X coded."""
+    _filename, xml_bytes = build_marcxml_for_row(_row(material_code="x", items=[_item(itype=100)]))
+    record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
+    # text/unmediated/volume — from the itype 100 (Adult book 28) fallback.
+    assert _subfields_of(record, "336")[0]["b"] == "txt"
+    assert _subfields_of(record, "337")[0]["b"] == "n"
+    assert _subfields_of(record, "338")[0]["b"] == "nc"
 
 
 def test_build_record_drops_datafield_with_no_valid_subfields() -> None:

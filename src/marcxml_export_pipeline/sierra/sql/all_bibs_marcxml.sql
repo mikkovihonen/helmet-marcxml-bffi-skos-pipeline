@@ -113,7 +113,20 @@ SELECT
           ON bil.item_record_id = i.record_id
         WHERE bil.bib_record_id = b.record_id
           AND i.is_suppressed = false
-    ) AS items
+    ) AS items,
+    (
+        -- Bib-level material code (joins to
+        -- ``sierra_view.material_property_myuser.code``). Authoritative
+        -- "what kind of manifestation is this bib" signal that the
+        -- processor uses *first* for RDA-33X synthesis when no
+        -- cataloguer-coded 33X varfield exists; items'
+        -- ``itype_code_num`` is the fallback. See
+        -- ``marcxml_export_pipeline.sierra.itype_to_rda.MATERIAL_TO_RDA``.
+        SELECT bp.material_code
+        FROM sierra_view.bib_record_property bp
+        WHERE bp.bib_record_id = b.record_id
+        LIMIT 1
+    ) AS material_code
 FROM sierra_view.bib_record b
 LEFT JOIN sierra_view.record_metadata rm ON rm.id = b.record_id
 WHERE b.is_suppressed = false

@@ -198,8 +198,8 @@ def lookup_rda_for_items(items: Iterable[Mapping[str, Any]]) -> RdaCarrier | Non
     itypes, the **lowest-numbered** mapped itype wins. Deterministic
     and stable across re-runs.
     """
-    candidates = sorted(
-        item.get("item_type_num")
+    candidates: list[int] = sorted(
+        int(item["item_type_num"])
         for item in items
         if item is not None and item.get("item_type_num") in ITYPE_TO_RDA
     )
@@ -208,8 +208,71 @@ def lookup_rda_for_items(items: Iterable[Mapping[str, Any]]) -> RdaCarrier | Non
     return ITYPE_TO_RDA[candidates[0]]
 
 
+#: Sierra ``bib_record_property.material_code`` (joins to
+#: ``sierra_view.material_property_myuser.code``) → cataloguer-canonical
+#: RDA 33X tuple. The **bib-level** material code is the authoritative
+#: "what kind of manifestation is this bib" signal — preferred over the
+#: item-level itype because RDA 33X describes the manifestation, not
+#: the specific physical copy. Items are the fallback when bib material
+#: is unmapped (or for bibs with no items at all).
+#:
+#: Codes are short alphanumeric strings (``"1"``-``"9"``, ``"a"``, ``"c"``,
+#: ``"g"``, ``"h"``, ``"q"``, ``"r"``, ``"s"``, ``"x"``). Derived from the
+#: same empirical discovery query as :data:`ITYPE_TO_RDA`, top-1 per
+#: material code on bibs with already-coded 33X. Source: cataloguer-run
+#: SQL paste, 2026-05-12.
+#:
+#: Omitted (insufficient or ambiguous cataloguer vote):
+#:
+#: - ``"a"`` Picture (2 records),
+#: - ``"c"`` Technical drawing (3 records),
+#: - ``"x"`` E-material (3 records split across 3 different tuples).
+MATERIAL_TO_RDA: Final[dict[str, RdaCarrier]] = {
+    "1": _TEXT_UNMEDIATED_VOLUME,  # Book (473 665 bibs)
+    "2": _MAP_SHEET,  # Map (258 bibs)
+    # CD music (top 7 266; also covers spoken-word CDs at 1 649 —
+    # cataloguer-coded 33X wins for those, so this default is fine).
+    "3": _PERFORMED_MUSIC_AUDIO_DISC,
+    "4": _PERFORMED_MUSIC_AUDIO_CASSETTE,  # Cassette (22 bibs)
+    "6": _PERFORMED_MUSIC_AUDIO_DISC,  # LP record (298 bibs)
+    "7": _NOTATED_MUSIC_UNMEDIATED_VOLUME,  # Sheet music (209 bibs)
+    "9": _TEXT_UNMEDIATED_VOLUME,  # Journal (347 bibs)
+    "g": _VIDEO_VIDEODISC,  # DVD (4 617 bibs)
+    "h": _VIDEO_VIDEODISC,  # Blu-ray (1 940 bibs)
+    "q": RdaCarrier(
+        # Object — Helmet's "object" bibs are predominantly tactile
+        # materials packaged as volumes (braille books, tactile picture
+        # books), not bare realia. Top-1 cataloguer-vote: tcf / n / nc.
+        content_types=(("taktiili kolmiulotteinen muoto", "tcf"),),
+        media=("käytettävissä ilman laitetta", "n"),
+        carrier=("nide", "nc"),
+    ),
+    "r": _BOARD_GAME,  # Board game (2 056 bibs)
+    "s": _COMPUTER_GAME_COMPUTER_DISC,  # Console game (1 755 + 1 720 — two-336 signature)
+}
+
+
+def lookup_rda(
+    material_code: str | None,
+    items: Iterable[Mapping[str, Any]],
+) -> RdaCarrier | None:
+    """Pick an :class:`RdaCarrier` from the bib's signals, in priority order.
+
+    1. **Bib-level** ``material_code`` (authoritative for the manifestation).
+    2. **Item-level** itype (fallback; lowest-numbered mapped itype wins
+       — matches :func:`lookup_rda_for_items`).
+    3. ``None`` if neither signal yields a mapped tuple. The caller
+       leaves 33X un-synthesised; the M2 strict gate then drops the bib.
+    """
+    if material_code is not None and material_code in MATERIAL_TO_RDA:
+        return MATERIAL_TO_RDA[material_code]
+    return lookup_rda_for_items(items)
+
+
 __all__ = [
     "ITYPE_TO_RDA",
+    "MATERIAL_TO_RDA",
     "RdaCarrier",
+    "lookup_rda",
     "lookup_rda_for_items",
 ]
