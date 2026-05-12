@@ -114,10 +114,11 @@ acceptance criteria):
     [`docs/local-inference.md`](../../local-inference.md) § "Throughput
     findings — P-02 § A6". Re-run on M5 Max before production.
   - A7 (acceptance gate passed): `<unfilled>`
-- Phase D1-D5 (dev-loop consolidation on mlx-lm): `<rollup unfilled>`
+- Phase D1-D5 (dev-loop consolidation on mlx-lm): **complete** —
+  D1 = `f3c0bea`, D2 = `d959bf6`, D3/D4/D5 = `1346035`.
   - D1 (per-port routing in Settings + cascade): `f3c0bea`
   - D2 (model-pull wrapper): `d959bf6`
-  - D3 (dev-machine throughput verification): `<unfilled>`.
+  - D3 (dev-machine throughput verification): `1346035`.
     M2 Max 64 GB result: mlx-lm Phase B config produces ~28 pairs/min
     @ c=1 vs Ollama's serial cascade median of ~18 660 ms/pair from
     the A5 parity bench. Well within the "≤ 20 % regression" bar
@@ -125,13 +126,13 @@ acceptance criteria):
     escape hatch needed. Documented in
     [`docs/local-inference.md`](../../local-inference.md) §
     "Throughput vs Ollama".
-  - D4 (flip committed defaults): `<unfilled>`.
+  - D4 (flip committed defaults): `1346035`.
     `.env.example` now defaults to `LLM_BASE_URL=http://127.0.0.1:8001/v1`
     + per-tier URLs + absolute mlx-lm model paths; the README
     Quick-start uses `hf download Qwen/Qwen3-8B-MLX-4bit` instead of
     `ollama pull`; `docs/local-inference.md` § "Ollama as the dev
     fallback" was renamed to "Ollama — supported but not recommended".
-  - D5 (label Ollama secondary): `<unfilled>`.
+  - D5 (label Ollama secondary): `1346035`.
     Banner + rationale + switching-back recipe live in
     `docs/local-inference.md`; README and `.env.example` mention
     the "supported but not recommended" status with pointers back
