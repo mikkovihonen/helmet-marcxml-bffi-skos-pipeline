@@ -83,26 +83,27 @@ reference for what shipped.
   — Grow `gold/gold.jsonl` from 17 to 50-100 cataloguer-vetted
   cases with proper per-category holdout stratification. Hard
   prerequisite for P-01, P-04 statistical power, and P-05 F3.
+- [`backlog/p-08-richer-rda-33x-synthesis.md`](backlog/p-08-richer-rda-33x-synthesis.md)
+  — Slot-wise cascade adding leader/06, 007, 008, 006, 245$h GMD,
+  and 300$a extent layers above the existing material-code /
+  itype-code RDA 33X synth, plus a `$5 FI-HELME/synth-v<N>`
+  provenance marker. Goal: drop the M2 ``marcxml-content-minimum``
+  residual on the P-02 5k sample from 525 to ≤ 100. Phase A
+  (coverage analysis on the existing drop list) is the gate
+  before production code lands.
 
 ### In progress
 
-- [`in-progress/p-02-inference-stack-tuning.md`](in-progress/p-02-inference-stack-tuning.md)
-  — Migrate M6 from Ollama to mlx-lm (Phase A), consolidate dev
-  loop on mlx-lm (D1-D5), layer prefix caching + speculative
-  decoding (B, C), remove Ollama install paths (D6). Tooling
-  shipped: `scripts/p02-parity-bench.sh` automates the A5 gold-set
-  parity diff. Pending: operator install of `mlx-lm` + model
-  conversion (A1-A2) before A5 can run.
-- [`in-progress/p-03-m6-stall-watchdog.md`](in-progress/p-03-m6-stall-watchdog.md)
-  — Per-call LLM timeout + watchdog event logging (stderr +
-  `watchdog-events.jsonl` sidecar) + kill-and-retry-same-pair, so
-  unattended overnight runs don't lose hours to a single transient
-  Ollama wedge. Phase A + Phase B code shipped; awaits the Ollama
-  dry-run measurement on v2's M6 candidates.
+*(none)*
 
 ### Completed
 
-*(none)*
+- [`completed/p-02-inference-stack-tuning.md`](completed/p-02-inference-stack-tuning.md)
+  — Migrated M6 from Ollama to mlx-lm + prefix caching +
+  speculative decoding + dev-loop consolidation + Ollama removal.
+- [`completed/p-03-m6-stall-watchdog.md`](completed/p-03-m6-stall-watchdog.md)
+  — Per-call LLM timeout + watchdog event logging + kill-and-
+  retry-same-pair against transient inference wedges.
 
 ### Abandoned
 
