@@ -120,7 +120,7 @@ acceptance criteria):
   - D3 (dev-machine throughput verification): `<unfilled>`
   - D4 (flip committed defaults): `<unfilled>`
   - D5 (label Ollama secondary): `<unfilled>`
-- Phase B (prefix caching): `<unfilled>`.
+- Phase B (prefix caching): `fd44894`.
   TTFT bench ([`scripts/p02-b-ttft-bench.py`](../../../scripts/p02-b-ttft-bench.py))
   on M2 Max 64 GB measured **7.99× TTFT speedup** (cold 2.87 s →
   warm 0.36 s median) on the byte-stable ``_M6_PROMPT_PREFIX_FULL``
