@@ -83,18 +83,17 @@ reference for what shipped.
   — Grow `gold/gold.jsonl` from 17 to 50-100 cataloguer-vetted
   cases with proper per-category holdout stratification. Hard
   prerequisite for P-01, P-04 statistical power, and P-05 F3.
-- [`backlog/p-08-richer-rda-33x-synthesis.md`](backlog/p-08-richer-rda-33x-synthesis.md)
-  — Slot-wise cascade adding leader/06, 007, 008, 006, 245$h GMD,
-  and 300$a extent layers above the existing material-code /
-  itype-code RDA 33X synth, plus a `$5 FI-HELME/synth-v<N>`
-  provenance marker. Goal: drop the M2 ``marcxml-content-minimum``
-  residual on the P-02 5k sample from 525 to ≤ 100. Phase A
-  (coverage analysis on the existing drop list) is the gate
-  before production code lands.
-
 ### In progress
 
-*(none)*
+- [`in-progress/p-08-richer-rda-33x-synthesis.md`](in-progress/p-08-richer-rda-33x-synthesis.md)
+  — Slot-wise cascade adding a universal (leader/06, 008-form)
+  layer + 007 refinement + 300$a extent fallback above the
+  existing material-code / itype-code RDA 33X synth, plus a
+  `$5 FI-HELME/synth-v<N>` provenance marker. Goal: drop the M2
+  ``marcxml-content-minimum`` residual on the P-02 5k sample from
+  566 to ≤ 50. Phase A (coverage analysis) shipped and revised the
+  layer design — 245$h GMD and 006 deferred (zero yield on the 5k
+  sample). Phase B-D pending.
 
 ### Completed
 
