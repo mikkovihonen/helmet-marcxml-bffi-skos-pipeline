@@ -177,6 +177,17 @@ _TAGGED_DAGGER_RE: Final[re.Pattern[str]] = re.compile(r"‡([0-9a-z])")
 #: group fired — ``[leading_text, code1, content1]``.
 _MIN_SPLIT_PARTS: Final[int] = 3
 
+#: ``xml:lang`` attribute in expanded form (the XML namespace, not the
+#: RDF/XML one). Walked over the XSLT output to repair malformed
+#: BCP-47 tags before rdflib parses them — see
+#: :func:`_sanitize_language_tags`.
+_XML_LANG_ATTR: Final[str] = "{http://www.w3.org/XML/1998/namespace}lang"
+
+#: One or more trailing ``-`` characters; the marc2bibframe2 XSLT
+#: emits these (``ru-``, ``uk-``) when it can't map a MARC 008
+#: country code into a BCP-47 region subtag.
+_TRAILING_DASH_RE: Final[re.Pattern[str]] = re.compile(r"-+$")
+
 
 def _sanitize_subfield_separators(tree: etree._ElementTree) -> int:
     """Split cataloguer-pasted ``‡<code>`` separators into proper
@@ -225,6 +236,37 @@ def _sanitize_subfield_separators(tree: etree._ElementTree) -> int:
             parent.insert(insertion_index, new_sf)
             insertion_index += 1
         fixed += 1
+    return fixed
+
+
+def _sanitize_language_tags(tree: etree._ElementTree) -> int:
+    """Strip trailing ``-`` from ``xml:lang`` attribute values, in place.
+
+    marc2bibframe2 occasionally synthesises BCP-47 tags of the form
+    ``<lang>-`` (e.g. ``ru-``, ``uk-``) when it tries to combine a MARC
+    008 publication-country code with the language code and the region
+    lookup falls through (the country is present in 008 positions
+    15-17 but not in the converter's MARC-country → BCP-47-region
+    lookup table). The trailing-hyphen tag is **invalid BCP-47** and
+    rdflib's RDF/XML parser raises ``ValueError`` on it, killing the
+    whole conversion before any other recovery can fire.
+
+    This sanitiser trims any trailing hyphen run on every ``xml:lang``
+    so ``ru-`` becomes ``ru`` — a valid bare-language tag.  Discovered
+    in the P-02 5k production-style run (7 of 5000 records, all
+    Russian / Ukrainian sources, hit this).
+
+    Returns the count of attributes rewritten.
+    """
+    fixed = 0
+    for el in tree.iter():
+        lang = el.get(_XML_LANG_ATTR)
+        if lang is None:
+            continue
+        repaired = _TRAILING_DASH_RE.sub("", lang)
+        if repaired != lang:
+            el.set(_XML_LANG_ATTR, repaired)
+            fixed += 1
     return fixed
 
 
@@ -444,6 +486,10 @@ def _convert_one(
     # bf:source + cataloguer-supplied $0 URI binding.
     _sanitize_subfield_separators(validated.tree)
     rdf_tree = _run_xslt(validated.tree, helmet_id)
+    # Repair invalid BCP-47 ``xml:lang`` attributes the XSLT
+    # occasionally emits (``ru-``, ``uk-``) before handing them to
+    # rdflib's parser, which would otherwise raise ``ValueError``.
+    _sanitize_language_tags(rdf_tree)
     rdf_bytes = etree.tostring(rdf_tree, xml_declaration=True, encoding="utf-8")
     g = _parse_to_graph(rdf_bytes)
     work, instance = post_process(
