@@ -90,14 +90,17 @@ acceptance criteria):
     `--chat-template-args '{"enable_thinking":false}'`): operator-
     side step. Same commit as A2 — `ad188ad` — captures the
     thinking-mode discovery and the full-path-as-model-ID quirk.
-  - A5 (`scripts/p02-parity-bench.sh` parity verdict captured): `<unfilled>`
+  - A5 (`scripts/p02-parity-bench.sh` parity verdict captured): `54f8db0`.
+    Result: Ollama 94.1 % (16/17), mlx-lm 88.2 % (15/17); 15 cases
+    identical, both fail `gs-0002`, mlx-lm-only failure on `gs-0001`
+    accepted as gold-set-quirk drift (see Material updates for the
+    full investigation).
     - A5 prep — prompt-side JSON-mode instruction (new module
       `src/bffi_pipeline/llm_json_mode.py`, wired into all four
       LLM call sites): `852bd35`. Without this fix the mlx-lm-only
       eval returned 0 % accuracy / 100 % uncertain because mlx-lm
       has no constrained decoding for `response_format`; with it,
-      mlx-lm-only accuracy is 88.2 % / 0 % uncertain. Parity
-      against Ollama is the remaining A5 question.
+      mlx-lm-only accuracy is 88.2 % / 0 % uncertain.
   - A6 (concurrency sweep run; chosen value recorded): `<unfilled>`
   - A7 (acceptance gate passed): `<unfilled>`
 - Phase D1-D5 (dev-loop consolidation on mlx-lm): `<rollup unfilled>`
