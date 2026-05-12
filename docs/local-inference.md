@@ -249,9 +249,28 @@ future re-evaluation with different `--num-draft-tokens` settings
 or a different draft-model size on the M5 Max. See P-02 § C5 in
 the plan for the abandon trail.
 
-## Ollama as the dev fallback
+## Ollama — supported but not recommended (P-02 § D5)
 
-Until P-02 Phase D5 ships, Ollama remains a documented option for fast iteration and gold-set runs:
+Ollama remains a documented backend for incident triage and as a
+secondary check (the A5 parity bench against it is what gates any
+mlx-lm-side prompt or schema change). It is **no longer the
+recommended default**: mlx-lm is faster on the same hardware, has
+the prefix-cache and decode-concurrency knobs the production batch
+relies on, and matches Ollama on 16/17 gold-set cases. The Ollama
+install paths are staged for removal in P-02 § D6 once a 1-2
+release-cycle observation window passes without complaints.
+
+### Throughput vs Ollama (M2 Max 64 GB, P-02 § D3)
+
+The mlx-lm primary-only serial throughput (~28 pairs/min @ c=1 with
+Phase B's prefix-cache config) is materially better than Ollama's
+serial cascade median of ~18 660 ms/pair measured during the A5
+parity bench. P-02 § D3's acceptance bar was "mlx-lm matches Ollama
+within ~20 %" on the smallest dev machine in actual team use; on
+the M2 Max we exceed that bar comfortably. No `BFFI_LOCAL_BACKEND=
+ollama` per-machine escape hatch is needed.
+
+### Switching back to Ollama
 
 ```bash
 brew install --cask ollama && open -a Ollama
@@ -263,10 +282,16 @@ ollama pull qwen3:32b-q4_K_M              # fallback (~20 GB)
 
 ```
 LLM_BASE_URL=http://localhost:11434/v1
+LLM_BASE_URL_PRIMARY=
+LLM_BASE_URL_FALLBACK=
 LLM_API_KEY=ollama
 LLM_MODEL_PRIMARY=qwen3:8b-q4_K_M
 LLM_MODEL_FALLBACK=qwen3:32b-q4_K_M
 ```
+
+(Leave `LLM_BASE_URL_PRIMARY` / `LLM_BASE_URL_FALLBACK` empty —
+Ollama serves all models from `:11434`, so the per-tier URLs
+introduced by P-02 § D1 don't apply.)
 
 After P-02 Phase D6 ships, the Ollama path is removed from the recommended setup but remains usable as a manual fallback for incident triage.
 

@@ -117,9 +117,26 @@ acceptance criteria):
 - Phase D1-D5 (dev-loop consolidation on mlx-lm): `<rollup unfilled>`
   - D1 (per-port routing in Settings + cascade): `f3c0bea`
   - D2 (model-pull wrapper): `d959bf6`
-  - D3 (dev-machine throughput verification): `<unfilled>`
-  - D4 (flip committed defaults): `<unfilled>`
-  - D5 (label Ollama secondary): `<unfilled>`
+  - D3 (dev-machine throughput verification): `<unfilled>`.
+    M2 Max 64 GB result: mlx-lm Phase B config produces ~28 pairs/min
+    @ c=1 vs Ollama's serial cascade median of ~18 660 ms/pair from
+    the A5 parity bench. Well within the "≤ 20 % regression" bar
+    (it's a comfortable improvement). No `BFFI_LOCAL_BACKEND=ollama`
+    escape hatch needed. Documented in
+    [`docs/local-inference.md`](../../local-inference.md) §
+    "Throughput vs Ollama".
+  - D4 (flip committed defaults): `<unfilled>`.
+    `.env.example` now defaults to `LLM_BASE_URL=http://127.0.0.1:8001/v1`
+    + per-tier URLs + absolute mlx-lm model paths; the README
+    Quick-start uses `hf download Qwen/Qwen3-8B-MLX-4bit` instead of
+    `ollama pull`; `docs/local-inference.md` § "Ollama as the dev
+    fallback" was renamed to "Ollama — supported but not recommended".
+  - D5 (label Ollama secondary): `<unfilled>`.
+    Banner + rationale + switching-back recipe live in
+    `docs/local-inference.md`; README and `.env.example` mention
+    the "supported but not recommended" status with pointers back
+    to the plan and the local-inference doc. No file deletions —
+    that's deferred to D6 after the observation window.
 - Phase B (prefix caching): `fd44894`.
   TTFT bench ([`scripts/p02-b-ttft-bench.py`](../../../scripts/p02-b-ttft-bench.py))
   on M2 Max 64 GB measured **7.99× TTFT speedup** (cold 2.87 s →
@@ -1021,6 +1038,16 @@ After Phase C lands, update **`docs/runbook.md`** with:
   disk for a future M5 Max re-evaluation but does not ship in the
   recommended production config. Phase B is the production
   endpoint.
+- Phases D3, D4, D5 shipped together. D3's acceptance ("mlx-lm
+  matches Ollama within ~20 %") was actually exceeded — mlx-lm is
+  comfortably faster on the M2 Max — so no per-machine
+  `BFFI_LOCAL_BACKEND=ollama` escape hatch was needed. D4 flipped
+  `.env.example` + README + `docs/local-inference.md` to mlx-lm-
+  by-default (mlx-lm port + absolute model paths; per-tier URLs
+  carrying the D1 multi-port shape; Ollama identifiers preserved
+  as commented-out switching recipe). D5 renamed the doc section
+  to "Ollama — supported but not recommended" with a switching
+  recipe and a pointer to the D6 removal window.
 - **Supervisor vs. per-port** for D1 — **resolved during the
   mlx-lm-vs-vllm-mlx decision in A1**: chose per-port routing
   (cheaper code change, fits the existing cascade primary/fallback

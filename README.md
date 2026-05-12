@@ -80,7 +80,7 @@ the development stack and the gold-set eval, but the
 Toolchain:
 
 - **Python 3.12** via [uv](https://github.com/astral-sh/uv) — the project pins everything in `uv.lock`.
-- **Ollama** (or mlx-lm for production) on `:11434` for the LLM judge + reconciliation picker. Full installation walkthrough in [`docs/local-inference.md`](docs/local-inference.md#installation).
+- **mlx-lm** on `:8001` (primary) + `:8002` (fallback) for the LLM judge + reconciliation picker. Ollama on `:11434` remains supported but is no longer the recommended default — see [`docs/local-inference.md`](docs/local-inference.md#installation) for both paths, the P-02 § D4 throughput case, and the eventual D6 removal window.
 - **Docker** (or Podman with `docker-compose`) for Fuseki and Skosmos. Both containers build from source — NatLibFi's Skosmos doesn't publish a Docker image, and we pin Apache Jena Fuseki via the JAR version Skosmos's vendored Dockerfile downloads at build time.
 - **git** with submodule support — `marc2bibframe2` and `Skosmos` (pinned at `v3.2`) are vendored under `third_party/`.
 
@@ -91,9 +91,14 @@ git clone --recurse-submodules https://github.com/<org>/helmet-marcxml-bffi-skos
 cd helmet-marcxml-bffi-skos-pipeline
 uv sync                                    # fetches every pinned dep
 cp .env.example .env                       # carries the committed LLM defaults
-brew install --cask ollama && open -a Ollama
-ollama pull qwen3:32b-q4_K_M               # primary judge (~20 GB)
-ollama pull qwen2.5:72b-instruct-q4_K_M    # cascade fallback (~40 GB; Qwen3 has no 72B size)
+
+# Local LLM server (mlx-lm). See docs/local-inference.md for the full
+# install + flags; this is the abbreviated form:
+uv venv ~/.venvs/mlx-lm --python 3.12 && source ~/.venvs/mlx-lm/bin/activate
+uv pip install mlx-lm
+hf download Qwen/Qwen3-8B-MLX-4bit       --local-dir ~/.mlx_models/Qwen3-8B-4bit
+hf download mlx-community/Qwen3-32B-4bit --local-dir ~/.mlx_models/Qwen3-32B-4bit
+
 docker compose build                       # one-off Skosmos + Fuseki build (~5-10 min)
 docker compose up -d                       # Fuseki + Skosmos
 ```
@@ -101,9 +106,12 @@ docker compose up -d                       # Fuseki + Skosmos
 ### Local LLM setup
 
 The judge and reconciliation picker both call a local OpenAI-compatible
-server. The end-to-end install — Ollama for development and gold-set
-runs, mlx-lm for production batches, model conversion, the
-`.env` wiring, and a one-shot verification probe — is documented in
+server. The end-to-end install — **mlx-lm as the recommended default**
+(model acquisition, server flags including the load-bearing
+`--chat-template-args '{"enable_thinking":false}'` and
+`--prompt-cache-size`/`--prompt-cache-bytes` knobs from P-02 Phase B),
+Ollama as a supported-but-not-recommended fallback, `.env` wiring, and
+a one-shot verification probe — is documented in
 **[`docs/local-inference.md`](docs/local-inference.md#installation)**.
 Follow that section before running `bffi-pipeline judge` or
 `bffi-pipeline reconcile` for the first time.
@@ -189,7 +197,7 @@ CI via `-m "not requires_llm"` and run on demand on the M5 Max.
 ## Operating constraints
 
 - **Apache 2.0** code (matching NLF tools); **CC0** published RDF data (matching Finto vocabularies).
-- **No paid API services** for inference. Ollama or mlx-lm, locally.
+- **No paid API services** for inference. mlx-lm (recommended) or Ollama, locally.
 - **No telemetry / error reporting.** Provenance is in-graph (`bffi-prov:` namespace).
 - **`mypy --strict` everywhere** in `src/`. Pydantic v2 at module boundaries; frozen dataclasses for internal value objects.
 - **Stage isolation:** modules under `src/bffi_pipeline/stages/` don't import each other; orchestration goes through `cli.py`. Cross-stage helpers live at the package root (`uris.py`, `blocking.py`).
