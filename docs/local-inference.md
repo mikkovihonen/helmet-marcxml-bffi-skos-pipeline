@@ -10,7 +10,7 @@ The LLM serving layer is [`mlx-lm`](https://github.com/ml-explore/mlx-lm) — Ap
 - `mlx_lm.convert` — one-shot weight conversion from raw HF checkpoints to MLX 4-bit.
 - `mlx_lm.generate`, `mlx_lm.chat` — handy one-shot CLIs for smoke testing.
 
-Apple MLX team maintenance + smaller transitive dep footprint (~15 packages) are the load-bearing reasons we picked mlx-lm over the higher-level `vllm-mlx` wrapper; the decision and trade-off table are recorded in [`plans/in-progress/p-02-inference-stack-tuning.md`](plans/in-progress/p-02-inference-stack-tuning.md) § A1.
+Apple MLX team maintenance + smaller transitive dep footprint (~15 packages) are the load-bearing reasons we picked mlx-lm over the higher-level `vllm-mlx` wrapper; the decision and trade-off table are recorded in [`plans/completed/p-02-inference-stack-tuning.md`](plans/completed/p-02-inference-stack-tuning.md) § A1.
 
 ### What we don't install (and why)
 
@@ -272,6 +272,6 @@ The eval harness uses whatever `LLM_BASE_URL` / `LLM_MODEL_*` `.env` carries.
 
 ## Cross-references
 
-- [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](plans/in-progress/p-02-inference-stack-tuning.md) — the plan of record for the mlx-lm inference stack.
+- [`docs/plans/completed/p-02-inference-stack-tuning.md`](plans/completed/p-02-inference-stack-tuning.md) — the plan of record for the mlx-lm inference stack.
 - [`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](plans/in-progress/p-03-m6-stall-watchdog.md) — per-call + per-pair watchdog around the LLM client.
 - [`docs/archived/local-inference.md`](archived/local-inference.md) — the prior version of this doc, kept for the audit trail of the install-instruction iterations.

@@ -122,7 +122,7 @@ supplements mlx-lm 0.31's `mlx_lm.server`:
 
 ## Cross-references
 
-- [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](../plans/in-progress/p-02-inference-stack-tuning.md)
+- [`docs/plans/completed/p-02-inference-stack-tuning.md`](../plans/completed/p-02-inference-stack-tuning.md)
   § "Open issues" — the resolved A5 entry that motivated this
   proposal; same section names the prompt-layer fix.
 - [`src/bffi_pipeline/llm_json_mode.py`](../../src/bffi_pipeline/llm_json_mode.py)

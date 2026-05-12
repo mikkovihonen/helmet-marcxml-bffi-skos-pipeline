@@ -1,6 +1,10 @@
 # P-02 — Inference-stack tuning for the M6 cascade
 
-**Status**: in-progress.
+**Status**: completed (2026-05-12).
+**Final rollup**: A complete, B complete (7.99× TTFT speedup),
+C abandoned with data (spec-decode regressed throughput by ~50 %
+on this hardware), D1-D6 complete (mlx-lm is the only supported
+backend, Ollama install paths removed).
 **Source proposals**:
 [`docs/proposals/prop-02-inference-stack-tuning-for-M6.md`](../../proposals/prop-02-inference-stack-tuning-for-M6.md)
 (introduced in commit `334294a` while still part of the combined
@@ -153,7 +157,7 @@ acceptance criteria):
   ("If acceptance < 50 %, abandon C; Phase B alone is still a win"),
   Phase C does not ship; the M5 Max production server runs without
   the `--draft-model` flag.
-- Phase D6 (remove Ollama install paths): `<unfilled>`.
+- Phase D6 (remove Ollama install paths): `2741ab6`.
   Acceptance ticked at the same commit that swept the install
   paths from `.env.example`, `README.md`, `docs/local-inference.md`,
   `docs/runbook.md`, `docs/tech-stack.md`, `docs/ci-strategy.md`,

@@ -204,7 +204,7 @@ def test_m6_prompt_prefix_is_byte_stable() -> None:
             _M6_PROMPT_PREFIX_FAST.encode("utf-8"))
         '
 
-    See P-02 Phase B (``docs/plans/in-progress/p-02-inference-stack-tuning.md``).
+    See P-02 Phase B (``docs/plans/completed/p-02-inference-stack-tuning.md``).
     """
     fixtures_dir = Path(__file__).resolve().parents[1] / "data"
     expected_full = (fixtures_dir / "m6_prompt_prefix_full.txt").read_bytes()

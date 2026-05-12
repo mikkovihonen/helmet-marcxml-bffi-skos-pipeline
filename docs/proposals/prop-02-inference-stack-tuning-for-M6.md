@@ -1,7 +1,7 @@
 # P-02 — Inference-stack tuning for the M6 cascade
 
 **Status**: planning (graduated). See
-[`docs/plans/in-progress/p-02-inference-stack-tuning.md`](../plans/in-progress/p-02-inference-stack-tuning.md)
+[`docs/plans/completed/p-02-inference-stack-tuning.md`](../plans/completed/p-02-inference-stack-tuning.md)
 for the full plan with sequenced phases, verification checkpoints,
 and rollback procedures.
 **Proposal-base commit**: `334294a` (initial draft as part of the
