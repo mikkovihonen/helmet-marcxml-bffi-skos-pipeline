@@ -144,9 +144,10 @@ bffi-pipeline embed
 #    Default --concurrency=1 (Ollama serial). Crash-safe: --resume
 #    is the default and picks up from <output>.checkpoint.
 bffi-pipeline judge
-# Production batch (mlx-lm on :8000):
-LLM_BASE_URL=http://localhost:8000/v1 \
-    bffi-pipeline judge --concurrency 16
+# Production batch (mlx-lm on :8001; see local-inference.md § A6
+# for the M2 Max sweep — re-measure on M5 Max before kickoff):
+LLM_BASE_URL=http://localhost:8001/v1 \
+    bffi-pipeline judge --concurrency 4
 # → writes <BFFI_DATA_DIR>/judge-decisions.jsonl,
 #   <BFFI_DATA_DIR>/judge-decisions.jsonl.checkpoint,
 #   <BFFI_DATA_DIR>/provenance.ttl per spec § 8 (every cascade step
@@ -282,12 +283,30 @@ If any of those fail, log a bug and check:
 
 ## --concurrency tuning sweep (one-time, before the production batch)
 
-Per spec § 7 / BUILD_PLAN M6, sweep `{4, 8, 16, 32}` against a fixed
-1 k-pair sample on mlx-lm, measure throughput, and record the
-chosen value here. Until the sweep runs, treat the 16-concurrency
-default in the example above as a placeholder.
+The P-02 § A6 sweep ran on **M2 Max, 64 GB** (the current dev box).
+Full results, methodology, and re-measurement gates for M5 Max are
+in [`docs/local-inference.md`](local-inference.md) § "Throughput
+findings — P-02 § A6". Operational defaults for the M2 Max dev box:
 
-The recommended approach:
+| Setting | Value |
+|---|---|
+| `M6_CONCURRENCY` (client `--concurrency`) | **4** |
+| `mlx_lm.server --decode-concurrency` | **4** |
+| `mlx_lm.server --prompt-concurrency` | **4** |
+| `mlx_lm.server --prompt-cache-size` | 200 |
+| `mlx_lm.server --prompt-cache-bytes` | 1073741824 |
+| End-to-end throughput ceiling | ~31 pairs/min |
+
+**Before the M5 Max production batch**, re-run the bench
+([`scripts/p02-a6-concurrency-bench.py`](../scripts/p02-a6-concurrency-bench.py))
+on the target hardware and update both this section and
+local-inference.md if the knee shifts. The M5 Max has more memory
+bandwidth than the M2 Max and is likely to support a higher
+`--decode-concurrency` cleanly; the 32 GB working-set headroom
+matters less than raw GPU bandwidth on Apple Silicon for
+batched-decode parallelism.
+
+For a fresh sweep against an M5 escalate band:
 
 ```bash
 # Capture a 1 k-pair slice of escalate-band candidates.
@@ -295,7 +314,7 @@ head -1000 data/embed-candidates.jsonl > data/embed-candidates.sample.jsonl
 
 for c in 4 8 16 32; do
     rm -rf data/judge-decisions.sample.jsonl* data/judge-cache.sqlite
-    time LLM_BASE_URL=http://localhost:8000/v1 \
+    time LLM_BASE_URL=http://localhost:8001/v1 \
         bffi-pipeline judge \
             --candidates-path data/embed-candidates.sample.jsonl \
             --output-path data/judge-decisions.sample.jsonl \
@@ -304,8 +323,10 @@ for c in 4 8 16 32; do
 done
 ```
 
-Pick the value that maximises throughput without OOMing. Update this
-section + the example command sequence above with the chosen value.
+The script-based bench at `scripts/p02-a6-concurrency-bench.py` is
+the recommended path when no real escalate band is available — it
+constructs 200 synthetic pairs from `gold/gold.jsonl` and produces a
+JSON summary at `eval-runs/p02-a6-concurrency-sweep.json`.
 
 ## Expected reconciliation residue from the YSA → YSO vocabulary merge
 

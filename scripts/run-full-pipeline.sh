@@ -17,7 +17,13 @@
 # Optional env (with defaults):
 #   BFFI_DATA_DIR     Output base (./data).
 #   PIPELINE_LOG      Per-stage log (<BFFI_DATA_DIR>/pipeline.log).
-#   M6_CONCURRENCY    Judge concurrency (1 for Ollama serial; 16 for mlx-lm batched).
+#   M6_CONCURRENCY    Judge concurrency. Defaults to 1 (Ollama serial,
+#                     also safe for mlx-lm without the Phase B prefix-cache
+#                     flags). For mlx-lm with --decode-concurrency 4
+#                     --prompt-concurrency 4 --prompt-cache-size 200, the
+#                     P-02 § A6 sweep on M2 Max picked 4. Re-measure on
+#                     M5 Max before production batches — see
+#                     docs/local-inference.md § "Throughput findings".
 #   SKIP_M5_M6        Set to "1" to skip embeddings + LLM judge (writes an
 #                     empty judge-decisions.jsonl so M8 still has its
 #                     expected input). Useful for fast pattern-mining runs.

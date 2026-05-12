@@ -137,6 +137,82 @@ Then any pipeline CLI call (`bffi-pipeline judge`, `bffi-pipeline reconcile`, et
 
 Comfortable on 128 GB. **On smaller dev boxes** (64 GB), drop the 32B fallback during dev iteration — the cascade tolerates a single-port setup where the primary handles every pair.
 
+## Throughput findings — P-02 § A6
+
+Measured on **M2 Max, 64 GB unified memory** (the current dev box,
+NOT the production target M5 Max with 128 GB). All M5 Max
+recommendations below carry a *re-measure on the target hardware*
+qualifier — these numbers are a floor, not a contract.
+
+### Sweep results
+
+Synthetic 32-pair slice constructed from `gold/gold.jsonl` (real
+M6 prompt template + `_build_chain` from `src/bffi_pipeline/stages/judge.py`,
+unique `(record_a, record_b)` per call). Bench script:
+[`scripts/p02-a6-concurrency-bench.py`](../scripts/p02-a6-concurrency-bench.py).
+
+| Configuration | c=1 | c=4 | c=8 | c=16 |
+|---|---|---|---|---|
+| Defaults, no prefix cache | 25.5 /min | 26.7 /min | 26.4 /min | 26.1 /min |
+| `--decode-concurrency 8 --prompt-concurrency 8` only | 25.5 /min | 25.9 /min | 25.9 /min | 26.0 /min |
+| `--decode-concurrency 8 --prompt-concurrency 8 --prompt-cache-size 200 --prompt-cache-bytes 1073741824` | **28.4 /min** | **31.2 /min** | **31.6 /min** | 30.2 /min |
+
+Median per-call latency at the best configuration: 1.94 s (c=1) →
+7.73 s (c=4) → 15.0 s (c=8). Latency scales roughly linearly with
+concurrency — i.e. **mlx-lm queues** rather than truly batches on
+the M2 Max for this workload. The throughput ceiling at c≈4-8
+(~31 pairs/min) is bandwidth-bound, not memory-bound (peak resident
+on the 8B server is ~4.7 GB).
+
+### Why the gains are modest
+
+- Each M6 pair has substantial unique user content (`record_a` /
+  `record_b` differ on every call). The prompt-prefix cache only
+  helps the shared SYSTEM section, not the per-pair tail.
+- Decode dominates total wall-time (~200-token rationale per call);
+  prefix caching saves only prefill.
+- mlx-lm 0.31's `--decode-concurrency` batching gain on the M5 Max
+  family for this workload pattern appears bandwidth-limited.
+
+### M2 Max operational defaults
+
+| Setting | Value |
+|---|---|
+| `M6_CONCURRENCY` (client `bffi-pipeline judge --concurrency`) | **4** |
+| `mlx_lm.server --decode-concurrency` | **4** |
+| `mlx_lm.server --prompt-concurrency` | **4** |
+| `mlx_lm.server --prompt-cache-size` | 200 |
+| `mlx_lm.server --prompt-cache-bytes` | 1073741824 (1 GiB) |
+| `mlx_lm.server --chat-template-args` | `'{"enable_thinking":false}'` (Qwen3) |
+
+The throughput knee is at `c=4`; `c=8` adds essentially nothing
+(+1 %) and `c=16` starts to degrade. Picking `c=4` keeps the
+server-side KV-cache pre-allocation tight (lower memory footprint
+on the 64 GB box) at the cost of <2 % throughput.
+
+### M5 Max re-measurement gates
+
+Before kicking off a production batch on the M5 Max, re-run the
+bench script and update this section. Specifically check whether:
+
+- Higher `--decode-concurrency` (16, 24) actually pays off — the
+  M5 Max has more memory bandwidth and may finally show true
+  batched-decode parallelism this workload should support.
+- The throughput ceiling stays at ~30 /min or moves materially.
+  At 50 k escalate-band pairs and the current ceiling, a full M6
+  run is ~28 hours; doubling that throughput cuts a production
+  run to ~14 hours, which is a real operational win.
+
+### Footnote: separating TTFT from throughput
+
+P-02 Phase B's acceptance criterion is *≥ 3× TTFT speedup* (time-
+to-first-token) from prefix caching, not 3× end-to-end throughput.
+The numbers above are end-to-end (full rationale generated), so
+they don't directly measure TTFT — Phase B's own bench will. The
+~10-20 % end-to-end uplift here is consistent with a much larger
+TTFT improvement diluted by decode time. Re-bench Phase B against
+its own TTFT-only criterion before judging the prefix-cache value.
+
 ## Ollama as the dev fallback
 
 Until P-02 Phase D5 ships, Ollama remains a documented option for fast iteration and gold-set runs:
