@@ -138,3 +138,19 @@ plan documents *when the execution was scheduled*.
   the shipped cascade. Phase A's coverage analysis confirmed 245$h
   GMD and 006 contribute no recovery on this corpus and were
   deferred.
+- [`prop-09-library-agnostic-source.md`](prop-09-library-agnostic-source.md)
+  — `proposed`. Decouple `bffi_pipeline` from FI-HELME so the
+  downstream stages can serve any Finnish library whose export tool
+  emits MARCXML with a populated controlfield 003. Phase A reads
+  `bib_id` from MARC 001 instead of the filename stem (ending the
+  filename-as-contract coupling and retiring the legacy bare-digits
+  filename pattern); Phase B pulls the nine-site FI-HELME URI cluster
+  (`bf:source`, `bffi:sourceMetadata`, `bffi:recordingSource`, the
+  M8 `ident/helmet/` minter, etc.) into a config-driven
+  `LibrarySource` registry keyed on MARC 003, and ships a bffi-prov
+  v2 vocabulary bump that renames `bffi-prov:helmetBibId` →
+  `bffi-prov:bibId` paired with a new `bffi-prov:sourceCode` (MARC
+  003 value, ISIL-aligned in Finnish practice). Default FI-HELME
+  entry preserves the committed-identifier URIs byte-for-byte; a
+  one-shot `provenance migrate-v2` CLI rewrites existing
+  `data/provenance.ttl`.
