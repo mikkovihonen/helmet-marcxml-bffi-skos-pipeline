@@ -203,15 +203,37 @@ bench script and update this section. Specifically check whether:
   run is ~28 hours; doubling that throughput cuts a production
   run to ~14 hours, which is a real operational win.
 
-### Footnote: separating TTFT from throughput
+### TTFT measurement (P-02 § B4)
 
-P-02 Phase B's acceptance criterion is *≥ 3× TTFT speedup* (time-
-to-first-token) from prefix caching, not 3× end-to-end throughput.
-The numbers above are end-to-end (full rationale generated), so
-they don't directly measure TTFT — Phase B's own bench will. The
-~10-20 % end-to-end uplift here is consistent with a much larger
-TTFT improvement diluted by decode time. Re-bench Phase B against
-its own TTFT-only criterion before judging the prefix-cache value.
+Phase B's acceptance criterion is *≥ 3× TTFT speedup* (time-to-
+first-token) from prefix caching, not 3× end-to-end throughput.
+Bench: [`scripts/p02-b-ttft-bench.py`](../scripts/p02-b-ttft-bench.py)
+streams 8 sequential chat completions against the byte-stable
+``_M6_PROMPT_PREFIX_FULL`` (~875 tokens) on a freshly-restarted 8B
+server with the cache flags above. Call 0 is the cold-cache
+reference; calls 1-7 hit the warm prefix.
+
+Measured (M2 Max 64 GB):
+
+| | TTFT |
+|---|---|
+| Cold (call 0) | **2.87 s** |
+| Warm (calls 1-7, median) | **0.36 s** |
+| **Speedup** | **7.99×** |
+
+Comfortably above the ≥ 3× target. The cold-warm gap of ~2.5 s
+matches the rough estimate of prefilling 875 tokens at ~350
+tokens/s — i.e. **the warm path skips essentially all of the
+system-prefix prefill**, and only the per-pair user delta is
+processed before generation starts.
+
+End-to-end throughput numbers above don't reflect this 8×
+TTFT win because decode (~1.5-2 s for ~100-200 token rationales)
+dominates the rest of total wall-time. For batched production
+runs the TTFT savings still compound: at the A6 ceiling of
+~31 pairs/min, ~80 % of every request's TTFT is now saved, which
+matters more if a stage downstream (e.g. M9 picker) ever needs to
+fire on every M6 verdict in real time.
 
 ## Ollama as the dev fallback
 

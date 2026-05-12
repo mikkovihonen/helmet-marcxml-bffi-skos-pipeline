@@ -427,6 +427,39 @@ def _parse_prompt_sections_fast() -> dict[str, str]:
     return _parse_sections(prompt_text_fast(), PROMPT_PATH_FAST)
 
 
+# --- Cached M6 system-prompt prefix (P-02 Phase B) ------------------------
+#
+# The system-message string fed to every M6 LLM call is identical for a
+# given schema across all pairs in a run — only the user-message tail
+# varies. Computing the system prefix once at module-import time keeps it
+# byte-stable, which is what mlx-lm's server-side prefix cache keys on.
+# Drift in the prompt files or the schema definition silently invalidates
+# every cache slot; ``tests/unit/test_judge.py``'s
+# ``test_m6_prompt_prefix_is_byte_stable`` is the regression gate.
+
+
+def _build_m6_prompt_prefix(sections: dict[str, str], schema: type[BaseModel]) -> str:
+    prefix = (
+        sections["SYSTEM"] + "\n\n" + sections["EXAMPLES"] + "\n\n" + json_mode_instruction(schema)
+    )
+    # The user-message template is appended downstream as a separate
+    # ChatMessage. A trailing newline here keeps any future suffix
+    # concatenation from accidentally splicing across the last
+    # schema-instruction token, which mlx-lm tokenises into a clean
+    # boundary every time.
+    if not prefix.endswith("\n"):
+        prefix = prefix + "\n"
+    return prefix
+
+
+_M6_PROMPT_PREFIX_FULL: Final[str] = _build_m6_prompt_prefix(
+    _parse_prompt_sections(), WorkMatchDecision
+)
+_M6_PROMPT_PREFIX_FAST: Final[str] = _build_m6_prompt_prefix(
+    _parse_prompt_sections_fast(), WorkMatchDecisionFast
+)
+
+
 # --- Custom SQLite cache (post-validation only) ---------------------------
 
 
@@ -613,22 +646,18 @@ def _build_chain(
 
     sections = _parse_prompt_sections() if full_rationale else _parse_prompt_sections_fast()
     schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
+    # System prefix is the module-level byte-stable constant (P-02 Phase B);
+    # pinning the bytes preserves the prefix-cache hit rate on mlx-lm.
     # ``method="json_mode"`` only sets ``response_format={"type":"json_object"}``
     # — LangChain does not auto-inject a schema description into the prompt.
     # Ollama tolerates that because ``format=json`` is constrained decoding;
     # mlx-lm 0.31 has no constrained-decoding fallback and otherwise copies
-    # the few-shot prose. The instruction below makes the JSON contract
-    # explicit on both backends. P-02 A5.
+    # the few-shot prose. The instruction inside the prefix makes the JSON
+    # contract explicit on both backends. P-02 A5.
+    prefix = _M6_PROMPT_PREFIX_FULL if full_rationale else _M6_PROMPT_PREFIX_FAST
     template = ChatPromptTemplate.from_messages(
         [
-            (
-                "system",
-                sections["SYSTEM"]
-                + "\n\n"
-                + sections["EXAMPLES"]
-                + "\n\n"
-                + json_mode_instruction(schema),
-            ),
+            ("system", prefix),
             ("user", sections["USER"]),
         ]
     )

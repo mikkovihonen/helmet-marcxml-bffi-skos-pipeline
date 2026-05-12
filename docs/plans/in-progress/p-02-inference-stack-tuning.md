@@ -120,7 +120,13 @@ acceptance criteria):
   - D3 (dev-machine throughput verification): `<unfilled>`
   - D4 (flip committed defaults): `<unfilled>`
   - D5 (label Ollama secondary): `<unfilled>`
-- Phase B (prefix caching): `<unfilled>`
+- Phase B (prefix caching): `<unfilled>`.
+  TTFT bench ([`scripts/p02-b-ttft-bench.py`](../../../scripts/p02-b-ttft-bench.py))
+  on M2 Max 64 GB measured **7.99× TTFT speedup** (cold 2.87 s →
+  warm 0.36 s median) on the byte-stable ``_M6_PROMPT_PREFIX_FULL``
+  — comfortably above the ≥ 3× acceptance bar. Full results in
+  [`docs/local-inference.md`](../../local-inference.md) § "TTFT
+  measurement (P-02 § B4)".
 - Phase C (speculative decoding): `<unfilled>`
 - Phase D6 (remove Ollama install paths): `<unfilled>`
 
@@ -707,10 +713,26 @@ Verdicts must still match the Ollama baseline.
 
 ### B6. Phase B acceptance
 
-- [ ] `_M6_PROMPT_PREFIX` factored out and pinned by unit test.
-- [ ] Prefix cache active (via TTFT delta on the B4 bench; mlx-lm doesn't expose per-cache metrics).
-- [ ] ≥ 3× TTFT speedup on the bench.
-- [ ] Gold-set parity holds.
+- [x] `_M6_PROMPT_PREFIX_FULL` / `_FAST` factored out of `_build_chain`
+      into module-level constants and pinned by the
+      `test_m6_prompt_prefix_is_byte_stable` regression test
+      (`tests/unit/test_judge.py`, fixtures under `tests/data/`).
+- [x] Prefix cache active. The TTFT-bench cold (2.87 s) vs warm
+      (0.36 s) gap on the byte-stable prefix is direct evidence of
+      the cache hitting — mlx-lm doesn't expose per-cache metrics,
+      but a 7.99× TTFT improvement on cache hits would not be
+      reproducible otherwise.
+- [x] ≥ 3× TTFT speedup on the bench. Measured **7.99×** on the
+      M2 Max 64 GB. Production target M5 Max is expected to show
+      similar or better speedup (more memory bandwidth, same
+      caching algorithm).
+- [x] Gold-set parity holds. Re-ran `bffi-pipeline eval` after the
+      prefix-factoring refactor: 88.2 % accuracy, identical 2-case
+      failure set as A5 (`gs-0001`, `gs-0002`). The trailing-newline
+      addition to the prefix did not perturb verdicts.
+
+**Phase B is complete.** Phases C (speculative decoding) and D3-D6
+remain.
 
 ### B7. Rollback
 
@@ -954,6 +976,14 @@ After Phase C lands, update **`docs/runbook.md`** with:
     `gs-0001` with the `505` component data, or re-classify as a
     cascade-conservatism test). See that plan's "Open issues" for
     the action item.
+- Phase B (prefix caching) shipped clean: byte-stable
+  `_M6_PROMPT_PREFIX_FULL` / `_FAST` constants in
+  `src/bffi_pipeline/stages/judge.py`, pinned by
+  `test_m6_prompt_prefix_is_byte_stable` against fixtures at
+  `tests/data/m6_prompt_prefix_{full,fast}.txt`. TTFT bench on
+  M2 Max 64 GB measured 7.99× speedup (cold 2.87 s → warm 0.36 s)
+  on cache hits — comfortably above the ≥ 3× acceptance bar.
+  No prompt-file edits; only `_build_chain` and supporting code.
 - **Supervisor vs. per-port** for D1 — **resolved during the
   mlx-lm-vs-vllm-mlx decision in A1**: chose per-port routing
   (cheaper code change, fits the existing cascade primary/fallback

@@ -186,6 +186,35 @@ def test_prompt_text_contains_required_sections() -> None:
     assert "{sim:.3f}" in text
 
 
+def test_m6_prompt_prefix_is_byte_stable() -> None:
+    """The M6 prompt prefix is what mlx-lm's server-side prefix cache
+    keys on; any byte drift silently drops the cache hit-rate to 0 %.
+    The recorded fixtures are the contract. When the prompt files or
+    the schemas legitimately change, regenerate the fixtures via::
+
+        uv run python -c '
+        from bffi_pipeline.stages.judge import (
+            _M6_PROMPT_PREFIX_FULL,
+            _M6_PROMPT_PREFIX_FAST,
+        )
+        from pathlib import Path
+        Path("tests/data/m6_prompt_prefix_full.txt").write_bytes(
+            _M6_PROMPT_PREFIX_FULL.encode("utf-8"))
+        Path("tests/data/m6_prompt_prefix_fast.txt").write_bytes(
+            _M6_PROMPT_PREFIX_FAST.encode("utf-8"))
+        '
+
+    See P-02 Phase B (``docs/plans/in-progress/p-02-inference-stack-tuning.md``).
+    """
+    fixtures_dir = Path(__file__).resolve().parents[1] / "data"
+    expected_full = (fixtures_dir / "m6_prompt_prefix_full.txt").read_bytes()
+    expected_fast = (fixtures_dir / "m6_prompt_prefix_fast.txt").read_bytes()
+    assert judge._M6_PROMPT_PREFIX_FULL.encode("utf-8") == expected_full
+    assert judge._M6_PROMPT_PREFIX_FAST.encode("utf-8") == expected_fast
+    assert judge._M6_PROMPT_PREFIX_FULL.endswith("\n")
+    assert judge._M6_PROMPT_PREFIX_FAST.endswith("\n")
+
+
 # --- JudgeCache -----------------------------------------------------------
 
 
