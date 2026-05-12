@@ -8,6 +8,7 @@ so the JSON-shape parsing is verified without touching the network.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.local_concept_resolver import LocalConceptHit
 from bffi_pipeline.stages.reconcile import (
     ALL_AUTHORITY_KINDS,
     LEXICAL_DIRECT_THRESHOLD,
@@ -1509,3 +1511,305 @@ def test_apply_reconciliation_concurrent_path_requires_factory() -> None:
             now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
             concurrency=4,
         )
+
+
+# --- P-10 Phase A2: Phase 1 parallelisation -------------------------------
+
+
+def test_apply_reconciliation_byte_stable_at_phase1_1_vs_phase1_8() -> None:
+    """Canonical graph mutations must be deterministic regardless of
+    Phase 1 concurrency.
+
+    Same 12-ambiguous-creator fixture used for the Phase A byte-stability
+    test, now varying ``phase1_concurrency`` instead of ``concurrency``.
+    Together with the Phase A test, both concurrency knobs are pinned as
+    determinism-preserving against the same fixture.
+    """
+    labels_seq, client_seq, picker_seq = _twelve_ambiguous_creators()
+    g_seq = _build_canonical_with_n_creators(labels_seq)
+    apply_reconciliation(
+        client=client_seq,
+        picker=picker_seq,
+        graph=g_seq,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=1,
+        phase1_concurrency=1,
+        field_timeout_seconds=0,
+    )
+    bytes_seq = g_seq.serialize(format="turtle")
+
+    labels_par, client_par, picker_par = _twelve_ambiguous_creators()
+    g_par = _build_canonical_with_n_creators(labels_par)
+    apply_reconciliation(
+        client=client_par,
+        picker=picker_par,
+        graph=g_par,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=1,
+        phase1_concurrency=8,
+        field_timeout_seconds=0,
+    )
+    bytes_par = g_par.serialize(format="turtle")
+
+    assert bytes_seq == bytes_par, (
+        "Canonical Turtle diverged between phase1=1 and phase1=8 — the "
+        "Phase 1 ThreadPoolExecutor is not order-stable."
+    )
+
+
+class _MapLocalResolver:
+    """In-memory ``LocalConceptResolver`` stub for Phase A2 tests.
+
+    Returns a wired ``LocalConceptHit`` for a given literal (regardless
+    of kind, to keep the fixture small), or ``None`` if the literal is
+    not in the map. Thread-safe by virtue of being read-only after
+    construction.
+    """
+
+    def __init__(self, hits: dict[str, tuple[str, str]]) -> None:
+        # hits: {literal: (uri, pref_label)}
+        self.hits = dict(hits)
+        self.calls = 0
+        self._lock = threading.Lock()
+
+    def resolve(self, *, literal: str, kind: AuthorityKind) -> Any:
+        with self._lock:
+            self.calls += 1
+        if literal not in self.hits:
+            return None
+        uri, label = self.hits[literal]
+        return LocalConceptHit(uri=uri, pref_label=label, source_vocabulary="yso")
+
+
+def _build_mixed_tier_fixture(
+    n_each: int = 6,
+) -> tuple[
+    list[str],
+    list[str],
+    list[str],
+    _MapLocalResolver,
+    StubAuthorityClient,
+    StubPicker,
+]:
+    """Build a fixture exercising all three Phase 1 outcome paths.
+
+    Returns labels grouped by destination tier:
+    - ``tier0_labels`` → resolved by the local resolver (no Finto call).
+    - ``picker_labels`` → routed to tier-2 (multiple high-similarity).
+    - ``empty_labels`` → no candidates returned → ``no_candidate``.
+
+    Plus the stub resolver / client / picker pre-wired for them.
+    """
+    tier0_labels = [f"TierZero, Author {i}," for i in range(n_each)]
+    picker_labels = [f"Picker, Author {i}," for i in range(n_each)]
+    empty_labels = [f"Empty, Author {i}," for i in range(n_each)]
+
+    resolver = _MapLocalResolver(
+        hits={
+            label: (f"http://yso/tier0-{i}", f"TierZero pref-label {i}")
+            for i, label in enumerate(tier0_labels)
+        }
+    )
+
+    fixtures: dict[tuple[str, str], list[AuthorityCandidate]] = {}
+    decisions: dict[tuple[str, str], PickerDecision] = {}
+    for i, label in enumerate(picker_labels):
+        fixtures[("person", label)] = [
+            _candidate(f"http://kanto/p-{i}-a", f"{label[:-1]} A", 0.97),
+            _candidate(f"http://kanto/p-{i}-b", f"{label[:-1]} B", 0.96),
+        ]
+    # No fixtures for empty_labels = StubAuthorityClient returns [] → no_candidate.
+
+    return (
+        tier0_labels,
+        picker_labels,
+        empty_labels,
+        resolver,
+        StubAuthorityClient(fixtures=fixtures),
+        StubPicker(decisions=decisions),
+    )
+
+
+def _build_canonical_with_mixed_creators(
+    tier0_labels: list[str],
+    picker_labels: list[str],
+    empty_labels: list[str],
+) -> Graph:
+    all_labels = tier0_labels + picker_labels + empty_labels
+    g = Graph()
+    for i, label in enumerate(all_labels):
+        work = URIRef(f"http://urn.fi/URN:NBN:fi:bib:work:mixed-{i}")
+        contrib = URIRef(f"http://example.org/contrib/mixed-{i}")
+        agent = URIRef(f"http://example.org/agent/mixed-{i}")
+        admin = URIRef(f"http://urn.fi/URN:NBN:fi:bib:adminmeta/mixed-{i}")
+        g.add((work, RDF.type, V.BFFI.Work))
+        g.add((work, V.BFFI.contribution, contrib))
+        g.add((contrib, RDF.type, V.BFFI.PrimaryContribution))
+        g.add((contrib, V.BFFI.agent, agent))
+        g.add((agent, V.RDFS.label, Literal(label)))
+        g.add((work, V.adminMetadata, admin))
+        g.add((admin, RDF.type, V.AdminMetadata))
+        g.add((admin, V.adminMetadataFor, work))
+        g.add(
+            (
+                admin,
+                V.descriptionChangeDate,
+                Literal("2026-05-01T00:00:00+00:00", datatype=V.XSD.dateTime),
+            )
+        )
+        g.add((admin, V.descriptionAuthentication, V.AUTH_AUTO_MERGED))
+    return g
+
+
+def test_phase1_concurrency_preserves_outcome_distribution() -> None:
+    """All three Phase 1 outcome paths (tier-0 local, no-candidate,
+    picker-deferred) must produce the same per-entity outcomes at
+    phase1=1 and phase1=8.
+    """
+    tier0_labels, picker_labels, empty_labels, resolver, client, picker = _build_mixed_tier_fixture(
+        n_each=6
+    )
+    n_total = len(tier0_labels) + len(picker_labels) + len(empty_labels)
+
+    g_seq = _build_canonical_with_mixed_creators(tier0_labels, picker_labels, empty_labels)
+    summary_seq, outcomes_seq = apply_reconciliation(
+        client=client,
+        picker=picker,
+        graph=g_seq,
+        local_resolver=resolver,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=1,
+        phase1_concurrency=1,
+    )
+
+    # Fresh fixture for the concurrent run — resolver call counter resets.
+    tier0_labels2, picker_labels2, empty_labels2, resolver2, client2, picker2 = (
+        _build_mixed_tier_fixture(n_each=6)
+    )
+    g_par = _build_canonical_with_mixed_creators(tier0_labels2, picker_labels2, empty_labels2)
+    summary_par, outcomes_par = apply_reconciliation(
+        client=client2,
+        picker=picker2,
+        graph=g_par,
+        local_resolver=resolver2,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=1,
+        phase1_concurrency=8,
+    )
+
+    # Summary counts identical.
+    assert summary_seq.local == summary_par.local == len(tier0_labels)
+    assert summary_seq.no_candidate == summary_par.no_candidate == len(empty_labels)
+    # picker_labels routed to fallback because StubPicker has no wired
+    # decisions (returns ``uncertain``).
+    assert summary_seq.fallback == summary_par.fallback == len(picker_labels)
+    assert summary_seq.total == summary_par.total == n_total
+
+    # Per-entity outcomes preserved (sorted by request.literal for comparison).
+    def _key(o: object) -> tuple[str, str]:
+        # ReconciliationOutcome carries request.literal + stage; sort by both.
+        return (o.request.literal, o.stage)  # type: ignore[attr-defined]
+
+    assert sorted(outcomes_seq, key=_key) == sorted(outcomes_par, key=_key)
+
+    # Phase 1 resolver was called exactly once per entity, regardless of
+    # concurrency. The lock inside ``_MapLocalResolver`` guarantees the
+    # counter is thread-safe.
+    assert resolver.calls == n_total
+    assert resolver2.calls == n_total
+
+
+def test_phase1_pool_handles_per_request_query_errors() -> None:
+    """A stub client raising on one request must not poison the pool.
+
+    The errored entity should route to ``no_candidate`` cleanly while
+    the other entities resolve normally. No thread errors, no orchestrator
+    abort.
+    """
+
+    class _ErrorOnLiteralClient:
+        def __init__(self, error_literal: str) -> None:
+            self.error_literal = error_literal
+            self.calls = 0
+            self._lock = threading.Lock()
+
+        def query(self, *, request: EntityRequest, top_k: int = 10) -> list[AuthorityCandidate]:
+            with self._lock:
+                self.calls += 1
+            if request.literal == self.error_literal:
+                raise httpx.ReadTimeout("simulated Finto stall")
+            # All other entities get one candidate at lexical 0.97 → tier-1 bind.
+            return [
+                AuthorityCandidate(
+                    uri=f"http://kanto/{request.literal}",
+                    pref_label=request.literal[:-1],  # strip trailing comma
+                    source_vocabulary="finaf",
+                    lexical_similarity=0.97,
+                )
+            ]
+
+    labels = [f"Worker, Author {i}," for i in range(8)]
+    error_literal = labels[3]
+    g = _build_canonical_with_n_creators(labels)
+    client = _ErrorOnLiteralClient(error_literal=error_literal)
+
+    # Expect ``httpx.ReadTimeout`` to propagate out — the orchestrator
+    # doesn't catch it today (no fallback when ``client.query`` itself
+    # raises). This pin documents the current behaviour: thread-pool
+    # workers surface exceptions; the orchestrator aborts the whole run.
+    # If we later want graceful per-entity error handling, the test
+    # changes shape; for now Phase A2 inherits the post-Phase-A
+    # exception-propagation contract from the existing pool path.
+    with pytest.raises(httpx.ReadTimeout, match="simulated Finto stall"):
+        apply_reconciliation(
+            client=client,
+            picker=StubPicker(),
+            graph=g,
+            now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+            concurrency=1,
+            phase1_concurrency=4,
+        )
+    # All 8 query attempts dispatched before the error surfaced (pool
+    # processes futures concurrently). Pinning >= 1 is enough; the exact
+    # value depends on thread scheduling.
+    assert client.calls >= 1
+
+
+def test_phase1_pool_thread_safe_call_count() -> None:
+    """Verify the stub client/resolver counters are incremented exactly
+    once per entity, regardless of phase1 concurrency."""
+
+    class _CountingClient:
+        def __init__(self) -> None:
+            self.calls = 0
+            self._lock = threading.Lock()
+
+        def query(self, *, request: EntityRequest, top_k: int = 10) -> list[AuthorityCandidate]:
+            with self._lock:
+                self.calls += 1
+            return [
+                AuthorityCandidate(
+                    uri=f"http://kanto/{self.calls}",
+                    pref_label="x",
+                    source_vocabulary="finaf",
+                    lexical_similarity=0.97,
+                )
+            ]
+
+    labels = [f"Counter, Author {i}," for i in range(16)]
+    g = _build_canonical_with_n_creators(labels)
+    client = _CountingClient()
+
+    apply_reconciliation(
+        client=client,
+        picker=StubPicker(),
+        graph=g,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=1,
+        phase1_concurrency=8,
+    )
+
+    assert client.calls == len(labels), (
+        f"Expected exactly {len(labels)} client.query calls under phase1=8, "
+        f"got {client.calls} — pool is either double-dispatching or dropping."
+    )

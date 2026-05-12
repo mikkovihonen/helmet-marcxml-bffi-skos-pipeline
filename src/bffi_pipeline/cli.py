@@ -867,6 +867,21 @@ def reconcile_command(
             ),
         ),
     ] = -1,
+    phase1_concurrency: Annotated[
+        int,
+        typer.Option(
+            "--phase1-concurrency",
+            help=(
+                "ThreadPoolExecutor max_workers for the Phase 1 pre-pass "
+                "(tier-0 SPARQL + Finto/VIAF candidate query). Separate from "
+                "--concurrency (tier-2 picker, GPU-bound) because Phase 1's "
+                "binding constraint is HTTP/SPARQL throughput. Defaults to "
+                "M9_PHASE1_CONCURRENCY (typically 8). Set 1 to restore the "
+                "post-Phase-A serial pre-pass. See "
+                "docs/plans/in-progress/p-10-m9-reconcile-throughput.md Phase A2."
+            ),
+        ),
+    ] = -1,
 ) -> None:
     """Reconcile canonical Work creators + subjects against KANTO / VIAF / YSO / KAUNO / MUSO."""
     settings = get_settings()
@@ -879,6 +894,9 @@ def reconcile_command(
     effective_concurrency = settings.m9_concurrency if concurrency < 0 else concurrency
     effective_field_timeout = (
         settings.llm_m9_field_timeout_seconds if field_timeout < 0 else field_timeout
+    )
+    effective_phase1_concurrency = (
+        settings.m9_phase1_concurrency if phase1_concurrency < 0 else phase1_concurrency
     )
     watchdog_sidecar = settings.data_dir / "watchdog-events.jsonl"
 
@@ -918,6 +936,7 @@ def reconcile_command(
                     concurrency=effective_concurrency,
                     field_timeout_seconds=effective_field_timeout,
                     watchdog_sidecar_path=watchdog_sidecar,
+                    phase1_concurrency=effective_phase1_concurrency,
                 )
         else:
             summary, _outcomes = reconcile.apply_reconciliation(
@@ -931,6 +950,7 @@ def reconcile_command(
                 concurrency=effective_concurrency,
                 field_timeout_seconds=effective_field_timeout,
                 watchdog_sidecar_path=watchdog_sidecar,
+                phase1_concurrency=effective_phase1_concurrency,
             )
     finally:
         http_client.close()

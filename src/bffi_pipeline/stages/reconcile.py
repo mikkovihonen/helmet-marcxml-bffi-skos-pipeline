@@ -1441,6 +1441,143 @@ def _collect_requests(
     return out
 
 
+@dataclass(frozen=True)
+class _Phase1Result:
+    """One Phase 1 (tier-0 + candidate query) outcome.
+
+    Either ``outcome`` is set (the entity resolved at fictional /
+    tier-0 / lexical / no-candidate, picker dispatch unnecessary) or
+    ``sorted_candidates`` is set (the entity needs tier-2 picker
+    dispatch in Phase 2). Never both, never neither.
+    """
+
+    idx: int
+    request: EntityRequest
+    outcome: ReconciliationOutcome | None
+    sorted_candidates: list[AuthorityCandidate] | None
+    started_at: datetime
+
+
+def _phase1_resolve_one(
+    *,
+    idx: int,
+    request: EntityRequest,
+    client: AuthorityClient,
+    fallback_client: AuthorityClient | None,
+    top_k: int,
+    local_resolver: LocalConceptResolver | None,
+) -> _Phase1Result:
+    """Run tier-0 + candidate query for one entity.
+
+    Stateless worker — all dependencies passed in. Thread-safe given
+    that ``client``, ``fallback_client``, and ``local_resolver`` are
+    HTTP-client-backed and stateless.
+    """
+    started = datetime.now(UTC)
+    # Fictional-character marker short-circuit (tier-0 sibling).
+    if request.kind == "fictional_character":
+        return _Phase1Result(
+            idx=idx,
+            request=request,
+            outcome=_fictional_outcome(request),
+            sorted_candidates=None,
+            started_at=started,
+        )
+    # Tier-0: local exact-prefLabel match.
+    if local_resolver is not None:
+        hit = local_resolver.resolve(literal=request.literal, kind=request.kind)
+        if hit is not None:
+            return _Phase1Result(
+                idx=idx,
+                request=request,
+                outcome=_local_outcome(request, hit),
+                sorted_candidates=None,
+                started_at=started,
+            )
+    # Authority client candidate query.
+    candidates = client.query(request=request, top_k=top_k)
+    if not candidates and fallback_client is not None:
+        candidates = fallback_client.query(request=request, top_k=top_k)
+    # Tier-1 short-circuit OR queue for picker dispatch.
+    outcome_or_none, sorted_candidates = _decide_before_picker(
+        request=request, candidates=candidates
+    )
+    if outcome_or_none is not None:
+        return _Phase1Result(
+            idx=idx,
+            request=request,
+            outcome=outcome_or_none,
+            sorted_candidates=None,
+            started_at=started,
+        )
+    return _Phase1Result(
+        idx=idx,
+        request=request,
+        outcome=None,
+        sorted_candidates=sorted_candidates,
+        started_at=started,
+    )
+
+
+def _phase1_seq(
+    request_list: list[EntityRequest],
+    *,
+    client: AuthorityClient,
+    fallback_client: AuthorityClient | None,
+    top_k: int,
+    local_resolver: LocalConceptResolver | None,
+) -> list[_Phase1Result]:
+    """Sequential (``phase1_concurrency <= 1``) path through Phase 1."""
+    return [
+        _phase1_resolve_one(
+            idx=idx,
+            request=request,
+            client=client,
+            fallback_client=fallback_client,
+            top_k=top_k,
+            local_resolver=local_resolver,
+        )
+        for idx, request in enumerate(request_list)
+    ]
+
+
+def _phase1_pool(
+    request_list: list[EntityRequest],
+    *,
+    client: AuthorityClient,
+    fallback_client: AuthorityClient | None,
+    top_k: int,
+    local_resolver: LocalConceptResolver | None,
+    phase1_concurrency: int,
+) -> list[_Phase1Result]:
+    """Concurrent (``phase1_concurrency >= 2``) path through Phase 1.
+
+    Workers share the orchestrator's ``client`` / ``fallback_client`` /
+    ``local_resolver`` — all built on ``httpx.Client`` (thread-safe)
+    plus stateless SPARQL queries. Results are sorted by submission
+    index so downstream graph mutations + provenance emit
+    deterministically regardless of completion order.
+    """
+    results: list[_Phase1Result] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=phase1_concurrency) as pool:
+        futures = [
+            pool.submit(
+                _phase1_resolve_one,
+                idx=idx,
+                request=request,
+                client=client,
+                fallback_client=fallback_client,
+                top_k=top_k,
+                local_resolver=local_resolver,
+            )
+            for idx, request in enumerate(request_list)
+        ]
+        for fut in concurrent.futures.as_completed(futures):
+            results.append(fut.result())
+    results.sort(key=lambda r: r.idx)
+    return results
+
+
 def _field_id(request: EntityRequest) -> str:
     """Stable key for one M9 reconciliation field.
 
@@ -1611,6 +1748,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     concurrency: int = 1,
     field_timeout_seconds: int = 0,
     watchdog_sidecar_path: Path | None = None,
+    phase1_concurrency: int = 1,
 ) -> tuple[ReconciliationSummary, list[ReconciliationOutcome]]:
     """Walk canonical.ttl, reconcile creators + subjects, and write the graph back.
 
@@ -1635,6 +1773,14 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     falls through to tier-3 fallback (highest-lexical + needs-review)
     with the provenance Activity stamped
     ``bffi-prov:stage = "watchdog-aborted"``.
+
+    P-10 Phase A2: Phase 1 (tier-0 SPARQL + Finto/VIAF candidate
+    query) is also dispatched through its own pool sized by
+    ``phase1_concurrency``. Defaults to ``1`` (sequential) so existing
+    callers / tests are byte-stable; production CLI passes the
+    ``M9_PHASE1_CONCURRENCY`` setting (default 8) — Phase 1's
+    binding constraint is HTTP / SPARQL throughput rather than the
+    GPU-bound mlx-lm picker, so it tolerates higher concurrency.
 
     Pass ``picker_factory`` for concurrent runs (one ``LLMPicker`` is
     built per worker thread). Pass ``picker`` for single-threaded
@@ -1677,37 +1823,43 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
 
     summary = ReconciliationSummary(total=len(request_list))
 
-    # --- Phase 1: walk requests serially through tier-0 + candidate-query --
-    # Collect either a decided outcome (tier-0 / no-candidate / lexical) or a
-    # picker-needed entry ``(idx, request, sorted_candidates)`` for Phase 2.
+    # --- Phase 1: walk requests through tier-0 + candidate-query ----------
+    # Each request resolves either to a final outcome (fictional / tier-0 /
+    # lexical / no-candidate) or to a deferred ``(request, sorted_candidates)``
+    # picker entry for Phase 2. P-10 Phase A2 dispatches the walk through a
+    # ``ThreadPoolExecutor`` sized by ``phase1_concurrency`` — Phase 1's
+    # cost is dominated by HTTP / SPARQL throughput, not GPU, so it scales
+    # independently of the picker concurrency.
     pre_outcomes: dict[int, ReconciliationOutcome] = {}
     deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]] = []
     started_at: dict[int, datetime] = {}
 
-    for idx, request in enumerate(request_list):
-        started_at[idx] = datetime.now(UTC)
-        # Fictional-character marker short-circuit (tier-0 sibling).
-        if request.kind == "fictional_character":
-            pre_outcomes[idx] = _fictional_outcome(request)
-            continue
-        # Tier-0: local exact-prefLabel match.
-        if local_resolver is not None:
-            hit = local_resolver.resolve(literal=request.literal, kind=request.kind)
-            if hit is not None:
-                pre_outcomes[idx] = _local_outcome(request, hit)
-                continue
-        # Authority client candidate query (network — kept serial for now).
-        candidates = client.query(request=request, top_k=top_k)
-        if not candidates and fallback_client is not None:
-            candidates = fallback_client.query(request=request, top_k=top_k)
-        # Tier-1 short-circuit OR queue for picker dispatch.
-        outcome_or_none, sorted_candidates = _decide_before_picker(
-            request=request, candidates=candidates
+    phase1_results: list[_Phase1Result]
+    if phase1_concurrency <= 1:
+        phase1_results = _phase1_seq(
+            request_list,
+            client=client,
+            fallback_client=fallback_client,
+            top_k=top_k,
+            local_resolver=local_resolver,
         )
-        if outcome_or_none is not None:
-            pre_outcomes[idx] = outcome_or_none
+    else:
+        phase1_results = _phase1_pool(
+            request_list,
+            client=client,
+            fallback_client=fallback_client,
+            top_k=top_k,
+            local_resolver=local_resolver,
+            phase1_concurrency=phase1_concurrency,
+        )
+
+    for result in phase1_results:
+        started_at[result.idx] = result.started_at
+        if result.outcome is not None:
+            pre_outcomes[result.idx] = result.outcome
         else:
-            deferred.append((idx, request, sorted_candidates))
+            assert result.sorted_candidates is not None  # invariant from _Phase1Result
+            deferred.append((result.idx, result.request, result.sorted_candidates))
 
     # --- Phase 2: dispatch deferred picker calls --------------------------
     picker_results: list[tuple[int, ReconciliationOutcome]] = []

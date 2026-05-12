@@ -105,6 +105,22 @@ class Settings(BaseSettings):
         default=4,
         alias="M9_CONCURRENCY",
     )
+    # M9 Phase 1 concurrency. ThreadPoolExecutor max_workers for the
+    # serial pre-pass (tier-0 local SPARQL + Finto/VIAF candidate
+    # query) inside ``apply_reconciliation``. Separate from
+    # ``m9_concurrency`` (which bounds tier-2 picker dispatch by GPU)
+    # because Phase 1's binding constraint is HTTP / SPARQL throughput
+    # on Fuseki + Finto + VIAF, which tolerate higher concurrency than
+    # mlx-lm. Default 8 — Phase A's 2026-05-12 bench surfaced that
+    # this pre-pass is ~70 % of M9 wall, so this lever is what closes
+    # the gap to the plan's original >=3x speedup target. See
+    # ``docs/plans/in-progress/p-10-m9-reconcile-throughput.md``
+    # Phase A2 + the snapshot at
+    # ``docs/performance/2026-05-12-5k-m2-max-phase-a.md``.
+    m9_phase1_concurrency: int = Field(
+        default=8,
+        alias="M9_PHASE1_CONCURRENCY",
+    )
     # Per-field wall-time ceiling for the M9 picker. M9 analogue of
     # ``llm_pair_timeout_seconds``: the outer budget that catches a
     # hung tier-2 call from sterilising a worker thread under
