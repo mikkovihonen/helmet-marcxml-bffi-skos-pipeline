@@ -72,7 +72,9 @@ Material updates since drafting:
 signal that the phase has not yet completed against the gold-set
 acceptance criteria):
 
-- Phase A (mlx-lm bring-up + parity): `<rollup unfilled>`
+- Phase A (mlx-lm bring-up + parity): **complete** — A7 acceptance
+  ticked at `645f886`. Rollup: A1/A4 = `7cde2bf`, A2/A3 = `ad188ad`,
+  A5 prep = `852bd35`, A5 = `54f8db0`, A6/A7 = `645f886`.
   - A1 (mlx-lm 0.31.3 installed in `~/.venvs/mlx-lm`): operator-side
     step, no commit; verified by `python -c "import mlx_lm;
     print(mlx_lm.__version__)"`.
@@ -101,7 +103,7 @@ acceptance criteria):
       eval returned 0 % accuracy / 100 % uncertain because mlx-lm
       has no constrained decoding for `response_format`; with it,
       mlx-lm-only accuracy is 88.2 % / 0 % uncertain.
-  - A6 (concurrency sweep run; chosen value recorded): `<unfilled>`.
+  - A6 (concurrency sweep run; chosen value recorded): `645f886`.
     Sweep ran against the actual `_build_chain` + a synthetic 32-pair
     slice ([`scripts/p02-a6-concurrency-bench.py`](../../../scripts/p02-a6-concurrency-bench.py))
     on **M2 Max 64 GB** (current dev box, not the production M5 Max
