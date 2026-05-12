@@ -14,9 +14,14 @@
 #   source ~/.venvs/mlx-lm/bin/activate
 #
 # Usage:
-#   scripts/llm-pull.sh Qwen/Qwen3-8B-Instruct
-#   scripts/llm-pull.sh Qwen/Qwen3-32B-Instruct
-#   scripts/llm-pull.sh Qwen/Qwen3-1.7B-Instruct      # draft model (P-02 Phase C)
+#   scripts/llm-pull.sh Qwen/Qwen3-8B
+#   scripts/llm-pull.sh Qwen/Qwen3-32B
+#   scripts/llm-pull.sh Qwen/Qwen3-1.7B               # draft model (P-02 Phase C)
+#
+# Note: Qwen3 (released 2025) dropped the "-Instruct" suffix; the bare
+# Qwen/Qwen3-<size> repo is the chat-tuned variant. For pre-quantised
+# MLX checkpoints (faster than local conversion), see
+# docs/local-inference.md § "Model acquisition".
 #
 # Override the output root with MLX_MODELS_DIR if you don't want
 # ~/.mlx_models (e.g. for an external drive).
@@ -24,7 +29,7 @@ set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
     echo "usage: $0 <hf-org>/<hf-name>" >&2
-    echo "example: $0 Qwen/Qwen3-8B-Instruct" >&2
+    echo "example: $0 Qwen/Qwen3-8B" >&2
     exit 2
 fi
 

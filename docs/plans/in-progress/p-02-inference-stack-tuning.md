@@ -26,6 +26,27 @@ Material updates since drafting:
   becomes D1-D5 between Phases A and B so the perf wins from B/C
   apply to both dev and prod once D1-D5 ships. The actual removal
   of Ollama install paths is D6, held until after Phase C.
+- A2 execution (May 2026) revealed three drift items from the plan
+  as drafted, all resolved in place — see "Open issues" for details:
+  - Qwen3 (released 2025) dropped the `-Instruct` suffix from its
+    chat-tuned variants. The plan's `Qwen/Qwen3-8B-Instruct` etc.
+    repo IDs 404. Bare `Qwen/Qwen3-8B` / `Qwen/Qwen3-32B` are the
+    chat-tuned variants now.
+  - A2 took the "Alternative" pre-quantised-download route rather
+    than local conversion — Qwen now publishes their own MLX 4-bit
+    at `Qwen/Qwen3-8B-MLX-4bit`, and `mlx-community/Qwen3-32B-4bit`
+    covers the 32B. Faster (network-only, ~10-30 min total) and the
+    8B comes from the model authors directly.
+  - mlx-lm 0.31 reports the model ID at `/v1/models` as the
+    absolute `--model` path (no `--model-name` alias). Bare basenames
+    cause a Hugging Face fallback fetch and 401. `LLM_MODEL_*` in
+    `.env.mlx-lm` is the full path; per-operator.
+  - Qwen3 default-mode generation lands in `message.reasoning` and
+    leaves `message.content` empty until the reasoning budget is
+    exhausted. The pipeline's `langchain_openai.ChatOpenAI` reads
+    `content`, so every Qwen3 request must disable thinking. Fixed
+    server-side via `--chat-template-args '{"enable_thinking":false}'`
+    — no client/code change needed.
 
 **Phase commits** (filled in as phases ship; empty fields here are a
 signal that the phase has not yet completed against the gold-set
@@ -188,30 +209,42 @@ python -m mlx_lm convert --help      # model conversion
 python -m mlx_lm generate --help     # one-shot generation (handy for smoke tests)
 ```
 
-### A2. Convert the two judge models to MLX 4-bit
+### A2. Acquire the two judge models in MLX 4-bit
 
-The easiest path is to pull a pre-quantised checkpoint from the
-`mlx-community` HF org if one exists; otherwise convert from the
-raw HF weights via `mlx_lm.convert`.
+The chosen path — settled during execution — is to **pull pre-quantised
+MLX checkpoints** rather than converting locally. Qwen now publishes
+their own MLX 4-bit of the 8B and `mlx-community` covers the 32B.
+Network-bound only, no quant compute, and the 8B comes from the model
+authors directly:
+
+```bash
+source ~/.venvs/mlx-lm/bin/activate
+hf download Qwen/Qwen3-8B-MLX-4bit       --local-dir ~/.mlx_models/Qwen3-8B-4bit
+hf download mlx-community/Qwen3-32B-4bit --local-dir ~/.mlx_models/Qwen3-32B-4bit
+```
+
+(`huggingface-cli` was deprecated in favour of `hf` in 2026; the older
+name still resolves but prints a deprecation notice.)
+
+**Convert from source instead** if a pre-quantised checkpoint isn't
+available or you need to pin a specific quantisation:
 
 ```bash
 mkdir -p ~/.mlx_models
-# Primary (8B; ~5 GB on disk after 4-bit quant): ~30-45 min on M5 Max
-python -m mlx_lm convert --hf-path Qwen/Qwen3-8B-Instruct -q --q-bits 4 \
-    --mlx-path ~/.mlx_models/Qwen3-8B-Instruct-4bit
-# Fallback (32B; ~18 GB on disk after 4-bit quant): ~1-2 h
-python -m mlx_lm convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
-    --mlx-path ~/.mlx_models/Qwen3-32B-Instruct-4bit
+# Primary (8B; ~4 GB on disk after 4-bit quant): ~30-45 min on M5 Max
+python -m mlx_lm convert --hf-path Qwen/Qwen3-8B -q --q-bits 4 \
+    --mlx-path ~/.mlx_models/Qwen3-8B-4bit
+# Fallback (32B; ~17 GB on disk after 4-bit quant): ~1-2 h
+python -m mlx_lm convert --hf-path Qwen/Qwen3-32B -q --q-bits 4 \
+    --mlx-path ~/.mlx_models/Qwen3-32B-4bit
 ```
 
-(Alternative: clone pre-quantised checkpoints from
-`mlx-community/Qwen3-8B-Instruct-4bit` etc. directly via `huggingface-cli
-download`; faster if the upstream re-quantisation matches what we'd
-have produced locally.)
+(Qwen3 dropped the `-Instruct` suffix; bare `Qwen/Qwen3-<size>` is the
+chat-tuned variant, `-Base` is pretrained-only.)
 
-**Verification**: `ls -la ~/.mlx_models/Qwen3-8B-Instruct-4bit/` shows
-the expected `weights.npz` (or sharded variant), `config.json`, and
-tokenizer files. Total size on disk ≈ 5 GB for 8B, ≈ 18 GB for 32B.
+**Verification**: `ls ~/.mlx_models/Qwen3-8B-4bit/` shows the expected
+sharded safetensors (or a single `model.safetensors`), `config.json`,
+and tokenizer files. Total size on disk ≈ 4 GB for 8B, ≈ 17 GB for 32B.
 
 **Fallback if HF download is unreliable**: pull the GGUF blobs Ollama
 already has at `~/.ollama/models/blobs/`, identify them by manifest,
@@ -220,21 +253,42 @@ Documented but flakier — only use if HF download repeatedly fails.
 
 ### A3. Start the mlx-lm server on a dedicated port
 
+`--chat-template-args '{"enable_thinking":false}'` is **load-bearing for
+Qwen3** — without it, generation lands in `message.reasoning` and
+`message.content` is empty, breaking any `langchain_openai.ChatOpenAI`
+caller. Discovered during execution; the server-side flag avoids any
+client-side change.
+
 ```bash
 # In a separate terminal (or via nohup); keep Ollama running on :11434.
 python -m mlx_lm server \
-    --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
+    --model ~/.mlx_models/Qwen3-8B-4bit \
     --host 127.0.0.1 --port 8001 \
+    --chat-template-args '{"enable_thinking":false}' \
     > /tmp/mlx-lm-server-8b.log 2>&1 &
 # Probe:
 curl -s http://127.0.0.1:8001/v1/models | jq
 ```
 
-**Verification**: the `/v1/models` response lists exactly the
-loaded model. The pipeline's `LLM_MODEL_PRIMARY` env value must
-match what mlx-lm reports — likely the model-path basename like
-`Qwen3-8B-Instruct-4bit`, not `qwen3:8b-q4_K_M`. Update
-`.env.mlx-lm` (see A4) accordingly.
+**Verification**: the `/v1/models` response lists the loaded model
+under `data[0].id`. In mlx-lm 0.31 this is the **absolute path** that
+was passed to `--model` (e.g. `/Users/<you>/.mlx_models/Qwen3-8B-4bit`),
+not the basename — `LLM_MODEL_PRIMARY` in `.env.mlx-lm` must be that
+exact string. There is no `--model-name` alias flag in mlx-lm 0.31;
+bare basenames trigger a Hugging Face fallback fetch that 401s.
+
+Smoke-test the thinking-disabled chat path with a real completion:
+
+```bash
+curl -s -X POST http://127.0.0.1:8001/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{"model":"/Users/<you>/.mlx_models/Qwen3-8B-4bit",
+         "messages":[{"role":"user","content":"Reply with just OK."}],
+         "max_tokens":8}' | jq '.choices[0].message'
+```
+
+Expect `{"role": "assistant", "content": "OK"}` — no `reasoning` field,
+and `content` populated.
 
 ### A4. Write the two parity-bench env files
 
@@ -251,15 +305,16 @@ cp .env .env.ollama-baseline
 
 # 2. Write .env.mlx-lm by copying .env.ollama-baseline and
 #    overriding the LLM_ section. Carry the D1 per-tier URLs
-#    explicitly so the cascade routes primary/fallback correctly:
+#    explicitly so the cascade routes primary/fallback correctly.
+#    `LLM_MODEL_*` must be the **absolute path** passed to `--model`
+#    (that's what `/v1/models` reports; mlx-lm 0.31 has no
+#    `--model-name` alias and rejects bare basenames):
 #      LLM_BASE_URL=http://127.0.0.1:8001/v1
 #      LLM_BASE_URL_PRIMARY=http://127.0.0.1:8001/v1
 #      LLM_BASE_URL_FALLBACK=http://127.0.0.1:8002/v1
 #      LLM_API_KEY=mlx-lm
-#      LLM_MODEL_PRIMARY=Qwen3-8B-Instruct-4bit
-#      LLM_MODEL_FALLBACK=Qwen3-32B-Instruct-4bit
-#    Model names must match what `mlx_lm server` reports at /v1/models
-#    (basename of the path you converted into during A2).
+#      LLM_MODEL_PRIMARY=/Users/<you>/.mlx_models/Qwen3-8B-4bit
+#      LLM_MODEL_FALLBACK=/Users/<you>/.mlx_models/Qwen3-32B-4bit
 
 # 3. Sanity diff:
 diff .env.ollama-baseline .env.mlx-lm
@@ -777,12 +832,22 @@ After Phase C lands, update **`docs/runbook.md`** with:
   (apples-to-apples vs Ollama) or at recommended concurrency (real
   production timing). Recommendation: do both, cite both in the
   runbook update.
-- **Model name strings** — `LLM_MODEL_PRIMARY` and `LLM_MODEL_FALLBACK`
-  must match what mlx-lm reports via `/v1/models`. Decide whether to
-  rename Ollama's identifiers (`qwen3:8b-q4_K_M`) to match mlx-lm
-  (`Qwen3-8B-Instruct-4bit` per the model-path basename), or vice
-  versa, or keep them differing per backend in
-  `.env.ollama-baseline` / `.env.mlx-lm`.
+- **Model name strings** — **resolved during A3**: keep the two
+  identifier sets differing per backend in `.env.ollama-baseline`
+  (`qwen3:8b-q4_K_M`, `qwen3:32b-q4_K_M`) and `.env.mlx-lm`
+  (the absolute model paths under `~/.mlx_models/`). Both env files
+  are gitignored, so per-operator paths are fine. Renaming wasn't an
+  option anyway — mlx-lm 0.31 has no `--model-name` flag and reports
+  the absolute `--model` path as the model ID at `/v1/models`.
+- **Qwen3 thinking mode** — **resolved during A3**: Qwen3's default
+  generation places chain-of-thought into a non-standard
+  `message.reasoning` field and leaves `message.content` empty until
+  the reasoning budget fills, which breaks any `content`-reading
+  client (the pipeline's `langchain_openai.ChatOpenAI` included).
+  Fixed server-side by starting `mlx_lm.server` with
+  `--chat-template-args '{"enable_thinking":false}'` — no
+  client/code change required. Documented in `docs/local-inference.md`
+  § "Running the server".
 - **Supervisor vs. per-port** for D1 — **resolved during the
   mlx-lm-vs-vllm-mlx decision in A1**: chose per-port routing
   (cheaper code change, fits the existing cascade primary/fallback

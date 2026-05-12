@@ -35,54 +35,55 @@ python -c "import mlx_lm; print(mlx_lm.__version__)"   # expect 0.31+
 
 Activate the venv any time you want to run `python -m mlx-lm.*` commands. The bffi_pipeline CLI itself talks to mlx-lm over HTTP and doesn't need this venv on its PATH.
 
-## Model conversion
+## Model acquisition
 
-One-time. The pipeline's two judge models are `qwen3-8B-Instruct` (primary) and `qwen3-32B-Instruct` (fallback); a smaller `qwen3-1.7B-Instruct` is the draft model for speculative decoding (P-02 Phase C).
+One-time. The pipeline's two judge models are `Qwen3-8B` (primary) and `Qwen3-32B` (fallback); a smaller `Qwen3-1.7B` is the draft model for speculative decoding (P-02 Phase C). Qwen3 (released 2025) dropped the `-Instruct` suffix from the conversational variants — the base `Qwen/Qwen3-<size>` repo *is* the chat-tuned model; `Qwen/Qwen3-<size>-Base` is the pretrained-only variant.
 
-The one-shot wrapper [`scripts/llm-pull.sh`](../scripts/llm-pull.sh) restores the `ollama pull qwen3:8b` one-command UX (P-02 § D2). It validates the slug, writes to `~/.mlx_models/<name>-4bit/`, and skips already-converted directories:
+**Recommended: pull pre-quantised MLX checkpoints.** Qwen now publishes their own MLX 4-bit at `Qwen/Qwen3-8B-MLX-4bit`; mlx-community covers the 32B at `mlx-community/Qwen3-32B-4bit`. Faster than local conversion (network-bound, no quant pass) and the 8B is shipped by the model authors themselves. The Hugging Face CLI replaces `huggingface-cli` with `hf` in 2026:
 
 ```bash
 source ~/.venvs/mlx-lm/bin/activate
-scripts/llm-pull.sh Qwen/Qwen3-8B-Instruct
-scripts/llm-pull.sh Qwen/Qwen3-32B-Instruct
+hf download Qwen/Qwen3-8B-MLX-4bit       --local-dir ~/.mlx_models/Qwen3-8B-4bit
+hf download mlx-community/Qwen3-32B-4bit --local-dir ~/.mlx_models/Qwen3-32B-4bit
 # Optional, only if you're shipping P-02 Phase C:
-scripts/llm-pull.sh Qwen/Qwen3-1.7B-Instruct
+hf download mlx-community/Qwen3-1.7B-4bit --local-dir ~/.mlx_models/Qwen3-1.7B-4bit
 ```
 
-The wrapper just calls `python -m mlx_lm convert -q --q-bits 4` under the hood; equivalent long-form if you need to pin a different quantisation or output path:
+Disk: ~4 GB / ~17 GB / ~1 GB respectively after 4-bit quantisation.
+
+**Convert from source instead** if you need a different quantisation, a non-`mlx-community` variant, or pinned reproducibility. The one-shot wrapper [`scripts/llm-pull.sh`](../scripts/llm-pull.sh) (P-02 § D2) calls `python -m mlx_lm convert -q --q-bits 4` and writes to `~/.mlx_models/<name>-4bit/`:
 
 ```bash
-mkdir -p ~/.mlx_models
-python -m mlx_lm convert --hf-path Qwen/Qwen3-8B-Instruct -q --q-bits 4 \
-    --mlx-path ~/.mlx_models/Qwen3-8B-Instruct-4bit
-python -m mlx_lm convert --hf-path Qwen/Qwen3-32B-Instruct -q --q-bits 4 \
-    --mlx-path ~/.mlx_models/Qwen3-32B-Instruct-4bit
-python -m mlx_lm convert --hf-path Qwen/Qwen3-1.7B-Instruct -q --q-bits 4 \
-    --mlx-path ~/.mlx_models/Qwen3-1.7B-Instruct-4bit
+source ~/.venvs/mlx-lm/bin/activate
+scripts/llm-pull.sh Qwen/Qwen3-8B
+scripts/llm-pull.sh Qwen/Qwen3-32B
+scripts/llm-pull.sh Qwen/Qwen3-1.7B
 ```
 
-Times on the M5 Max: ~30-45 min for the 8B, ~1-2 h for the 32B, ~10 min for the 1.7B. Disk: ~5 GB / 18 GB / 1 GB respectively after 4-bit quantisation.
-
-**Alternative**: pull pre-quantised checkpoints from the `mlx-community` HF org via `huggingface-cli download mlx-community/Qwen3-8B-Instruct-4bit` (and 32B / 1.7B variants). Faster if the upstream re-quantisation matches what we'd produce locally; verify model card before trusting it for production.
+Times on the M5 Max: ~30-45 min for the 8B, ~1-2 h for the 32B, ~10 min for the 1.7B.
 
 **Fallback if HF download is unreliable**: pull the GGUF blobs Ollama already has at `~/.ollama/models/blobs/`, identify them by manifest, and convert via `mlx_lm.convert --hf-path` against the GGUF path. Flakier; only use if HF download repeatedly fails.
 
 ## Running the server
 
-`mlx_lm.server` serves one model per process. For the cascade (primary + fallback) we run two processes on different ports:
+`mlx_lm.server` serves one model per process. For the cascade (primary + fallback) we run two processes on different ports.
+
+`--chat-template-args '{"enable_thinking":false}'` is **load-bearing for Qwen3**: without it, Qwen3 emits its chain-of-thought into a non-standard `message.reasoning` field while `message.content` stays empty until the reasoning budget is exhausted — which breaks any client (including the pipeline's `langchain_openai.ChatOpenAI`) that reads `content`. Discovered during P-02 § A3.
 
 ```bash
 # Primary on 8001
 python -m mlx_lm server \
-    --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
+    --model ~/.mlx_models/Qwen3-8B-4bit \
     --host 127.0.0.1 --port 8001 \
+    --chat-template-args '{"enable_thinking":false}' \
     --prompt-cache-size 200 \
     --prompt-cache-bytes 1073741824 &
 
 # Fallback on 8002 (skip if RAM is tight; the cascade tolerates a single-port setup)
 python -m mlx_lm server \
-    --model ~/.mlx_models/Qwen3-32B-Instruct-4bit \
+    --model ~/.mlx_models/Qwen3-32B-4bit \
     --host 127.0.0.1 --port 8002 \
+    --chat-template-args '{"enable_thinking":false}' \
     --prompt-cache-size 200 \
     --prompt-cache-bytes 1073741824 &
 ```
@@ -91,6 +92,7 @@ Useful flags (run `python -m mlx_lm server --help` for the full list):
 
 | Flag | Purpose |
 |---|---|
+| `--chat-template-args '{"enable_thinking":false}'` | Disable Qwen3 thinking mode server-side so generation goes to `message.content`, not `message.reasoning`. Required for our judge prompts. |
 | `--prompt-cache-size 200` | Cache up to 200 distinct prompt prefixes (entry count). |
 | `--prompt-cache-bytes 1073741824` | 1 GB byte budget for the prefix cache (raised so the entry-count cap binds first on our workload). |
 | `--draft-model PATH` | Speculative decoding (P-02 Phase C). |
@@ -101,19 +103,21 @@ Useful flags (run `python -m mlx_lm server --help` for the full list):
 
 ## Pointing the pipeline at the server
 
-Once the server(s) are up, the pipeline reads `LLM_BASE_URL` (and, post-P-02 Phase D1, `LLM_BASE_URL_PRIMARY` + `LLM_BASE_URL_FALLBACK`) from `.env`:
+Once the server(s) are up, the pipeline reads `LLM_BASE_URL` (and, post-P-02 Phase D1, `LLM_BASE_URL_PRIMARY` + `LLM_BASE_URL_FALLBACK`) from `.env`.
+
+`LLM_MODEL_*` must be the **absolute path** that was passed to `mlx_lm.server --model` — mlx-lm 0.31 reports the path as the model ID at `/v1/models` and rejects the basename (it falls through to a Hugging Face fetch and 401s). Update the home-dir prefix per operator.
 
 ```
 # Single-port setup (cascade falls back to primary if no fallback URL set)
 LLM_BASE_URL=http://127.0.0.1:8001/v1
-LLM_MODEL_PRIMARY=Qwen3-8B-Instruct-4bit
-LLM_MODEL_FALLBACK=Qwen3-32B-Instruct-4bit
+LLM_MODEL_PRIMARY=/Users/<you>/.mlx_models/Qwen3-8B-4bit
+LLM_MODEL_FALLBACK=/Users/<you>/.mlx_models/Qwen3-32B-4bit
 
 # Two-port setup (post-P-02 D1)
 LLM_BASE_URL_PRIMARY=http://127.0.0.1:8001/v1
 LLM_BASE_URL_FALLBACK=http://127.0.0.1:8002/v1
-LLM_MODEL_PRIMARY=Qwen3-8B-Instruct-4bit
-LLM_MODEL_FALLBACK=Qwen3-32B-Instruct-4bit
+LLM_MODEL_PRIMARY=/Users/<you>/.mlx_models/Qwen3-8B-4bit
+LLM_MODEL_FALLBACK=/Users/<you>/.mlx_models/Qwen3-32B-4bit
 ```
 
 Then any pipeline CLI call (`bffi-pipeline judge`, `bffi-pipeline reconcile`, etc.) picks up the new endpoint.
@@ -165,7 +169,7 @@ curl -s http://127.0.0.1:8001/v1/models | jq
 # A one-shot generation against the loaded model.
 source ~/.venvs/mlx-lm/bin/activate
 python -m mlx_lm generate \
-    --model ~/.mlx_models/Qwen3-8B-Instruct-4bit \
+    --model ~/.mlx_models/Qwen3-8B-4bit \
     --prompt "Say 'hello'" --max-tokens 16
 ```
 
