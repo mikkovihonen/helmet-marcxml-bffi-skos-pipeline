@@ -263,6 +263,18 @@ def build_record(
             for sf in sorted(vf.subfields, key=lambda s: s.display_order or 0)
             if sf.tag and sf.tag.strip()
         ]
+        # Skip the whole datafield if no valid subfields remain. The
+        # MARC21slim XSD requires every ``<datafield>`` to carry at
+        # least one ``<subfield>`` child — indicators alone aren't
+        # enough — and an empty datafield kills the record at M2's
+        # XSD gate. Sierra occasionally serialises bare tag/indicator
+        # placeholders (e.g. a cataloguer started a ``041`` entry and
+        # saved without populating ``$a``); surfaced on bib 2180377
+        # (a self-closing ``<datafield ind1="0" ind2=" " tag="041" />``).
+        # Dropping the whole field is safe because indicators with no
+        # subfield content carry no meaningful MARC data.
+        if not subfields:
+            continue
         record.add_field(
             Field(
                 tag=tag,

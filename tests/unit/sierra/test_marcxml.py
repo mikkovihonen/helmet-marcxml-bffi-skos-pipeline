@@ -363,6 +363,54 @@ def test_row_to_marcxml_round_trips_through_pymarc() -> None:
     assert title_245[0].get_subfields("a") == ["Sota ja rauha"]
 
 
+def test_build_record_drops_datafield_with_no_valid_subfields() -> None:
+    """A varfield whose subfield list is empty (or whose every subfield
+    has an invalid tag) should be skipped entirely — emitting a bare
+    ``<datafield ind1=" " ind2=" " tag="..." />`` fails the MARC21slim
+    XSD ``Missing child element(s). Expected is ( subfield )`` gate
+    and kills the record at M2. Surfaced on bib 2180377 (empty 041
+    datafield)."""
+    varfields = [
+        # Empty subfield list entirely.
+        Varfield(
+            id=10,
+            marc_tag="041",
+            marc_ind1="0",
+            marc_ind2=" ",
+            field_content="",
+            subfields=[],
+        ),
+        # Subfields exist but all have whitespace-only tags — should
+        # also drop the field (after our tag-validity filter zeros it
+        # out).
+        Varfield(
+            id=11,
+            marc_tag="500",
+            marc_ind1=" ",
+            marc_ind2=" ",
+            field_content="",
+            subfields=[
+                Subfield(tag=" ", content="x", display_order=0),
+                Subfield(tag="", content="y", display_order=1),
+            ],
+        ),
+        # A legitimate field for contrast.
+        Varfield(
+            id=12,
+            marc_tag="245",
+            marc_ind1="1",
+            marc_ind2="0",
+            field_content="",
+            subfields=[Subfield(tag="a", content="Title", display_order=0)],
+        ),
+    ]
+    record = build_record(None, varfields, [])
+    tags = [f.tag for f in record.get_fields()]
+    assert "041" not in tags
+    assert "500" not in tags
+    assert "245" in tags
+
+
 def test_build_record_drops_subfields_with_whitespace_only_tag() -> None:
     """Sierra occasionally exports placeholder subfields with
     ``tag=" "`` (a literal space). The MARC21slim XSD pattern rejects
