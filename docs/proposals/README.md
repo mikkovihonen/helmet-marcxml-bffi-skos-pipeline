@@ -129,9 +129,12 @@ plan documents *when the execution was scheduled*.
   per-856 classifier, or an upstream PR to marc2bibframe2 — and
   documents what would have to be true for it to be worth shipping.
 - [`prop-08-richer-rda-33x-synthesis.md`](prop-08-richer-rda-33x-synthesis.md)
-  — `planning (graduated)`. Layer MARC's more precise manifestation
-  signals (leader/06, 007 deterministic carrier, 008 / 006 material
-  positions, 245$h GMD regex, 300$a extent) above the existing
-  bib-material + itype cascade so bibs with no mapped material /
-  itype signal still get RDA 33X synthesised. Plan lives at
-  [`docs/plans/backlog/p-08-richer-rda-33x-synthesis.md`](../plans/backlog/p-08-richer-rda-33x-synthesis.md).
+  — `done`. Layered MARC's manifestation signals (007 refinement +
+  universal (leader/06, 008-form) default + bib-material + itype
+  adapters + 300$a extent fallback) above the original two-signal
+  cascade. Plan (now completed) lives at
+  [`docs/plans/completed/p-08-richer-rda-33x-synthesis.md`](../plans/completed/p-08-richer-rda-33x-synthesis.md);
+  the 566 missing-33X drops on the P-02 5k sample close to 0 under
+  the shipped cascade. Phase A's coverage analysis confirmed 245$h
+  GMD and 006 contribute no recovery on this corpus and were
+  deferred.

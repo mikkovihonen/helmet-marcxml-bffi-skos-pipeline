@@ -59,6 +59,14 @@ from marcxml_export_pipeline.sierra.itype_to_rda import (
     lookup_rda_for_items,
 )
 
+#: Cascade-output version. Bumped manually whenever the cascade's
+#: emitted RDA tuple for an existing record would change (new layer
+#: ordering, table updates, etc.). Stamped into every synthesised 33X
+#: datafield as ``$5 FI-HELME/synth-v<N>`` so a future re-cascading
+#: can find synth-v<N> fields and replace them deterministically
+#: without disturbing cataloguer-coded fields.
+SYNTH_VERSION: Final[int] = 1
+
 # --- Types ---------------------------------------------------------------
 
 
@@ -556,6 +564,7 @@ __all__ = [
     "DEFAULT_LAYERS",
     "LEADER_008_TO_RDA",
     "LEADER_06_FALLBACK",
+    "SYNTH_VERSION",
     "TEXT_BRAILLE",
     "TEXT_LARGE_PRINT",
     "TEXT_MICROFICHE",

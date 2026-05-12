@@ -85,15 +85,7 @@ reference for what shipped.
   prerequisite for P-01, P-04 statistical power, and P-05 F3.
 ### In progress
 
-- [`in-progress/p-08-richer-rda-33x-synthesis.md`](in-progress/p-08-richer-rda-33x-synthesis.md)
-  — Slot-wise cascade adding a universal (leader/06, 008-form)
-  layer + 007 refinement + 300$a extent fallback above the
-  existing material-code / itype-code RDA 33X synth, plus a
-  `$5 FI-HELME/synth-v<N>` provenance marker. Goal: drop the M2
-  ``marcxml-content-minimum`` residual on the P-02 5k sample from
-  566 to ≤ 50. Phase A (coverage analysis) shipped and revised the
-  layer design — 245$h GMD and 006 deferred (zero yield on the 5k
-  sample). Phase B-D pending.
+*(none)*
 
 ### Completed
 
@@ -103,6 +95,14 @@ reference for what shipped.
 - [`completed/p-03-m6-stall-watchdog.md`](completed/p-03-m6-stall-watchdog.md)
   — Per-call LLM timeout + watchdog event logging + kill-and-
   retry-same-pair against transient inference wedges.
+- [`completed/p-08-richer-rda-33x-synthesis.md`](completed/p-08-richer-rda-33x-synthesis.md)
+  — Slot-wise RDA 33X synth cascade: 007 refinement + universal
+  (leader/06, 008-form) default + material-code + itype adapters +
+  300$a extent fallback, plus a `$5 FI-HELME/synth-v<N>` provenance
+  marker on every synthesised datafield. Phase A coverage analysis
+  measured 566 records missing 33X on the P-02 5k sample; Phase B
+  + the cascade close it to 0 (the plan's `≤ 50` goal was beaten
+  by Phase B alone).
 
 ### Abandoned
 

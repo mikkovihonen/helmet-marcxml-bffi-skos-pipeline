@@ -1,6 +1,6 @@
 # P-08 — Richer RDA 33X synthesis from leader / 008 / 007
 
-**Status**: in-progress (Phase A landed; layer set revised before Phase B).
+**Status**: completed (all four phases shipped; the M2 missing-33X drop count on the 5k sample is at 0 — well below the ≤ 50 target).
 **Source proposal**: [`docs/proposals/prop-08-richer-rda-33x-synthesis.md`](../../proposals/prop-08-richer-rda-33x-synthesis.md)
 at commit `19e09e4`.
 **Plan-base commit**: `19e09e4`. To gauge drift before executing,
@@ -15,7 +15,7 @@ tests/unit/sierra/test_marcxml.py`.
 - Phase A (coverage analysis + layer-set revision): `10c508a`
 - Phase B (cascade scaffolding + (leader/06, 008-form) + 007 refinement + adapter layers): `e87965c`
 - Phase C (300$a extent fallback): `94a7de7`
-- Phase D (`$5` provenance marker + cataloguer-facing docs): `<unfilled>`
+- Phase D (`$5` provenance marker + cataloguer-facing docs): `<unfilled>` (this commit)
 
 **Owner**: TBD.
 **Estimated wall-time**: ~1 day remaining. Phase A is done; Phase B
@@ -444,14 +444,44 @@ small task if cataloguers ask for the audit signal.
 
 ---
 
-## Phase D — Provenance marker + cataloguer-facing docs
+## Phase D — Provenance marker + cataloguer-facing docs (DONE)
 
-Estimated wall-time: half a day.
+Shipped:
 
-### D1. `$5 FI-HELME/synth-v<N>` on synthesised datafields
+- `SYNTH_VERSION: Final[int] = 1` constant in `rda_signals.py`. Bumped
+  manually when the cascade's emitted RDA tuple for an existing record
+  would change. Stamped into every synthesised 33X datafield via the
+  `SYNTH_SOURCE_MARKER = f"{AGENCY_CODE}/synth-v{SYNTH_VERSION}"` string
+  in `marcxml.py`.
+- `_build_rda_varfield` extended with an optional `source_marker` arg
+  that appends a `$5 <marker>` subfield when supplied.
+  `_synthesise_33x_varfields` passes the marker on every emitted 33X
+  field; cataloguer-coded 33X passes through unchanged (no marker
+  added) because the synth path only fires when none of
+  `{336, 337, 338}` is present on the bib.
+- `docs/external-dependencies.md` carries a new section explaining
+  the synth cascade, the `$5 FI-HELME/synth-v<N>` marker, the
+  per-record opt-out (add cataloguer-coded 33X), and where the
+  version constant lives.
+- Plan graduates from `in-progress/` to `completed/` in this commit
+  via `git mv`; `docs/plans/README.md` + `docs/proposals/README.md`
+  cross-references updated.
 
-Extend `_build_rda_varfield` to accept a `source_marker` arg and
-emit a `$5` subfield carrying the institution code + synth version:
+### Phase D acceptance
+
+- [x] `$5 FI-HELME/synth-v1` lands on every synthesised 33X
+      datafield. Verified by
+      `test_row_to_marcxml_synth_33x_carries_provenance_marker` and
+      by the updated assertion in
+      `test_row_to_marcxml_synthesises_33x_from_itype_book`.
+- [x] `docs/external-dependencies.md` documents the marker and the
+      cataloguer opt-out.
+- [x] `test_row_to_marcxml_cataloguer_coded_33x_carries_no_synth_marker`
+      confirms cataloguer-coded 33X passes through with no `$5`
+      marker.
+- [x] Plan moved to `completed/`; cross-references updated.
+
+### Sample synthesised output
 
 ```xml
 <datafield tag="336" ind1=" " ind2=" ">
@@ -463,39 +493,9 @@ emit a `$5` subfield carrying the institution code + synth version:
 ```
 
 MARC convention: `$5` is "institution to which field applies". The
-Helmet agency code is `FI-HELME` (already in `AGENCY_CODE`); the
 `/synth-v<N>` suffix carries the cascade version so a future
-re-cascading can find synth-v1 fields and replace them deterministically
-without disturbing cataloguer-coded fields.
-
-### D2. Cataloguer-facing docs
-
-Update `docs/external-dependencies.md` with a new section:
-
-- The pipeline synthesises RDA 33X for pre-RDA records that
-  carry MARC manifestation signals but no cataloguer-coded
-  33X. Synth fields are marked `$5 FI-HELME/synth-v<N>`.
-- Cataloguers can opt out per-record by adding cataloguer-
-  coded 33X to the Sierra record — the synth path only fires
-  when the bib carries none of `{336, 337, 338}`.
-- Synth versions are documented in
-  `src/marcxml_export_pipeline/sierra/rda_signals.py` next to the
-  `SYNTH_VERSION` constant; bumping the version is a notice to
-  re-cascade existing synth records on the next full export.
-
-### D3. Phase D acceptance
-
-- [ ] `$5 FI-HELME/synth-v1` lands on every synthesised 33X
-      datafield in the next full run.
-- [ ] `docs/external-dependencies.md` documents the marker and
-      the cataloguer opt-out.
-- [ ] A test fixture confirms cataloguer-coded 33X (no `$5`
-      marker) still passes through unchanged when present.
-- [ ] Plan moves to `completed/` via `git mv` in the Phase D
-      commit; corresponding cross-references in
-      `docs/proposals/README.md`, `docs/plans/README.md`, and any
-      source comments referencing the plan path are updated in
-      the same commit.
+re-cascading can find synth-v1 fields and replace them
+deterministically without disturbing cataloguer-coded fields.
 
 ---
 

@@ -106,6 +106,59 @@ Before publishing to a public-facing Skosmos instance, explicit confirmation fro
 - No specific records or record categories must be excluded from the production publish.
 - The license for the published RDF data is settled (CC0 to match Finto conventions; confirm).
 
+## Notice — RDA 336/337/338 synthesis at Sierra export time
+
+Pre-RDA records (broadly: anything catalogued before Helmet adopted
+RDA around 2015-16) often lack the `336/337/338` content / media /
+carrier triple that M2's `marcxml-content-minimum` gate requires.
+~11 % of the 2026-05-12 5 000-record production-style run dropped on
+exactly this. To recover those records, the pipeline's Sierra-export
+stage **synthesises** the missing 33X datafields from the MARC
+signals already on the record:
+
+1. MARC `007` (physical-form fixed-field), when present.
+2. The `(leader/06, 008-form-of-item)` pair — universal default for
+   the manifestation. Covers ~100 % of the corpus.
+3. The bib-level Sierra `material_code`.
+4. The item-level Sierra `itype_code_num`.
+5. MARC `300$a` extent regex — last resort.
+
+The cascade fires **only when the bib carries none of `336/337/338`**.
+Cataloguer-coded 33X always wins — adding an explicit 33X datafield
+in Sierra is the per-record opt-out.
+
+### Synth-provenance marker
+
+Every synthesised 33X datafield is tagged with a MARC `$5` subfield
+carrying the institution code and synth version:
+
+```xml
+<datafield tag="336" ind1=" " ind2=" ">
+  <subfield code="a">teksti</subfield>
+  <subfield code="b">txt</subfield>
+  <subfield code="2">rdacontent</subfield>
+  <subfield code="5">FI-HELME/synth-v1</subfield>
+</datafield>
+```
+
+(MARC `$5` = "institution to which field applies".) Cataloguer-coded
+33X carries no such marker. The marker lets downstream tooling find
+synth-coded fields and replace them deterministically when the
+cascade version bumps, without disturbing cataloguer edits.
+
+The version integer lives at `SYNTH_VERSION` in
+`src/marcxml_export_pipeline/sierra/rda_signals.py` and is bumped
+manually whenever the cascade's emitted tuple for an existing record
+would change (new layer ordering, table updates, etc.). Bumping the
+version is a signal to re-cascade existing synth-coded records on
+the next full Sierra export.
+
+The cascade engine itself lives at
+`src/marcxml_export_pipeline/sierra/rda_signals.py`; the table
+contents (`LEADER_008_TO_RDA`, `LEADER_06_FALLBACK`,
+`MATERIAL_TO_RDA`, `ITYPE_TO_RDA`, and the 300$a token list) are
+the load-bearing tunable surface.
+
 ## How to surface these asks
 
 These are dependencies on a human cataloguer, not technical decisions Claude Code can make:

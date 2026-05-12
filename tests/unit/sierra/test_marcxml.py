@@ -435,17 +435,30 @@ def _subfields_of(record: Record, tag: str) -> list[dict[str, str]]:
 def test_row_to_marcxml_synthesises_33x_from_itype_book() -> None:
     """Bib without 336/337/338 + one Adult book 28 item (itype 100)
     → synthesised text/unmediated/volume tuple. Recovers the pre-RDA
-    records that drop on the M2 ``marcxml-content-minimum`` gate."""
+    records that drop on the M2 ``marcxml-content-minimum`` gate.
+
+    Every synthesised datafield carries the
+    ``$5 FI-HELME/synth-v1`` provenance marker so downstream
+    consumers can distinguish cataloguer-coded from synth-coded 33X.
+    Note: under the P-08 cascade, leader/06='a' from the default
+    leader resolves *before* the itype layer, so the resolved
+    carrier is the same (text/unmediated/volume) but via the
+    leader+008 path rather than the itype adapter."""
     _filename, xml_bytes = build_marcxml_for_row(_row(items=[_item(itype=100)]))
     record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
     assert _subfields_of(record, "336") == [
-        {"a": "teksti", "b": "txt", "2": "rdacontent"},
+        {"a": "teksti", "b": "txt", "2": "rdacontent", "5": "FI-HELME/synth-v1"},
     ]
     assert _subfields_of(record, "337") == [
-        {"a": "käytettävissä ilman laitetta", "b": "n", "2": "rdamedia"},
+        {
+            "a": "käytettävissä ilman laitetta",
+            "b": "n",
+            "2": "rdamedia",
+            "5": "FI-HELME/synth-v1",
+        },
     ]
     assert _subfields_of(record, "338") == [
-        {"a": "nide", "b": "nc", "2": "rdacarrier"},
+        {"a": "nide", "b": "nc", "2": "rdacarrier", "5": "FI-HELME/synth-v1"},
     ]
 
 
@@ -472,6 +485,71 @@ def test_row_to_marcxml_no_33x_synth_when_itype_unmapped() -> None:
     assert 'tag="336"' not in body
     assert 'tag="337"' not in body
     assert 'tag="338"' not in body
+
+
+def test_row_to_marcxml_synth_33x_carries_provenance_marker() -> None:
+    """P-08 Phase D — every synthesised 33X datafield carries
+    ``$5 FI-HELME/synth-v1`` so downstream consumers can find synth-
+    coded fields and distinguish them from cataloguer-coded ones."""
+    _filename, xml_bytes = build_marcxml_for_row(_row(items=[_item(itype=100)]))
+    record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
+    for tag in ("336", "337", "338"):
+        for sf_dict in _subfields_of(record, tag):
+            assert sf_dict.get("5") == "FI-HELME/synth-v1", (
+                f"tag={tag} missing synth marker: {sf_dict}"
+            )
+
+
+def test_row_to_marcxml_cataloguer_coded_33x_carries_no_synth_marker() -> None:
+    """When the bib carries cataloguer-coded 33X (the synth path
+    doesn't fire), the original datafield passes through unchanged
+    — no ``$5 FI-HELME/synth-v<N>`` marker is added. Confirms the
+    marker tags only synth-emitted fields, never cataloguer-edited
+    ones."""
+    varfields = [
+        {
+            "id": 1,
+            "marc_tag": "336",
+            "marc_ind1": " ",
+            "marc_ind2": " ",
+            "field_content": "",
+            "subfields": [
+                {"tag": "a", "content": "cartographic image", "display_order": 0},
+                {"tag": "b", "content": "cri", "display_order": 1},
+                {"tag": "2", "content": "rdacontent", "display_order": 2},
+            ],
+        },
+        {
+            "id": 2,
+            "marc_tag": "337",
+            "marc_ind1": " ",
+            "marc_ind2": " ",
+            "field_content": "",
+            "subfields": [
+                {"tag": "a", "content": "unmediated", "display_order": 0},
+                {"tag": "b", "content": "n", "display_order": 1},
+                {"tag": "2", "content": "rdamedia", "display_order": 2},
+            ],
+        },
+        {
+            "id": 3,
+            "marc_tag": "338",
+            "marc_ind1": " ",
+            "marc_ind2": " ",
+            "field_content": "",
+            "subfields": [
+                {"tag": "a", "content": "sheet", "display_order": 0},
+                {"tag": "b", "content": "nb", "display_order": 1},
+                {"tag": "2", "content": "rdacarrier", "display_order": 2},
+            ],
+        },
+    ]
+    _filename, xml_bytes = build_marcxml_for_row(_row(varfields=varfields))
+    record = marcxml.parse_xml_to_array(io.BytesIO(xml_bytes))[0]
+    # Cataloguer-supplied content survives intact; no synth marker.
+    for tag in ("336", "337", "338"):
+        for sf_dict in _subfields_of(record, tag):
+            assert "5" not in sf_dict, f"unexpected synth marker on cataloguer {tag}: {sf_dict}"
 
 
 def test_row_to_marcxml_preserves_existing_33x_varfield() -> None:

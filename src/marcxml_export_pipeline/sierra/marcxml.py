@@ -49,6 +49,7 @@ from pymarc import Subfield as PymarcSubfield
 from marcxml_export_pipeline.sierra.dtos import Leaderfield, Subfield, Varfield
 from marcxml_export_pipeline.sierra.rda_signals import (
     DEFAULT_LAYERS,
+    SYNTH_VERSION,
     RecordContext,
     resolve_rda,
 )
@@ -216,12 +217,32 @@ def build_leader(lf: Leaderfield | None) -> str:
     )
 
 
-def _build_rda_varfield(tag: str, label: str, code: str, source: str) -> Varfield:
+#: P-08 Phase D — provenance marker stamped into every synthesised
+#: 33X datafield as ``$5 FI-HELME/synth-v<N>``. Lets downstream
+#: consumers distinguish cataloguer-coded from synth-coded RDA tuples
+#: (so e.g. a future re-cascading can find synth-v<N> fields and
+#: replace them deterministically without disturbing cataloguer
+#: edits). Version number lives at
+#: :data:`marcxml_export_pipeline.sierra.rda_signals.SYNTH_VERSION`;
+#: bump manually when the cascade's output for an existing record
+#: would change.
+SYNTH_SOURCE_MARKER: Final[str] = f"{AGENCY_CODE}/synth-v{SYNTH_VERSION}"
+
+
+def _build_rda_varfield(
+    tag: str, label: str, code: str, source: str, source_marker: str | None = None
+) -> Varfield:
     """Return a synthetic :class:`Varfield` for an RDA 336/337/338 entry.
 
     Three subfields: ``$a`` localised label, ``$b`` RDA code, ``$2`` source
     vocabulary (``rdacontent`` / ``rdamedia`` / ``rdacarrier``). Matches the
     cataloguer-canonical shape observed across the corpus.
+
+    When ``source_marker`` is supplied, an additional ``$5`` subfield is
+    appended carrying the institution / synth-version string (per MARC
+    spec: ``$5`` = institution to which the field applies). Used to tag
+    synthesised 33X fields so cataloguer-coded fields can be told apart
+    downstream.
     """
     vf = Varfield(
         id=None,
@@ -230,11 +251,14 @@ def _build_rda_varfield(tag: str, label: str, code: str, source: str) -> Varfiel
         marc_ind2=" ",
         field_content="",
     )
-    vf.subfields = [
+    subfields = [
         Subfield(tag="a", content=label, display_order=0),
         Subfield(tag="b", content=code, display_order=1),
         Subfield(tag="2", content=source, display_order=2),
     ]
+    if source_marker is not None:
+        subfields.append(Subfield(tag="5", content=source_marker, display_order=3))
+    vf.subfields = subfields
     return vf
 
 
@@ -247,7 +271,8 @@ def _synthesise_33x_varfields(
 ) -> list[Varfield]:
     """Run the P-08 RDA 33X cascade and return the synthesised
     336/337/338 :class:`Varfield` triple (or empty list if the cascade
-    couldn't resolve a complete tuple)."""
+    couldn't resolve a complete tuple). Every emitted field carries
+    the ``$5 FI-HELME/synth-v<N>`` provenance marker."""
     ctx = RecordContext(
         leader_record_type=(leader.record_type_code if leader is not None else None),
         controlfields=tuple(controlfields),
@@ -258,12 +283,13 @@ def _synthesise_33x_varfields(
     rda = resolve_rda(ctx, DEFAULT_LAYERS)
     if rda is None:
         return []
+    marker = SYNTH_SOURCE_MARKER
     out: list[Varfield] = [
-        _build_rda_varfield("336", c_label, c_code, "rdacontent")
+        _build_rda_varfield("336", c_label, c_code, "rdacontent", marker)
         for c_label, c_code in rda.content_types
     ]
-    out.append(_build_rda_varfield("337", rda.media[0], rda.media[1], "rdamedia"))
-    out.append(_build_rda_varfield("338", rda.carrier[0], rda.carrier[1], "rdacarrier"))
+    out.append(_build_rda_varfield("337", rda.media[0], rda.media[1], "rdamedia", marker))
+    out.append(_build_rda_varfield("338", rda.carrier[0], rda.carrier[1], "rdacarrier", marker))
     return out
 
 
