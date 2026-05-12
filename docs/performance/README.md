@@ -42,3 +42,11 @@ in [`docs/local-inference.md`](../local-inference.md) §
   end-to-end, M9 reconcile is the dominant stage (82.9 % of
   total wall-time). Also documents the six converter / cache
   robustness fixes shipped during the run.
+- [`2026-05-12-5k-m2-max-phase-a.md`](2026-05-12-5k-m2-max-phase-a.md)
+  — P-10 Phase A bench (M9 at `c=4` + watchdog). Wall 5 460 s
+  vs 5 722 s baseline (1.05× speedup), zero
+  `field_budget_exceeded` events, byte-identical bindings.
+  Surfaces that serial Phase 1 (tier-0 + Finto/VIAF candidate
+  query) is the new bottleneck — Phase A's concurrency lever
+  only covered ~30 % of the wall — informing Phase B + C
+  scoping.
