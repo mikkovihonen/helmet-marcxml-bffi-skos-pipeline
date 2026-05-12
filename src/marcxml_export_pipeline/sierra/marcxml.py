@@ -47,7 +47,11 @@ from pymarc import Field, Indicators, Record, marcxml
 from pymarc import Subfield as PymarcSubfield
 
 from marcxml_export_pipeline.sierra.dtos import Leaderfield, Subfield, Varfield
-from marcxml_export_pipeline.sierra.itype_to_rda import lookup_rda
+from marcxml_export_pipeline.sierra.rda_signals import (
+    DEFAULT_LAYERS,
+    RecordContext,
+    resolve_rda,
+)
 
 # --- Constants ----------------------------------------------------------
 
@@ -232,6 +236,35 @@ def _build_rda_varfield(tag: str, label: str, code: str, source: str) -> Varfiel
         Subfield(tag="2", content=source, display_order=2),
     ]
     return vf
+
+
+def _synthesise_33x_varfields(
+    leader: Leaderfield | None,
+    controlfields: list[tuple[str, str]],
+    varfields: list[Varfield],
+    item_dicts: list[dict[str, Any]],
+    material_code: str | None,
+) -> list[Varfield]:
+    """Run the P-08 RDA 33X cascade and return the synthesised
+    336/337/338 :class:`Varfield` triple (or empty list if the cascade
+    couldn't resolve a complete tuple)."""
+    ctx = RecordContext(
+        leader_record_type=(leader.record_type_code if leader is not None else None),
+        controlfields=tuple(controlfields),
+        varfields=tuple(varfields),
+        items=tuple(item_dicts),
+        material_code=material_code,
+    )
+    rda = resolve_rda(ctx, DEFAULT_LAYERS)
+    if rda is None:
+        return []
+    out: list[Varfield] = [
+        _build_rda_varfield("336", c_label, c_code, "rdacontent")
+        for c_label, c_code in rda.content_types
+    ]
+    out.append(_build_rda_varfield("337", rda.media[0], rda.media[1], "rdamedia"))
+    out.append(_build_rda_varfield("338", rda.carrier[0], rda.carrier[1], "rdacarrier"))
+    return out
 
 
 def build_holdings_fields(item_dicts: list[dict[str, Any]]) -> list[Field]:
@@ -420,19 +453,16 @@ def build_marcxml_for_row(row: tuple[Any, ...]) -> tuple[str, bytes]:
     # Synthesise RDA 33X (336/337/338) when the bib carries no
     # cataloguer-coded 33X. Recovers the pre-RDA records (~10 % of the
     # corpus in the 2026-05-12 5k run) that the M2
-    # ``marcxml-content-minimum`` gate otherwise drops. Two-signal
-    # lookup: bib-level ``material_code`` (authoritative for the
-    # manifestation) first, item-level ``itype_code_num`` (fallback)
-    # second. See ``marcxml_export_pipeline.sierra.itype_to_rda``.
+    # ``marcxml-content-minimum`` gate otherwise drops. Slot-wise
+    # cascade in ``rda_signals.DEFAULT_LAYERS``: 007 refinement →
+    # (leader/06, 008-form) universal default → bib material_code →
+    # item itype.
     if not present_tags & {"336", "337", "338"}:
-        rda = lookup_rda(material_code, item_dicts)
-        if rda is not None:
-            for c_label, c_code in rda.content_types:
-                varfields.append(_build_rda_varfield("336", c_label, c_code, "rdacontent"))
-            varfields.append(_build_rda_varfield("337", rda.media[0], rda.media[1], "rdamedia"))
-            varfields.append(
-                _build_rda_varfield("338", rda.carrier[0], rda.carrier[1], "rdacarrier")
-            )
+        synth = _synthesise_33x_varfields(
+            leader, controlfields, varfields, item_dicts, material_code
+        )
+        if synth:
+            varfields.extend(synth)
             present_tags.update({"336", "337", "338"})
 
     extra_fields = build_holdings_fields(item_dicts)

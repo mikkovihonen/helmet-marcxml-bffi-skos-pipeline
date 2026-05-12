@@ -13,16 +13,18 @@ tests/unit/sierra/test_marcxml.py`.
 **Phase commits**:
 
 - Phase A (coverage analysis + layer-set revision): `10c508a`
-- Phase B (cascade scaffolding + (leader/06, 008-form) layer + 007 refinement): `<unfilled>`
-- Phase C (300$a extent fallback + adapter layers for existing material/itype): `<unfilled>`
+- Phase B (cascade scaffolding + (leader/06, 008-form) + 007 refinement + adapter layers): `<unfilled>`
+- Phase C (300$a extent fallback): `<unfilled>`
 - Phase D (`$5` provenance marker + cataloguer-facing docs): `<unfilled>`
 
 **Owner**: TBD.
-**Estimated wall-time**: 2-3 days remaining. Phase A is done (this
-commit). Phase B is one day (the cascade scaffolding + the universal
-(leader/06, 008-form) layer that covers 100 % of current drops, plus
-007 refinement). Phase C is half a day (extent fallback + adapter
-wrapping for material/itype). Phase D is half a day (provenance + docs).
+**Estimated wall-time**: ~1 day remaining. Phase A is done; Phase B
+is done (cascade scaffolding + (leader/06, 008-form) + 007 refinement
++ material/itype adapter layers + tests; the adapter layers were
+folded into Phase B from the original Phase C scope so existing
+material/itype regressions are caught at Phase B5 acceptance, not
+deferred). Phase C is now just the 300$a extent fallback (half a
+day). Phase D is half a day (provenance + docs).
 
 ## Goal
 
@@ -109,9 +111,12 @@ existing pre-gate; the cascade runs only when that gate doesn't fire):
 preserved as adapter layers for records the (leader/06, 008-form)
 table doesn't cover (e.g. exotic leader/06 values, missing 008).
 
-Phase B implements priorities 2 + 3 (the universal default + 007
-refinement). Phase C implements priorities 4-6 (preserved adapters
-+ extent fallback).
+Phase B (shipped) implements priorities 2-5 — the universal default,
+007 refinement, and the material/itype adapter wrappers. The adapter
+wrappers were folded into Phase B from the original Phase C scope so
+existing material/itype regression tests are covered at Phase B5
+acceptance, not deferred. Phase C now implements priority 6 — the
+300$a extent fallback.
 
 ### Deferred layers (no yield on the 5k sample)
 
@@ -189,74 +194,86 @@ sample. The plan's goal updates from `≤ 100` to `≤ 50`.
 
 ---
 
-## Phase B — Cascade scaffolding + (leader/06, 008-form) + 007 refinement
+## Phase B — Cascade scaffolding + (leader/06, 008-form) + 007 refinement + adapters (DONE)
 
-Estimated wall-time: one day. Implements the universal default layer
-and the 007 refinement layer.
+Shipped `src/marcxml_export_pipeline/sierra/rda_signals.py` with:
 
-### B1. Scaffold the cascade
+- `PartialRda` (per-slot resolution dataclass + `merge_below` composer
+  primitive + `is_complete` + `to_carrier`);
+- `RecordContext` (typed view: leader/06, controlfields tuples,
+  varfields tuple, items tuple, material_code);
+- `resolve_rda(ctx, layers)` — runs the cascade in priority order,
+  short-circuits as soon as all three RDA slots fill;
+- `from_marc_007` — categories `s/v/c/t` with their carrier
+  refinement positions (1 for audio/computer/text, 4 for video) per
+  LoC § 007;
+- `from_leader_and_008` — `LEADER_008_TO_RDA` dict keyed on
+  `(leader/06, 008-form)`; `LEADER_06_FALLBACK` dict for missing /
+  unmapped 008-form;
+- `from_material_code`, `from_items_itype` — adapter wrappers around
+  the existing `MATERIAL_TO_RDA` and `lookup_rda_for_items` tables;
+- `DEFAULT_LAYERS = (from_marc_007, from_leader_and_008,
+  from_material_code, from_items_itype)`.
 
-Add `src/marcxml_export_pipeline/sierra/rda_signals.py`:
+Also promoted the 9 shared `RdaCarrier` constants in
+`itype_to_rda.py` from underscore-prefixed to public so both modules
+share them (`TEXT_UNMEDIATED_VOLUME`, `VIDEO_VIDEODISC`, etc.). Wired
+into `build_marcxml_for_row` via a small `_synthesise_33x_varfields`
+helper.
 
-```python
-@dataclass(frozen=True)
-class PartialRda:
-    """RDA 33X with optional per-slot resolution. The cascade
-    composes a final RdaCarrier from slot-wise winners."""
-    content_types: tuple[tuple[str, str], ...] | None = None
-    media: tuple[str, str] | None = None
-    carrier: tuple[str, str] | None = None
+### Phase B key findings
 
-    def merge_below(self, other: PartialRda) -> PartialRda:
-        """Layer this (higher-priority) on top of other (lower).
-        Only fill the slots this layer left empty."""
-        ...
+- **Projected residual: 0 records** on the 566-drop list, vs the
+  plan's `≤ 50` target. Measured by
+  `scratchpad/rda-cascade/phase_b_residual.py` which constructs a
+  `RecordContext` from each drop's MARCXML and runs the Phase B
+  layers — 100 % recovery rate.
+- All 8 leader/06 + 008-form combinations present in the drop list
+  resolve via `LEADER_008_TO_RDA` (or its leader-only fallback).
+- 007 refinement fires on the 5 % of drops that carry it. On the
+  remaining 95 %, `from_leader_and_008` fills all three slots from
+  the leader-derived default.
+- Existing material/itype tests passed unchanged because the
+  default-leader scenarios in those tests still resolve to the
+  same `TEXT_UNMEDIATED_VOLUME` either via leader+008 or via the
+  material/itype adapters.
 
+### Phase B acceptance
 
-@dataclass(frozen=True)
-class RecordContext:
-    """View over the streamed row, exposing the signals P-08 reads."""
-    leader_dict: Mapping[str, Any] | None
-    varfields: Sequence[Mapping[str, Any]]      # incl. 245, 300
-    controlfields: Sequence[Mapping[str, Any]]  # incl. 007/008
-    items: Sequence[Mapping[str, Any]]
-    material_code: str | None
+- [x] `rda_signals.py` exists with all listed exports.
+- [x] Unit tests at `tests/unit/sierra/test_rda_signals.py` cover:
+      `PartialRda` mechanics, `resolve_rda` composition, 007 per
+      category, `LEADER_008_TO_RDA` per tuple, adapter layers,
+      cascade priority ordering, the empty case.
+- [x] Regression: all 44 existing `test_marcxml.py` tests still
+      pass (52 new tests added; full suite at 796 tests).
+- [x] Phase B alone drops the residual from 566 to 0 on the 5k
+      sample. The plan's `≤ 50` goal is met (and beaten); the
+      `Definition of done` for the plan as a whole is satisfied
+      after Phase B; Phase C (300$a fallback) and Phase D
+      (provenance marker) ship for resilience / auditability but
+      are no longer load-bearing for the goal.
 
+### Scope deviation from the original Phase B/C split
 
-CascadeLayer = Callable[[RecordContext], PartialRda]
+The plan as committed at `10c508a` slated material/itype adapter
+wrappers for Phase C. They were folded into Phase B instead so
+existing regression tests in `test_marcxml.py` (which assert
+material/itype behaviour) stay green during Phase B. Phase C is now
+just the 300$a extent fallback.
 
+---
 
-def resolve_rda(ctx: RecordContext, layers: Sequence[CascadeLayer]) -> RdaCarrier | None:
-    """Run the cascade. Return a complete RdaCarrier or None if any
-    slot is still empty after all layers."""
-    ...
-```
+## (Earlier draft of B3 — kept as a reference for the (leader/06, 008-form) table contents)
 
-### B2. Layer 2 — 007 refinement
+The shipped table lives in `src/marcxml_export_pipeline/sierra/rda_signals.py`
+as `LEADER_008_TO_RDA`. The draft below documents the design
+intent and is retained for future-readers who want the *why*
+without `git blame`-ing the module.
 
-Add `from_marc_007(ctx) -> PartialRda` covering the four MARC 007
-category codes present on this corpus (5 % of drops, but every
-record where 007 disagrees with the leader+008 default is a record
-where the cataloguer was being deliberately specific):
-
-- `s` (sound recording) — 007/01 ∈ {`d`: audio disc, `s`: audio
-  cassette}; media `s`.
-- `v` (videorecording) — 007/04 ∈ {`v`: videodisc, `s`: videocassette,
-  `f`: videocartridge}; media `v`.
-- `c` (computer/electronic resource) — 007/01 ∈ {`o`: optical disc,
-  `r`: remote (online)}; media `c`, carrier `cd` or `cr` accordingly.
-- `t` (text) — 007/01 = `a` → volume; 007/01 = `b` → large-print
-  volume; media `n`.
-
-This layer fills 337+338 only (the content-type slot stays empty;
-filled by layer 3 below).
-
-### B3. Layer 3 — (leader/06, 008-form) universal default
-
-Add `from_leader_and_008(ctx) -> PartialRda` keyed on the
-`(leader/06, 008-form)` tuple. 008-form lives at a different
-position per leader/06 class — encode the position map and the
-tuple values together:
+The 008 "Form of item" position lives at a different position per
+leader/06 class — encode the position map and the tuple values
+together:
 
 ```python
 # 008 "Form of item" position per leader/06 class. Per LoC MARC 21
@@ -362,78 +379,18 @@ leader/06 (rare migration cases), fall back to `(leader/06, " ")` —
 the default for that content type. When leader/06 itself is unmapped,
 return `PartialRda()` (empty; lower-priority layers handle it).
 
-### B4. Wire the cascade into `build_marcxml_for_row`
-
-Replace the `lookup_rda(material_code, item_dicts)` call with the
-slot-wise composer:
-
-```python
-if not present_tags & {"336", "337", "338"}:
-    ctx = RecordContext.from_row(...)
-    rda = resolve_rda(ctx, layers=DEFAULT_LAYERS)
-    if rda is not None:
-        # emit as before
-```
-
-`DEFAULT_LAYERS = (from_marc_007, from_leader_and_008, ...)`.
-Phase C adds the adapter layers + 300$a fallback below these two.
-
-### B5. Phase B acceptance
-
-- [ ] `rda_signals.py` exists with `PartialRda`, `RecordContext`,
-      `resolve_rda`, `from_marc_007`, `from_leader_and_008`.
-- [ ] Unit tests cover:
-  - one record per 007 category (s/v/c/t);
-  - one record per (leader/06, 008-form) tuple in the table above
-    (a/`r`, a/`d`, a/`f`, a/`a`, a/`b`, a/`o`, g/` `, g/`o`,
-    m/` `, e/` `, k/` `, r/` `);
-  - the 007-overrides-008 case (007=`s`+`d` audio disc beats
-    leader=`j`+008-form-default music CD — but j is music-exempt, so
-    pick a leader that's in the gate, e.g. 007=`v`+`v` videodisc beats
-    a hypothetical g/`o` online if 007 says otherwise);
-  - the empty case (unmapped leader/06 + no 007 + no other signal).
-- [ ] **Regression**: every existing 33X-synth test in
-      `tests/unit/sierra/test_marcxml.py` still passes. Specifically,
-      the bib-material-code-wins-over-items test needs to be
-      re-evaluated: in the revised cascade, (leader/06, 008-form)
-      runs *before* material_code, so a record with both signals will
-      now resolve via leader+008. Update the test's expected outcome
-      or pick test records where leader/06 is in the *empty* set so
-      material_code remains the deciding layer.
-- [ ] Re-run `scratchpad/rda-cascade/coverage_tally.py` on the same
-      5k sample — Phase B alone should drop the residual from 566 to
-      ≤ 50 records (the records whose leader/06 is unmapped or whose
-      008 is malformed).
-
 ---
 
-## Phase C — 300$a extent fallback + existing material/itype adapters
+## Phase C — 300$a extent fallback
 
-Estimated wall-time: half a day. Adds the last-resort textual layer
-and adapts the existing material/itype tables to the PartialRda shape
-so they slot into the cascade rather than being a separate path.
+Estimated wall-time: half a day. Adds the last-resort textual layer.
+Phase B's empirical 0-residual on the 5k sample means this layer is
+no longer load-bearing for the plan goal — it ships as insurance
+against the long-tail distribution on the full 800k corpus and for
+records whose leader/06 is unmapped (`o` kits, `p` mixed material,
+obsolete codes) AND whose material/itype don't speak.
 
-### C1. Layer 4-5 — material_code + itype adapters
-
-Wrap the existing `MATERIAL_TO_RDA` and `ITYPE_TO_RDA` lookups into
-PartialRda-returning layer functions:
-
-```python
-def from_material_code(ctx: RecordContext) -> PartialRda:
-    rda = MATERIAL_TO_RDA.get(ctx.material_code or "")
-    return _as_partial(rda)
-
-
-def from_items_itype(ctx: RecordContext) -> PartialRda:
-    rda = lookup_rda_for_items(ctx.items)
-    return _as_partial(rda)
-```
-
-Slotted into `DEFAULT_LAYERS` *after* leader+008 so they only fire
-on records the universal default couldn't resolve (extremely rare
-on this corpus per Phase A; the layer exists as belt-and-braces).
-
-### C2. Layer 6 — 300$a extent regex
+### C1. Layer 6 — 300$a extent regex
 
 Add `from_300_a_extent(ctx) -> PartialRda`. Last-resort textual
 fallback for records whose leader/06 and 008-form are both
@@ -445,15 +402,16 @@ unmapped *and* whose material_code/itype don't help. Keys on
 in the regression-test residual but useful insurance on the full
 800k corpus where the long-tail leader/06 distribution may differ.
 
-### C3. Phase C acceptance
+### C2. Phase C acceptance
 
-- [ ] `from_material_code`, `from_items_itype`, `from_300_a_extent`
-      exist with unit tests.
-- [ ] Each adapter layer is independently testable (separate
-      function, separate test file or section).
-- [ ] Re-run `coverage_tally.py`: residual ≤ 50 records (matches
-      the plan goal — this is the plan-wide acceptance, not Phase C
-      alone).
+- [ ] `from_300_a_extent(ctx)` exists with unit tests covering each
+      token in the regex.
+- [ ] Appended to `DEFAULT_LAYERS` after the existing
+      `from_items_itype` adapter so it slots in as the last
+      fallback.
+- [ ] Re-run `coverage_tally.py` and `phase_b_residual.py` — both
+      should still report 0 residual on the 5k sample (no
+      regression from Phase B's perfect recovery).
 - [ ] Conflict-logging: when 007 and (leader/06, 008-form) disagree
       on carrier, the cascade composer writes a
       `scratchpad/rda-cascade/conflicts.jsonl` entry. Not surfaced

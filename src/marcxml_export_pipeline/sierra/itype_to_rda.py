@@ -53,37 +53,37 @@ class RdaCarrier:
 
 # Reusable atomic carriers (cuts repetition + keeps the canonical form
 # under one definition each).
-_TEXT_UNMEDIATED_VOLUME = RdaCarrier(
+TEXT_UNMEDIATED_VOLUME = RdaCarrier(
     content_types=(("teksti", "txt"),),
     media=("käytettävissä ilman laitetta", "n"),
     carrier=("nide", "nc"),
 )
-_NOTATED_MUSIC_UNMEDIATED_VOLUME = RdaCarrier(
+NOTATED_MUSIC_UNMEDIATED_VOLUME = RdaCarrier(
     content_types=(("nuottikirjoitus", "ntm"),),
     media=("käytettävissä ilman laitetta", "n"),
     carrier=("nide", "nc"),
 )
-_PERFORMED_MUSIC_AUDIO_DISC = RdaCarrier(
+PERFORMED_MUSIC_AUDIO_DISC = RdaCarrier(
     content_types=(("esitetty musiikki", "prm"),),
     media=("audio", "s"),
     carrier=("äänilevy", "sd"),
 )
-_PERFORMED_MUSIC_AUDIO_CASSETTE = RdaCarrier(
+PERFORMED_MUSIC_AUDIO_CASSETTE = RdaCarrier(
     content_types=(("esitetty musiikki", "prm"),),
     media=("audio", "s"),
     carrier=("äänikasetti", "ss"),
 )
-_SPOKEN_WORD_AUDIO_DISC = RdaCarrier(
+SPOKEN_WORD_AUDIO_DISC = RdaCarrier(
     content_types=(("puhe", "spw"),),
     media=("audio", "s"),
     carrier=("äänilevy", "sd"),
 )
-_VIDEO_VIDEODISC = RdaCarrier(
+VIDEO_VIDEODISC = RdaCarrier(
     content_types=(("kaksiulotteinen liikkuva kuva", "tdi"),),
     media=("video", "v"),
     carrier=("videolevy", "vd"),
 )
-_COMPUTER_GAME_COMPUTER_DISC = RdaCarrier(
+COMPUTER_GAME_COMPUTER_DISC = RdaCarrier(
     # Console / computer games idiomatically carry TWO 336 entries —
     # ``tdi`` (the in-game visuals are 2-D moving image) AND ``cop``
     # (the game is a computer program). Empirical near-tie in the
@@ -95,12 +95,12 @@ _COMPUTER_GAME_COMPUTER_DISC = RdaCarrier(
     media=("tietokonekäyttöinen", "c"),
     carrier=("tietolevy", "cd"),
 )
-_BOARD_GAME = RdaCarrier(
+BOARD_GAME = RdaCarrier(
     content_types=(("kolmiulotteinen muoto", "tdf"),),
     media=("käytettävissä ilman laitetta", "n"),
     carrier=("objekti", "nr"),
 )
-_MAP_SHEET = RdaCarrier(
+MAP_SHEET = RdaCarrier(
     content_types=(("kartografinen kuva", "cri"),),
     media=("käytettävissä ilman laitetta", "n"),
     carrier=("arkki", "nb"),
@@ -113,65 +113,65 @@ _MAP_SHEET = RdaCarrier(
 #: itype's ``itype_property_myuser.name``.
 ITYPE_TO_RDA: Final[dict[int, RdaCarrier]] = {
     # --- Books, journals (text/unmediated/volume) -----------------------
-    100: _TEXT_UNMEDIATED_VOLUME,  # Adult book 28
-    101: _TEXT_UNMEDIATED_VOLUME,  # Adult book special 28
-    102: _TEXT_UNMEDIATED_VOLUME,  # Adult book bestseller 14
-    103: _TEXT_UNMEDIATED_VOLUME,  # Adult journal 28
-    200: _TEXT_UNMEDIATED_VOLUME,  # Juvenile book 28
-    201: _TEXT_UNMEDIATED_VOLUME,  # Juvenile book special 28
-    203: _TEXT_UNMEDIATED_VOLUME,  # Juvenile journal 28
+    100: TEXT_UNMEDIATED_VOLUME,  # Adult book 28
+    101: TEXT_UNMEDIATED_VOLUME,  # Adult book special 28
+    102: TEXT_UNMEDIATED_VOLUME,  # Adult book bestseller 14
+    103: TEXT_UNMEDIATED_VOLUME,  # Adult journal 28
+    200: TEXT_UNMEDIATED_VOLUME,  # Juvenile book 28
+    201: TEXT_UNMEDIATED_VOLUME,  # Juvenile book special 28
+    203: TEXT_UNMEDIATED_VOLUME,  # Juvenile journal 28
     # --- LP vinyl (performed music / audio / audio disc) ----------------
-    107: _PERFORMED_MUSIC_AUDIO_DISC,  # Adult LP 28
-    207: _PERFORMED_MUSIC_AUDIO_DISC,  # Juvenile LP 28 (inferred — same shape as 107)
+    107: PERFORMED_MUSIC_AUDIO_DISC,  # Adult LP 28
+    207: PERFORMED_MUSIC_AUDIO_DISC,  # Juvenile LP 28 (inferred — same shape as 107)
     # --- Audio cassette (performed music / audio / audio cassette) ------
-    108: _PERFORMED_MUSIC_AUDIO_CASSETTE,  # Adult cassette 28
+    108: PERFORMED_MUSIC_AUDIO_CASSETTE,  # Adult cassette 28
     # --- CD music (performed music / audio / audio disc) ----------------
-    111: _PERFORMED_MUSIC_AUDIO_DISC,  # Adult CD mus 14
-    211: _PERFORMED_MUSIC_AUDIO_DISC,  # Juvenile CD mus 14
+    111: PERFORMED_MUSIC_AUDIO_DISC,  # Adult CD mus 14
+    211: PERFORMED_MUSIC_AUDIO_DISC,  # Juvenile CD mus 14
     # --- CD spoken word / audiobook (spoken word / audio / audio disc) --
-    110: _SPOKEN_WORD_AUDIO_DISC,  # Adult CD talk 28
-    210: _SPOKEN_WORD_AUDIO_DISC,  # Juvenile CD talk 28
+    110: SPOKEN_WORD_AUDIO_DISC,  # Adult CD talk 28
+    210: SPOKEN_WORD_AUDIO_DISC,  # Juvenile CD talk 28
     # --- Console games (two 336: tdi+cop / computer / computer disc) ----
-    114: _COMPUTER_GAME_COMPUTER_DISC,  # Adult console game S 14
-    115: _COMPUTER_GAME_COMPUTER_DISC,  # Adult console game K07 14
-    116: _COMPUTER_GAME_COMPUTER_DISC,  # Adult console game K12 14
-    117: _COMPUTER_GAME_COMPUTER_DISC,  # Adult console game K16 14
-    118: _COMPUTER_GAME_COMPUTER_DISC,  # Adult console game K18 14
-    214: _COMPUTER_GAME_COMPUTER_DISC,  # Juvenile console game S 14
-    215: _COMPUTER_GAME_COMPUTER_DISC,  # Juvenile console game K07 14
-    216: _COMPUTER_GAME_COMPUTER_DISC,  # Juvenile console game K12 14
-    217: _COMPUTER_GAME_COMPUTER_DISC,  # Juvenile console game K16 14
+    114: COMPUTER_GAME_COMPUTER_DISC,  # Adult console game S 14
+    115: COMPUTER_GAME_COMPUTER_DISC,  # Adult console game K07 14
+    116: COMPUTER_GAME_COMPUTER_DISC,  # Adult console game K12 14
+    117: COMPUTER_GAME_COMPUTER_DISC,  # Adult console game K16 14
+    118: COMPUTER_GAME_COMPUTER_DISC,  # Adult console game K18 14
+    214: COMPUTER_GAME_COMPUTER_DISC,  # Juvenile console game S 14
+    215: COMPUTER_GAME_COMPUTER_DISC,  # Juvenile console game K07 14
+    216: COMPUTER_GAME_COMPUTER_DISC,  # Juvenile console game K12 14
+    217: COMPUTER_GAME_COMPUTER_DISC,  # Juvenile console game K16 14
     # --- Board games (3-D form / unmediated / object) -------------------
-    126: _BOARD_GAME,  # Adult board game 14
-    127: _BOARD_GAME,  # Adult board game special 14
-    226: _BOARD_GAME,  # Juvenile board game 14
+    126: BOARD_GAME,  # Adult board game 14
+    127: BOARD_GAME,  # Adult board game special 14
+    226: BOARD_GAME,  # Juvenile board game 14
     # --- DVD video (2-D moving image / video / videodisc) ---------------
-    140: _VIDEO_VIDEODISC,  # Adult DVD S 14
-    141: _VIDEO_VIDEODISC,  # Adult DVD K07 14
-    142: _VIDEO_VIDEODISC,  # Adult DVD K12 14
-    143: _VIDEO_VIDEODISC,  # Adult DVD K16 14
-    144: _VIDEO_VIDEODISC,  # Adult DVD K18 14
-    240: _VIDEO_VIDEODISC,  # Juvenile DVD S 14
-    241: _VIDEO_VIDEODISC,  # Juvenile DVD K07 14
-    242: _VIDEO_VIDEODISC,  # Juvenile DVD K12 14
+    140: VIDEO_VIDEODISC,  # Adult DVD S 14
+    141: VIDEO_VIDEODISC,  # Adult DVD K07 14
+    142: VIDEO_VIDEODISC,  # Adult DVD K12 14
+    143: VIDEO_VIDEODISC,  # Adult DVD K16 14
+    144: VIDEO_VIDEODISC,  # Adult DVD K18 14
+    240: VIDEO_VIDEODISC,  # Juvenile DVD S 14
+    241: VIDEO_VIDEODISC,  # Juvenile DVD K07 14
+    242: VIDEO_VIDEODISC,  # Juvenile DVD K12 14
     # --- Blu-ray video (same RDA tuple as DVD) --------------------------
-    160: _VIDEO_VIDEODISC,  # Adult blu ray S 14
-    161: _VIDEO_VIDEODISC,  # Adult blu ray K07 14
-    162: _VIDEO_VIDEODISC,  # Adult blu ray K12 14
-    163: _VIDEO_VIDEODISC,  # Adult blu ray K16 14
-    164: _VIDEO_VIDEODISC,  # Adult blu ray K18 14
-    245: _VIDEO_VIDEODISC,  # Juvenile blu ray S 14
-    246: _VIDEO_VIDEODISC,  # Juvenile blu ray K07 14
-    247: _VIDEO_VIDEODISC,  # Juvenile blu ray K12 14
-    248: _VIDEO_VIDEODISC,  # Juvenile blu ray K16 14
+    160: VIDEO_VIDEODISC,  # Adult blu ray S 14
+    161: VIDEO_VIDEODISC,  # Adult blu ray K07 14
+    162: VIDEO_VIDEODISC,  # Adult blu ray K12 14
+    163: VIDEO_VIDEODISC,  # Adult blu ray K16 14
+    164: VIDEO_VIDEODISC,  # Adult blu ray K18 14
+    245: VIDEO_VIDEODISC,  # Juvenile blu ray S 14
+    246: VIDEO_VIDEODISC,  # Juvenile blu ray K07 14
+    247: VIDEO_VIDEODISC,  # Juvenile blu ray K12 14
+    248: VIDEO_VIDEODISC,  # Juvenile blu ray K16 14
     # --- CD/DVD-ROM (juvenile only had clear vote — tdi/v/vd) -----------
-    220: _VIDEO_VIDEODISC,  # Juvenile CD/DVD-ROM S 28
-    221: _VIDEO_VIDEODISC,  # Juvenile CD/DVD-ROM K07 28
+    220: VIDEO_VIDEODISC,  # Juvenile CD/DVD-ROM S 28
+    221: VIDEO_VIDEODISC,  # Juvenile CD/DVD-ROM K07 28
     # --- Sheet music / score (notated music / unmediated / volume) ------
-    150: _NOTATED_MUSIC_UNMEDIATED_VOLUME,  # Adult sheet music/score 28
-    250: _NOTATED_MUSIC_UNMEDIATED_VOLUME,  # Juvenile sheet music/score 28
+    150: NOTATED_MUSIC_UNMEDIATED_VOLUME,  # Adult sheet music/score 28
+    250: NOTATED_MUSIC_UNMEDIATED_VOLUME,  # Juvenile sheet music/score 28
     # --- Other material — maps (cartographic image / unmediated / sheet)
-    159: _MAP_SHEET,  # Adult other material 28
+    159: MAP_SHEET,  # Adult other material 28
     #
     # ------------------------------------------------------------------
     # Itypes intentionally OMITTED (insufficient or ambiguous cataloguer
@@ -228,17 +228,17 @@ def lookup_rda_for_items(items: Iterable[Mapping[str, Any]]) -> RdaCarrier | Non
 #: - ``"c"`` Technical drawing (3 records),
 #: - ``"x"`` E-material (3 records split across 3 different tuples).
 MATERIAL_TO_RDA: Final[dict[str, RdaCarrier]] = {
-    "1": _TEXT_UNMEDIATED_VOLUME,  # Book (473 665 bibs)
-    "2": _MAP_SHEET,  # Map (258 bibs)
+    "1": TEXT_UNMEDIATED_VOLUME,  # Book (473 665 bibs)
+    "2": MAP_SHEET,  # Map (258 bibs)
     # CD music (top 7 266; also covers spoken-word CDs at 1 649 —
     # cataloguer-coded 33X wins for those, so this default is fine).
-    "3": _PERFORMED_MUSIC_AUDIO_DISC,
-    "4": _PERFORMED_MUSIC_AUDIO_CASSETTE,  # Cassette (22 bibs)
-    "6": _PERFORMED_MUSIC_AUDIO_DISC,  # LP record (298 bibs)
-    "7": _NOTATED_MUSIC_UNMEDIATED_VOLUME,  # Sheet music (209 bibs)
-    "9": _TEXT_UNMEDIATED_VOLUME,  # Journal (347 bibs)
-    "g": _VIDEO_VIDEODISC,  # DVD (4 617 bibs)
-    "h": _VIDEO_VIDEODISC,  # Blu-ray (1 940 bibs)
+    "3": PERFORMED_MUSIC_AUDIO_DISC,
+    "4": PERFORMED_MUSIC_AUDIO_CASSETTE,  # Cassette (22 bibs)
+    "6": PERFORMED_MUSIC_AUDIO_DISC,  # LP record (298 bibs)
+    "7": NOTATED_MUSIC_UNMEDIATED_VOLUME,  # Sheet music (209 bibs)
+    "9": TEXT_UNMEDIATED_VOLUME,  # Journal (347 bibs)
+    "g": VIDEO_VIDEODISC,  # DVD (4 617 bibs)
+    "h": VIDEO_VIDEODISC,  # Blu-ray (1 940 bibs)
     "q": RdaCarrier(
         # Object — Helmet's "object" bibs are predominantly tactile
         # materials packaged as volumes (braille books, tactile picture
@@ -247,8 +247,8 @@ MATERIAL_TO_RDA: Final[dict[str, RdaCarrier]] = {
         media=("käytettävissä ilman laitetta", "n"),
         carrier=("nide", "nc"),
     ),
-    "r": _BOARD_GAME,  # Board game (2 056 bibs)
-    "s": _COMPUTER_GAME_COMPUTER_DISC,  # Console game (1 755 + 1 720 — two-336 signature)
+    "r": BOARD_GAME,  # Board game (2 056 bibs)
+    "s": COMPUTER_GAME_COMPUTER_DISC,  # Console game (1 755 + 1 720 — two-336 signature)
 }
 
 
@@ -270,8 +270,17 @@ def lookup_rda(
 
 
 __all__ = [
+    "BOARD_GAME",
+    "COMPUTER_GAME_COMPUTER_DISC",
     "ITYPE_TO_RDA",
+    "MAP_SHEET",
     "MATERIAL_TO_RDA",
+    "NOTATED_MUSIC_UNMEDIATED_VOLUME",
+    "PERFORMED_MUSIC_AUDIO_CASSETTE",
+    "PERFORMED_MUSIC_AUDIO_DISC",
+    "SPOKEN_WORD_AUDIO_DISC",
+    "TEXT_UNMEDIATED_VOLUME",
+    "VIDEO_VIDEODISC",
     "RdaCarrier",
     "lookup_rda",
     "lookup_rda_for_items",
