@@ -12,8 +12,6 @@ The LLM serving layer is [`mlx-lm`](https://github.com/ml-explore/mlx-lm) — Ap
 
 Apple MLX team maintenance + smaller transitive dep footprint (~15 packages) are the load-bearing reasons we picked mlx-lm over the higher-level `vllm-mlx` wrapper; the decision and trade-off table are recorded in [`plans/in-progress/p-02-inference-stack-tuning.md`](plans/in-progress/p-02-inference-stack-tuning.md) § A1.
 
-For development and gold-set evaluation runs we also keep **Ollama** installed as a fallback / quick-iteration option. P-02 ships the swap toward mlx-lm-by-default.
-
 ### What we don't install (and why)
 
 | Project | Why not |
@@ -62,7 +60,7 @@ scripts/llm-pull.sh Qwen/Qwen3-1.7B
 
 Times on the M5 Max: ~30-45 min for the 8B, ~1-2 h for the 32B, ~10 min for the 1.7B.
 
-**Fallback if HF download is unreliable**: pull the GGUF blobs Ollama already has at `~/.ollama/models/blobs/`, identify them by manifest, and convert via `mlx_lm.convert --hf-path` against the GGUF path. Flakier; only use if HF download repeatedly fails.
+**Fallback if HF download is unreliable**: retry with `--max-workers 1` and / or set `HF_TOKEN` for higher rate limits. The Hugging Face hub-cache at `~/.cache/huggingface/` keeps partial downloads, so a flaky session resumes cleanly.
 
 ## Running the server
 
@@ -249,52 +247,6 @@ future re-evaluation with different `--num-draft-tokens` settings
 or a different draft-model size on the M5 Max. See P-02 § C5 in
 the plan for the abandon trail.
 
-## Ollama — supported but not recommended (P-02 § D5)
-
-Ollama remains a documented backend for incident triage and as a
-secondary check (the A5 parity bench against it is what gates any
-mlx-lm-side prompt or schema change). It is **no longer the
-recommended default**: mlx-lm is faster on the same hardware, has
-the prefix-cache and decode-concurrency knobs the production batch
-relies on, and matches Ollama on 16/17 gold-set cases. The Ollama
-install paths are staged for removal in P-02 § D6 once a 1-2
-release-cycle observation window passes without complaints.
-
-### Throughput vs Ollama (M2 Max 64 GB, P-02 § D3)
-
-The mlx-lm primary-only serial throughput (~28 pairs/min @ c=1 with
-Phase B's prefix-cache config) is materially better than Ollama's
-serial cascade median of ~18 660 ms/pair measured during the A5
-parity bench. P-02 § D3's acceptance bar was "mlx-lm matches Ollama
-within ~20 %" on the smallest dev machine in actual team use; on
-the M2 Max we exceed that bar comfortably. No `BFFI_LOCAL_BACKEND=
-ollama` per-machine escape hatch is needed.
-
-### Switching back to Ollama
-
-```bash
-brew install --cask ollama && open -a Ollama
-ollama pull qwen3:8b-q4_K_M               # primary judge (~5 GB)
-ollama pull qwen3:32b-q4_K_M              # fallback (~20 GB)
-```
-
-`.env` for Ollama:
-
-```
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_BASE_URL_PRIMARY=
-LLM_BASE_URL_FALLBACK=
-LLM_API_KEY=ollama
-LLM_MODEL_PRIMARY=qwen3:8b-q4_K_M
-LLM_MODEL_FALLBACK=qwen3:32b-q4_K_M
-```
-
-(Leave `LLM_BASE_URL_PRIMARY` / `LLM_BASE_URL_FALLBACK` empty —
-Ollama serves all models from `:11434`, so the per-tier URLs
-introduced by P-02 § D1 don't apply.)
-
-After P-02 Phase D6 ships, the Ollama path is removed from the recommended setup but remains usable as a manual fallback for incident triage.
-
 ## Verification
 
 After install + conversion, smoke-test the server:
@@ -310,7 +262,7 @@ python -m mlx_lm generate \
     --prompt "Say 'hello'" --max-tokens 16
 ```
 
-Then run the pipeline-side smoke (gold-set eval) once both backends are reachable:
+Then run the pipeline-side smoke (gold-set eval) once the server is reachable:
 
 ```bash
 make eval LABEL=mlx-lm-smoke-$(date +%Y-%m-%d)
@@ -320,6 +272,6 @@ The eval harness uses whatever `LLM_BASE_URL` / `LLM_MODEL_*` `.env` carries.
 
 ## Cross-references
 
-- [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](plans/in-progress/p-02-inference-stack-tuning.md) — the active migration plan from Ollama to mlx-lm.
-- [`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](plans/in-progress/p-03-m6-stall-watchdog.md) — per-call + per-pair watchdog around the LLM client. Backend-agnostic, applies under both Ollama and mlx-lm.
+- [`docs/plans/in-progress/p-02-inference-stack-tuning.md`](plans/in-progress/p-02-inference-stack-tuning.md) — the plan of record for the mlx-lm inference stack.
+- [`docs/plans/in-progress/p-03-m6-stall-watchdog.md`](plans/in-progress/p-03-m6-stall-watchdog.md) — per-call + per-pair watchdog around the LLM client.
 - [`docs/archived/local-inference.md`](archived/local-inference.md) — the prior version of this doc, kept for the audit trail of the install-instruction iterations.

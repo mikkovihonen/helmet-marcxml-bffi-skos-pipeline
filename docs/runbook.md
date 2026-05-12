@@ -15,22 +15,23 @@ milestone notes.
 | `marc2bibframe2` | `third_party/marc2bibframe2` (git submodule) | M2 |
 | Embedding model | `BAAI/bge-m3` (1024-dim, multilingual) | M5; benchmark via `bffi-pipeline embed-benchmark` |
 | FAISS HNSW | `M=32`, `efConstruction=200`, `efSearch=64`, IP metric on L2-normalised vectors | M5 |
-| LLM primary | `qwen3:32b-q4_K_M` (Ollama) / equivalent MLX 4-bit | M6 |
-| LLM fallback | `qwen2.5:72b-instruct-q4_K_M` | M6 cascade — Qwen3 has no 72B size; cascade steps to previous-gen 72B |
+| LLM primary | `Qwen3-8B-4bit` (mlx-lm; `Qwen/Qwen3-8B-MLX-4bit` on HF) | M6 |
+| LLM fallback | `Qwen3-32B-4bit` (mlx-lm; `mlx-community/Qwen3-32B-4bit` on HF) | M6 cascade — see [`local-inference.md`](local-inference.md) for server flags |
 | Skosmos | `third_party/Skosmos` (git submodule pinned at `v3.2`) | M11; built from source via `docker-compose build` since NatLibFi doesn't publish a Docker image |
 | Apache Jena Fuseki | `5.4.0` (Maven JAR downloaded by Skosmos's vendored `dockerfiles/jena-fuseki2-docker/Dockerfile`) | M10 (`docker-compose.yml`); pinned to the same value Skosmos 3.2 commits to in its own compose file |
 
 Override via environment / `.env`:
 
 ```
-LLM_BASE_URL=http://localhost:11434/v1     # Ollama default
-LLM_MODEL_PRIMARY=qwen3:32b-q4_K_M
-LLM_MODEL_FALLBACK=qwen2.5:72b-instruct-q4_K_M
+LLM_BASE_URL=http://127.0.0.1:8001/v1                          # mlx-lm primary
+LLM_BASE_URL_FALLBACK=http://127.0.0.1:8002/v1                 # mlx-lm fallback
+LLM_MODEL_PRIMARY=/Users/<you>/.mlx_models/Qwen3-8B-4bit
+LLM_MODEL_FALLBACK=/Users/<you>/.mlx_models/Qwen3-32B-4bit
 BFFI_DATA_DIR=./data
 ```
 
-Local-LLM install (Ollama for development, mlx-lm for production
-batches), model pulls, and the verification probe live in
+Local-LLM install (mlx-lm venv, model downloads, server flags, and
+the verification probe) lives in
 [`docs/local-inference.md`](local-inference.md#installation).
 
 ## Throughput expectations on the M5 Max
@@ -42,8 +43,7 @@ batches), model pulls, and the verification probe live in
 | M4 Stage-1 blocking | one-shot | seconds | small |
 | M5 embedding build | sentence-transformers `mps` | 30-60 min | ~5 GB index + 2.5 GB model |
 | M5 candidate query | top-k=20 | seconds | reuses index |
-| M6 cascade | Ollama serial | 70-170 hours per 50 k pairs | ~20 GB primary; +40 GB if loading fallback |
-| M6 cascade | mlx-lm batched | 10-25 hours per 50 k pairs | same |
+| M6 cascade | mlx-lm with Phase B prefix cache | ~25-40 hours per 50 k pairs on M5 Max (extrapolated from M2 Max 5k-record run: ~31 pairs/min) | ~5 GB primary; +18 GB if 32B fallback loaded |
 
 Two things to plan around:
 
@@ -51,9 +51,10 @@ Two things to plan around:
    to ≥ 0.90 / ≤ 0.78 thresholds; the embed-stats output tells you
    how many pairs land in each band. If "escalate" is > 100 k pairs,
    re-tighten before committing to a multi-night run.
-2. **mlx-lm + concurrency for production.** Ollama is fine for
-   gold-set runs and the few-hundred-pair test sweeps. Production
-   passes use `--concurrency` ≥ 4 and the mlx-lm server.
+2. **mlx-lm + concurrency for production.** Production passes use
+   `--concurrency` ≥ 4 against the mlx-lm server with the Phase B
+   prefix-cache + decode-concurrency flags (see
+   [`local-inference.md`](local-inference.md) § "Throughput findings").
 
 ## Source-data export — Helmet Sierra Postgres replica
 
@@ -81,9 +82,10 @@ validation pass:
 # MARCXML_EXPORT_AGENCY_CODE (defaults to FI-HELME).
 
 # 1. Pre-flight: seed local Fuseki with vocab dumps and confirm
-#    the Ollama judge models are pulled.
+#    the mlx-lm judge models load.
 uv run bffi-pipeline load-finto
-ollama list                       # expect the LLM_MODEL_PRIMARY/FALLBACK tags
+curl -s http://127.0.0.1:8001/v1/models | jq   # expect LLM_MODEL_PRIMARY
+curl -s http://127.0.0.1:8002/v1/models | jq   # expect LLM_MODEL_FALLBACK
 
 # 2. Smoke export + local validation, no full export yet.
 scripts/run-sierra-export.sh
@@ -140,9 +142,10 @@ bffi-pipeline embed
 # Re-runs without --force are idempotent: skipped when both files
 # are newer than the input BFFI Turtle.
 
-# 5. M6 — cascade judge over the escalate band.
-#    Default --concurrency=1 (Ollama serial). Crash-safe: --resume
-#    is the default and picks up from <output>.checkpoint.
+# 5. M6 — cascade judge over the escalate band. Default
+#    --concurrency=1; production runs use --concurrency 4 against
+#    the mlx-lm server (see local-inference.md § A6). Crash-safe:
+#    --resume is the default and picks up from <output>.checkpoint.
 bffi-pipeline judge
 # Production batch (mlx-lm on :8001; see local-inference.md § A6
 # for the M2 Max sweep — re-measure on M5 Max before kickoff):

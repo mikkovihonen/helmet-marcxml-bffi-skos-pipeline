@@ -18,7 +18,7 @@ deeper doc that owns the topic.
                        BFFI Turtle  ──►  M4 blocking ──► M5 BGE-M3 + FAISS HNSW ──► candidate pairs
                                                                                        │
                                                                                        ▼
-                                                                       M6 Qwen3 cascade judge (Ollama or mlx-lm)
+                                                                       M6 Qwen3 cascade judge (mlx-lm)
                                                                                        │
                                                                                        ▼
                                                                        M8 union-find merge ──► canonical Works
@@ -80,11 +80,11 @@ The transition contract between each pair of stages is one of the five Boundary 
 
 | Component | Choice | Documented in |
 |---|---|---|
-| **LLM serving** | **mlx-lm** (Apple, `ml-explore/mlx-lm`, PyPI `mlx-lm`) — production target. Ollama remains the documented dev fallback until P-02 D6 ships. | [`local-inference.md`](local-inference.md) |
-| **LLM primary** | `qwen3:8b-q4_K_M` (Ollama) / `Qwen3-8B-Instruct-4bit` (mlx-lm) | Same |
-| **LLM fallback** | `qwen3:32b-q4_K_M` (Ollama) / `Qwen3-32B-Instruct-4bit` (mlx-lm); the older spec referenced `qwen2.5:72b-instruct-q4_K_M` but the dev machine doesn't fit the 72B — see `~/.claude/projects/.../memory/dev_machine_constraints.md` | Same |
-| **LLM draft model (P-02 Phase C)** | `Qwen3-1.7B-Instruct-4bit` | [`plans/in-progress/p-02-inference-stack-tuning.md`](plans/in-progress/p-02-inference-stack-tuning.md) |
-| **LLM client** | `langchain-openai ≥ 0.1` (OpenAI-compatible HTTP). Same client talks to Ollama and mlx-lm. | [`local-inference.md`](local-inference.md) |
+| **LLM serving** | **mlx-lm** (Apple, `ml-explore/mlx-lm`, PyPI `mlx-lm`) — the only supported backend after P-02 § D6. | [`local-inference.md`](local-inference.md) |
+| **LLM primary** | `Qwen3-8B-4bit` (mlx-lm; `Qwen/Qwen3-8B-MLX-4bit` on HF) | Same |
+| **LLM fallback** | `Qwen3-32B-4bit` (mlx-lm; `mlx-community/Qwen3-32B-4bit` on HF). The older spec referenced `qwen2.5:72b-instruct-q4_K_M` but the dev machine doesn't fit the 72B — see `~/.claude/projects/.../memory/dev_machine_constraints.md` | Same |
+| **LLM draft model (P-02 Phase C — abandoned)** | `Qwen3-1.7B-4bit` — kept on disk but not used in production; spec-decode regressed throughput on M2 Max (see [`plans/in-progress/p-02-inference-stack-tuning.md`](plans/in-progress/p-02-inference-stack-tuning.md) § C5) | [`plans/in-progress/p-02-inference-stack-tuning.md`](plans/in-progress/p-02-inference-stack-tuning.md) |
+| **LLM client** | `langchain-openai ≥ 0.1` (OpenAI-compatible HTTP) | [`local-inference.md`](local-inference.md) |
 | **Embedding model** | `BAAI/bge-m3` (1024-dim, multilingual). Benchmark to lock in vs e5-large / jina-v3 is [P-04](plans/backlog/p-04-m5-calibration.md). | [`plans/backlog/p-04-m5-calibration.md`](plans/backlog/p-04-m5-calibration.md) |
 | **Embedding runtime** | `sentence-transformers ≥ 3.0` on PyTorch MPS (Apple Silicon GPU) | Same |
 | **ANN index** | FAISS HNSW: `M=32 efConstruction=200 efSearch=64`, IP metric on L2-normalised vectors | M5 stage docstring + [`p-04`](plans/backlog/p-04-m5-calibration.md) Phase B |

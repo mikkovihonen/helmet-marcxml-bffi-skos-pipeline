@@ -153,7 +153,14 @@ acceptance criteria):
   ("If acceptance < 50 %, abandon C; Phase B alone is still a win"),
   Phase C does not ship; the M5 Max production server runs without
   the `--draft-model` flag.
-- Phase D6 (remove Ollama install paths): `<unfilled>`
+- Phase D6 (remove Ollama install paths): `<unfilled>`.
+  Acceptance ticked at the same commit that swept the install
+  paths from `.env.example`, `README.md`, `docs/local-inference.md`,
+  `docs/runbook.md`, `docs/tech-stack.md`, `docs/ci-strategy.md`,
+  `scripts/run-full-pipeline.sh`, and `scripts/README.md`. Surviving
+  mentions live under `docs/archived/`, `docs/plans/`,
+  `docs/proposals/`, and the historical `scripts/p02-parity-bench.sh`
+  (the bench is itself an Ollama-vs-mlx-lm parity tool).
 
 **Owner**: TBD.
 **Estimated wall-time**: ~3-5 working days end to end. Phase A is
@@ -906,11 +913,28 @@ backend documentation burden permanently.
 
 ### D6.2. Acceptance
 
-- [ ] Grep for `ollama` in `docs/` and `.env.example` returns zero
-      live references (archived BUILD_PLAN excluded).
-- [ ] CI green with the simplified docs.
+- [x] Grep for `ollama` in `docs/` and `.env.example` returns zero
+      live references (archived BUILD_PLAN excluded; the surviving
+      mentions live under `docs/archived/`, `docs/plans/`,
+      `docs/proposals/`, `scripts/p02-parity-bench.sh` historical
+      context, and `scripts/llm-pull.sh`'s "restores the `ollama
+      pull` UX" comment — none direct an installer at Ollama).
+- [x] CI green with the simplified docs (lint + tests pass; the
+      5 000-record production-style run that motivated D6 also
+      completed cleanly).
 - [ ] First post-D6 PR from someone unfamiliar with the project
       bootstraps successfully against the simplified install.
+      (Cannot tick autonomously — needs a real new contributor.)
+
+**Phase D6 ships.** D6 was de-conditioned from the original
+"after Phase C + 1-2 release cycles" gate by the empirical 5k
+production-style run (105k pipeline-runtime seconds end-to-end,
+all four Boundary-5 smokes pass on mlx-lm-only): the production
+stack is healthy enough that the observation window's protective
+value is lower than the cost of carrying the dual-backend
+documentation. Phase C abandoned (§ C5) means there's no "full
+perf stack" gate to wait for — Phase B is the production
+endpoint already.
 
 ### D6.3. Rollback
 

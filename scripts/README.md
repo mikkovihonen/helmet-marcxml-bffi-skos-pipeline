@@ -11,7 +11,7 @@ file — the milestone stream stays uncluttered.
 
 | Script | Stages run | Typical use | LLM calls |
 |---|---|---|---|
-| [`run-full-pipeline.sh`](run-full-pipeline.sh) | M2 → M3 → M5 → M6 → M8 → M9 → skosify → load | Bootstrap a fresh corpus → publish to Skosmos. | M6 judge + M9 picker. Hours on full corpus with Ollama serial. |
+| [`run-full-pipeline.sh`](run-full-pipeline.sh) | M2 → M3 → M5 → M6 → M8 → M9 → skosify → load | Bootstrap a fresh corpus → publish to Skosmos. | M6 judge + M9 picker against mlx-lm. Tens of hours on the full corpus at the P-02 § A6 / Phase B operational defaults. |
 | [`run-fast-export.sh`](run-fast-export.sh) | M2 → M3 → M8 (empty decisions) → skosify → load → `ysa-disambiguation-report` | Surface cataloguer-side data-quality residue (YSA disambiguation worklist; source-tag distribution; no-candidate counts) without LLM cost. **Not for production publish** — no merge consolidation. | None. |
 | [`republish.sh`](republish.sh) | M5 → M6 → M8 → M9 → skosify → load (subsettable via `--from-stage`) | Re-run downstream half after a stage's logic changed (e.g. an M6 auto-merge wiring fix). M2 + M3 outputs are assumed up to date. | Subset of M6 + M9 depending on entry point. |
 

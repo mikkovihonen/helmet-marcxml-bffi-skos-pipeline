@@ -19,7 +19,7 @@ Quality gates that involve the LLM run manually on the M5 Max via `make eval`, w
 | Check | Where | Trigger |
 |---|---|---|
 | `make eval` against gold set hold-out | M5 Max, locally | before any PR touching `prompts/`, `gold/`, `src/bffi_pipeline/stages/judge.py`, or `src/bffi_pipeline/eval/` |
-| `make test-integration` (incl. `requires_llm` mark) | M5 Max with Ollama running | on demand |
+| `make test-integration` (incl. `requires_llm` mark) | M5 Max with mlx-lm server running | on demand |
 
 ## Workflow file
 
