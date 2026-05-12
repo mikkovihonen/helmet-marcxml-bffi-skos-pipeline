@@ -363,6 +363,35 @@ def test_row_to_marcxml_round_trips_through_pymarc() -> None:
     assert title_245[0].get_subfields("a") == ["Sota ja rauha"]
 
 
+def test_build_record_drops_subfields_with_whitespace_only_tag() -> None:
+    """Sierra occasionally exports placeholder subfields with
+    ``tag=" "`` (a literal space). The MARC21slim XSD pattern rejects
+    them and the M2 conversion stage kills the whole record. The
+    exporter strips them at source. Surfaced on the 5k production-
+    style sample (bib 2553807, 338-field tail subfield)."""
+    varfields = [
+        Varfield(
+            id=10,
+            marc_tag="338",
+            marc_ind1=" ",
+            marc_ind2=" ",
+            field_content="",
+            subfields=[
+                Subfield(tag="a", content="nide", display_order=0),
+                Subfield(tag="b", content="nc", display_order=1),
+                Subfield(tag="2", content="rdacarrier", display_order=2),
+                Subfield(tag=" ", content="", display_order=3),  # the bad one
+                Subfield(tag="", content="also bad", display_order=4),
+            ],
+        )
+    ]
+    record = build_record(None, varfields, [])
+    fields_338 = record.get_fields("338")
+    assert len(fields_338) == 1
+    codes = [sf.code for sf in fields_338[0].subfields]
+    assert codes == ["a", "b", "2"]
+
+
 def test_build_record_orders_tags_in_marc_standard_order() -> None:
     """Mixing varfields + controlfields + extra Fields and re-merging
     by tag order is what makes the resulting MARCXML render cleanly

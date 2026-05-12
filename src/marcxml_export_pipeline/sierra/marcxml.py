@@ -250,10 +250,18 @@ def build_record(
             content = _strip_subfield_prefix(vf.field_content or "")
             record.add_field(Field(tag=tag, data=content))
             continue
+        # ``sf.tag and sf.tag.strip()`` rejects Sierra subfields whose
+        # tag is empty, ``None``, or whitespace-only. Sierra
+        # occasionally serialises placeholder subfields with
+        # ``tag=" "`` (a literal space); the MARC21slim XSD pattern
+        # ``[\dA-Za-z!"#$%&'()*+,-./:;<=>?{}_^`~\[\]\\]{1}`` rejects
+        # them and the downstream M2 stage kills the whole record.
+        # Surfaced on a 5k production-style sample (bib 2553807,
+        # 338-field with a trailing ``<subfield code=" " />``).
         subfields = [
             PymarcSubfield(code=sf.tag, value=sf.content or "")
             for sf in sorted(vf.subfields, key=lambda s: s.display_order or 0)
-            if sf.tag
+            if sf.tag and sf.tag.strip()
         ]
         record.add_field(
             Field(

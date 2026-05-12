@@ -14,7 +14,6 @@ from lxml import etree
 
 from bffi_pipeline.stages.marc_to_bf import _sanitize_language_tags
 
-
 _XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 
 
