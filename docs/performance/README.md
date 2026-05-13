@@ -50,3 +50,11 @@ in [`docs/local-inference.md`](../local-inference.md) §
   query) is the new bottleneck — Phase A's concurrency lever
   only covered ~30 % of the wall — informing Phase B + C
   scoping.
+- [`2026-05-12-5k-m2-max-phase-a2.md`](2026-05-12-5k-m2-max-phase-a2.md)
+  — P-10 Phase A2 bench (`phase1=8` + `c=4`). Wall 3 639 s,
+  cumulative 1.57× speedup vs baseline (1.50× over Phase A).
+  Phase 1 wall dropped ~1.9× (sublinear vs 8× nominal; server-
+  side latency on Finto/VIAF dominates throughput). Still
+  below the ≥3× target; A2 + B + C projected to close the
+  gap. Outcome distribution byte-identical to Phase A
+  (modulo run-time `descriptionChangeDate`).

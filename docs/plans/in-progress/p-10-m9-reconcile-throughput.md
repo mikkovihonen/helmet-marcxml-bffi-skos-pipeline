@@ -15,7 +15,7 @@ data/finto-dumps/`.
 **Phase commits**:
 
 - Phase A (M9 concurrency knob + watchdog wiring): `0f8c3da` (code, 2026-05-12). Bench snapshot at [`docs/performance/2026-05-12-5k-m2-max-phase-a.md`](../../performance/2026-05-12-5k-m2-max-phase-a.md): zero `field_budget_exceeded` events ✓, byte-identical bindings ✓, but **1.05× speedup vs ≥3× target** because the parallelisable tier-2 LLM picker is only ~30 % of M9 wall on this corpus; serial Phase 1 (tier-0 + candidate-query) dominates. See snapshot § "Implications for P-10 Phases B and C" for the re-scoping this introduces.
-- Phase A2 (Phase 1 parallelisation — tier-0 + candidate query): `<unfilled>`
+- Phase A2 (Phase 1 parallelisation — tier-0 + candidate query): `6c14c36` (code, 2026-05-12). Bench snapshot at [`docs/performance/2026-05-12-5k-m2-max-phase-a2.md`](../../performance/2026-05-12-5k-m2-max-phase-a2.md): zero `field_budget_exceeded` events ✓, semantically byte-identical bindings to Phase A ✓ (only `descriptionChangeDate` timestamps differ), wall **3 639 s (60:39)** vs Phase A's 5 460 s — cumulative **1.57× speedup** vs the 5 722 s baseline (Phase A2 alone gives 1.50× over Phase A). Phase 1 dropped ~1.9× (sublinear of the 8× nominal — server-side Finto/VIAF latency dominates throughput). **Still short of the ≥3× cumulative target on this corpus**; Phase B + Phase C projected to close the gap.
 - Phase B (persistent picker cache): `<unfilled>`
 - Phase C (tier-0 normalisation + altLabel inclusion): `<unfilled>`
 
