@@ -55,6 +55,15 @@ services:
   # (Prometheus reaches it via ``host.docker.internal``) and renders
   # the bundled Grafana dashboard. All local; no outbound telemetry.
   # Start / stop via ``make observability-up`` / ``make observability-down``.
+  #
+  # Cross-runtime note: ``host.docker.internal`` resolves automatically
+  # on Docker Desktop (macOS / Windows) and on Podman 4.5+ (which
+  # provides it as a built-in alias alongside its native
+  # ``host.containers.internal``). Linux-Docker operators must add
+  # ``extra_hosts: ["host.docker.internal:host-gateway"]`` via a local
+  # ``docker-compose.override.yml`` — the line is intentionally **not**
+  # in the committed file because Podman rejects ``host-gateway`` as a
+  # special value and fails to start the container.
   prometheus:
     image: prom/prometheus:v2.55.0
     container_name: bffi-prometheus
@@ -63,8 +72,6 @@ services:
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Linux compat; macOS / Windows native
     restart: unless-stopped
     profiles: ["observability"]  # Excluded from the default ``up`` set
 
