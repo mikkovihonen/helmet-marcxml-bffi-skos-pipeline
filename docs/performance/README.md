@@ -71,3 +71,19 @@ in [`docs/local-inference.md`](../local-inference.md) §
   remains un-run; next attempt either drops mlx-lm
   `--prompt-cache-size` to 100 or waits for the production
   M5 Max 128 GB.
+- [`2026-05-13-5k-m2-max-phase-b-e.md`](2026-05-13-5k-m2-max-phase-b-e.md)
+  — P-10 Phase B + E combined bench (cold + warm consecutive
+  5k runs at `--prompt-cache-size 100`). Cold 4 147 s, warm
+  **1 440 s** — cold→warm **2.88×** speedup; picker phase
+  3.25× faster on warm at 65.8 % cache hit rate. Hit rate
+  below the plan's ≥ 90 % target because the cache stores
+  only successful LLM picks (cold's 473 fallback outcomes
+  intentionally aren't cached → 461 warm misses re-dispatch
+  the picker). Phase E unmeasurable cleanly because the
+  mlx-lm prompt-cache size dropped from 200 to 100 at the
+  same time; queued as a follow-up A/B. **Open issue**:
+  cold and warm outcome distributions diverge (~1 000
+  entities shifted lexical → local), likely a triple-
+  deduplication bug in the cache-hit codepath; audit script
+  + Phase B.1 fix queued before declaring Phase B
+  production-ready.
