@@ -195,6 +195,57 @@ def test_progress_event_mirrors_phase2_outcome_keys() -> None:
     assert 'outcome="cache_misses"' not in text
 
 
+def test_eta_resets_to_zero_when_phase_completes_within_one_second() -> None:
+    """Phase-complete bypass: ETA must read 0 even when the throughput
+    rate cannot be computed.
+
+    M9 Phase 1's result-collation loop emits all its cadence progress
+    events within the same wall-clock second (the slow work happens in
+    the parallel ``_phase1_pool`` call BEFORE collation), so the
+    ``elapsed = last_ts - first_ts`` denominator collapses to zero and
+    the throughput branch returns early. Pre-fix the ETA gauge stayed
+    pinned at whatever transient value the early-cadence emit had
+    written. Post-fix, ``processed >= total`` is detected on every
+    progress event and forces the gauge to 0.
+    """
+    metrics = PipelineMetrics()
+    # Two cadence emits at the same second — like Phase 1's collation
+    # loop. First emit pre-populates the gauge with a non-zero ETA;
+    # second emit is the phase-complete tip.
+    apply_event(
+        metrics,
+        _row(
+            event="progress",
+            phase="phase1",
+            counters={"processed": 12600, "total": 12666},
+            ts_unix=1747094400.0,
+        ),
+    )
+    apply_event(
+        metrics,
+        _row(
+            event="progress",
+            phase="phase1",
+            counters={"processed": 12666, "total": 12666},
+            ts_unix=1747094400.0,
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    # Every phase1 ETA series for this run should be 0 (the helper
+    # asserts on the parsed-line value rather than a substring match
+    # so a stale "0.0" elsewhere can't accidentally satisfy it).
+    eta_phase1_lines = [
+        line
+        for line in text.splitlines()
+        if line.startswith("bffi_stage_eta_seconds{")
+        and 'phase="phase1"' in line
+        and 'run_uuid="r"' in line
+    ]
+    assert eta_phase1_lines, "phase1 ETA gauge must be present after completion"
+    for line in eta_phase1_lines:
+        assert line.endswith(" 0.0"), f"phase1 ETA must be 0 after completion, got: {line}"
+
+
 def test_progress_event_outcome_values_are_cumulative() -> None:
     """Each progress event resets ``outcome`` series to the cumulative
     value carried in ``extra`` (gauge-like Counter semantics matching

@@ -266,6 +266,14 @@ def _update_throughput(
     history.append((ts_unix, processed))
     if len(history) > _THROUGHPUT_WINDOW:
         history.pop(0)
+    # Phase-complete bypass: when ``processed`` has caught up to ``total``
+    # the phase is done and the ETA must read zero. Without this the
+    # throughput-driven branch below can return early (e.g. M9 Phase 1's
+    # collation loop emits all cadence events within the same wall-clock
+    # second so ``elapsed=0``) and leave the gauge stuck at a transient
+    # sample value from earlier in the phase.
+    if total > 0 and processed >= total:
+        metrics.stage_eta_seconds.labels(stage=stage, phase=phase, run_uuid=run_uuid).set(0.0)
     if len(history) < 2:  # noqa: PLR2004 — need two samples to derive a rate
         return
     first_ts, first_processed = history[0]

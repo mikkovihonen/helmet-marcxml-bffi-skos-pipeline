@@ -114,7 +114,7 @@
       "id": 34,
       "type": "stat",
       "title": "ETA / Completed",
-      "description": "Top: M9's ETA in seconds (the bench-dominant remaining work). Bottom: most recent stage end timestamp. When the run is complete, ETA reads 0 and the bottom value shows when it finished.",
+      "description": "Top: M9's Phase 2 ETA in seconds (the bench-dominant remaining work — picker dispatch). Reads — until Phase 2 has emitted two cadence-spaced progress events so a rate can be derived. Bottom: most recent stage end timestamp. When the run is complete, ETA reads 0 and the bottom value shows when it finished.",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -128,7 +128,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_eta_seconds{stage=\"m9\",run_uuid=\"$active_run\"}) or vector(0)",
+          "expr": "bffi_stage_eta_seconds{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}",
           "legendFormat": "ETA (s)"
         },
         {
