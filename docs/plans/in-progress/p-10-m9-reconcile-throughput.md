@@ -17,7 +17,7 @@ data/finto-dumps/`.
 - Phase A (M9 concurrency knob + watchdog wiring): `0f8c3da` (code, 2026-05-12). Bench snapshot at [`docs/performance/2026-05-12-5k-m2-max-phase-a.md`](../../performance/2026-05-12-5k-m2-max-phase-a.md): zero `field_budget_exceeded` events ✓, byte-identical bindings ✓, but **1.05× speedup vs ≥3× target** because the parallelisable tier-2 LLM picker is only ~30 % of M9 wall on this corpus; serial Phase 1 (tier-0 + candidate-query) dominates. See snapshot § "Implications for P-10 Phases B and C" for the re-scoping this introduces.
 - Phase A2 (Phase 1 parallelisation — tier-0 + candidate query): `6c14c36` (code, 2026-05-12). Bench snapshot at [`docs/performance/2026-05-12-5k-m2-max-phase-a2.md`](../../performance/2026-05-12-5k-m2-max-phase-a2.md): zero `field_budget_exceeded` events ✓, semantically byte-identical bindings to Phase A ✓ (only `descriptionChangeDate` timestamps differ), wall **3 639 s (60:39)** vs Phase A's 5 460 s — cumulative **1.57× speedup** vs the 5 722 s baseline (Phase A2 alone gives 1.50× over Phase A). Phase 1 dropped ~1.9× (sublinear of the 8× nominal — server-side Finto/VIAF latency dominates throughput). **Still short of the ≥3× cumulative target on this corpus**; Phase B + Phase C projected to close the gap.
 - Phase B (persistent picker cache): `<unfilled>`
-- Phase C (tier-0 normalisation + altLabel inclusion): `<unfilled>`
+- Phase C (tier-0 normalisation + altLabel inclusion): `8e47a69` (code, 2026-05-12; feature-flagged off by default — see below). Resolver-side `BFFI_M9_TIER0_EXPANSION` defaults `False`; `load-finto --fold-pref-labels` materialisation defaults `False` as of the 2026-05-13 flip. Bench *attempt* at [`docs/performance/2026-05-13-5k-m2-max-phase-c-attempt.md`](../../performance/2026-05-13-5k-m2-max-phase-c-attempt.md) (mlx-lm GPU-OOM mid-run on the M2 Max; 1 500 picker calls completed at crash already past Phase A2's 1 348 baseline, suggesting Phase C does **not** reduce tier-2 work on the May 12 corpus while doubling Phase 1 SPARQL traffic). Code-side stays committed; production-readiness validation remains pending the cataloguer audit OR a clean re-bench on the M5 Max 128 GB with smaller mlx-lm `--prompt-cache-size`.
 
 **Owner**: TBD.
 **Estimated wall-time**: ~4.5-5.5 days end-to-end. Phase A ~1.5 days (concurrency + watchdog wiring + bench) **— shipped at `0f8c3da`**. Phase A2 ~1 day (Phase 1 parallelisation — added after Phase A's bench surfaced that serial Phase 1 work, not tier-2 LLM, is the dominant cost on this corpus). Phase B ~1-1.5 days. Phase C ~1-2 days (rule design + cataloguer-sample audit gate). Each phase is independently shippable and lands with its own [`docs/performance/`](../../performance/) snapshot.
@@ -273,7 +273,7 @@ Extend `bffi-pipeline load-finto` to emit one extra triple per `skos:prefLabel` 
 
 Where `fold(s)` = `NFKC → casefold → fold_diacritics → " ".join(s.split())`.
 
-Stored alongside the original prefLabel in `data/finto-dumps/<vocab>.ttl`. Adds a `--fold-prefLabels` flag (default on for new dumps; idempotent — re-running adds no duplicates because the predicate is deterministic).
+Stored alongside the original prefLabel in `data/finto-dumps/<vocab>.ttl`. Adds a `--fold-pref-labels` flag, **default off as of 2026-05-13** after the Phase C bench attempt surfaced that the materialised triples doubled Phase 1 SPARQL traffic without offsetting picker-call savings on the May 12 corpus. Idempotent — re-running adds no duplicates because the predicate is deterministic. To use the tier-0 expansion, operators flip **both** `--fold-pref-labels` here AND `BFFI_M9_TIER0_EXPANSION=1` at reconcile time; either alone is a no-op.
 
 Why materialise vs. computing in the SPARQL query: Fuseki has no `fold_diacritics` builtin, so the alternative is fetching every candidate label to Python and folding there — orders of magnitude more SPARQL work per call. Materialisation moves the cost to load-time, paid once per Finto refresh.
 
@@ -348,7 +348,7 @@ This is the safety net in case the 200-audit misses a rare collision.
 
 ### C.8. Acceptance
 
-- [ ] `bffi:foldedLabel` materialisation lands behind `--fold-prefLabels` (default on).
+- [x] `bffi:foldedLabel` materialisation lands behind `--fold-pref-labels` (default **off** post-2026-05-13 — see Phase C commit hash above; flag was originally specified default-on, flipped after the bench-attempt evidence).
 - [ ] Tier-0 SPARQL switched to the folded predicate; cataloguer-side fold + strip rules applied.
 - [ ] Two altLabel ambiguity tests pass (single-hit binds, multi-hit falls through).
 - [ ] 200-sample audit committed at `gold/reconcile-audit-200.jsonl`, zero false-positives.

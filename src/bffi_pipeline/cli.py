@@ -1411,15 +1411,17 @@ def load_finto_command(
             help=(
                 "Materialise bffi:foldedLabel triples on every "
                 "skos:prefLabel and skos:altLabel of every concept in the "
-                "downloaded dump. Default on; the resolver-side feature "
-                "flag BFFI_M9_TIER0_EXPANSION still controls whether the "
-                "folded predicate is actually queried at reconcile time, "
-                "so this is safe to leave on. See "
-                "docs/plans/in-progress/p-10-m9-reconcile-throughput.md "
-                "Phase C.1."
+                "downloaded dump (P-10 Phase C.1). Default OFF — the "
+                "2026-05-13 Phase C bench attempt found this doubled "
+                "Phase 1 SPARQL traffic without an offsetting reduction "
+                "in tier-2 picker calls on the May 12 corpus. Using the "
+                "tier-0 expansion path requires BOTH this flag and the "
+                "resolver-side BFFI_M9_TIER0_EXPANSION=1; the materialised "
+                "triples are inert otherwise. See "
+                "docs/performance/2026-05-13-5k-m2-max-phase-c-attempt.md."
             ),
         ),
-    ] = True,
+    ] = False,
 ) -> None:
     """Refresh the KANTO/YSO/KAUNO/MUSO/SLM named graphs in Fuseki.
 

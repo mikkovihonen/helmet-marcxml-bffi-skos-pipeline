@@ -359,7 +359,7 @@ def run(
     vocabs: tuple[FintoVocab, ...] = FINTO_VOCABS,
     http_client: httpx.Client | None = None,
     now: datetime | None = None,
-    fold_pref_labels: bool = True,
+    fold_pref_labels: bool = False,
 ) -> FintoLoadSummary:
     """Refresh the Finto-vocab named graphs in Fuseki.
 
@@ -369,14 +369,23 @@ def run(
     so a re-run produces a clean graph rather than accumulating stale
     triples from old dumps.
 
-    ``fold_pref_labels=True`` (the default; P-10 Phase C.1) post-
-    processes each downloaded dump by adding ``bffi:foldedLabel``
-    triples for every ``skos:prefLabel`` and ``skos:altLabel``. Idempotent —
-    re-running against an already-materialised dump is a no-op. Folded
-    labels are inert until the resolver-side feature flag
-    ``BFFI_M9_TIER0_EXPANSION`` is enabled. Pass ``False`` to skip
-    materialisation (smaller dumps, faster load; tier-0 expansion will
-    fall through to the existing exact-match path).
+    ``fold_pref_labels=True`` post-processes each downloaded dump by
+    adding ``bffi:foldedLabel`` triples for every ``skos:prefLabel``
+    and ``skos:altLabel`` (P-10 Phase C.1). The materialised triples
+    are inert until the **resolver-side** feature flag
+    ``BFFI_M9_TIER0_EXPANSION`` is also enabled — using the tier-0
+    expansion path therefore needs **both** flags flipped on.
+
+    **Default is False** because the 2026-05-13 Phase C bench attempt
+    (see `docs/performance/2026-05-13-5k-m2-max-phase-c-attempt.md`)
+    found Phase 1 SPARQL traffic ~doubled with the materialised
+    predicate present, *without* an offsetting reduction in tier-2
+    picker calls on the May 12 corpus. Until a clean re-bench
+    demonstrates a net win, both flags stay default-off so
+    ``load-finto`` runs and Fuseki query times match the post-Phase-A2
+    baseline. Operators opting into tier-0 expansion flip
+    ``--fold-pref-labels`` here AND ``BFFI_M9_TIER0_EXPANSION=1`` at
+    reconcile time.
     """
     settings = get_settings()
     base = output_dir or settings.data_dir
