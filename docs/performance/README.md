@@ -87,3 +87,18 @@ in [`docs/local-inference.md`](../local-inference.md) §
   deduplication bug in the cache-hit codepath; audit script
   + Phase B.1 fix queued before declaring Phase B
   production-ready.
+- [`2026-05-13-5k-m2-max-phase-b1.md`](2026-05-13-5k-m2-max-phase-b1.md)
+  — P-10 Phase B.1 re-bench (cache every picker decision, not
+  just `STAGE_LLM`). Cold 3 992 s, warm **276 s (4 m 36 s)** —
+  cold→warm **14.5×** speedup at **100 % cache hit rate**
+  (1 348 / 1 348). Output **99.999 % byte-stable** (1 triple
+  diff over 168 969, a single `needs-review ↔ auto-merged`
+  flip attributable to upstream Finto candidate-set variance,
+  not the cache). The pre-B.1 open issue is **closed**; the
+  plan's ≥ 90 % hit-rate gate is comfortably exceeded. The
+  ≤ 100 s warm wall target is unreachable on the M2 Max + this
+  corpus because Phase 1's HTTP-bound floor is ~245 s — the
+  picker phase itself is effectively free on warm. Phase E
+  still unmeasurable cleanly (warm Phase 2 had nothing to
+  prefix-cache). 800k extrapolation: **~10.8 h warm wall**,
+  just at the overnight window edge.
