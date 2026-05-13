@@ -131,7 +131,7 @@ class PipelineMetrics:
         )
         self.dependency_health = Gauge(
             "bffi_dependency_health",
-            "Health probe verdict: 2 up, 1 degraded, 0 down.",
+            "Health probe verdict: 2 up, 1 degraded, 0 down, NaN not_configured.",
             labelnames=("stage", "dep"),
             registry=self.registry,
         )
@@ -151,8 +151,17 @@ class PipelineMetrics:
 
 #: Health-status string → numeric gauge mapping. Matches the Grafana
 #: dashboard's state-timeline thresholds: 2 = up (green), 1 = degraded
-#: (amber), 0 = down (red).
-_HEALTH_STATUS_VALUE: Final[dict[str, int]] = {"up": 2, "degraded": 1, "down": 0}
+#: (amber), 0 = down (red). P-12 Phase B adds ``not_configured`` →
+#: ``NaN`` so the dashboard can grey out cells for deps that aren't
+#: provisioned on this host instead of colouring them red. Default
+#: for unknown statuses stays at 0 (down) so a typoed status doesn't
+#: silently grey out a real outage.
+_HEALTH_STATUS_VALUE: Final[dict[str, float]] = {
+    "up": 2.0,
+    "degraded": 1.0,
+    "down": 0.0,
+    "not_configured": float("nan"),
+}
 
 
 def _update_throughput(
@@ -230,7 +239,7 @@ def apply_event(
     elif row.event == "health":
         probes = row.extra.get("probes") or {}
         for dep, probe in probes.items():
-            status_value = _HEALTH_STATUS_VALUE.get(probe.get("status"), 0)
+            status_value = _HEALTH_STATUS_VALUE.get(probe.get("status"), 0.0)
             metrics.dependency_health.labels(stage=row.stage, dep=dep).set(status_value)
             metrics.dependency_probe_latency_ms.labels(stage=row.stage, dep=dep).set(
                 probe.get("latency_ms", 0)

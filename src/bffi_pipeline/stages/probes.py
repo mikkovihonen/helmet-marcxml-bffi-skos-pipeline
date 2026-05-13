@@ -38,7 +38,17 @@ DEFAULT_PROBE_TIMEOUT_SECONDS: Final[float] = 5.0
 #: the magic ``3``.
 _DATASET_URL_SLASH_COUNT: Final[int] = 3
 
-ProbeStatus = Literal["up", "degraded", "down"]
+#: Probe verdict.
+#:
+#: - ``up`` — service reachable, healthy response.
+#: - ``degraded`` — service reachable but slow / non-2xx / timed out.
+#: - ``down`` — service unreachable (connection refused).
+#: - ``not_configured`` — probe skipped because the dependency is not
+#:   provisioned on this host (e.g. the mlx-lm 32B fallback that
+#:   doesn't fit on the M2 Max dev box). Distinguished from ``down``
+#:   so the dashboard can grey the cell out instead of colouring it
+#:   red. P-12 Phase B.
+ProbeStatus = Literal["up", "degraded", "down", "not_configured"]
 
 
 @dataclass(frozen=True)
@@ -156,7 +166,20 @@ def probe_mlx_lm(
     (e.g. ``http://127.0.0.1:8001/v1``). ``dep`` defaults to
     ``"mlx-lm"`` but callers can pass ``"mlx-lm-primary"`` /
     ``"mlx-lm-fallback"`` when probing the two cascade ports.
+
+    P-12 Phase B: an empty ``base_url`` (the convention callers use
+    to signal "this dependency isn't provisioned on this host" — e.g.
+    the unstarted M2 Max 32B fallback) short-circuits to
+    ``status="not_configured"`` without an HTTP attempt. The dashboard
+    then greys out the cell instead of colouring it red.
     """
+    if not base_url:
+        return ProbeResult(
+            dep=dep,
+            status="not_configured",
+            latency_ms=0,
+            note="empty base_url; probe skipped",
+        )
     url = f"{base_url.rstrip('/')}/models"
     return _probe_get(dep, url, timeout=timeout, client=client)
 

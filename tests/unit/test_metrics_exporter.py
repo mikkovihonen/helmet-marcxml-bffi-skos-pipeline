@@ -9,6 +9,7 @@ server, no real Prometheus scrape.
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -121,6 +122,39 @@ def test_end_records_outcome_buckets() -> None:
     # ``total`` is excluded from the outcomes counter (it's a header,
     # not a bucket).
     assert 'outcome="total"' not in text
+
+
+def test_health_event_maps_not_configured_to_nan_gauge() -> None:
+    """P-12 Phase B: ``status="not_configured"`` maps to NaN so
+    Grafana's default value-mapping greys the cell out instead of
+    rendering it as 0 = down (red). Distinguishes "dep not provisioned"
+    from "dep failing"."""
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="health",
+            stage="m6",
+            extra={
+                "probes": {
+                    "mlx-lm-fallback": {
+                        "dep": "mlx-lm-fallback",
+                        "status": "not_configured",
+                        "latency_ms": 0,
+                        "note": "empty base_url; probe skipped",
+                    },
+                }
+            },
+        ),
+    )
+    gauge_value = metrics.dependency_health.labels(stage="m6", dep="mlx-lm-fallback")._value.get()
+    assert math.isnan(gauge_value), (
+        f"not_configured should map to NaN; got {gauge_value!r}. "
+        "The dashboard's grey-out value-mapping depends on this."
+    )
+    # Wire-format check too: prometheus_client serialises NaN literally.
+    text = generate_latest(metrics.registry).decode("utf-8")
+    assert 'bffi_dependency_health{dep="mlx-lm-fallback",stage="m6"} NaN' in text
 
 
 def test_health_event_maps_status_to_gauge() -> None:

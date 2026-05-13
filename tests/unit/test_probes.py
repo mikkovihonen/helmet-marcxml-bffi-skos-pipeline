@@ -151,6 +151,31 @@ def test_probe_mlx_lm_down_when_connect_refused() -> None:
     assert result.status == "down"
 
 
+def test_probe_mlx_lm_empty_url_is_not_configured() -> None:
+    """P-12 Phase B: empty ``base_url`` short-circuits to
+    ``status="not_configured"`` without an HTTP attempt.
+
+    Convention used by callers to express "this dependency is not
+    provisioned on this host" — e.g. the unstarted 32B fallback on a
+    dev box where the cascade collapses to a single tier. The
+    exporter maps this status to a ``NaN`` gauge so Grafana greys
+    the cell out instead of colouring it red.
+    """
+    http_attempted = False
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal http_attempted
+        http_attempted = True
+        return httpx.Response(200, json={"data": []})
+
+    result = probe_mlx_lm("", dep="mlx-lm-fallback", client=_client(handler))
+    assert result.status == "not_configured"
+    assert result.dep == "mlx-lm-fallback"
+    assert result.latency_ms == 0
+    assert "skipped" in result.note
+    assert http_attempted is False  # short-circuit before any HTTP
+
+
 # --- probe_finto --------------------------------------------------------
 
 

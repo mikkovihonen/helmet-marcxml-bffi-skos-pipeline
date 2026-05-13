@@ -1469,8 +1469,16 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
     # P-11 Phase C: probe both mlx-lm cascade ports at entry. The
     # primary at :8001 and the fallback at :8002 are independent
     # processes; either can be down without the other.
+    #
+    # P-12 Phase B: when the fallback URL equals the primary URL
+    # (degenerate cascade — the same process probed twice — typical
+    # on dev hosts where the 32B fallback doesn't fit, see CLAUDE.md
+    # § "Dev machine constraints"), pass an empty URL into
+    # probe_mlx_lm so it short-circuits to status="not_configured".
+    # The dashboard then greys the cell instead of colouring it red.
     primary_url = settings.llm_base_url_primary or settings.llm_base_url
-    fallback_url = settings.llm_base_url_fallback or settings.llm_base_url
+    raw_fallback = settings.llm_base_url_fallback or settings.llm_base_url
+    fallback_url = raw_fallback if raw_fallback != primary_url else ""
     emit_health_probes(
         "m6",
         {
