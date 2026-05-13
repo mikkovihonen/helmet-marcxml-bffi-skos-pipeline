@@ -2661,13 +2661,14 @@ def test_picker_phase_progress_cadence_zero_disables_emission(tmp_path: Path) ->
     assert progress == []
 
 
-def test_picker_phase_progress_no_partial_emission(tmp_path: Path) -> None:
-    """500 entries at cadence=200 emits 2 events (at 200 + 400), not 3.
+def test_picker_phase_progress_flushes_final_when_misaligned(tmp_path: Path) -> None:
+    """500 entries at cadence=200 emits 3 events: [200, 400, 500].
 
-    The trailing 100 entries below the cadence boundary do NOT trigger
-    an emission; the final state is communicated via the existing
-    ``m9 end`` event in ``apply_reconciliation`` itself. Pinning this
-    so the dashboard doesn't double-count the last boundary.
+    The trailing 100 entries below the cadence boundary trigger one
+    final end-of-phase progress event so the dashboard's processed
+    gauge reaches 100% of the phase total instead of plateauing at
+    the last cadence multiple. Cadence-aligned runs (e.g. exactly
+    600) still emit exactly N/cadence events with no duplicate.
     """
     queue = _build_picker_queue(500)
     picker = _picker_for_queue(queue)
@@ -2684,6 +2685,6 @@ def test_picker_phase_progress_no_partial_emission(tmp_path: Path) -> None:
             cache_hits=0,
         ),
     )
-    assert len(progress) == 2
+    assert len(progress) == 3
     processed = [int(p["counters"]["processed"]) for p in progress]
-    assert processed == [200, 400]
+    assert processed == [200, 400, 500]

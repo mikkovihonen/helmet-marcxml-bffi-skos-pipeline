@@ -56,7 +56,7 @@
               "options": {
                 "0": {
                   "text": "skipped",
-                  "color": "purple"
+                  "color": "text"
                 },
                 "10": {
                   "text": "pending",
@@ -77,7 +77,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "purple",
+                "color": "text",
                 "value": null
               }
             ]
@@ -126,7 +126,7 @@
               "options": {
                 "0": {
                   "text": "skipped",
-                  "color": "purple"
+                  "color": "text"
                 },
                 "10": {
                   "text": "pending",
@@ -147,7 +147,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "purple",
+                "color": "text",
                 "value": null
               }
             ]
@@ -196,7 +196,7 @@
               "options": {
                 "0": {
                   "text": "skipped",
-                  "color": "purple"
+                  "color": "text"
                 },
                 "10": {
                   "text": "pending",
@@ -217,7 +217,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "purple",
+                "color": "text",
                 "value": null
               }
             ]
@@ -266,7 +266,7 @@
               "options": {
                 "0": {
                   "text": "skipped",
-                  "color": "purple"
+                  "color": "text"
                 },
                 "10": {
                   "text": "pending",
@@ -287,7 +287,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "purple",
+                "color": "text",
                 "value": null
               }
             ]
@@ -336,7 +336,7 @@
               "options": {
                 "0": {
                   "text": "skipped",
-                  "color": "purple"
+                  "color": "text"
                 },
                 "10": {
                   "text": "pending",
@@ -357,7 +357,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "purple",
+                "color": "text",
                 "value": null
               }
             ]
@@ -406,7 +406,7 @@
               "options": {
                 "0": {
                   "text": "skipped",
-                  "color": "purple"
+                  "color": "text"
                 },
                 "10": {
                   "text": "pending",
@@ -427,7 +427,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "purple",
+                "color": "text",
                 "value": null
               }
             ]
@@ -476,7 +476,7 @@
               "options": {
                 "0": {
                   "text": "skipped",
-                  "color": "purple"
+                  "color": "text"
                 },
                 "10": {
                   "text": "pending",
@@ -497,7 +497,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "purple",
+                "color": "text",
                 "value": null
               }
             ]
@@ -546,7 +546,7 @@
               "options": {
                 "0": {
                   "text": "skipped",
-                  "color": "purple"
+                  "color": "text"
                 },
                 "10": {
                   "text": "pending",
@@ -567,7 +567,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "purple",
+                "color": "text",
                 "value": null
               }
             ]
@@ -593,12 +593,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m2\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_entities_processed_total{stage=\"m2\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m2\",run_uuid=\"$active_run\"}))",
           "legendFormat": "processed"
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_throughput_per_minute{stage=\"m2\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"m2\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m2\",run_uuid=\"$active_run\"}))",
           "legendFormat": "items/min"
         }
       ],
@@ -647,12 +647,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m3\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_entities_processed_total{stage=\"m3\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m3\",run_uuid=\"$active_run\"}))",
           "legendFormat": "processed"
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_throughput_per_minute{stage=\"m3\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"m3\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m3\",run_uuid=\"$active_run\"}))",
           "legendFormat": "items/min"
         }
       ],
@@ -701,12 +701,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m5\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_entities_processed_total{stage=\"m5\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m5\",run_uuid=\"$active_run\"}))",
           "legendFormat": "processed"
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_throughput_per_minute{stage=\"m5\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"m5\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m5\",run_uuid=\"$active_run\"}))",
           "legendFormat": "items/min"
         }
       ],
@@ -755,12 +755,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m6\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_entities_processed_total{stage=\"m6\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m6\",run_uuid=\"$active_run\"}))",
           "legendFormat": "processed"
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_throughput_per_minute{stage=\"m6\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"m6\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m6\",run_uuid=\"$active_run\"}))",
           "legendFormat": "items/min"
         }
       ],
@@ -809,12 +809,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m8\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_entities_processed_total{stage=\"m8\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m8\",run_uuid=\"$active_run\"}))",
           "legendFormat": "processed"
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_throughput_per_minute{stage=\"m8\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"m8\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m8\",run_uuid=\"$active_run\"}))",
           "legendFormat": "items/min"
         }
       ],
@@ -847,9 +847,9 @@
     },
     {
       "id": 22,
-      "type": "stat",
-      "title": "M9 reconcile",
-      "description": "M9 reconcile \u2014 cumulative entities processed (top) and current throughput in items/min (bottom). Active run only.",
+      "type": "bargauge",
+      "title": "${m9_processed}/${m9_total}",
+      "description": "M9 reconcile: top-line title shows the freshest phase's processed/total fraction; bars show each M9 phase's percent done (phase 1 = entity walk, phase 2 = picker calls). Active run only.",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -863,13 +863,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m9\",run_uuid=\"$active_run\"})",
-          "legendFormat": "processed"
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_entities_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "legendFormat": "phase 1"
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_throughput_per_minute{stage=\"m9\",run_uuid=\"$active_run\"})",
-          "legendFormat": "items/min"
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "legendFormat": "phase 2"
         }
       ],
       "options": {
@@ -878,21 +878,27 @@
             "lastNotNull"
           ]
         },
-        "graphMode": "area",
-        "textMode": "value_and_name",
-        "colorMode": "value",
-        "orientation": "vertical"
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color"
       },
       "fieldConfig": {
         "defaults": {
           "noValue": "\u2014",
-          "unit": "short",
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "blue",
                 "value": null
+              },
+              {
+                "color": "green",
+                "value": 99.99
               }
             ]
           }
@@ -917,12 +923,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"skosify\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_entities_processed_total{stage=\"skosify\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"skosify\",run_uuid=\"$active_run\"}))",
           "legendFormat": "processed"
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_throughput_per_minute{stage=\"skosify\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"skosify\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"skosify\",run_uuid=\"$active_run\"}))",
           "legendFormat": "items/min"
         }
       ],
@@ -971,12 +977,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"load\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_entities_processed_total{stage=\"load\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"load\",run_uuid=\"$active_run\"}))",
           "legendFormat": "processed"
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_throughput_per_minute{stage=\"load\",run_uuid=\"$active_run\"})",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"load\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"load\",run_uuid=\"$active_run\"}))",
           "legendFormat": "items/min"
         }
       ],
@@ -1062,63 +1068,6 @@
       }
     },
     {
-      "id": 5,
-      "type": "state-timeline",
-      "title": "Dependency health",
-      "description": "Per-(stage, dep) health verdict. P-12 Phase C: series whose most recent probe is older than 60s are filtered out by the freshness clause so the timeline shows a gap (grey) instead of extending stale state indefinitely. P-12 Phase B: not_configured deps (NaN gauge) render as grey too.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bffi-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 20
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "bffi_dependency_health{run_uuid=\"$active_run\"} and on(stage, dep) (time() - bffi_dependency_last_probe_timestamp{run_uuid=\"$active_run\"} < 60)",
-          "legendFormat": "{{stage}}/{{dep}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "stale",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "down",
-                  "color": "red"
-                }
-              }
-            },
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "degraded",
-                  "color": "orange"
-                }
-              }
-            },
-            {
-              "type": "value",
-              "options": {
-                "2": {
-                  "text": "up",
-                  "color": "green"
-                }
-              }
-            }
-          ]
-        }
-      }
-    },
-    {
       "id": 8,
       "type": "stat",
       "title": "Dependency probe latency (ms)",
@@ -1130,7 +1079,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 20
       },
       "targets": [
         {
@@ -1425,6 +1374,40 @@
         },
         "includeAll": false,
         "multi": false
+      },
+      {
+        "name": "m9_processed",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "bffi-prometheus"
+        },
+        "query": "query_result(bffi_stage_entities_processed_total{stage=\"m9\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m9\",run_uuid=\"$active_run\"})))",
+        "regex": "/([0-9]+\\.?[0-9]*)\\s+[0-9]+\\s*$/",
+        "refresh": 2,
+        "hide": 2,
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        }
+      },
+      {
+        "name": "m9_total",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "bffi-prometheus"
+        },
+        "query": "query_result(bffi_stage_entities_total{stage=\"m9\",run_uuid=\"$active_run\"} and on(phase) topk(1, timestamp(bffi_stage_entities_processed_total{stage=\"m9\",run_uuid=\"$active_run\"})))",
+        "regex": "/([0-9]+\\.?[0-9]*)\\s+[0-9]+\\s*$/",
+        "refresh": 2,
+        "hide": 2,
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        }
       }
     ]
   },

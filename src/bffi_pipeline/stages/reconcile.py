@@ -1802,6 +1802,17 @@ def _picker_phase_seq(
                 cache_hits=cache_hits,
                 watchdog_aborted=watchdog_aborted,
             )
+    # End-of-phase flush: emit one final progress event when the run
+    # didn't land on a cadence boundary, so the dashboard's processed
+    # gauge ends at 100 % of the phase total instead of plateauing at
+    # the last cadence multiple.
+    if progress_cadence > 0 and len(results) > 0 and len(results) % progress_cadence != 0:
+        _emit_picker_progress(
+            len(results),
+            total=len(deferred),
+            cache_hits=cache_hits,
+            watchdog_aborted=watchdog_aborted,
+        )
     return results
 
 
@@ -1871,6 +1882,14 @@ def _picker_phase_pool(
                     cache_hits=cache_hits,
                     watchdog_aborted=watchdog_aborted,
                 )
+    # End-of-phase flush — see _picker_phase_seq for rationale.
+    if progress_cadence > 0 and len(results) > 0 and len(results) % progress_cadence != 0:
+        _emit_picker_progress(
+            len(results),
+            total=len(deferred),
+            cache_hits=cache_hits,
+            watchdog_aborted=watchdog_aborted,
+        )
     results.sort(key=lambda t: t[0])
     return results
 
@@ -2388,6 +2407,25 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         # overnight run). Cheap — one probe per 1000 entities.
         if (i + 1) % _M9_HEALTH_PROBE_CADENCE == 0:
             _m9_probe_dependencies(local_resolver)
+
+    # End-of-phase flush: emit one final progress event when the walk
+    # didn't land on a cadence boundary so the dashboard reads 100 %
+    # of phase 1 instead of plateauing at the last cadence multiple.
+    if (
+        progress_cadence > 0
+        and len(phase1_results) > 0
+        and len(phase1_results) % progress_cadence != 0
+    ):
+        emit_if_active(
+            stage="m9",
+            event="progress",
+            phase="phase1",
+            counters={
+                "processed": len(phase1_results),
+                "total": len(request_list),
+            },
+            extra={"resolved": phase1_local, "deferred_to_picker": phase1_deferred},
+        )
 
     # --- Phase 1.5: consult the picker cache for deferred entries ---------
     # P-10 Phase B: single-threaded loop *before* the pool dispatch so that
