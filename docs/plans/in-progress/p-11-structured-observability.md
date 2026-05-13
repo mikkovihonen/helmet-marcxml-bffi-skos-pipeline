@@ -14,7 +14,7 @@ docker-compose.yml
 docs/runbook.md`.
 **Phase commits**:
 
-- Phase A (structured event emission from every stage): `<unfilled>`
+- Phase A (structured event emission from every stage): `f3a22b3` (2026-05-13). Code: `observability.py` + Settings + CLI hook + wired into M2/M3/M6/M8/M9/skosify/load; watchdog absorption forwards to the new stream; 5 unit tests + 867 total green. M5 embeddings deferred to a follow-up sub-step (the build/emit-candidates surface needs more event-cadence design than fit in this commit). Real-pipeline-run sanity check folds into the next bench.
 - Phase B (`bffi-pipeline status` CLI): `<unfilled>`
 - Phase C (dependency health probes): `<unfilled>`
 - Phase D (Prometheus exporter + Grafana dashboard): `<unfilled>`
