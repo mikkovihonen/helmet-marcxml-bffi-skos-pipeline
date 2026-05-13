@@ -19,7 +19,7 @@
       "id": 32,
       "type": "stat",
       "title": "Run ${active_run}",
-      "description": "Active run header. Title = run_uuid; body = free-text description from the runner script's plan event (emit via ``bffi-pipeline plan ... --description '...'``). Falls back to ``\u2014`` when no description was supplied.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -45,7 +45,11 @@
         },
         "graphMode": "none",
         "textMode": "name",
-        "colorMode": "value"
+        "colorMode": "value",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 16
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -66,7 +70,7 @@
       "id": 33,
       "type": "stat",
       "title": "Started",
-      "description": "Wall-clock time of the run's earliest start event.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -92,7 +96,11 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "value"
+        "colorMode": "value",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 16
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1775,7 +1783,7 @@
       "id": 28,
       "type": "stat",
       "title": "Skosify + Load",
-      "description": "Skosify (canonical \u2192 SKOS) + Load (\u2192 Fuseki) entities processed. Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -1870,7 +1878,7 @@
       "id": 29,
       "type": "bargauge",
       "title": "M8 + M9",
-      "description": "M8 (consolidate) entities processed + M9 (reconcile) outcome distribution per tier. Active run only. Bars share scale so the M9 outcomes visually decompose the M8 total.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -1954,7 +1962,7 @@
       "id": 30,
       "type": "bargauge",
       "title": "M2 + M3",
-      "description": "M2 (MARCXML \u2192 BIBFRAME) + M3 (BIBFRAME \u2192 BFFI) \u2014 entities processed at top, per-error-type counts from bibframe/_errors.jsonl and bffi/_validation.jsonl below. Active run only. Mirrors the M8+M9 column's structure.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -2018,7 +2026,7 @@
       "id": 31,
       "type": "bargauge",
       "title": "M5 + M6",
-      "description": "M5 (embeddings) processed + M6 (judge) outcome buckets + M6 watchdog event counts. Mirrors the M8+M9 column's structure. Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
