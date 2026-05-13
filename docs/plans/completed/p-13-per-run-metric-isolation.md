@@ -1,6 +1,6 @@
 # P-13 — Per-run metric isolation
 
-**Status**: in-progress.
+**Status**: completed.
 **Source proposal**: [`docs/proposals/prop-13-per-run-metric-isolation.md`](../../proposals/prop-13-per-run-metric-isolation.md)
 at commit `40abb2d`.
 **Plan-base commit**: `40abb2d`. To gauge drift before executing,
@@ -12,7 +12,7 @@ docs/observability.md`.
 **Phase commits**:
 
 - Phase A (exporter: add `run_uuid` label to every Counter + Gauge): `b95597e` (2026-05-13). Every metric in `PipelineMetrics` now carries `run_uuid`; `apply_event` + `_update_throughput` thread it to every `.labels(...)` site; rolling-window throughput history keyed by `(stage, phase, run_uuid)`. Three new regression tests cover cross-run isolation, legacy empty-string `run_uuid` fallback, and per-run throughput-history separation. Existing test assertions adjusted for the new alphabetical label ordering. 935 total green; intentionally a no-op on dashboard panels until Phase B adds the filter.
-- Phase B (dashboard JSON: filter every panel by `$active_run` + docs): `<unfilled>`
+- Phase B (dashboard JSON: filter every panel by `$active_run` + docs): `a4dfb23` (2026-05-13). Every PromQL target on panels 1-8 carries `run_uuid="$active_run"`; the freshness clause on panel 5 wraps both selectors. New schema test pins the contract as a forward-incompat trap. `docs/observability.md` § Per-run metric isolation explains the contract; metric vocabulary table updated with the `run_uuid` label on every metric; cardinality estimate restated. Exporter live-restarted to publish run-scoped labels. 936 total green.
 
 **Owner**: TBD.
 **Estimated wall-time**: ~1 day. Phase A is the bulk (~half a day:
