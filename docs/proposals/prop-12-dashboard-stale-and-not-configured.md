@@ -1,7 +1,9 @@
-# P-12 — Observability cleanup: exporter tail bug + dashboard freshness + `not_configured` health status
+# P-12 — Observability cleanup: exporter tail bug + Phase 2 progress + dashboard freshness + `not_configured` health status
 
 **Status**: proposed.
-**Scope**: half-day to 1 day (three small, independent fixes).
+**Scope**: ~1 day (four small, independent fixes; the Phase 2
+progress emitter adds ~half a day for the thread-safe completion
+counter + test fixtures).
 **Proposal-base commit**: `cbaa7b2`.
 
 ## Motivation
@@ -73,13 +75,42 @@ the picker fires during the cold/warm runs will also inflate. The
 dashboard's watchdog counts cannot be read literally until this is
 fixed.
 
-All three bugs produce the same operator confusion: the dashboard
-shouts about things that are either historical, by-design, or
-phantom counts from idle re-reads.
+### Bug 4 — M9 Phase 2 emits no mid-stream progress events
+
+During the 2026-05-13 P-10 Phase B + E bench, the sidecar pattern
+for the active run was:
+
+| Phase | Events | Cadence |
+|---|---|---|
+| Phase 1 (tier-0 + Finto/VIAF) | 63 progress + 1 phase_boundary | every 200 entities (`_M9_PROGRESS_CADENCE`) |
+| Cache lookup | 1 progress | once at the end of the pass |
+| Phase 2 (picker dispatch) | **0 progress + 1 phase_boundary** | only at start |
+| Phase 3 (graph mutation + provenance) | — | (fast; not a dashboard concern) |
+
+Phase 2 is the **longest** stretch on this corpus (Phase A2 measured
+~27 min of the 60 min total) and it's invisible to the dashboard
+between `phase_boundary=phase2` and the M9 `end` event. The operator
+sees a flatline graph for the most operationally interesting period
+— picker latency, cache hit-rate trend, watchdog event arrival — and
+has to fall back to `tail -F mlx-lm-8001.log | grep -c POST` to
+estimate progress, defeating the point of the structured pipeline.
+
+The fix is straightforward: emit `progress` events from the picker
+pool's `as_completed` loop in `_picker_phase_pool` (and from
+`_picker_phase_seq`'s serial loop) at the same cadence Phase 1
+uses, with counters showing how many picker calls have completed
+against the deferred-pool total. The dashboard's existing m9 progress
+panel will then render a smooth curve through Phase 2 instead of
+flatlining.
+
+All four bugs produce the same operator confusion: the dashboard
+shouts about things that are either historical, by-design, phantom
+counts from idle re-reads — or **silent during the work that
+matters most**.
 
 ## Approach
 
-Three small, independent changes:
+Four small, independent changes:
 
 ### 1. Fix the exporter tail-loop double-count (one-character bug)
 
@@ -99,10 +130,10 @@ Unit test: drive `_tail_step` with no appended bytes between calls
 and assert no event is re-applied (e.g. counter delta == 0 across
 N idle polls).
 
-This is the smallest of the three changes (one character + one
+This is the smallest of the four changes (one character + one
 test) but the most impactful: it makes the watchdog and outcome
 counters readable during a live bench. Should be the first commit
-in the PR so the other two changes can be visually verified
+in the PR so the other three changes can be visually verified
 against accurate counts.
 
 ### 2. New health status `not_configured` (gauge value `NaN`)
@@ -147,6 +178,46 @@ interval × the in-bench probe cadence (`_M9_HEALTH_PROBE_CADENCE`
 currently fires per 1000 entities, roughly once per minute on the
 M2 Max).
 
+### 4. M9 Phase 2 progress events
+
+Emit `progress` events from both picker-dispatch paths in
+`src/bffi_pipeline/stages/reconcile.py` at the same cadence Phase 1
+uses (`_M9_PROGRESS_CADENCE`, default 200):
+
+- `_picker_phase_pool` — emit after each batch of N futures resolves
+  out of `concurrent.futures.as_completed(...)`. A thread-safe
+  completion counter (atomic int or lock-guarded) drives the
+  cadence; emission stays on the orchestrator thread so JSONL writes
+  remain serialised.
+- `_picker_phase_seq` — emit after each N-th result in the
+  single-threaded loop. Trivial.
+
+Event payload mirrors Phase 1's shape so the dashboard panel uses
+one query for both phases:
+
+```json
+{"stage":"m9","event":"progress","phase":"phase2",
+ "counters":{"processed":600,"total":1358},
+ "extra":{"cache_hits":0,"watchdog_aborted":2}}
+```
+
+The `cache_hits` value carries the *running* Phase B hit rate
+(known at lookup-pass time, already in the orchestrator's local
+state). `watchdog_aborted` increments whenever a future returns a
+``was_watchdog_aborted=True`` outcome — surfaces picker
+hangs to the dashboard live rather than only after the run ends.
+
+Cadence is intentionally rate-limited (default every 200 calls,
+not every call) so the JSONL doesn't bloat — picker calls are
+typically O(seconds) but a bench with 1 358 deferred calls would
+write a 7-event Phase 2 progress trail under the default cadence.
+Operator override via `BFFI_M9_PROGRESS_CADENCE` env var if a
+denser trail is wanted during a smaller bench.
+
+Test: replay a fixture with N=600 deferred calls, assert the picker
+phase emits exactly `floor(600/200) = 3` progress events plus the
+existing start/end boundaries, in submission order.
+
 ## Out of scope
 
 - Changing the per-stage probe wiring so that *all* stages share one
@@ -175,7 +246,13 @@ M2 Max).
 - Grafana dashboard JSON updated with the freshness value-mapping
   above; visual check during the next bench shows the M6 row greying
   out within 60 s of M6 ending while the M9 row stays live.
-- No regression in the existing P-11 health-probe tests.
+- M9 Phase 2 emits `progress` events at the configured cadence; the
+  dashboard's m9 progress panel renders a continuous curve from
+  Phase 1 start through Phase 2 end on the next bench, with no
+  flatline gap between `phase_boundary=phase2` and `m9 end`.
+- No regression in the existing P-11 health-probe tests; M9
+  byte-stability tests still pass (the new emissions only add JSONL
+  lines, no graph mutation).
 
 ## Risk
 
@@ -200,5 +277,6 @@ convention.
 - [`src/bffi_pipeline/stages/probes.py`](../../src/bffi_pipeline/stages/probes.py) — `ProbeResult` + `probe_mlx_lm`.
 - [`src/bffi_pipeline/stages/judge.py:1474`](../../src/bffi_pipeline/stages/judge.py) — the M6 probe call site that triggered this.
 - [`src/bffi_pipeline/metrics_exporter.py:267`](../../src/bffi_pipeline/metrics_exporter.py) — `_tail_step` (the off-by-one truncation check) and `apply_event` (the gauge / counter mapping).
+- [`src/bffi_pipeline/stages/reconcile.py`](../../src/bffi_pipeline/stages/reconcile.py) — `_picker_phase_pool` + `_picker_phase_seq` (the picker-dispatch paths missing mid-stream progress emission), plus the existing `_M9_PROGRESS_CADENCE` constant that Phase 1 already uses.
 - [`config/grafana/dashboards/`](../../config/grafana/dashboards/) — dashboard JSON to update.
 - 2026-05-13 conversation on dashboard "DOWN" panels during the P-10 Phase B + E bench — the trigger for this proposal.
