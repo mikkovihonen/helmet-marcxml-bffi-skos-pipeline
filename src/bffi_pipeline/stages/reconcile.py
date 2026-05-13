@@ -2663,6 +2663,13 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         event="phase_boundary",
         phase="phase2",
         counters={
+            # ``total`` echoes ``deferred_to_picker`` so the exporter sets
+            # ``bffi_stage_entities_total{phase="phase2"}`` at phase entry.
+            # Without this the dashboard's M9 phase-2 bar stays empty until
+            # the first progress event lands at ``processed=cadence``
+            # (~2-3 min into Phase 2). Phase 1 / Phase 3 already follow
+            # this pattern.
+            "total": len(deferred_misses),
             "deferred_to_picker": len(deferred_misses),
             "cache_hits": cache_hits,
         },
