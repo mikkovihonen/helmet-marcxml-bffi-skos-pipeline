@@ -16,6 +16,8 @@ from prometheus_client import generate_latest
 
 from bffi_pipeline.metrics_exporter import (
     PipelineMetrics,
+    _tail_step,
+    _TailState,
     apply_event,
     rehydrate,
 )
@@ -227,6 +229,131 @@ def test_rehydrate_on_missing_sidecar_returns_zero(tmp_path: Path) -> None:
     crash; it just exposes an empty registry."""
     metrics = PipelineMetrics()
     assert rehydrate(metrics, tmp_path / "missing.jsonl") == 0
+
+
+# --- _tail_step (P-12 Phase A regression pins) --------------------------
+
+
+def _watchdog_event_row(ts: str, inner: str) -> dict[str, object]:
+    """Synthetic watchdog row for the tail-loop double-count tests.
+
+    Watchdog events are useful here because they're keyed off the
+    `Counter` family — the gauge family masks the bug since
+    ``Gauge.set`` is idempotent. Counter inflation is the bug
+    signature.
+    """
+    return {
+        "ts": ts,
+        "run_uuid": "r",
+        "stage": "watchdog",
+        "event": "watchdog",
+        "extra": {"event": inner, "elapsed_s": 0.0, "retry_n": 0},
+    }
+
+
+def _watchdog_total(metrics: PipelineMetrics, inner: str) -> float:
+    """Helper: read the ``bffi_watchdog_events_total`` counter for one inner event."""
+    return float(metrics.watchdog_events_total.labels(stage="watchdog", event=inner)._value.get())
+
+
+def test_tail_step_idle_polls_do_not_double_count(tmp_path: Path) -> None:
+    """Regression pin for the P-12 Phase A fix.
+
+    Pre-fix: ``_tail_step`` used ``size <= state.last_pos`` and
+    reset ``last_pos`` to 0 even when nothing was appended, then
+    re-applied the entire sidecar on every idle poll. Counter
+    inflation in mid-bench dashboards (~1 165x on the 2026-05-13
+    run) was the symptom.
+
+    Post-fix: idle polls (size == last_pos) return 0 with no
+    re-application. Counters stay stable.
+    """
+    sidecar = tmp_path / "stage-events.jsonl"
+    rows = [
+        _watchdog_event_row("2026-05-13T00:00:00Z", "timeout"),
+        _watchdog_event_row("2026-05-13T00:00:01Z", "timeout"),
+        _watchdog_event_row("2026-05-13T00:00:02Z", "give_up"),
+    ]
+    sidecar.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    metrics = PipelineMetrics()
+    rehydrate(metrics, sidecar)
+    state = _TailState(last_pos=sidecar.stat().st_size)
+
+    timeout_before = _watchdog_total(metrics, "timeout")
+    give_up_before = _watchdog_total(metrics, "give_up")
+    assert timeout_before == 2.0
+    assert give_up_before == 1.0
+
+    # 50 idle polls. Pre-fix this inflated counters by 50x;
+    # post-fix every step returns 0 and counters stay frozen.
+    for _ in range(50):
+        applied = _tail_step(metrics, sidecar, state)
+        assert applied == 0
+
+    assert _watchdog_total(metrics, "timeout") == timeout_before
+    assert _watchdog_total(metrics, "give_up") == give_up_before
+
+
+def test_tail_step_handles_truncation_and_re_reads(tmp_path: Path) -> None:
+    """Rotation / truncation must still trigger a full re-read.
+
+    Pre-fix the ``<=`` branch handled this incidentally (and broke
+    idle polls); post-fix the strict ``<`` branch handles it
+    intentionally without breaking the idle case.
+    """
+    sidecar = tmp_path / "stage-events.jsonl"
+    rows_before = [_watchdog_event_row("2026-05-13T00:00:00Z", "timeout") for _ in range(3)]
+    sidecar.write_text("\n".join(json.dumps(r) for r in rows_before) + "\n", encoding="utf-8")
+    metrics = PipelineMetrics()
+    rehydrate(metrics, sidecar)
+    state = _TailState(last_pos=sidecar.stat().st_size)
+    assert _watchdog_total(metrics, "timeout") == 3.0
+
+    # Truncate + replace with fewer-but-different events.
+    rows_after = [
+        _watchdog_event_row("2026-05-13T01:00:00Z", "pair_budget_exceeded"),
+        _watchdog_event_row("2026-05-13T01:00:01Z", "pair_budget_exceeded"),
+    ]
+    sidecar.write_text("\n".join(json.dumps(r) for r in rows_after) + "\n", encoding="utf-8")
+
+    applied = _tail_step(metrics, sidecar, state)
+    # Truncation re-reads from byte 0 so both new events get applied.
+    assert applied == 2
+    assert _watchdog_total(metrics, "pair_budget_exceeded") == 2.0
+
+
+def test_tail_step_mixed_idle_and_append_pattern(tmp_path: Path) -> None:
+    """Bench-realistic pattern: events arrive sporadically across many
+    polls. Total counter delta must equal exactly the appended
+    events, not appended-times-idle-polls.
+    """
+    sidecar = tmp_path / "stage-events.jsonl"
+    sidecar.write_text("", encoding="utf-8")
+    metrics = PipelineMetrics()
+    state = _TailState(last_pos=0)
+
+    # 5 idle polls before anything happens.
+    for _ in range(5):
+        assert _tail_step(metrics, sidecar, state) == 0
+
+    # Append one event, poll, then 5 idle polls.
+    with sidecar.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(_watchdog_event_row("2026-05-13T00:00:00Z", "timeout")) + "\n")
+    assert _tail_step(metrics, sidecar, state) == 1
+    for _ in range(5):
+        assert _tail_step(metrics, sidecar, state) == 0
+
+    # Append two more events, poll, then 5 more idle polls.
+    with sidecar.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(_watchdog_event_row("2026-05-13T00:00:01Z", "timeout")) + "\n")
+        f.write(json.dumps(_watchdog_event_row("2026-05-13T00:00:02Z", "give_up")) + "\n")
+    assert _tail_step(metrics, sidecar, state) == 2
+    for _ in range(5):
+        assert _tail_step(metrics, sidecar, state) == 0
+
+    # Exactly 3 events appended; no inflation from the 15 idle polls.
+    assert _watchdog_total(metrics, "timeout") == 2.0
+    assert _watchdog_total(metrics, "give_up") == 1.0
 
 
 # --- dashboard JSON schema sanity ---------------------------------------

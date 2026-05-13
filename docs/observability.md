@@ -27,6 +27,28 @@ alongside the pipeline (it shares the `BFFI_DATA_DIR` mount without
 volume mapping); Prometheus and Grafana run as Docker Compose
 services under the `observability` profile.
 
+### Counter inheritance across exporter restarts
+
+Counters (`bffi_*_total`) are cumulative within a single exporter
+process. Each `bffi-pipeline serve-metrics` invocation starts from
+zero, rehydrates the full sidecar once, then tails for new events.
+Restarting the exporter resets every counter to "sum of sidecar
+events on disk at startup" — the displayed numbers can drop
+visibly on the dashboard at the restart boundary.
+
+This is by design: rehydration replays the JSONL ground truth, so
+counters always reflect the actual on-disk event count regardless
+of whether the exporter was bounced. Operators sweeping the data
+dir between benches (e.g. `rm data/stage-events.jsonl` for a clean
+slate) and restarting the exporter get a clean zero baseline;
+operators wanting historical continuity keep the sidecar in place.
+
+PromQL queries spanning an exporter restart should account for the
+discontinuity (use `increase(...[5m])` or `rate(...[5m])` rather
+than raw counter values across the boundary). The Grafana
+dashboard does this for `Watchdog event rate (5m)` already; the
+other counter-based panels show cumulative-by-design.
+
 ## Metric vocabulary
 
 The exporter publishes the canonical metric set below. Every metric

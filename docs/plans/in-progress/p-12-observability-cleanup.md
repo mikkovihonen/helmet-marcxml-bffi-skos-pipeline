@@ -1,6 +1,6 @@
 # P-12 — Observability cleanup: exporter tail bug + Phase 2 progress + dashboard overview row + freshness + `not_configured` health status
 
-**Status**: backlog.
+**Status**: in-progress.
 **Source proposal**: [`docs/proposals/prop-12-dashboard-stale-and-not-configured.md`](../../proposals/prop-12-dashboard-stale-and-not-configured.md)
 at commit `374eb60`.
 **Plan-base commit**: `374eb60`. To gauge drift before executing,

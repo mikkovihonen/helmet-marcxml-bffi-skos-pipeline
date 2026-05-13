@@ -276,9 +276,14 @@ def _tail_step(metrics: PipelineMetrics, sidecar_path: Path, state: _TailState) 
     if not sidecar_path.is_file():
         return 0
     size = sidecar_path.stat().st_size
-    if size <= state.last_pos:
+    if size < state.last_pos:
         # File was truncated / rotated. Reset and re-read from the
-        # start so we don't miss the new content.
+        # start so we don't miss the new content. ``<`` (not ``<=``)
+        # because ``size == last_pos`` is the *idle poll* case where
+        # nothing was appended — using ``<=`` here would re-apply the
+        # whole sidecar on every quiet tick and ``Counter.inc()`` is
+        # cumulative, so the bug surfaced as ~1 165x inflation in the
+        # mid-bench dashboard on 2026-05-13. See P-12 Phase A.
         state.last_pos = 0
     if size == state.last_pos:
         return 0
