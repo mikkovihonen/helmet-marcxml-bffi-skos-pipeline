@@ -154,6 +154,22 @@ plan documents *when the execution was scheduled*.
   entry preserves the committed-identifier URIs byte-for-byte; a
   one-shot `provenance migrate-v2` CLI rewrites existing
   `data/provenance.ttl`.
+- [`prop-11-structured-observability.md`](prop-11-structured-observability.md)
+  — `proposed`. Add a canonical structured-event stream so operators
+  can answer "is the pipeline making forward progress?" from a single
+  source instead of composing five unrelated tools (`ps`, `curl`,
+  `grep` against three different log files). Phase A emits
+  `STAGE_EVENT` JSON lines to stderr + a `stage-events.jsonl` sidecar
+  per stage entry / progress tick / phase boundary / exit. Phase B
+  ships a `bffi-pipeline status` CLI that tails the sidecar and
+  renders a live summary with ETA + last health probe. Phase C wires
+  dependency health probes (Fuseki, mlx-lm, Finto) into the same
+  stream. Phase D adds a `bffi-pipeline serve-metrics` Prometheus
+  exporter (tails the sidecar) + provisioned Grafana dashboard as
+  Docker-Compose siblings of the existing Fuseki + Skosmos services
+  — local-only stack, no outbound telemetry, the dashboard consumer
+  that earns the per-stage emission overhead for the 12-hour
+  overnight-run use case.
 - [`prop-10-m9-reconcile-throughput.md`](prop-10-m9-reconcile-throughput.md)
   — `planning (graduated)`. M9 reconcile is the new wall after P-02
   closed: the 2026-05-12 5k run clocked M9 at 82.9 % of total wall-

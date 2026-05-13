@@ -20,7 +20,7 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - Pro bono. **No paid API services.** All LLM inference runs locally on Apple Silicon (target: MacBook Pro M5 Max, 128 GB).
 - Open-source tooling only.
 - License: code **Apache 2.0** (matching NLF tools); published RDF data **CC0** (matching Finto vocabularies).
-- No telemetry / error reporting.
+- No **outbound** telemetry / error reporting — i.e. no Datadog, Sentry, Honeycomb, or any other monitoring service that sends pipeline data to a third party. Local-only observability is fine: running Prometheus + Grafana in a container next to the existing Fuseki + Skosmos services (so the operator can `localhost:3001` a dashboard) does not violate this constraint because no data leaves the operator's machine. See `docs/proposals/prop-11-structured-observability.md` for the planned local stack.
 
 ## Committed identifiers (do not change without surfacing)
 
