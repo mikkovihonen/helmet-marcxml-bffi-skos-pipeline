@@ -658,8 +658,13 @@
         },
         {
           "refId": "B",
-          "expr": "(bffi_stage_eta_seconds{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"} unless on(stage,run_uuid) bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or (bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"})",
-          "legendFormat": "time"
+          "expr": "bffi_stage_eta_seconds{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"} unless on(stage,run_uuid) bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}",
+          "legendFormat": "ETA"
+        },
+        {
+          "refId": "C",
+          "expr": "bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}",
+          "legendFormat": ""
         }
       ],
       "options": {
@@ -669,7 +674,7 @@
           ]
         },
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "colorMode": "background",
         "orientation": "vertical"
       },
@@ -713,6 +718,18 @@
           {
             "matcher": {
               "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": " "
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
               "options": "B"
             },
             "properties": [
@@ -734,6 +751,41 @@
                   "mode": "fixed",
                   "fixedColor": "text"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "ETA"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": " "
               }
             ]
           }
