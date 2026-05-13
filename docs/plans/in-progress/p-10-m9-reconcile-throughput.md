@@ -18,9 +18,10 @@ data/finto-dumps/`.
 - Phase A2 (Phase 1 parallelisation — tier-0 + candidate query): `6c14c36` (code, 2026-05-12). Bench snapshot at [`docs/performance/2026-05-12-5k-m2-max-phase-a2.md`](../../performance/2026-05-12-5k-m2-max-phase-a2.md): zero `field_budget_exceeded` events ✓, semantically byte-identical bindings to Phase A ✓ (only `descriptionChangeDate` timestamps differ), wall **3 639 s (60:39)** vs Phase A's 5 460 s — cumulative **1.57× speedup** vs the 5 722 s baseline (Phase A2 alone gives 1.50× over Phase A). Phase 1 dropped ~1.9× (sublinear of the 8× nominal — server-side Finto/VIAF latency dominates throughput). **Still short of the ≥3× cumulative target on this corpus**; Phase B + Phase C projected to close the gap.
 - Phase B (persistent picker cache): `<unfilled>`
 - Phase C (tier-0 normalisation + altLabel inclusion): `8e47a69` (code, 2026-05-12; feature-flagged off by default — see below). Resolver-side `BFFI_M9_TIER0_EXPANSION` defaults `False`; `load-finto --fold-pref-labels` materialisation defaults `False` as of the 2026-05-13 flip. Bench *attempt* at [`docs/performance/2026-05-13-5k-m2-max-phase-c-attempt.md`](../../performance/2026-05-13-5k-m2-max-phase-c-attempt.md) (mlx-lm GPU-OOM mid-run on the M2 Max; 1 500 picker calls completed at crash already past Phase A2's 1 348 baseline, suggesting Phase C does **not** reduce tier-2 work on the May 12 corpus while doubling Phase 1 SPARQL traffic). Code-side stays committed; production-readiness validation remains pending the cataloguer audit OR a clean re-bench on the M5 Max 128 GB with smaller mlx-lm `--prompt-cache-size`.
+- Phase E (prompt ordering for mlx-lm prefix-cache stickiness): `<unfilled>` — promoted from the deferred-levers list on 2026-05-13 after the Phase C bench attempt confirmed that picker-phase wall remains the largest single contributor (no Phase B yet, Phase C provides no picker savings on this corpus). Targets ≥ 5 % picker-phase wall reduction at zero quality risk by sorting the deferred picker queue to maximise prompt-prefix reuse across consecutive `POST /v1/chat/completions` calls.
 
 **Owner**: TBD.
-**Estimated wall-time**: ~4.5-5.5 days end-to-end. Phase A ~1.5 days (concurrency + watchdog wiring + bench) **— shipped at `0f8c3da`**. Phase A2 ~1 day (Phase 1 parallelisation — added after Phase A's bench surfaced that serial Phase 1 work, not tier-2 LLM, is the dominant cost on this corpus). Phase B ~1-1.5 days. Phase C ~1-2 days (rule design + cataloguer-sample audit gate). Each phase is independently shippable and lands with its own [`docs/performance/`](../../performance/) snapshot.
+**Estimated wall-time**: ~5-6 days end-to-end. Phase A ~1.5 days (concurrency + watchdog wiring + bench) **— shipped at `0f8c3da`**. Phase A2 ~1 day (Phase 1 parallelisation — added after Phase A's bench surfaced that serial Phase 1 work, not tier-2 LLM, is the dominant cost on this corpus). Phase B ~1-1.5 days. Phase C ~1-2 days (rule design + cataloguer-sample audit gate). Phase E ~0.25 day (sort key + env var + byte-stability test; small surface area). Each phase is independently shippable and lands with its own [`docs/performance/`](../../performance/) snapshot.
 
 ## Goal
 
@@ -39,8 +40,9 @@ The Phase A column shows the **measured** result, not a target — see [`docs/pe
 
 ## Definition of done
 
-- All four phases have filled-in phase commits, each on its own commit (no batching) so a partial revert is mechanical.
-- The fresh [`docs/performance/`](../../performance/) snapshot taken after Phase C shows M9 ≤ 70 s on the 5k sample with the cache warm, and the extrapolation table in that snapshot projects ≤ 10 h for the full 800 k corpus.
+- All five phases (A, A2, B, C, E) have filled-in phase commits, each on its own commit (no batching) so a partial revert is mechanical.
+- The fresh [`docs/performance/`](../../performance/) snapshot taken after the final phase shows M9 ≤ 70 s on the 5k sample with the cache warm, and the extrapolation table in that snapshot projects ≤ 10 h for the full 800 k corpus.
+- Phase E's snapshot demonstrates ≥ 5 % picker-phase wall reduction vs Phase A2 at byte-identical output.
 - The Phase A2 snapshot demonstrates that the **original Phase A speedup target (≥ 3×)** is achievable once both concurrency levers ship — closing the gap surfaced by the Phase A bench.
 - The 200-sample audit from Phase C is committed under `gold/reconcile-audit-200.jsonl` (feeds the P-06 backlog).
 - `docs/plans/backlog/p-10-m9-reconcile-throughput.md` has been `git mv`'d through `in-progress/` → `completed/` per the lifecycle convention in [`docs/plans/README.md`](../README.md).
@@ -364,6 +366,61 @@ This is the safety net in case the 200-audit misses a rare collision.
 
 ---
 
+## Phase E — Prompt ordering for mlx-lm prefix-cache stickiness
+
+Estimated wall-time: ~0.25 day (~1-2 hours). Pure orchestration-shape change with no new dependencies. Ship before the next 5 k bench so the next snapshot measures the speedup cleanly.
+
+**Motivation (promoted from deferred-levers on 2026-05-13).** mlx-lm's prompt-prefix cache is keyed on the longest-common-prefix of consecutive `POST /v1/chat/completions` calls (per P-02 § "Throughput findings" and the mlx-lm 0.31 server's `--prompt-cache-size` LRU). Today the deferred picker queue is dispatched in the order `apply_reconciliation` walked the canonical Works — effectively random with respect to vocabulary and request kind. Consecutive picker calls therefore frequently share zero usable prefix (e.g. a fictional-character pick on Work A is followed by a YSO subject pick on Work B). Sorting the queue so that calls sharing the system prompt + vocabulary + candidate-list-style cluster together turns the cache LRU from "always cold" into "warm for runs of consecutive same-kind calls".
+
+The Phase C bench attempt (2026-05-13) showed 1 500 picker calls completed in ~1h 35m on the M2 Max — ~3.8 s per call wall. The system prompt + few-shot exemplars are ~95 % of every picker prompt, so even a partial prefix-cache hit collapses per-call wall to roughly the decode time alone. Expected impact: **5-15 % picker-phase wall reduction**, larger on YSO-heavy corpora (long runs of same-kind picks) than on the heterogeneous May 12 sample.
+
+Phase E does **not** change any picker input, prompt text, or candidate list — only the order in which the picker queue is drained. Bindings are byte-stable under any ordering because the orchestrator already gathers futures and sorts by `(work_uri, field_predicate, literal)` before graph-write (per Phase A's A.3 determinism gate).
+
+### E.1. Sort key in `_picker_phase_pool`
+
+In `src/bffi_pipeline/stages/reconcile.py`, sort the `deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]]` queue immediately before dispatching to the `ThreadPoolExecutor`. Sort key, in order:
+
+1. **`request.kind`** — clusters fictional-character picks together, then person-author picks, then subject picks, etc. The system prompt + few-shot exemplars vary slightly per kind (the picker prompt has kind-conditional sections in `prompts/picker_v1.txt`), so picks of the same kind share the longest prompt prefix.
+2. **`candidates[0].source_vocabulary`** — within a kind, cluster by the dominant candidate vocabulary (`yso`, `finaf`, `kauno`, `viaf`, …). Same-vocabulary candidates share authority-style language in the prompt (vocabulary-specific candidate formatting).
+3. **A stable fingerprint of `sorted(c.uri for c in candidates)`** — within a kind+vocab cluster, group calls with overlapping candidate sets. The candidate URIs are rendered into the prompt body; identical or near-identical candidate sets share long prompt-body prefixes.
+4. **`request.literal`** — final tie-breaker for byte-stability across runs (the literal varies last in the prompt).
+
+Use a stable sort (Python's `list.sort` is stable). The `idx` field rides along so the post-pool result merge still places each binding at the correct position in the canonical graph.
+
+### E.2. Env var + CLI flag
+
+- Add `m9_picker_ordering: str = Field(default="prefix-cache", alias="BFFI_M9_PICKER_ORDERING")` to `Settings`. Valid values: `"prefix-cache"` (Phase E behaviour, default) and `"submission"` (pre-Phase-E behaviour — submission order, useful for bench A/B and rollback).
+- No CLI flag — env var only. Operators don't need per-run override; the bench-time A/B is settable via env.
+- Document the env var in `docs/runbook.md` under the M9 reconcile section.
+
+### E.3. Tests
+
+- **Byte-stability**: fixture with 50+ deferred picker entries; run with `BFFI_M9_PICKER_ORDERING=prefix-cache` and `BFFI_M9_PICKER_ORDERING=submission`; assert byte-identical canonical Turtle output (modulo `descriptionChangeDate` timestamps). The orchestrator's existing post-pool sort-by-idx guarantees this — the test pins the contract.
+- **Sort key correctness**: synthetic deferred queue with mixed kinds and vocabularies; assert the sorted order matches the documented key (fictional-character before person before subject; within each, `finaf` before `kauno` before `yso` lexicographically; within each, same-candidate-set runs cluster).
+- **Empty / single-entry queue**: assert the sort is a no-op (no exceptions, no reordering).
+
+### E.4. Acceptance
+
+- [ ] `BFFI_M9_PICKER_ORDERING` env var wired through `Settings`; default `"prefix-cache"`.
+- [ ] `_picker_phase_pool` sorts `deferred` per E.1's key when ordering is `"prefix-cache"`; preserves submission order when `"submission"`.
+- [ ] Byte-stability test passes: identical canonical Turtle under both ordering modes on the 50-entry fixture.
+- [ ] Sort-key correctness test passes.
+- [ ] 5 k re-run with `BFFI_M9_PICKER_ORDERING=prefix-cache` (against Phase A + A2, Phase C still flag-off) clocks picker-phase wall **≥ 5 % below** the Phase A2 baseline. (Smaller speedup is acceptable as documented in the snapshot's "Implications" — but a regression vs Phase A2 fails the acceptance gate.)
+- [ ] Fresh [`docs/performance/<date>-5k-m2-max-phase-e.md`](../../performance/) snapshot committed. Includes side-by-side picker-phase wall + per-call median latency vs Phase A2's snapshot, and an mlx-lm cache-hit-rate proxy measurement (P-11's metrics-exporter Prometheus counter if available, otherwise the snapshot documents the proxy used).
+
+### E.5. Rollback
+
+- Set `BFFI_M9_PICKER_ORDERING=submission` — restores pre-Phase-E queue ordering. No code revert needed; bindings remain byte-stable across the flip.
+- If full revert needed: git revert the Phase E commit. `Settings.m9_picker_ordering` field stays (unused). No vocabulary, schema, or output-shape changes.
+
+### E.6. Why this is safe (and why Phase D isn't, yet)
+
+Phase E is purely a dispatch-order change — every individual picker call receives the same prompt, candidate list, and few-shot exemplars it would have received in submission order. The picker is deterministic per input (temperature 0 in `prompts/picker_v1.txt`). The orchestrator's existing post-pool result-merge sorts by `idx` before graph-write, so the canonical Turtle is byte-stable regardless of completion order.
+
+Phase D (batched picker — handing N fields per LLM call to amortise prompt-prefix cost) stays deferred because it *does* change picker inputs: the model must now disambiguate N entities in a single response, and long-context quality degradation on the 8B Qwen model is unmeasured against the P-06 gold-set. Phase D's gate is a gold-set big enough to detect a 1-2 % quality regression — the current `gold/contrib.jsonl` is too small. See `docs/plans/backlog/p-06-gold-set-growth.md`.
+
+---
+
 ## Risks
 
 | Risk | Likelihood | Mitigation |
@@ -380,12 +437,14 @@ This is the safety net in case the 200-audit misses a rare collision.
 | Phase C — Silent false-positive merge (cataloguer literal binds to wrong authority because normalisation collides) | Medium | 200-sample audit gate (C.5) is the primary defence. `needs-review` flag (C.7) is the secondary safety net for fuzzy matches. |
 | Phase C — `skos:altLabel` ambiguity at tier-0 causes legitimate exact-prefLabel matches to fall through | Low | The "never bind on multi-hit" constraint in `local_concept_resolver.py` already prevents this; the existing prefLabel path stays in place because folded prefLabels still get materialised. |
 | Phase C — Cataloguer audit is delayed by external availability | Medium | Plan executor can perform the audit themselves with documented uncertainty flagged for later cataloguer review. Audit results are reviewable and reversible. |
+| Phase E — Diminishing returns at corpus scale: 200-slot mlx-lm prompt-cache fills before clustering pays off | Medium | The 5 k bench is the canary; if picker-phase wall reduction is < 5 %, the snapshot's "Implications" section documents the next lever (cache-size tuning) without blocking other phases. Phase E's cost is ~1-2 hours implementation, so a low-return outcome is cheap. |
+| Phase E — Sort key produces unstable dispatch order across runs (e.g. set iteration order leaks in) | Effectively zero | Sort key is fully deterministic (`request.kind` is a string enum, `source_vocabulary` is a string, candidate-URI fingerprint uses `sorted()`). Python's `list.sort` is stable. E.3 byte-stability test pins it. |
 | All — Concurrent benches produce noisy timings on the M2 Max dev box | Low | Each phase's bench is repeated 3× and the median reported. Mlx-lm prefix-cache is warmed before measurement (10-call warmup loop). |
 
 ## Open issues to close before / during execution
 
 - **Finto refresh policy in the runbook** (Phase B docs): which vocabularies the operator should refresh how often. Plan default: YSO + KANTO/FINAF daily on production; YSE weekly; KAUNO + MUSO opportunistic / on-demand. The plan executor adds the per-vocabulary recipe to `docs/runbook.md` during Phase B.
-- **Phase D (batched picker) and Phase E (prompt ordering)** stay deferred per the proposal. If A+B+C close the gap to ≤ 8 h on the full 800 k corpus, they're not needed and the plan completes. If wall-time is still > overnight after C, file a follow-up plan (P-11?) that picks up D + E.
+- **Phase D (batched picker) stays deferred** per the proposal. Phase E (prompt ordering) was promoted into this plan on 2026-05-13 after the Phase C bench attempt confirmed that picker-phase wall is still the largest contributor and Phase E is a zero-quality-risk lever. Phase D remains deferred because batching N picks per LLM call changes picker inputs and risks long-context quality degradation on the 8B model — the gate is a P-06 gold-set big enough to detect a 1-2 % regression, which doesn't exist yet. If A+A2+B+C+E close the gap to ≤ 8 h on the full 800 k corpus, Phase D is not needed and the plan completes. If wall-time is still > overnight after E, file a follow-up plan that picks up D once the gold-set has grown.
 - **Provenance for cache-hit Activities**: the spec § 8 enum (`bffi-prov:stage`) currently has `reconciliation-llm`. Cache-hit Activities should carry the same stage (the decision is semantically the LLM's), with the `prov:wasInfluencedBy` pointer distinguishing them. No new stage value needed.
 - **Phase C strip rules in non-Finnish corpora**: the `$e` role-marker whitelist (`ohjaaja`, `säveltäjä`, …) is Finnish/Swedish. If P-09 (`prop-09-library-agnostic-source`) graduates and a second library onboards with a different language, the whitelist needs to grow. Out of scope here; document as a P-09 follow-up.
 
