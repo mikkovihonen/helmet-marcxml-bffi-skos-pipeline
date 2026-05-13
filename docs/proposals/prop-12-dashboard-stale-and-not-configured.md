@@ -1,6 +1,6 @@
 # P-12 — Observability cleanup: exporter tail bug + Phase 2 progress + dashboard overview row + freshness + `not_configured` health status
 
-**Status**: proposed.
+**Status**: planning (graduated → [`docs/plans/backlog/p-12-observability-cleanup.md`](../plans/backlog/p-12-observability-cleanup.md)).
 **Scope**: ~1 day (five small, independent fixes). The Phase 2
 progress emitter is the largest single item (~half a day for the
 thread-safe completion counter + test fixtures); the dashboard
