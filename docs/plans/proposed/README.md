@@ -109,6 +109,15 @@ plan documents *when the execution was scheduled*.
   `bib_id` from MARC 001 instead of the filename stem; Phase B pulls
   the nine-site FI-HELME URI cluster into a config-driven
   `LibrarySource` registry keyed on MARC 003.
+- [`prop-15-bilingual-subject-reconciliation.md`](prop-15-bilingual-subject-reconciliation.md)
+  — `proposed`. M9 today binds `Italia` (Finnish) to `yso:p105111`
+  and `Italien` (Swedish) to `allars:Y30493` — two URIs for the
+  same concept. Confirmed against the 2026-05-13 cataloguer-feedback
+  audit (`b26322791`). Proposes a three-layer fix:
+  `skos:exactMatch`-driven cross-walk at reconcile time, post-M8
+  subject deduplication, and the same treatment for `slm/fin` +
+  `slm/swe`. Numbering note: prop-15 collides with no existing plan;
+  if it graduates the plan should pick a non-colliding `p-NN`.
 
 ## Graduated / completed / abandoned
 

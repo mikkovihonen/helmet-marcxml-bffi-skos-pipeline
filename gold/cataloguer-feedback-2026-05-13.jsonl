@@ -1,0 +1,19 @@
+{"bib_id":"b26152228","category":"kanto_no_d_subfield","expected":"bind_to_kanto","note":"In KANTO with asteri-id; record lacks $d (birth/death years).","cataloguer_action":"none — pipeline should bind"}
+{"bib_id":"b26141280","category":"kanto_no_d_subfield","expected":"bind_to_kanto","note":"In KANTO with asteri-id; record lacks $d.","cataloguer_action":"none — pipeline should bind"}
+{"bib_id":"b13164132","category":"kanto_no_d_subfield","expected":"bind_to_kanto","note":"In KANTO with asteri-id; record lacks $d.","cataloguer_action":"none — pipeline should bind"}
+{"bib_id":"b15641065","category":"kanto_no_d_subfield","expected":"bind_to_kanto","note":"In KANTO with asteri-id; record lacks $d.","cataloguer_action":"none — pipeline should bind"}
+{"bib_id":"b26267822","category":"kanto_no_d_subfield","expected":"bind_to_kanto","note":"In KANTO with asteri-id; record lacks $d.","cataloguer_action":"none — pipeline should bind"}
+{"bib_id":"b22522396","category":"not_in_kanto","expected":"no_candidate_or_literal","note":"Author not in KANTO. M9 must NOT hallucinate a wrong bind.","cataloguer_action":"none"}
+{"bib_id":"b23948619","category":"not_in_kanto","expected":"no_candidate_or_literal","note":"Author not in KANTO.","cataloguer_action":"none"}
+{"bib_id":"b26485916","category":"not_in_kanto","expected":"no_candidate_or_literal","note":"Author not in KANTO.","cataloguer_action":"none"}
+{"bib_id":"b25845469","category":"not_in_kanto","expected":"no_candidate_or_literal","note":"Author not in KANTO.","cataloguer_action":"none"}
+{"bib_id":"b23481833","category":"not_in_kanto","expected":"no_candidate_or_literal","note":"Author not in KANTO.","cataloguer_action":"none"}
+{"bib_id":"b25254509","category":"kanto_id_missing_from_record","expected":"depends_on_lexical_match","note":"Author IS in KANTO but the bib record omits the asteri-id. Pipeline may bind via lexical / picker; cataloguer-side fix is to add the $0 subfield.","cataloguer_action":"add $0 asteri-id to record"}
+{"bib_id":"b23591146","category":"wrong_name_order","expected":"observe_then_cataloguer_fixes","note":"Name parts in wrong order. Cataloguer wants to see current pipeline behaviour before correcting the source record.","cataloguer_action":"reorder after observing pipeline behaviour"}
+{"bib_id":"b26163743","category":"incorrect_name_form","expected":"observe_then_cataloguer_fixes","note":"Wrong name form. Cataloguer fix scheduled.","cataloguer_action":"correct name form"}
+{"bib_id":"b22057407","category":"old_name_form_no_id","expected":"observe_then_cataloguer_fixes","note":"Old/superseded name form, differs from KANTO; no $0. Pipeline may bind via lexical to a different KANTO URI than the current canonical.","cataloguer_action":"update to current KANTO form"}
+{"bib_id":"b26356557","category":"yso_fin_swe_co_occurrence","expected":"single_yso_uri","note":"Record carries both yso/fin and yso/swe entries for the same concept. M9 subject-reconcile must collapse to one URI per concept, not duplicate.","cataloguer_action":"none — pipeline behaviour question"}
+{"bib_id":"b26304119","category":"yso_fin_swe_co_occurrence","expected":"single_yso_uri","note":"yso/fin + yso/swe co-occurrence.","cataloguer_action":"none"}
+{"bib_id":"b26322791","category":"yso_fin_swe_co_occurrence","expected":"single_yso_uri","note":"yso/fin + yso/swe co-occurrence.","cataloguer_action":"none"}
+{"bib_id":"b2635665x","category":"yso_fin_swe_co_occurrence","expected":"single_yso_uri","note":"yso/fin + yso/swe co-occurrence. Sierra check-digit x form.","cataloguer_action":"none"}
+{"bib_id":"b26346564","category":"slm_fin_swe_co_occurrence","expected":"single_slm_uri","note":"slm/fin + slm/swe co-occurrence (genre/form vocab; MUSO-adjacent).","cataloguer_action":"none — same shape as yso bilingual case"}
