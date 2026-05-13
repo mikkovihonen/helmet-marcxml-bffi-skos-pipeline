@@ -114,7 +114,7 @@
       "id": 9,
       "type": "stat",
       "title": "M2 marc-to-bf",
-      "description": "Current state of pipeline stage `m2` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -151,7 +151,11 @@
         "graphMode": "none",
         "textMode": "value_and_name",
         "colorMode": "background",
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -271,7 +275,7 @@
       "id": 10,
       "type": "stat",
       "title": "M3 bf-to-bffi",
-      "description": "Current state of pipeline stage `m3` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -308,7 +312,11 @@
         "graphMode": "none",
         "textMode": "value_and_name",
         "colorMode": "background",
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -428,7 +436,7 @@
       "id": 11,
       "type": "stat",
       "title": "M5 embeddings",
-      "description": "Current state of pipeline stage `m5` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -465,7 +473,11 @@
         "graphMode": "none",
         "textMode": "value_and_name",
         "colorMode": "background",
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -585,7 +597,7 @@
       "id": 12,
       "type": "stat",
       "title": "M6 judge",
-      "description": "Current state of pipeline stage `m6` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -622,7 +634,11 @@
         "graphMode": "none",
         "textMode": "value_and_name",
         "colorMode": "background",
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -742,7 +758,7 @@
       "id": 13,
       "type": "stat",
       "title": "M8 consolidate",
-      "description": "Current state of pipeline stage `m8` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -779,7 +795,11 @@
         "graphMode": "none",
         "textMode": "value_and_name",
         "colorMode": "background",
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -899,7 +919,7 @@
       "id": 14,
       "type": "stat",
       "title": "M9 reconcile",
-      "description": "Current state of pipeline stage `m9` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -936,7 +956,11 @@
         "graphMode": "none",
         "textMode": "value_and_name",
         "colorMode": "background",
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1056,7 +1080,7 @@
       "id": 15,
       "type": "stat",
       "title": "Skosify",
-      "description": "Current state of pipeline stage `skosify` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -1088,7 +1112,11 @@
         "graphMode": "none",
         "textMode": "value",
         "colorMode": "background",
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1161,7 +1189,7 @@
       "id": 16,
       "type": "stat",
       "title": "Load \u2192 Fuseki",
-      "description": "Current state of pipeline stage `load` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -1193,7 +1221,11 @@
         "graphMode": "none",
         "textMode": "value",
         "colorMode": "background",
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1272,7 +1304,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 0,
         "y": 7
@@ -1293,7 +1325,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 14
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1327,7 +1363,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 3,
         "y": 7
@@ -1348,7 +1384,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 14
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1382,7 +1422,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 6,
         "y": 7
@@ -1403,7 +1443,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 14
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1437,7 +1481,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 9,
         "y": 7
@@ -1458,7 +1502,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 14
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1492,7 +1540,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 12,
         "y": 7
@@ -1513,7 +1561,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 14
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1547,7 +1599,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 15,
         "y": 7
@@ -1573,7 +1625,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 14
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1607,7 +1663,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 18,
         "y": 7
@@ -1628,7 +1684,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 14
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1662,7 +1722,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 21,
         "y": 7
@@ -1683,7 +1743,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 14
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1720,7 +1784,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 11
+        "y": 10
       },
       "targets": [
         {
@@ -1773,7 +1837,7 @@
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 22
       },
       "targets": [
         {
@@ -1815,7 +1879,7 @@
         "h": 12,
         "w": 6,
         "x": 12,
-        "y": 11
+        "y": 10
       },
       "targets": [
         {
@@ -1899,7 +1963,7 @@
         "h": 12,
         "w": 6,
         "x": 0,
-        "y": 11
+        "y": 10
       },
       "targets": [
         {
@@ -1963,7 +2027,7 @@
         "h": 12,
         "w": 6,
         "x": 6,
-        "y": 11
+        "y": 10
       },
       "targets": [
         {
