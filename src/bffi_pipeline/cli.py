@@ -1260,6 +1260,9 @@ def reconcile_command(
                     phase1_concurrency=effective_phase1_concurrency,
                     picker_ordering=effective_picker_ordering,
                     picker_cache=picker_cache,
+                    lexical_fallback_floor=settings.m9_lexical_fallback_floor,
+                    lexical_fallback_floor_per_vocab=settings.m9_lexical_fallback_floor_per_vocab,
+                    disable_fallback=settings.m9_disable_fallback,
                 )
         else:
             summary, _outcomes = reconcile.apply_reconciliation(
@@ -1276,6 +1279,9 @@ def reconcile_command(
                 phase1_concurrency=effective_phase1_concurrency,
                 picker_ordering=effective_picker_ordering,
                 picker_cache=picker_cache,
+                lexical_fallback_floor=settings.m9_lexical_fallback_floor,
+                lexical_fallback_floor_per_vocab=settings.m9_lexical_fallback_floor_per_vocab,
+                disable_fallback=settings.m9_disable_fallback,
             )
     finally:
         http_client.close()

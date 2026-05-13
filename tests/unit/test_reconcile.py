@@ -50,6 +50,7 @@ from bffi_pipeline.stages.reconcile import (
     PickerDecision,
     StubAuthorityClient,
     StubPicker,
+    _decide_with_pick,
     _iter_subject_requests,
     _order_deferred_picker_queue,
     _picker_phase_pool,
@@ -229,6 +230,135 @@ def test_llm_low_confidence_routes_to_fallback() -> None:
     assert out.stage == STAGE_FALLBACK
     assert out.chosen_uri == "http://kanto/top"  # highest lexical, NOT the picker's pick
     assert out.needs_review is True
+
+
+def test_p16_knob_a_raised_fallback_floor_routes_to_no_candidate() -> None:
+    """P-16 Knob A: with ``lexical_fallback_floor=0.85`` and a picker-uncertain
+    verdict, a top lexical at 0.80 falls back to ``no-candidate`` instead of
+    binding via tier-3 fallback. This is the ``Williams, John`` case from the
+    2026-05-13 cataloguer-audit.
+    """
+
+    sorted_candidates = [_candidate("http://kanto/wrong-namesake", "Williams, John", 0.80)]
+    pick = PickerDecision(
+        chosen_uri=None,
+        confidence=0.4,
+        rationale="Stub uncertain — namesake-disambiguation case.",
+        decision="uncertain",
+    )
+    out = _decide_with_pick(
+        request=_request(),
+        sorted_candidates=sorted_candidates,
+        pick=pick,
+        lexical_fallback_floor=0.85,
+    )
+    assert out.stage == STAGE_NO_CANDIDATE
+    assert out.chosen_uri is None
+    assert out.needs_review is False
+    assert "below the 0.85 fallback floor" in out.rationale
+
+
+def test_p16_default_floor_preserves_pre_p16_fallback_behavior() -> None:
+    """P-16: with default kwargs (floor=0.70, no per-vocab, disable=False),
+    the tier-3 fallback path is unchanged from pre-P-16 behaviour. Pins
+    backward-compatibility for the no-knob default case.
+    """
+
+    sorted_candidates = [_candidate("http://kanto/wrong-namesake", "Williams, John", 0.80)]
+    pick = PickerDecision(
+        chosen_uri=None,
+        confidence=0.4,
+        rationale="Stub uncertain — namesake-disambiguation test.",
+        decision="uncertain",
+    )
+    out = _decide_with_pick(request=_request(), sorted_candidates=sorted_candidates, pick=pick)
+    assert out.stage == STAGE_FALLBACK
+    assert out.chosen_uri == "http://kanto/wrong-namesake"
+    assert out.needs_review is True
+
+
+def test_p16_knob_b_per_vocab_floor_overrides_global() -> None:
+    """P-16 Knob B: per-vocabulary floor map overrides the global floor for
+    that vocab. Other vocabs keep the global floor.
+    """
+
+    finaf_cand = [_candidate("http://kanto/wrong", "Williams, John", 0.80, vocab="finaf")]
+    yso_cand = [_candidate("http://yso/p1", "Ystävyys", 0.80, vocab="yso")]
+    pick = PickerDecision(
+        chosen_uri=None,
+        confidence=0.4,
+        rationale="Stub uncertain — knob-B per-vocab test.",
+        decision="uncertain",
+    )
+    per_vocab = {"finaf": 0.85}
+
+    # finaf candidate: per-vocab floor applies → no-candidate
+    out_finaf = _decide_with_pick(
+        request=_request(),
+        sorted_candidates=finaf_cand,
+        pick=pick,
+        lexical_fallback_floor_per_vocab=per_vocab,
+    )
+    assert out_finaf.stage == STAGE_NO_CANDIDATE
+    assert "finaf" in out_finaf.rationale
+
+    # yso candidate: vocab not in per-vocab map → falls back to global (0.70) → tier-3 fallback
+    out_yso = _decide_with_pick(
+        request=_request(),
+        sorted_candidates=yso_cand,
+        pick=pick,
+        lexical_fallback_floor_per_vocab=per_vocab,
+    )
+    assert out_yso.stage == STAGE_FALLBACK
+
+
+def test_p16_knob_c_disable_fallback_routes_to_no_candidate() -> None:
+    """P-16 Knob C: ``disable_fallback=True`` makes every picker-uncertain
+    outcome a ``no-candidate`` bind, regardless of lexical similarity.
+    """
+
+    sorted_candidates = [_candidate("http://kanto/wrong", "Williams, John", 0.95)]
+    pick = PickerDecision(
+        chosen_uri=None,
+        confidence=0.4,
+        rationale="Stub uncertain — knob-B per-vocab test.",
+        decision="uncertain",
+    )
+    out = _decide_with_pick(
+        request=_request(),
+        sorted_candidates=sorted_candidates,
+        pick=pick,
+        disable_fallback=True,
+    )
+    assert out.stage == STAGE_NO_CANDIDATE
+    assert out.chosen_uri is None
+    assert "hard-disabled" in out.rationale
+    assert "BFFI_M9_DISABLE_FALLBACK" in out.rationale
+
+
+def test_p16_knob_c_disable_subsumes_chose_below_llm_threshold() -> None:
+    """P-16 Knob C: ``disable_fallback=True`` also gates the picker's
+    low-confidence ``chose`` path (which today falls to tier-3 with the
+    highest-lexical, not the picker's choice). The disable wins.
+    """
+
+    sorted_candidates = [
+        _candidate("http://kanto/top", "Williams, John", 0.95),
+        _candidate("http://kanto/two", "Williams, J.", 0.92),
+    ]
+    pick = PickerDecision(
+        chosen_uri="http://kanto/two",
+        confidence=LLM_CONFIDENCE_THRESHOLD - 0.01,
+        rationale="Stub low-confidence pick.",
+        decision="chose",
+    )
+    out = _decide_with_pick(
+        request=_request(),
+        sorted_candidates=sorted_candidates,
+        pick=pick,
+        disable_fallback=True,
+    )
+    assert out.stage == STAGE_NO_CANDIDATE
 
 
 def test_no_candidates_at_all_yields_no_candidate() -> None:

@@ -169,6 +169,40 @@ class Settings(BaseSettings):
         default="submission",
         alias="BFFI_M9_PICKER_ORDERING",
     )
+    # P-16 Knob A: separate lexical floor for the tier-3 fallback path.
+    # When the LLM picker returns ``uncertain`` or low-confidence, the
+    # current code falls back to the highest-lexical candidate (flagged
+    # ``needs-review``) provided its similarity clears
+    # :data:`bffi_pipeline.stages.reconcile.LEXICAL_FLOOR` (0.70). Some
+    # namesake-rich authorities (KANTO / VIAF) routinely produce
+    # lexical-similar wrong-person matches between 0.70 and 0.85; raising
+    # this floor forces those into ``no-candidate`` instead of a
+    # provisional bind. Default ``0.70`` preserves current behaviour.
+    m9_lexical_fallback_floor: float = Field(
+        default=0.70,
+        alias="BFFI_M9_LEXICAL_FALLBACK_FLOOR",
+    )
+    # P-16 Knob B: per-source-vocabulary override of the fallback floor.
+    # JSON-encoded dict via the env var:
+    # ``BFFI_M9_LEXICAL_FALLBACK_FLOOR_PER_VOCAB='{"finaf":0.85,"viaf":0.85}'``.
+    # An entry here overrides ``m9_lexical_fallback_floor`` for that
+    # vocabulary's candidates. Vocabularies not listed fall through to
+    # the global floor.
+    m9_lexical_fallback_floor_per_vocab: dict[str, float] = Field(
+        default_factory=dict,
+        alias="BFFI_M9_LEXICAL_FALLBACK_FLOOR_PER_VOCAB",
+    )
+    # P-16 Knob C: hard-disable the tier-3 fallback path. When ``True``,
+    # picker-uncertain outcomes return ``no-candidate`` instead of binding
+    # the highest-lexical candidate with ``needs-review`` set. Trades the
+    # recovery path for misspellings / alternate forms (which the LLM
+    # picker correctly routes through tier-2 today) against eliminating
+    # all provisional binds for cataloguers to review. Default ``False``
+    # preserves current behaviour.
+    m9_disable_fallback: bool = Field(
+        default=False,
+        alias="BFFI_M9_DISABLE_FALLBACK",
+    )
     # P-10 Phase B: emergency-disable knob for the persistent picker
     # decision cache (``<data_dir>/reconcile-cache.sqlite``). When
     # ``True`` the CLI does not construct a :class:`PickerCache`, so

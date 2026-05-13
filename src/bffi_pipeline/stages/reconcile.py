@@ -40,7 +40,7 @@ import re
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -780,6 +780,9 @@ def _decide_with_pick(
     request: EntityRequest,
     sorted_candidates: list[AuthorityCandidate],
     pick: PickerDecision,
+    lexical_fallback_floor: float = LEXICAL_FLOOR,
+    lexical_fallback_floor_per_vocab: Mapping[str, float] | None = None,
+    disable_fallback: bool = False,
 ) -> ReconciliationOutcome:
     """Apply tier-2 / tier-3 given an already-computed picker decision.
 
@@ -789,6 +792,11 @@ def _decide_with_pick(
     Warm-cache replay then byte-stably reproduces the cold-run
     classification, including for low-confidence picks that map to
     STAGE_FALLBACK.
+
+    P-16: ``lexical_fallback_floor``, ``lexical_fallback_floor_per_vocab``
+    and ``disable_fallback`` gate the tier-3 fallback path. Defaults
+    preserve pre-P-16 behaviour (floor = ``LEXICAL_FLOOR``, no per-vocab
+    overrides, fallback enabled).
     """
     if (
         pick.decision == "chose"
@@ -807,6 +815,49 @@ def _decide_with_pick(
         )
 
     top = sorted_candidates[0]
+    # P-16 Knob A + B: the fallback floor is per-vocabulary-overridable.
+    # Vocabs not listed in ``lexical_fallback_floor_per_vocab`` fall
+    # through to the global floor.
+    per_vocab = lexical_fallback_floor_per_vocab or {}
+    effective_floor = per_vocab.get(top.source_vocabulary, lexical_fallback_floor)
+    # P-16 Knob C: hard-disable the tier-3 fallback path. Knob A/B are
+    # subsumed when Knob C is on — we never bind. The order matters for
+    # the rationale string.
+    if disable_fallback:
+        return ReconciliationOutcome(
+            request=request,
+            stage=STAGE_NO_CANDIDATE,
+            chosen_uri=None,
+            confidence=top.lexical_similarity,
+            rationale=(
+                f"LLM picker {pick.decision!r} (confidence "
+                f"{pick.confidence:.2f}); tier-3 fallback hard-disabled via "
+                f"BFFI_M9_DISABLE_FALLBACK. Top lexical was "
+                f"{top.pref_label!r} ({top.lexical_similarity:.3f}). "
+                f"Left unreconciled."
+            ),
+            candidates=sorted_candidates,
+            needs_review=False,
+            picker_decision=pick,
+        )
+    if top.lexical_similarity < effective_floor:
+        return ReconciliationOutcome(
+            request=request,
+            stage=STAGE_NO_CANDIDATE,
+            chosen_uri=None,
+            confidence=top.lexical_similarity,
+            rationale=(
+                f"LLM picker {pick.decision!r} (confidence "
+                f"{pick.confidence:.2f}); top lexical "
+                f"{top.lexical_similarity:.3f} below the "
+                f"{effective_floor:.2f} fallback floor for "
+                f"{top.source_vocabulary!r}. Left unreconciled."
+            ),
+            candidates=sorted_candidates,
+            needs_review=False,
+            picker_decision=pick,
+        )
+
     return ReconciliationOutcome(
         request=request,
         stage=STAGE_FALLBACK,
@@ -1790,6 +1841,9 @@ def _picker_phase_seq(
     watchdog_sidecar_path: Path | None,
     progress_cadence: int = _M9_PROGRESS_CADENCE,
     cache_hits: int = 0,
+    lexical_fallback_floor: float = LEXICAL_FLOOR,
+    lexical_fallback_floor_per_vocab: Mapping[str, float] | None = None,
+    disable_fallback: bool = False,
 ) -> list[tuple[int, ReconciliationOutcome]]:
     """Sequential (c=1) path: call the shared picker inline per field.
 
@@ -1797,6 +1851,10 @@ def _picker_phase_seq(
     completed calls. ``cache_hits`` is fixed at Phase-1.5 exit time so
     the caller passes it in once; ``watchdog_aborted`` is tallied
     locally from the results stream.
+
+    P-16: ``lexical_fallback_floor`` / ``lexical_fallback_floor_per_vocab``
+    / ``disable_fallback`` forward to :func:`_decide_with_pick` to gate
+    the tier-3 fallback. Defaults preserve pre-P-16 behaviour.
     """
     results: list[tuple[int, ReconciliationOutcome]] = []
     watchdog_aborted = 0
@@ -1810,6 +1868,9 @@ def _picker_phase_seq(
             field_timeout_seconds=field_timeout_seconds,
             model_name=model_name,
             watchdog_sidecar_path=watchdog_sidecar_path,
+            lexical_fallback_floor=lexical_fallback_floor,
+            lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
+            disable_fallback=disable_fallback,
         )
         results.append((idx, outcome))
         if outcome.was_watchdog_aborted:
@@ -1853,6 +1914,9 @@ def _picker_phase_pool(
     watchdog_sidecar_path: Path | None,
     progress_cadence: int = _M9_PROGRESS_CADENCE,
     cache_hits: int = 0,
+    lexical_fallback_floor: float = LEXICAL_FLOOR,
+    lexical_fallback_floor_per_vocab: Mapping[str, float] | None = None,
+    disable_fallback: bool = False,
 ) -> list[tuple[int, ReconciliationOutcome]]:
     """Concurrent (c>=2) path: thread-local pickers, parallel dispatch.
 
@@ -1890,6 +1954,9 @@ def _picker_phase_pool(
             field_timeout_seconds=field_timeout_seconds,
             model_name=model_name,
             watchdog_sidecar_path=watchdog_sidecar_path,
+            lexical_fallback_floor=lexical_fallback_floor,
+            lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
+            disable_fallback=disable_fallback,
         )
         return idx, outcome
 
@@ -1939,6 +2006,9 @@ def _picker_call_with_budget(
     field_timeout_seconds: int,
     model_name: str,
     watchdog_sidecar_path: Path | None,
+    lexical_fallback_floor: float = LEXICAL_FLOOR,
+    lexical_fallback_floor_per_vocab: Mapping[str, float] | None = None,
+    disable_fallback: bool = False,
 ) -> tuple[ReconciliationOutcome, int]:
     """Run ``picker.pick`` with a per-field wall budget.
 
@@ -1961,7 +2031,14 @@ def _picker_call_with_budget(
 
     if field_timeout_seconds <= 0:
         pick = picker.pick(request=request, candidates=sorted_candidates)
-        outcome = _decide_with_pick(request=request, sorted_candidates=sorted_candidates, pick=pick)
+        outcome = _decide_with_pick(
+            request=request,
+            sorted_candidates=sorted_candidates,
+            pick=pick,
+            lexical_fallback_floor=lexical_fallback_floor,
+            lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
+            disable_fallback=disable_fallback,
+        )
         return outcome, 0
 
     inner = concurrent.futures.ThreadPoolExecutor(
@@ -1990,7 +2067,14 @@ def _picker_call_with_budget(
         return outcome, 1
 
     inner.shutdown(wait=False)
-    outcome = _decide_with_pick(request=request, sorted_candidates=sorted_candidates, pick=pick)
+    outcome = _decide_with_pick(
+        request=request,
+        sorted_candidates=sorted_candidates,
+        pick=pick,
+        lexical_fallback_floor=lexical_fallback_floor,
+        lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
+        disable_fallback=disable_fallback,
+    )
     return outcome, 0
 
 
@@ -2262,6 +2346,9 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     picker_ordering: PickerOrdering = PICKER_ORDERING_PREFIX_CACHE,
     picker_cache: PickerCache | None = None,
     finto_dumps_dir: Path | None = None,
+    lexical_fallback_floor: float = LEXICAL_FLOOR,
+    lexical_fallback_floor_per_vocab: Mapping[str, float] | None = None,
+    disable_fallback: bool = False,
 ) -> tuple[ReconciliationSummary, list[ReconciliationOutcome]]:
     """Walk canonical.ttl, reconcile creators + subjects, and write the graph back.
 
@@ -2531,7 +2618,12 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             hit = picker_cache.get(key_info[0])
         if hit is not None:
             outcome = _decide_with_pick(
-                request=request, sorted_candidates=sorted_candidates, pick=hit.decision
+                request=request,
+                sorted_candidates=sorted_candidates,
+                pick=hit.decision,
+                lexical_fallback_floor=lexical_fallback_floor,
+                lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
+                disable_fallback=disable_fallback,
             )
             pre_outcomes[idx] = ReconciliationOutcome(
                 request=outcome.request,
@@ -2597,6 +2689,9 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 watchdog_sidecar_path=watchdog_sidecar_path,
                 progress_cadence=progress_cadence,
                 cache_hits=cache_hits,
+                lexical_fallback_floor=lexical_fallback_floor,
+                lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
+                disable_fallback=disable_fallback,
             )
         else:
             assert picker_factory is not None  # narrow; validated above
@@ -2609,6 +2704,9 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 watchdog_sidecar_path=watchdog_sidecar_path,
                 progress_cadence=progress_cadence,
                 cache_hits=cache_hits,
+                lexical_fallback_floor=lexical_fallback_floor,
+                lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
+                disable_fallback=disable_fallback,
             )
 
     # P-10 Phase B: stash write-back data per idx — Phase 3 reads it
