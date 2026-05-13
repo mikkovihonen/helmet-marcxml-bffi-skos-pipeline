@@ -2404,6 +2404,131 @@ def test_apply_reconciliation_cache_disabled_runs_picker_every_time(
     )
 
 
+def test_apply_reconciliation_caches_fallback_outcomes_too(
+    tmp_path: Path,
+) -> None:
+    """P-10 Phase B.1: every picker call is cached, not only STAGE_LLM.
+
+    The 2026-05-13 bench audit showed that picker calls returning
+    low-confidence ("chose with conf < 0.80") or ``uncertain``
+    verdicts — both of which map to STAGE_FALLBACK — were not being
+    cached, so the warm run re-picked them and produced different
+    tier classifications when the model's per-call non-determinism
+    nudged the confidence across the 0.80 threshold. P-13 Phase B.1
+    extends the cache to cover these outcomes.
+
+    This test pins the contract: a low-confidence pick on the cold
+    run lands in the cache; the warm run hits the cache and
+    reproduces the same fallback outcome verbatim — no second
+    picker call.
+    """
+    dumps = _make_finto_dumps(tmp_path, ["finaf"])
+    cache_path = tmp_path / "reconcile-cache.sqlite"
+
+    # Build a single ambiguous creator whose stub picker returns
+    # decision="chose" with confidence 0.70 (below the 0.80 threshold
+    # in LLM_CONFIDENCE_THRESHOLD), which maps to STAGE_FALLBACK.
+    labels = ["Tolstoy, Leo,"]
+    work_uri = "http://urn.fi/URN:NBN:fi:bib:work:multi-0"
+    fixtures: dict[tuple[str, str], list[AuthorityCandidate]] = {
+        ("person", labels[0]): [
+            _candidate("http://kanto/multi-0-a", "Tolstoy, Lev A", 0.97),
+            _candidate("http://kanto/multi-0-b", "Tolstoy, Lev B", 0.96),
+        ]
+    }
+    low_conf_decision = PickerDecision(
+        decision="chose",
+        chosen_uri="http://kanto/multi-0-a",
+        confidence=0.70,
+        rationale=(
+            "Low-confidence pick that maps to STAGE_FALLBACK — "
+            "filler text to satisfy the minimum-length validator."
+        ),
+    )
+    decisions: dict[tuple[str, str], PickerDecision] = {(work_uri, labels[0]): low_conf_decision}
+
+    class _ModelNamedFallbackPicker:
+        model_name = "stub-fallback-test"
+
+        def __init__(self) -> None:
+            self.inner = StubPicker(decisions=dict(decisions))
+            self.call_count = 0
+
+        def pick(
+            self,
+            *,
+            request: EntityRequest,
+            candidates: list[AuthorityCandidate],
+        ) -> PickerDecision:
+            self.call_count += 1
+            return self.inner.pick(request=request, candidates=candidates)
+
+    # --- Cold run: picker fires; cache should be written.
+    pickers_cold: list[_ModelNamedFallbackPicker] = []
+
+    def _cold_factory() -> _ModelNamedFallbackPicker:
+        p = _ModelNamedFallbackPicker()
+        pickers_cold.append(p)
+        return p
+
+    g_cold = _build_canonical_with_n_creators(labels)
+    client_cold = StubAuthorityClient(fixtures=dict(fixtures))
+    cache_cold = PickerCache(cache_path)
+    prov_cold = Graph()
+    summary_cold, outcomes_cold = apply_reconciliation(
+        client=client_cold,
+        picker_factory=_cold_factory,  # type: ignore[arg-type]
+        graph=g_cold,
+        provenance_graph=prov_cold,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        picker_cache=cache_cold,
+        finto_dumps_dir=dumps,
+    )
+    cache_cold.close()
+    assert summary_cold.fallback == 1, "Expected STAGE_FALLBACK on the cold run."
+    cold_outcome = outcomes_cold[0]
+    cold_chosen = cold_outcome.chosen_uri
+
+    # --- Warm run: same input, cache populated. Picker must NOT fire.
+    pickers_warm: list[_ModelNamedFallbackPicker] = []
+
+    def _warm_factory() -> _ModelNamedFallbackPicker:
+        p = _ModelNamedFallbackPicker()
+        pickers_warm.append(p)
+        return p
+
+    g_warm = _build_canonical_with_n_creators(labels)
+    client_warm = StubAuthorityClient(fixtures=dict(fixtures))
+    cache_warm = PickerCache(cache_path)
+    prov_warm = Graph()
+    summary_warm, outcomes_warm = apply_reconciliation(
+        client=client_warm,
+        picker_factory=_warm_factory,  # type: ignore[arg-type]
+        graph=g_warm,
+        provenance_graph=prov_warm,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        picker_cache=cache_warm,
+        finto_dumps_dir=dumps,
+    )
+    cache_warm.close()
+
+    # Cache hit was load-bearing: no picker call fired on the warm run.
+    warm_picker_calls = sum(p.call_count for p in pickers_warm)
+    assert warm_picker_calls == 0, (
+        f"Phase B.1 contract broken: warm run made {warm_picker_calls} "
+        f"picker call(s) despite the cache being populated."
+    )
+    # Same outcome stage + same bound URI as the cold run.
+    assert summary_warm.fallback == 1
+    warm_outcome = outcomes_warm[0]
+    assert warm_outcome.stage == cold_outcome.stage == STAGE_FALLBACK
+    assert warm_outcome.chosen_uri == cold_chosen
+
+
 # --- P-12 Phase D: M9 Phase 2 progress events -----------------------------
 
 

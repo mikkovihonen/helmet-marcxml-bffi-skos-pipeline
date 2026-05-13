@@ -314,6 +314,18 @@ class ReconciliationOutcome:
     needs_review: bool
     was_watchdog_aborted: bool = False
     cached_activity_uuid: str | None = None
+    # P-10 Phase B.1: the raw PickerDecision that produced this outcome.
+    # Populated by tier-2 dispatch paths (STAGE_LLM + STAGE_FALLBACK);
+    # ``None`` for tier-0 / tier-1 / no-candidate / fictional / watchdog-
+    # aborted. Phase B's write-back logic stores this verbatim so the
+    # warm-run lookup can replay the same _decide_with_pick(pick=…)
+    # logic and reproduce the cold-run outcome byte-stably — including
+    # for low-confidence ("uncertain" / "chose with conf < 0.80")
+    # decisions that map to STAGE_FALLBACK. The model's per-call
+    # non-determinism near the 0.80 threshold otherwise causes
+    # cold/warm tier flips (audit script
+    # ``scripts/p10-phase-b-cold-warm-audit.py`` surfaces these).
+    picker_decision: PickerDecision | None = None
 
     @property
     def is_success(self) -> bool:
@@ -769,7 +781,15 @@ def _decide_with_pick(
     sorted_candidates: list[AuthorityCandidate],
     pick: PickerDecision,
 ) -> ReconciliationOutcome:
-    """Apply tier-2 / tier-3 given an already-computed picker decision."""
+    """Apply tier-2 / tier-3 given an already-computed picker decision.
+
+    P-10 Phase B.1: the original ``pick`` rides on the outcome's
+    ``picker_decision`` field so the cache-write site can persist
+    *every* picker call's verdict (not only the STAGE_LLM successes).
+    Warm-cache replay then byte-stably reproduces the cold-run
+    classification, including for low-confidence picks that map to
+    STAGE_FALLBACK.
+    """
     if (
         pick.decision == "chose"
         and pick.chosen_uri is not None
@@ -783,6 +803,7 @@ def _decide_with_pick(
             rationale=pick.rationale,
             candidates=sorted_candidates,
             needs_review=False,
+            picker_decision=pick,
         )
 
     top = sorted_candidates[0]
@@ -798,6 +819,7 @@ def _decide_with_pick(
         ),
         candidates=sorted_candidates,
         needs_review=True,
+        picker_decision=pick,
     )
 
 
@@ -2484,32 +2506,30 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
 
     # P-10 Phase B: stash write-back data per idx — Phase 3 reads it
     # after _emit_provenance returns the freshly-minted Activity URI.
+    # P-10 Phase B.1: cache *every* picker decision, not only STAGE_LLM
+    # successes. Storing the raw ``PickerDecision`` lets the warm-run
+    # lookup replay ``_decide_with_pick`` byte-stably — including for
+    # low-confidence picks that map to STAGE_FALLBACK. Without this,
+    # the model's per-call non-determinism near the 0.80 LLM-confidence
+    # threshold flips cold→warm tier classifications (see
+    # ``scripts/p10-phase-b-cold-warm-audit.py``). Watchdog-aborted
+    # outcomes still aren't cached: those reflect a budget timeout, not
+    # a real picker verdict, and a re-run should re-attempt.
     cache_pending: dict[int, _CachePending] = {}
     for idx, outcome in picker_results:
         pre_outcomes[idx] = outcome
         if (
             picker_cache is not None
             and idx in cache_lookup_keys
-            and outcome.stage == STAGE_LLM
             and not outcome.was_watchdog_aborted
-            and outcome.chosen_uri is not None
+            and outcome.picker_decision is not None
         ):
-            # Only cache verdicts where the LLM picked a candidate
-            # (decision="chose" with confidence >= threshold). Fallback,
-            # uncertain, and watchdog-aborted outcomes are not cached so a
-            # re-run with a fixed prompt or recovered LLM can produce a
-            # better answer.
             cache_key, vocab, finto_sha = cache_lookup_keys[idx]
             cache_pending[idx] = _CachePending(
                 cache_key=cache_key,
                 finto_vocab=vocab,
                 finto_sha=finto_sha,
-                decision=PickerDecision(
-                    decision="chose",
-                    chosen_uri=outcome.chosen_uri,
-                    confidence=outcome.confidence,
-                    rationale=outcome.rationale,
-                ),
+                decision=outcome.picker_decision,
             )
 
     # --- Phase 3: apply graph mutations + provenance in request order -----
