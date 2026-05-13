@@ -1,7 +1,7 @@
 # P-13 — Per-run metric isolation
 
 **Status**: completed.
-**Source proposal**: [`docs/proposals/prop-13-per-run-metric-isolation.md`](../../proposals/prop-13-per-run-metric-isolation.md)
+**Source proposal**: `prop-13-per-run-metric-isolation` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
 at commit `40abb2d`.
 **Plan-base commit**: `40abb2d`. To gauge drift before executing,
 run

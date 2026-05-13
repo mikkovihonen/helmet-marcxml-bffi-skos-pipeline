@@ -5,7 +5,7 @@
 **Outcome summary**: Phases A, A2, B, B.1 cumulatively deliver the overnight-window target via the 14.5× warm-cache speedup measured in Phase B.1 ([`docs/performance/2026-05-13-5k-m2-max-phase-b1.md`](../../performance/2026-05-13-5k-m2-max-phase-b1.md)) — operator pattern is to keep the cache warm across consecutive runs against the same corpus, which collapses M9 wall to ~5 min on the 5 k sample (extrapolating to under-overnight on full 800 k). Phase C's tier-0 expansion shipped behind `BFFI_M9_TIER0_EXPANSION=False` because the 2026-05-13 bench attempt crashed mid-run (mlx-lm GPU-OOM on the M2 Max 64 GB) before validating tier-0 hit-count uplift; the validation gate moves to P-14. Phase E (prompt ordering) shipped behind `BFFI_M9_PICKER_ORDERING` with default reverted to `submission` after the A/B bench showed prefix-cache regressed picker-phase wall by +5 % ([`docs/performance/2026-05-13-5k-m2-max-phase-e.md`](../../performance/2026-05-13-5k-m2-max-phase-e.md)).
 
 
-**Source proposal**: [`docs/proposals/prop-10-m9-reconcile-throughput.md`](../../proposals/prop-10-m9-reconcile-throughput.md)
+**Source proposal**: `prop-10-m9-reconcile-throughput` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
 at commit `9ba54d1` (proposal-base `ad4f6c4`, refined with Finto-cadence
 evidence at `9ba54d1`).
 **Plan-base commit**: `9ba54d1`. To gauge drift before executing,
@@ -456,10 +456,10 @@ Phase D (batched picker — handing N fields per LLM call to amortise prompt-pre
 ## Cross-references
 
 - [`docs/performance/2026-05-12-5k-m2-max.md`](../../performance/2026-05-12-5k-m2-max.md) — the baseline P-10 measures itself against.
-- [`docs/proposals/prop-10-m9-reconcile-throughput.md`](../../proposals/prop-10-m9-reconcile-throughput.md) — source proposal; full lever rationale and the Finto-cadence evidence.
+- `prop-10-m9-reconcile-throughput` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`) — source proposal; full lever rationale and the Finto-cadence evidence.
 - [`docs/plans/completed/p-02-inference-stack-tuning.md`](../completed/p-02-inference-stack-tuning.md) — the prefix-cache + concurrency lever set P-10 reuses on the M9 side.
 - [`docs/plans/backlog/p-06-gold-set-growth.md`](p-06-gold-set-growth.md) — the gold-set backlog that absorbs C.5's 200-sample audit.
-- [`docs/proposals/prop-09-library-agnostic-source.md`](../../proposals/prop-09-library-agnostic-source.md) — the per-library decoupling proposal whose `LibrarySource` config interacts with Phase C's Finnish-specific role-marker whitelist.
+- [`docs/plans/proposed/prop-09-library-agnostic-source.md`](../proposed/prop-09-library-agnostic-source.md) — the per-library decoupling proposal whose `LibrarySource` config interacts with Phase C's Finnish-specific role-marker whitelist.
 - [`src/bffi_pipeline/stages/reconcile.py`](../../../src/bffi_pipeline/stages/reconcile.py) — `apply_reconciliation` orchestrator (Phase A) and `LangChainLLMPicker` call site (Phase B).
 - [`src/bffi_pipeline/stages/local_concept_resolver.py`](../../../src/bffi_pipeline/stages/local_concept_resolver.py) — tier-0 SPARQL (Phase C).
 - [`src/bffi_pipeline/cli.py:767`](../../../src/bffi_pipeline/cli.py) — `reconcile_command` signature (Phases A + B knobs).

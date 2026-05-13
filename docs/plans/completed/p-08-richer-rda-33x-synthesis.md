@@ -1,7 +1,7 @@
 # P-08 — Richer RDA 33X synthesis from leader / 008 / 007
 
 **Status**: completed (all four phases shipped; the M2 missing-33X drop count on the 5k sample is at 0 — well below the ≤ 50 target).
-**Source proposal**: [`docs/proposals/prop-08-richer-rda-33x-synthesis.md`](../../proposals/prop-08-richer-rda-33x-synthesis.md)
+**Source proposal**: `prop-08-richer-rda-33x-synthesis` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
 at commit `19e09e4`.
 **Plan-base commit**: `19e09e4`. To gauge drift before executing,
 run `git diff 19e09e4..HEAD --
@@ -464,7 +464,7 @@ Shipped:
   per-record opt-out (add cataloguer-coded 33X), and where the
   version constant lives.
 - Plan graduates from `in-progress/` to `completed/` in this commit
-  via `git mv`; `docs/plans/README.md` + `docs/proposals/README.md`
+  via `git mv`; `docs/plans/README.md` + `docs/plans/proposed/README.md`
   cross-references updated.
 
 ### Phase D acceptance
@@ -564,7 +564,7 @@ no phase introduces a behaviour the previous phase can't fall back to.
 
 ## Cross-references
 
-- [`docs/proposals/prop-08-richer-rda-33x-synthesis.md`](../../proposals/prop-08-richer-rda-33x-synthesis.md)
+- `prop-08-richer-rda-33x-synthesis` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
   — graduated source proposal; planning-graduated stub.
 - [`src/marcxml_export_pipeline/sierra/itype_to_rda.py`](../../../src/marcxml_export_pipeline/sierra/itype_to_rda.py)
   — `ITYPE_TO_RDA` and `MATERIAL_TO_RDA` preserved as cascade

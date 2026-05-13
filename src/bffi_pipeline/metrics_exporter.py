@@ -4,7 +4,7 @@ Architecture: pipeline stages → ``stage-events.jsonl`` (Phase A) →
 **this module's tail loop** → ``prometheus_client`` registry →
 ``/metrics`` HTTP endpoint → Prometheus scrapes → Grafana queries.
 All local; no outbound telemetry. See
-``docs/proposals/prop-11-structured-observability.md``.
+``docs/plans/completed/p-11-structured-observability.md``.
 
 The exporter is opt-in via a separate ``bffi-pipeline serve-metrics``
 CLI subcommand. Pipeline stages never import this module — the cost

@@ -16,8 +16,8 @@ schema — same byte-for-byte string for the same schema on every call, so
 the prefix-cache benefit targeted by P-02 Phase B is preserved.
 
 Discovered during P-02 § A5; see the plan's "Open issues" entry. Out-of-
-scope alternative documented in ``docs/proposals/`` as future structured-
-output-backend work (outlines / vllm-mlx).
+scope alternative documented in ``docs/plans/proposed/prop-06-structured-output-backend.md``
+as future structured-output-backend work (outlines / vllm-mlx).
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 # P-12 — Observability cleanup: exporter tail bug + Phase 2 progress + dashboard overview row + freshness + `not_configured` health status
 
 **Status**: completed.
-**Source proposal**: [`docs/proposals/prop-12-dashboard-stale-and-not-configured.md`](../../proposals/prop-12-dashboard-stale-and-not-configured.md)
+**Source proposal**: `prop-12-dashboard-stale-and-not-configured` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
 at commit `374eb60`.
 **Plan-base commit**: `374eb60`. To gauge drift before executing,
 run
@@ -562,7 +562,7 @@ layout.
 ## Cross-references
 
 - [`docs/plans/completed/p-11-structured-observability.md`](../completed/p-11-structured-observability.md) — the parent plan this follows up.
-- [`docs/proposals/prop-12-dashboard-stale-and-not-configured.md`](../../proposals/prop-12-dashboard-stale-and-not-configured.md) — source proposal.
+- `prop-12-dashboard-stale-and-not-configured` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`) — source proposal.
 - [`src/bffi_pipeline/metrics_exporter.py`](../../../src/bffi_pipeline/metrics_exporter.py) — `_tail_step` (Phase A) + `apply_event` (Phase B + C) + `PipelineMetrics` (Phase B + C gauges).
 - [`src/bffi_pipeline/stages/probes.py`](../../../src/bffi_pipeline/stages/probes.py) — `ProbeResult` + `probe_mlx_lm` (Phase B).
 - [`src/bffi_pipeline/stages/judge.py`](../../../src/bffi_pipeline/stages/judge.py) — M6 fallback-probe call site (Phase B).

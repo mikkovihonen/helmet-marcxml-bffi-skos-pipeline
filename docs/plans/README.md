@@ -1,8 +1,8 @@
 # Plans
 
 Documents in this folder are **plans of record** — concrete,
-sequenced work that has graduated from `docs/proposals/` and is
-committed to. A plan lays out:
+sequenced work that has graduated from [`proposed/`](proposed/) and
+is committed to. A plan lays out:
 
 - the **goal** and how we know we've reached it,
 - the **current state** the plan starts from,
@@ -19,10 +19,11 @@ hinges on and what the answer should be in the expected case.
 ## Lifecycle: state folders
 
 A plan's state is encoded by which sub-folder it lives in. There are
-four, traversed in order from intake to terminal state:
+five, traversed in order from intake to terminal state:
 
 | Folder | Meaning |
 |---|---|
+| [`proposed/`](proposed/) | Forward-looking idea — `prop-<NN>-<slug>.md`. Status `proposed` or `rejected (reason)`. Graduating to a plan **deletes** the proposal file (the plan becomes the canonical record). |
 | [`backlog/`](backlog/) | Drafted but not yet started — no phase commit landed. Ready to be picked up cold. |
 | [`in-progress/`](in-progress/) | At least one phase has shipped but the plan's definition of done has not been met. |
 | [`completed/`](completed/) | Every phase has a filled-in phase commit; the audit trail of what shipped. |
@@ -39,10 +40,10 @@ with the folder; if they disagree, the folder wins and the field is
 the bug.
 
 Cross-references to a plan from outside the `plans/` tree (CLAUDE.md,
-proposals, source code) need to be updated when a plan transitions
-state, because the path changes. That's a small recurring cost
-accepted in exchange for state being immediately visible at a
-filesystem glance.
+source code) need to be updated when a plan transitions state,
+because the path changes. That's a small recurring cost accepted
+in exchange for state being immediately visible at a filesystem
+glance.
 
 ## Tying plans to version control
 

@@ -31,7 +31,7 @@ one being mutable.
   successors: [`CLAUDE.md`](../../CLAUDE.md) for committed identifiers
   and `bffi-prov` enums; [`../tech-stack.md`](../tech-stack.md) for the
   toolchain; per-plan documents under [`../plans/`](../plans/) for the
-  execution detail; [`../proposals/`](../proposals/) for forward-looking
+  execution detail; [`../plans/proposed/`](../plans/proposed/) for forward-looking
   design changes.
 - [`local-inference.md`](local-inference.md) — the previous
   Ollama-centric and `mlx_lm` source-clone draft of the inference

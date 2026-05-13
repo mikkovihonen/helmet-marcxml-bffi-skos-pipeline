@@ -1,7 +1,7 @@
 # P-11 — Structured pipeline observability for long unattended runs
 
 **Status**: completed.
-**Source proposal**: [`docs/proposals/prop-11-structured-observability.md`](../../proposals/prop-11-structured-observability.md)
+**Source proposal**: `prop-11-structured-observability` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
 at commit `30cd82a`.
 **Plan-base commit**: `30cd82a`. To gauge drift before executing,
 run
@@ -352,7 +352,7 @@ Extend `docs/runbook.md` with a section on starting the local observability stac
 
 ## Cross-references
 
-- [`docs/proposals/prop-11-structured-observability.md`](../../proposals/prop-11-structured-observability.md) — source proposal; the policy note at the top settles the `CLAUDE.md` "no telemetry" scope question this plan acts on.
+- `prop-11-structured-observability` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`) — source proposal; the policy note at the top settles the `CLAUDE.md` "no telemetry" scope question this plan acts on.
 - [`src/bffi_pipeline/stages/watchdog.py`](../../../src/bffi_pipeline/stages/watchdog.py) — the closest analog. `emit_watchdog_event`'s signature is the shape Phase A's `emit_stage_event` generalises.
 - [`scripts/run-full-pipeline.sh`](../../../scripts/run-full-pipeline.sh) — current `STAGE_*` filter pattern; the new `STAGE_EVENT` prefix slots in alongside.
 - [`docker-compose.yml`](../../../docker-compose.yml) — current Fuseki + Skosmos stack that Phase D.2 extends.

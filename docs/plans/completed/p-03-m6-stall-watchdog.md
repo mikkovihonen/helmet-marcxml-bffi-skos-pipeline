@@ -16,7 +16,7 @@ defaults aren't biting against real backend + real cascade).
 Re-pin only if a future full-corpus run surfaces non-zero event
 counts.
 **Source proposal**:
-[`docs/proposals/prop-03-m6-stall-watchdog.md`](../../proposals/prop-03-m6-stall-watchdog.md)
+`prop-03-m6-stall-watchdog` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
 (drafted in commit `da5e3c9`; recovery-evidence amendment in `538c99e`).
 **Plan-base commit**: `538c99e`. To gauge drift before executing,
 run `git diff 538c99e..HEAD -- src/bffi_pipeline/config.py
@@ -681,7 +681,7 @@ without re-litigating P-03's design.
 
 ## Cross-references
 
-- [`docs/proposals/prop-03-m6-stall-watchdog.md`](../../proposals/prop-03-m6-stall-watchdog.md)
+- `prop-03-m6-stall-watchdog` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
   — source proposal, including the empirical evidence section that
   motivates the retry-on-same-model design choice.
 - [`docs/archived/marcxml-to-bffi-skosmos-pipeline.md`](../../archived/marcxml-to-bffi-skosmos-pipeline.md)

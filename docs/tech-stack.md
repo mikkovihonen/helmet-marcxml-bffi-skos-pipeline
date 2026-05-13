@@ -175,8 +175,8 @@ PR template prompts for the eval block whenever a PR touches `prompts/`, `gold/`
 
 | Artefact | Purpose |
 |---|---|
-| `docs/proposals/` (`prop-<NN>-<slug>.md`) | Forward-looking sketches. Each carries `Status` + `Proposal-base commit`. |
-| `docs/plans/` (`p-<NN>-<slug>.md`) | Committed-to-action plans of record. State encoded via sub-folders (`backlog/` → `in-progress/` → `completed/` / `abandoned/`). Each carries `Plan-base commit` + per-phase commit hashes filled in as work ships. |
+| `docs/plans/proposed/` (`prop-<NN>-<slug>.md`) | Forward-looking sketches not yet committed to. Each carries `Status: proposed | rejected (reason)` + `Proposal-base commit`. Graduated proposals are deleted from this folder; the resulting plan under `backlog/` (or further) becomes canonical. |
+| `docs/plans/` (`p-<NN>-<slug>.md`) | Committed-to-action plans of record. State encoded via sub-folders (`proposed/` → `backlog/` → `in-progress/` → `completed/` / `abandoned/`). Each carries `Plan-base commit` + per-phase commit hashes filled in as work ships. |
 | `docs/archived/` | Superseded docs kept for reference (`BUILD_PLAN.md`, the earlier `local-inference.md`, …). |
 | Auto-memory | `~/.claude/projects/.../memory/` | Project-specific operational notes (dev-machine LLM constraints, corpus location, curated dev sample, …). |
 
@@ -195,4 +195,4 @@ PR template prompts for the eval block whenever a PR touches `prompts/`, `gold/`
 - New to the project? Read [`runbook.md`](runbook.md) first — that's the canonical end-to-end recipe.
 - Setting up the LLM stack? [`local-inference.md`](local-inference.md).
 - Adding a new validation step? [`validation-strategy.md`](validation-strategy.md).
-- Adding a new milestone or refactor? Surface as a proposal under [`docs/proposals/`](proposals/) first; graduate to a plan under [`docs/plans/`](plans/) once committed.
+- Adding a new milestone or refactor? Surface as a proposal under [`docs/plans/proposed/`](plans/proposed/) first; graduate to a plan under [`docs/plans/backlog/`](plans/backlog/) once committed.

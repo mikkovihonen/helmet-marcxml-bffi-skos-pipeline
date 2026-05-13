@@ -6,12 +6,12 @@ C abandoned with data (spec-decode regressed throughput by ~50 %
 on this hardware), D1-D6 complete (mlx-lm is the only supported
 backend, Ollama install paths removed).
 **Source proposals**:
-[`docs/proposals/prop-02-inference-stack-tuning-for-M6.md`](../../proposals/prop-02-inference-stack-tuning-for-M6.md)
+`prop-02-inference-stack-tuning-for-M6` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
 (introduced in commit `334294a` while still part of the combined
 `performance-enhancements.md`; k-NN critique that fed back into P-01
 landed in `9789c20`; per-proposal file split in the commit that also
 introduced the initial plan) and
-[`docs/proposals/prop-04-consolidate-on-mlx-lm.md`](../../proposals/prop-04-consolidate-on-mlx-lm.md)
+`prop-04-consolidate-on-mlx-lm` (deleted on 2026-05-13 plans/proposed reorganisation; recover via `git show f2d8486 -- <orig-path>`)
 (merged into this plan as Phase D; see "Material updates" below).
 **Plan-base commit**: `d0af171`. The "Current state" section is
 accurate against this commit. If `main` has moved before execution
@@ -163,7 +163,7 @@ acceptance criteria):
   `docs/runbook.md`, `docs/tech-stack.md`, `docs/ci-strategy.md`,
   `scripts/run-full-pipeline.sh`, and `scripts/README.md`. Surviving
   mentions live under `docs/archived/`, `docs/plans/`,
-  `docs/proposals/`, and the historical `scripts/p02-parity-bench.sh`
+  `docs/plans/proposed/`, and the historical `scripts/p02-parity-bench.sh`
   (the bench is itself an Ollama-vs-mlx-lm parity tool).
 
 **Owner**: TBD.
@@ -920,7 +920,7 @@ backend documentation burden permanently.
 - [x] Grep for `ollama` in `docs/` and `.env.example` returns zero
       live references (archived BUILD_PLAN excluded; the surviving
       mentions live under `docs/archived/`, `docs/plans/`,
-      `docs/proposals/`, `scripts/p02-parity-bench.sh` historical
+      `docs/plans/proposed/`, `scripts/p02-parity-bench.sh` historical
       context, and `scripts/llm-pull.sh`'s "restores the `ollama
       pull` UX" comment — none direct an installer at Ollama).
 - [x] CI green with the simplified docs (lint + tests pass; the
@@ -1178,7 +1178,7 @@ answers.
 
 ## Cross-references
 
-- `docs/proposals/performance-enhancements.md` § P-02 — origin proposal.
+- `docs/plans/proposed/performance-enhancements.md` § P-02 — origin proposal.
 - `docs/local-inference.md` § "mlx-lm — production batches" —
   prerequisite documentation for the install commands.
 - `docs/runbook.md` § "End-to-end command sequence" — updated as

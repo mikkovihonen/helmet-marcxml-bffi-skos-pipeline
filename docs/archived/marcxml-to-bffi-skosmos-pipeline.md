@@ -12,7 +12,7 @@
 >   [`../tech-stack.md`](../tech-stack.md).
 > - Local inference setup → [`../local-inference.md`](../local-inference.md).
 > - Validation boundaries → [`../validation-strategy.md`](../validation-strategy.md).
-> - Forward-looking design changes → [`../proposals/`](../proposals/).
+> - Forward-looking design changes → [`../plans/proposed/`](../plans/proposed/).
 > - Sequenced execution detail → [`../plans/`](../plans/).
 >
 > The historical milestone-ordered build plan lives at

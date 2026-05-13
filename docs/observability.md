@@ -8,10 +8,9 @@ dashboard renders.
 
 See also:
 
-- [`docs/proposals/prop-11-structured-observability.md`](proposals/prop-11-structured-observability.md)
-  — the design rationale.
-- [`docs/plans/in-progress/p-11-structured-observability.md`](plans/in-progress/p-11-structured-observability.md)
-  — the execution plan.
+- [`docs/plans/completed/p-11-structured-observability.md`](plans/completed/p-11-structured-observability.md)
+  — the execution plan (carries the design rationale at the top, the
+  source proposal was inlined when the plan graduated).
 - [`docs/runbook.md`](runbook.md) § "Local observability stack" — the
   operator workflow.
 
