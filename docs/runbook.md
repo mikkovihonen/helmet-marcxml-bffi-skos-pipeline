@@ -187,6 +187,15 @@ LLM_BASE_URL=http://localhost:11434/v1 \
 #   bffi-pipeline reconcile --kinds creators        # KANTO + VIAF only
 #   bffi-pipeline reconcile --kinds subjects,genres # YSO + KAUNO + MUSO
 #
+# P-10 Phase E knob (env-var only — no CLI flag):
+#   BFFI_M9_PICKER_ORDERING=prefix-cache (default) reorders deferred
+#     picker calls so consecutive POST /v1/chat/completions calls share
+#     the longest possible prompt prefix, maximising mlx-lm prefix-cache
+#     reuse on runs of same-kind / same-vocabulary picks.
+#   BFFI_M9_PICKER_ORDERING=submission preserves the pre-Phase-E walk
+#     order; useful for bench A/B comparisons and rollback. Output
+#     Turtle is byte-stable under either value.
+#
 # After reconcile, surface the YSA → YSO bare-label residue for the
 # cataloguer worklist (see "Expected reconciliation residue from the
 # YSA → YSO vocabulary merge" section below):

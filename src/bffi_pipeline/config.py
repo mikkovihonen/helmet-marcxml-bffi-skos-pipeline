@@ -148,6 +148,21 @@ class Settings(BaseSettings):
         default=False,
         alias="BFFI_M9_TIER0_EXPANSION",
     )
+    # P-10 Phase E: ordering of the deferred picker queue before
+    # ThreadPoolExecutor dispatch. ``prefix-cache`` (default) sorts by
+    # (request.kind, candidates[0].source_vocabulary, sorted-candidate-URI
+    # fingerprint, request.literal) so consecutive picker calls share the
+    # longest possible prompt prefix — mlx-lm's prompt-prefix cache
+    # collapses per-call wall to roughly decode-time on runs of same-kind
+    # calls. ``submission`` preserves the pre-Phase-E walk order (the
+    # order ``_collect_requests`` yielded them); useful for bench A/B
+    # comparison and rollback. Byte-stability is guaranteed under both
+    # values because the orchestrator sorts results by submission ``idx``
+    # before graph-write.
+    m9_picker_ordering: str = Field(
+        default="prefix-cache",
+        alias="BFFI_M9_PICKER_ORDERING",
+    )
     # P-11 Phase A: per-invocation structured event stream.
     # ``observability_sidecar`` is the canonical JSONL file every stage
     # appends to (start / progress / phase_boundary / end / health /

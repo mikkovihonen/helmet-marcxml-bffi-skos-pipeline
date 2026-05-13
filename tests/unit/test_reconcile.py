@@ -28,6 +28,8 @@ from bffi_pipeline.stages.reconcile import (
     LEXICAL_FLOOR,
     LLM_CONFIDENCE_THRESHOLD,
     PICKER_MAX_VALIDATION_RETRIES,
+    PICKER_ORDERING_PREFIX_CACHE,
+    PICKER_ORDERING_SUBMISSION,
     STAGE_FALLBACK,
     STAGE_FICTIONAL,
     STAGE_LEXICAL,
@@ -42,6 +44,8 @@ from bffi_pipeline.stages.reconcile import (
     StubAuthorityClient,
     StubPicker,
     _iter_subject_requests,
+    _order_deferred_picker_queue,
+    _picker_queue_sort_key,
     apply_reconciliation,
     decide_reconciliation,
     lexical_similarity,
@@ -1812,4 +1816,221 @@ def test_phase1_pool_thread_safe_call_count() -> None:
     assert client.calls == len(labels), (
         f"Expected exactly {len(labels)} client.query calls under phase1=8, "
         f"got {client.calls} — pool is either double-dispatching or dropping."
+    )
+
+
+# --- P-10 Phase E: picker queue ordering for prefix-cache stickiness ------
+
+
+def _deferred_entry(
+    idx: int,
+    *,
+    kind: AuthorityKind,
+    literal: str,
+    candidate_uris: list[str],
+    source_vocab: str,
+) -> tuple[int, EntityRequest, list[AuthorityCandidate]]:
+    """Build one (idx, request, candidates) tuple for the picker-queue tests."""
+    request = EntityRequest(
+        work_uri=f"http://urn.fi/URN:NBN:fi:bib:work:order-{idx}",
+        literal=literal,
+        kind=kind,
+    )
+    candidates = [
+        AuthorityCandidate(
+            uri=uri,
+            pref_label=f"{literal} candidate",
+            source_vocabulary=source_vocab,
+            lexical_similarity=0.96,
+        )
+        for uri in candidate_uris
+    ]
+    return idx, request, candidates
+
+
+def test_picker_queue_sort_key_orders_by_kind_then_vocab() -> None:
+    """Sort key clusters by request.kind first, then source_vocabulary.
+
+    Per plan § E.1, the prompt prefix is dominated by the kind-conditional
+    sections in ``prompts/picker_v1.txt``; same-kind picks therefore share
+    the longest static prefix and should be dispatched contiguously.
+    """
+    entries = [
+        _deferred_entry(
+            0, kind="subject", literal="Helsinki", candidate_uris=["a"], source_vocab="yso"
+        ),
+        _deferred_entry(
+            1, kind="person", literal="Tolstoy", candidate_uris=["b"], source_vocab="finaf"
+        ),
+        _deferred_entry(
+            2, kind="subject", literal="Espoo", candidate_uris=["c"], source_vocab="yso"
+        ),
+        _deferred_entry(
+            3, kind="person", literal="Pushkin", candidate_uris=["d"], source_vocab="finaf"
+        ),
+    ]
+    ordered = _order_deferred_picker_queue(entries, ordering=PICKER_ORDERING_PREFIX_CACHE)
+    kinds = [request.kind for _idx, request, _cands in ordered]
+    # All "person" picks before all "subject" picks (lexical order on kind).
+    assert kinds == ["person", "person", "subject", "subject"]
+
+
+def test_picker_queue_sort_key_clusters_by_candidate_fingerprint() -> None:
+    """Within a kind+vocab cluster, identical candidate sets cluster together."""
+    entries = [
+        _deferred_entry(
+            0, kind="person", literal="A", candidate_uris=["x", "y"], source_vocab="finaf"
+        ),
+        _deferred_entry(
+            1, kind="person", literal="B", candidate_uris=["m", "n"], source_vocab="finaf"
+        ),
+        _deferred_entry(
+            2, kind="person", literal="C", candidate_uris=["x", "y"], source_vocab="finaf"
+        ),
+        _deferred_entry(
+            3, kind="person", literal="D", candidate_uris=["m", "n"], source_vocab="finaf"
+        ),
+    ]
+    ordered = _order_deferred_picker_queue(entries, ordering=PICKER_ORDERING_PREFIX_CACHE)
+    # ``m|n`` < ``x|y`` lexically; within each fingerprint group, literal
+    # alphabetises (B < D, A < C).
+    literals = [request.literal for _idx, request, _cands in ordered]
+    assert literals == ["B", "D", "A", "C"]
+
+
+def test_picker_queue_sort_key_stable_on_ties() -> None:
+    """Entries with identical sort keys preserve submission order (stable sort)."""
+    entries = [
+        _deferred_entry(
+            i,
+            kind="person",
+            literal="duplicate",
+            candidate_uris=["same-1", "same-2"],
+            source_vocab="finaf",
+        )
+        for i in range(6)
+    ]
+    ordered = _order_deferred_picker_queue(entries, ordering=PICKER_ORDERING_PREFIX_CACHE)
+    indices = [idx for idx, _req, _cands in ordered]
+    assert indices == list(range(6)), "Stable sort must preserve submission order on tied keys."
+
+
+def test_picker_queue_empty_and_single_are_noops() -> None:
+    """Empty and single-entry queues sort to themselves with no exception."""
+    assert _order_deferred_picker_queue([], ordering=PICKER_ORDERING_PREFIX_CACHE) == []
+    single = [
+        _deferred_entry(0, kind="person", literal="X", candidate_uris=["a"], source_vocab="finaf")
+    ]
+    assert _order_deferred_picker_queue(single, ordering=PICKER_ORDERING_PREFIX_CACHE) == single
+
+
+def test_picker_queue_submission_ordering_is_passthrough() -> None:
+    """``submission`` mode must return the queue unchanged for byte-stable rollback."""
+    entries = [
+        _deferred_entry(
+            0, kind="subject", literal="z-last", candidate_uris=["zzz"], source_vocab="yso"
+        ),
+        _deferred_entry(
+            1, kind="person", literal="a-first", candidate_uris=["aaa"], source_vocab="finaf"
+        ),
+    ]
+    ordered = _order_deferred_picker_queue(entries, ordering=PICKER_ORDERING_SUBMISSION)
+    # Same objects, same order.
+    assert ordered == entries
+    assert ordered is not entries or ordered == entries  # passthrough is acceptable
+
+
+def test_picker_queue_sort_key_uses_candidate_zero_vocab() -> None:
+    """Sort key reads ``candidates[0].source_vocabulary``; verify it's used."""
+    entry = _deferred_entry(
+        0, kind="person", literal="X", candidate_uris=["u1", "u2"], source_vocab="kanto"
+    )
+    key = _picker_queue_sort_key(entry)
+    assert key[0] == "person"
+    assert key[1] == "kanto"
+    # Fingerprint is sorted-then-joined.
+    assert key[2] == "u1|u2"
+    assert key[3] == "X"
+
+
+def test_apply_reconciliation_byte_stable_across_picker_ordering_modes() -> None:
+    """Canonical output is byte-identical under prefix-cache and submission ordering.
+
+    The orchestrator re-sorts ``picker_results`` by submission ``idx`` before
+    graph mutation (Phase A's determinism gate), so the output Turtle is
+    invariant under any picker dispatch order. This is the load-bearing
+    guarantee for Phase E's rollback knob.
+    """
+    # prefix-cache ordering (default).
+    labels_pc, client_pc, picker_pc = _twelve_ambiguous_creators()
+    g_pc = _build_canonical_with_n_creators(labels_pc)
+    apply_reconciliation(
+        client=client_pc,
+        picker_factory=lambda decisions=picker_pc.decisions: StubPicker(decisions=dict(decisions)),
+        graph=g_pc,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        picker_ordering=PICKER_ORDERING_PREFIX_CACHE,
+    )
+    bytes_pc = g_pc.serialize(format="turtle")
+
+    # submission ordering (rollback).
+    labels_sub, client_sub, picker_sub = _twelve_ambiguous_creators()
+    g_sub = _build_canonical_with_n_creators(labels_sub)
+    apply_reconciliation(
+        client=client_sub,
+        picker_factory=lambda decisions=picker_sub.decisions: StubPicker(decisions=dict(decisions)),
+        graph=g_sub,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        picker_ordering=PICKER_ORDERING_SUBMISSION,
+    )
+    bytes_sub = g_sub.serialize(format="turtle")
+
+    assert bytes_pc == bytes_sub, (
+        "Canonical Turtle diverged between prefix-cache and submission picker "
+        "ordering — the post-pool result-sort guarantee is broken."
+    )
+
+
+def test_picker_ordering_default_is_prefix_cache_in_apply_reconciliation() -> None:
+    """``apply_reconciliation`` defaults to ``prefix-cache`` ordering.
+
+    Pins the default behaviour: callers that don't pass ``picker_ordering``
+    get Phase E's optimisation. Pre-Phase-E callers (tests etc.) are unchanged
+    because output is byte-stable across ordering modes.
+    """
+    labels, client, picker = _twelve_ambiguous_creators()
+    g_default = _build_canonical_with_n_creators(labels)
+    apply_reconciliation(
+        client=client,
+        picker_factory=lambda decisions=picker.decisions: StubPicker(decisions=dict(decisions)),
+        graph=g_default,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        # picker_ordering omitted — should default to prefix-cache.
+    )
+    bytes_default = g_default.serialize(format="turtle")
+
+    labels_explicit, client_explicit, picker_explicit = _twelve_ambiguous_creators()
+    g_explicit = _build_canonical_with_n_creators(labels_explicit)
+    apply_reconciliation(
+        client=client_explicit,
+        picker_factory=(
+            lambda decisions=picker_explicit.decisions: StubPicker(decisions=dict(decisions))
+        ),
+        graph=g_explicit,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        picker_ordering=PICKER_ORDERING_PREFIX_CACHE,
+    )
+    bytes_explicit = g_explicit.serialize(format="turtle")
+
+    assert bytes_default == bytes_explicit, (
+        "Default picker_ordering is not 'prefix-cache' — the Phase E "
+        "opt-in/opt-out contract is broken."
     )

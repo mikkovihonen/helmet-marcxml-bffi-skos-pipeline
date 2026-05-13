@@ -1637,6 +1637,72 @@ def _field_id(request: EntityRequest) -> str:
     return f"{request.work_uri}|{predicate}|{request.literal}"
 
 
+#: Valid values for ``BFFI_M9_PICKER_ORDERING`` / ``apply_reconciliation``'s
+#: ``picker_ordering`` parameter. ``prefix-cache`` is the Phase E default;
+#: ``submission`` preserves the pre-Phase-E walk order for bench A/B and
+#: rollback.
+PickerOrdering = LiteralType["prefix-cache", "submission"]
+
+PICKER_ORDERING_PREFIX_CACHE: Final[PickerOrdering] = "prefix-cache"
+PICKER_ORDERING_SUBMISSION: Final[PickerOrdering] = "submission"
+
+
+def _picker_queue_sort_key(
+    entry: tuple[int, EntityRequest, list[AuthorityCandidate]],
+) -> tuple[str, str, str, str]:
+    """Sort key for the deferred picker queue (P-10 Phase E).
+
+    Orders entries so that consecutive ``POST /v1/chat/completions``
+    calls share the longest possible prompt prefix — mlx-lm's
+    prompt-prefix cache then collapses per-call wall to roughly
+    decode-time on runs of same-kind / same-vocabulary calls.
+
+    Key, in order:
+
+    1. ``request.kind`` — clusters fictional-character picks together,
+       then person, then corporate_body, etc. The picker prompt has
+       kind-conditional sections in ``prompts/picker_v1.txt``, so picks
+       of the same kind share the longest static prompt prefix.
+    2. ``candidates[0].source_vocabulary`` — within a kind, cluster by
+       the dominant candidate vocabulary (``yso``, ``finaf``, ``kauno``,
+       ``viaf``, …). Same-vocabulary candidates share authority-style
+       formatting in the rendered candidate list.
+    3. A stable fingerprint of ``sorted(c.uri for c in candidates)`` —
+       within a kind+vocab cluster, group calls with overlapping
+       candidate sets. Identical / near-identical candidate sets share
+       long prompt-body prefixes.
+    4. ``request.literal`` — final tie-breaker for byte-stability
+       across runs (the literal varies last in the prompt).
+
+    Output of ``_apply_reconciliation`` is byte-stable regardless of the
+    ordering chosen, because the orchestrator sorts ``picker_results`` by
+    submission ``idx`` before applying graph mutations.
+    """
+    _idx, request, candidates = entry
+    vocab = candidates[0].source_vocabulary if candidates else ""
+    fingerprint = "|".join(sorted(c.uri for c in candidates))
+    return (request.kind, vocab, fingerprint, request.literal)
+
+
+def _order_deferred_picker_queue(
+    deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]],
+    *,
+    ordering: PickerOrdering,
+) -> list[tuple[int, EntityRequest, list[AuthorityCandidate]]]:
+    """Return ``deferred`` in the order requested by ``ordering``.
+
+    The orchestrator dispatches the returned list to the picker pool;
+    the result-merge that follows re-sorts by submission ``idx`` so the
+    canonical Turtle is byte-stable across both ordering modes. See
+    :func:`_picker_queue_sort_key` for the prefix-cache key.
+    """
+    if ordering == PICKER_ORDERING_SUBMISSION:
+        return deferred
+    # ``prefix-cache`` — Python's ``sorted`` is stable, so equal keys
+    # preserve their submission order (deterministic tie-break).
+    return sorted(deferred, key=_picker_queue_sort_key)
+
+
 def _picker_phase_seq(
     deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]],
     *,
@@ -1796,6 +1862,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     field_timeout_seconds: int = 0,
     watchdog_sidecar_path: Path | None = None,
     phase1_concurrency: int = 1,
+    picker_ordering: PickerOrdering = PICKER_ORDERING_PREFIX_CACHE,
 ) -> tuple[ReconciliationSummary, list[ReconciliationOutcome]]:
     """Walk canonical.ttl, reconcile creators + subjects, and write the graph back.
 
@@ -1828,6 +1895,14 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     ``M9_PHASE1_CONCURRENCY`` setting (default 8) — Phase 1's
     binding constraint is HTTP / SPARQL throughput rather than the
     GPU-bound mlx-lm picker, so it tolerates higher concurrency.
+
+    P-10 Phase E: ``picker_ordering`` controls the dispatch order of
+    deferred picker entries. ``"prefix-cache"`` (default) sorts so that
+    consecutive ``POST /v1/chat/completions`` calls share the longest
+    possible prompt prefix, maximising mlx-lm prefix-cache reuse.
+    ``"submission"`` preserves the pre-Phase-E walk order. Output is
+    byte-stable under both modes — the orchestrator re-sorts results by
+    submission ``idx`` before graph mutation.
 
     Pass ``picker_factory`` for concurrent runs (one ``LLMPicker`` is
     built per worker thread). Pass ``picker`` for single-threaded
@@ -1884,6 +1959,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 local_resolver is not None
                 and getattr(local_resolver, "tier0_expansion_enabled", False)
             ),
+            "picker_ordering": picker_ordering,
         },
     )
     # P-11 Phase C: probe Fuseki / mlx-lm / Finto at entry; surfaces a
@@ -1956,11 +2032,16 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             _m9_probe_dependencies(local_resolver)
 
     # --- Phase 2: dispatch deferred picker calls --------------------------
+    # P-10 Phase E: reorder the queue so consecutive picker calls share
+    # the longest possible prompt prefix. Output Turtle stays byte-stable
+    # because the result-merge below sorts by submission ``idx``.
+    deferred = _order_deferred_picker_queue(deferred, ordering=picker_ordering)
     emit_if_active(
         stage="m9",
         event="phase_boundary",
         phase="phase2",
         counters={"deferred_to_picker": len(deferred)},
+        extra={"picker_ordering": picker_ordering},
     )
     picker_results: list[tuple[int, ReconciliationOutcome]] = []
     if deferred:
@@ -2073,6 +2154,8 @@ __all__ = [
     "PICKER_MAX_CONNECTION_RETRIES",
     "PICKER_MAX_VALIDATION_RETRIES",
     "PICKER_MIN_RATIONALE_CHARS",
+    "PICKER_ORDERING_PREFIX_CACHE",
+    "PICKER_ORDERING_SUBMISSION",
     "PICKER_PROMPT_PATH",
     "PICKER_STUB_PHRASES",
     "PICKER_UNCERTAIN_MAX_CONFIDENCE",
@@ -2096,6 +2179,7 @@ __all__ = [
     "LLMPicker",
     "LangChainLLMPicker",
     "PickerDecision",
+    "PickerOrdering",
     "ReconciliationOutcome",
     "ReconciliationStage",
     "ReconciliationSummary",

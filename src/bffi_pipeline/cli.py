@@ -1120,6 +1120,23 @@ def reconcile_command(
     effective_tier0_expansion = (
         settings.m9_tier0_expansion if tier0_expansion is None else tier0_expansion
     )
+    # P-10 Phase E: validated string → typed Literal for apply_reconciliation.
+    # Env-var only (no CLI flag); see plan § E.2.
+    if settings.m9_picker_ordering not in (
+        reconcile.PICKER_ORDERING_PREFIX_CACHE,
+        reconcile.PICKER_ORDERING_SUBMISSION,
+    ):
+        raise typer.BadParameter(
+            f"BFFI_M9_PICKER_ORDERING must be "
+            f"'{reconcile.PICKER_ORDERING_PREFIX_CACHE}' or "
+            f"'{reconcile.PICKER_ORDERING_SUBMISSION}'; "
+            f"got {settings.m9_picker_ordering!r}."
+        )
+    effective_picker_ordering: reconcile.PickerOrdering = (
+        reconcile.PICKER_ORDERING_PREFIX_CACHE
+        if settings.m9_picker_ordering == reconcile.PICKER_ORDERING_PREFIX_CACHE
+        else reconcile.PICKER_ORDERING_SUBMISSION
+    )
     watchdog_sidecar = settings.data_dir / "watchdog-events.jsonl"
 
     http_client = httpx.Client(timeout=10.0)
@@ -1160,6 +1177,7 @@ def reconcile_command(
                     field_timeout_seconds=effective_field_timeout,
                     watchdog_sidecar_path=watchdog_sidecar,
                     phase1_concurrency=effective_phase1_concurrency,
+                    picker_ordering=effective_picker_ordering,
                 )
         else:
             summary, _outcomes = reconcile.apply_reconciliation(
@@ -1174,6 +1192,7 @@ def reconcile_command(
                 field_timeout_seconds=effective_field_timeout,
                 watchdog_sidecar_path=watchdog_sidecar,
                 phase1_concurrency=effective_phase1_concurrency,
+                picker_ordering=effective_picker_ordering,
             )
     finally:
         http_client.close()
