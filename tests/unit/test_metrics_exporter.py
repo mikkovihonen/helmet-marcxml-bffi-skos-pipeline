@@ -602,6 +602,13 @@ def test_grafana_dashboard_every_panel_filters_by_active_run() -> None:
     ``run_uuid="$active_run"`` so the dashboard reflects the active
     invocation only. Forward-incompat trap: adding a new panel
     without the filter trips this test.
+
+    Exception: the "Dependency probe latency" panel is intentionally
+    cross-run — it summarises ``max by (dep)`` of the latest reading
+    for each dependency regardless of run. Operators want to see the
+    health of Finto / Fuseki / mlx-lm across all invocations, not
+    only the active one, since a slow Finto today is a slow Finto
+    for tomorrow's run too.
     """
     dashboard_path = (
         Path(__file__).resolve().parents[2]
@@ -611,8 +618,11 @@ def test_grafana_dashboard_every_panel_filters_by_active_run() -> None:
         / "bffi-pipeline.json"
     )
     data = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    cross_run_panel_titles = {"Dependency probe latency (ms)"}
     offenders: list[str] = []
     for panel in data["panels"]:
+        if panel.get("title") in cross_run_panel_titles:
+            continue
         for target in panel.get("targets", []):
             expr = target.get("expr", "")
             if not expr:
@@ -644,9 +654,7 @@ def test_grafana_dashboard_pipeline_overview_row_covers_every_stage() -> None:
     # pushed it down. Locate it by shape (w=3 stat tiles, one per stage)
     # rather than by literal coordinate.
     overview_tiles = [
-        p
-        for p in data["panels"]
-        if p.get("type") == "stat" and p.get("gridPos", {}).get("w") == 3
+        p for p in data["panels"] if p.get("type") == "stat" and p.get("gridPos", {}).get("w") == 3
     ]
     assert len(overview_tiles) == 8, (
         f"Expected 8 overview tiles at the top of the dashboard; "

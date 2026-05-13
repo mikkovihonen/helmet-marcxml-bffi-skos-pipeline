@@ -1258,7 +1258,7 @@
         "uid": "bffi-prometheus"
       },
       "gridPos": {
-        "h": 6,
+        "h": 3,
         "w": 24,
         "x": 0,
         "y": 23
@@ -1266,13 +1266,27 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_dependency_probe_latency_ms{run_uuid=\"$active_run\"}",
-          "legendFormat": "{{stage}}/{{dep}}"
+          "expr": "max by (dep) (bffi_dependency_probe_latency_ms)",
+          "legendFormat": "{{dep}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "ms"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "text": {
+          "valueSize": 24,
+          "titleSize": 12
         }
       }
     },
