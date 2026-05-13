@@ -26,7 +26,7 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 8,
+        "w": 16,
         "x": 0,
         "y": 0
       },
@@ -74,7 +74,7 @@
       "gridPos": {
         "h": 3,
         "w": 8,
-        "x": 8,
+        "x": 16,
         "y": 0
       },
       "targets": [
@@ -111,86 +111,6 @@
       }
     },
     {
-      "id": 34,
-      "type": "stat",
-      "title": "ETA / Completed",
-      "description": "Top: M9's Phase 2 ETA in seconds (the bench-dominant remaining work — picker dispatch). Reads — until Phase 2 has emitted two cadence-spaced progress events so a rate can be derived. Bottom: most recent stage end timestamp. When the run is complete, ETA reads 0 and the bottom value shows when it finished.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bffi-prometheus"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 8,
-        "x": 16,
-        "y": 0
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "bffi_stage_eta_seconds{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}",
-          "legendFormat": "ETA (s)"
-        },
-        {
-          "refId": "B",
-          "expr": "max(bffi_stage_ended_timestamp{run_uuid=\"$active_run\"}) * 1000",
-          "legendFormat": "last end"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "graphMode": "none",
-        "textMode": "value_and_name",
-        "colorMode": "value",
-        "orientation": "vertical"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "\u2014",
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "last end"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "dateTimeFromNow"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ETA (s)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
       "id": 9,
       "type": "stat",
       "title": "M2 marc-to-bf",
@@ -210,6 +130,11 @@
           "refId": "A",
           "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m2\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m2"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}",
+          "legendFormat": "time"
         }
       ],
       "options": {
@@ -220,7 +145,8 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "orientation": "vertical"
       },
       "fieldConfig": {
         "defaults": {
@@ -257,7 +183,36 @@
               }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -280,6 +235,11 @@
           "refId": "A",
           "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m3\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m3"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}",
+          "legendFormat": "time"
         }
       ],
       "options": {
@@ -290,7 +250,8 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "orientation": "vertical"
       },
       "fieldConfig": {
         "defaults": {
@@ -327,7 +288,36 @@
               }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -350,6 +340,11 @@
           "refId": "A",
           "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m5\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m5"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}",
+          "legendFormat": "time"
         }
       ],
       "options": {
@@ -360,7 +355,8 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "orientation": "vertical"
       },
       "fieldConfig": {
         "defaults": {
@@ -397,7 +393,36 @@
               }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -420,6 +445,11 @@
           "refId": "A",
           "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m6\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m6"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}",
+          "legendFormat": "time"
         }
       ],
       "options": {
@@ -430,7 +460,8 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "orientation": "vertical"
       },
       "fieldConfig": {
         "defaults": {
@@ -467,7 +498,36 @@
               }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -490,6 +550,11 @@
           "refId": "A",
           "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m8\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m8"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}",
+          "legendFormat": "time"
         }
       ],
       "options": {
@@ -500,7 +565,8 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "orientation": "vertical"
       },
       "fieldConfig": {
         "defaults": {
@@ -537,7 +603,36 @@
               }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -560,6 +655,11 @@
           "refId": "A",
           "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m9\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m9"
+        },
+        {
+          "refId": "B",
+          "expr": "(bffi_stage_eta_seconds{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"} unless on(stage,run_uuid) bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or (bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"})",
+          "legendFormat": "time"
         }
       ],
       "options": {
@@ -570,7 +670,8 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "orientation": "vertical"
       },
       "fieldConfig": {
         "defaults": {
@@ -607,7 +708,36 @@
               }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -630,6 +760,11 @@
           "refId": "A",
           "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"skosify\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "skosify"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}",
+          "legendFormat": "time"
         }
       ],
       "options": {
@@ -640,7 +775,8 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "orientation": "vertical"
       },
       "fieldConfig": {
         "defaults": {
@@ -677,7 +813,36 @@
               }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -700,6 +865,11 @@
           "refId": "A",
           "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"load\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "load"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"}",
+          "legendFormat": "time"
         }
       ],
       "options": {
@@ -710,7 +880,8 @@
         },
         "graphMode": "none",
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "orientation": "vertical"
       },
       "fieldConfig": {
         "defaults": {
@@ -747,7 +918,36 @@
               }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
