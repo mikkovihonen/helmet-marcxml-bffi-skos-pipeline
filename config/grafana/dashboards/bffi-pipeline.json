@@ -88,17 +88,19 @@
       "id": 5,
       "type": "state-timeline",
       "title": "Dependency health",
+      "description": "Per-(stage, dep) health verdict. P-12 Phase C: series whose most recent probe is older than 60s are filtered out by the freshness clause so the timeline shows a gap (grey) instead of extending stale state indefinitely. P-12 Phase B: not_configured deps (NaN gauge) render as grey too.",
       "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_dependency_health",
+          "expr": "bffi_dependency_health and on(stage, dep) (time() - bffi_dependency_last_probe_timestamp < 60)",
           "legendFormat": "{{stage}}/{{dep}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "stale",
           "mappings": [
             {"type": "value", "options": {"0": {"text": "down", "color": "red"}}},
             {"type": "value", "options": {"1": {"text": "degraded", "color": "orange"}}},

@@ -124,6 +124,55 @@ def test_end_records_outcome_buckets() -> None:
     assert 'outcome="total"' not in text
 
 
+def test_health_event_sets_last_probe_timestamp_gauge() -> None:
+    """P-12 Phase C: every probe records its event timestamp into
+    ``bffi_dependency_last_probe_timestamp`` so the dashboard can
+    compute ``time() - probe_ts`` and grey out stale cells.
+
+    Two events for the same (stage, dep): the latest timestamp must
+    win (Gauge.set is most-recent-write).
+    """
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="health",
+            stage="m9",
+            ts_unix=1_700_000_000.0,
+            extra={
+                "probes": {
+                    "fuseki": {
+                        "dep": "fuseki",
+                        "status": "up",
+                        "latency_ms": 12,
+                        "note": "HTTP 200",
+                    },
+                }
+            },
+        ),
+    )
+    apply_event(
+        metrics,
+        _row(
+            event="health",
+            stage="m9",
+            ts_unix=1_700_000_999.0,
+            extra={
+                "probes": {
+                    "fuseki": {
+                        "dep": "fuseki",
+                        "status": "up",
+                        "latency_ms": 14,
+                        "note": "HTTP 200",
+                    },
+                }
+            },
+        ),
+    )
+    ts = metrics.dependency_last_probe_timestamp.labels(stage="m9", dep="fuseki")._value.get()
+    assert ts == 1_700_000_999.0, f"Expected the latest probe ts (1_700_000_999) to win; got {ts}."
+
+
 def test_health_event_maps_not_configured_to_nan_gauge() -> None:
     """P-12 Phase B: ``status="not_configured"`` maps to NaN so
     Grafana's default value-mapping greys the cell out instead of

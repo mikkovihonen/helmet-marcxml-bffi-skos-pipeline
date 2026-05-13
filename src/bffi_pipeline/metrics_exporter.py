@@ -84,6 +84,7 @@ class PipelineMetrics:
     stage_eta_seconds: Gauge = field(init=False)
     dependency_health: Gauge = field(init=False)
     dependency_probe_latency_ms: Gauge = field(init=False)
+    dependency_last_probe_timestamp: Gauge = field(init=False)
     watchdog_events_total: Counter = field(init=False)
 
     def __post_init__(self) -> None:
@@ -138,6 +139,16 @@ class PipelineMetrics:
         self.dependency_probe_latency_ms = Gauge(
             "bffi_dependency_probe_latency_ms",
             "Latency of the most recent dependency probe in milliseconds.",
+            labelnames=("stage", "dep"),
+            registry=self.registry,
+        )
+        # P-12 Phase C: timestamp of the most recent health event per
+        # (stage, dep) so the dashboard can compute freshness and grey
+        # out stale gauges (>60 s) instead of presenting them as if
+        # they were live.
+        self.dependency_last_probe_timestamp = Gauge(
+            "bffi_dependency_last_probe_timestamp",
+            "Unix timestamp of the most recent `health` event for this stage / dep.",
             labelnames=("stage", "dep"),
             registry=self.registry,
         )
@@ -243,6 +254,11 @@ def apply_event(
             metrics.dependency_health.labels(stage=row.stage, dep=dep).set(status_value)
             metrics.dependency_probe_latency_ms.labels(stage=row.stage, dep=dep).set(
                 probe.get("latency_ms", 0)
+            )
+            # P-12 Phase C: per-(stage, dep) freshness gauge for the
+            # dashboard's stale-detection overlay.
+            metrics.dependency_last_probe_timestamp.labels(stage=row.stage, dep=dep).set(
+                row.ts.timestamp()
             )
     elif row.event == "watchdog":
         inner_event = row.extra.get("event") or "unknown"
