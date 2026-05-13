@@ -16,7 +16,7 @@ docs/runbook.md`.
 
 - Phase A (structured event emission from every stage): `f3a22b3` (2026-05-13). Code: `observability.py` + Settings + CLI hook + wired into M2/M3/M6/M8/M9/skosify/load; watchdog absorption forwards to the new stream; 5 unit tests + 867 total green. M5 embeddings deferred to a follow-up sub-step (the build/emit-candidates surface needs more event-cadence design than fit in this commit). Real-pipeline-run sanity check folds into the next bench.
 - Phase B (`bffi-pipeline status` CLI): `25b2c6e` (2026-05-13). Code: `src/bffi_pipeline/status.py` (parse + collate + render + tail) + new `bffi-pipeline status` subcommand in `cli.py`. `--sidecar` / `--tail` / `--since now|<iso>` / `--run-uuid` flags. 13 new unit tests against synthetic event streams. 880 total tests green.
-- Phase C (dependency health probes): `<unfilled>`
+- Phase C (dependency health probes): `2cd00e2` (2026-05-13). Code: `stages/probes.py` with probe_fuseki / probe_mlx_lm / probe_finto + emit_health_probes helper. Wired into M9 (entry + every 1000 entities re-probe), M6 (primary + fallback mlx-lm at entry), load (Fuseki at entry). M3 cascade probe deferred (small follow-up). 13 new unit tests covering up/degraded/down for each probe + emit_health_probes write shape. 894 total tests green.
 - Phase D (Prometheus exporter + Grafana dashboard): `<unfilled>`
 
 **Owner**: TBD.
