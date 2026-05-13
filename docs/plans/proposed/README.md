@@ -110,14 +110,17 @@ plan documents *when the execution was scheduled*.
   the nine-site FI-HELME URI cluster into a config-driven
   `LibrarySource` registry keyed on MARC 003.
 - [`prop-17-exporter-multi-sidecar-discovery.md`](prop-17-exporter-multi-sidecar-discovery.md)
-  — `proposed`. The metrics exporter resolves its sidecar path at
-  process startup from `BFFI_DATA_DIR` / `BFFI_OBSERVABILITY_SIDECAR`,
-  so a pipeline run against a different `BFFI_DATA_DIR` silently
-  writes events to a sidecar the exporter doesn't watch. Surfaced
+  — `proposed`. The metrics exporter resolves its sidecar path AND
+  its error-spec paths at process startup from `BFFI_DATA_DIR` /
+  `BFFI_OBSERVABILITY_SIDECAR` — both as separate gotchas. A
+  pipeline run against a different `BFFI_DATA_DIR` silently writes
+  events + error rows to files the exporter doesn't watch. Surfaced
   by the 2026-05-13 overnight bench launch (5-hour observability
-  blackout until the exporter was restarted with `--sidecar`).
+  blackout for the stage events; the M2+M3 failure-mode bargauge
+  silently empty for another ~30 min after the sidecar fix).
   Proposes a repeatable `--sidecar`, a `--watch-glob` for
-  auto-discovery, and a startup echo of the resolved sidecar set.
+  auto-discovery, per-sidecar error-spec derivation from the
+  sidecar's parent dir, and a startup echo of the resolved set.
   No default-behaviour change.
 
 _(prop-15 and prop-16 graduated to plans on 2026-05-13 and shipped

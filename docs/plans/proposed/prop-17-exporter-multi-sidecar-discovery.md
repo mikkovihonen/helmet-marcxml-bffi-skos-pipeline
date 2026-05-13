@@ -1,7 +1,7 @@
 # P-17 — Exporter tails multiple stage-events sidecars + glob-based auto-discovery
 
 **Status**: proposed.
-**Scope**: half-day. Extend the exporter's tail loop to handle a list of sidecar paths; add `--watch-glob` for auto-discovery.
+**Scope**: half- to one-day. Extend the exporter's tail loop to handle a list of sidecar paths; add `--watch-glob` for auto-discovery; switch error-spec derivation from a single global `data_dir` to per-sidecar parent-dir resolution.
 **Proposal-base commit**: `11691bf`. To gauge drift before acting, run
 `git diff 11691bf..HEAD --
 src/bffi_pipeline/metrics_exporter.py
@@ -22,9 +22,11 @@ The current rollback — restart the exporter with `--sidecar` — works but is 
 1. The operator forgets the gotcha entirely; an overnight run lands with the dashboard apparently empty and they conclude "observability is broken." This happened today.
 2. Multiple bench runs in parallel (e.g. an audit pipeline + a production publish from different `BFFI_DATA_DIR`s) — the operator has to pick which one the exporter watches.
 
+**Same gotcha, different symptom — error JSONLs.** ~22:30 on the same overnight run the operator noticed the **M2+M3 failure-mode bargauge was empty** despite the panel having refIds `topk(10, sum by (error_type) (bffi_stage_errors_total{stage=m2|m3, run_uuid="$active_run"}))`. Root cause: the exporter's `_default_error_specs(data_dir)` derives `bibframe/_errors.jsonl` + `bffi/_validation.jsonl` paths from `get_settings().data_dir` at startup — separately from the `--sidecar` flag. So `--sidecar` correctly switched the event stream but error rows from the bench's `scratchpad/overnight-sample-2026-05-13/bibframe/_errors.jsonl` stayed invisible. Rollback: also set `BFFI_DATA_DIR=<bench-dir>` on the exporter's environment. Same shape of gotcha as the sidecar one — the operator has to remember to align two settings instead of one.
+
 ## Approach
 
-Three small additions to the exporter, all opt-in (defaults unchanged):
+Four small additions to the exporter, all opt-in (defaults unchanged):
 
 ### A. `--sidecar` becomes repeatable
 
@@ -54,19 +56,43 @@ New matches → new `_TailState` entries. Disappeared matches → state retained
 
 Surface: ~30 lines. The rescan is best-effort — a glob walk over a few hundred top-level directories is sub-millisecond.
 
-### C. Echo the resolved sidecar set on startup
+### C. Error-spec paths derive from each sidecar's parent dir
+
+Today `_default_error_specs(data_dir)` is computed once at process startup against `get_settings().data_dir`. With per-sidecar tailing from steps A + B this is the wrong shape: each watched sidecar has its OWN co-located `bibframe/_errors.jsonl` and `bffi/_validation.jsonl` (the pipeline convention is `<BFFI_DATA_DIR>/stage-events.jsonl`, `<BFFI_DATA_DIR>/bibframe/_errors.jsonl`, `<BFFI_DATA_DIR>/bffi/_validation.jsonl` all together).
+
+Change the resolution: when the exporter attaches a new sidecar (whether via explicit `--sidecar` or glob auto-discovery), it also synthesises the matching error specs from the sidecar's parent dir. Concretely:
+
+```python
+def _error_specs_for_sidecar(sidecar_path: Path) -> list[_ErrorFileSpec]:
+    data_dir = sidecar_path.parent
+    return [
+        _ErrorFileSpec(stage="m2", path=data_dir / "bibframe" / "_errors.jsonl", ...),
+        _ErrorFileSpec(stage="m3", path=data_dir / "bffi" / "_validation.jsonl", ...),
+    ]
+```
+
+The exporter's tail loop iterates over `{sidecar → [error_spec, error_spec, ...]}` pairs. Per-sidecar `_TailState` for the events JSONL pairs with per-error-file `_ErrorFileTailState` for the two error JSONLs.
+
+A `--error-spec <stage>:<path>` flag stays available as an escape hatch for operators who want to point at error JSONLs from a directory layout that doesn't follow the standard pipeline convention (e.g. tests, ad-hoc post-mortem analysis).
+
+Surface: ~20 lines (factor out the spec construction into `_error_specs_for_sidecar`; update the tail loop to iterate over the per-sidecar dict).
+
+### D. Echo the resolved sidecar set on startup
 
 The exporter today prints `[bffi-pipeline] metrics exporter listening on :9100`. Extend to also print:
 
 ```
 [bffi-pipeline] tailing sidecars (3):
   /path/to/data/stage-events.jsonl
+    + bibframe/_errors.jsonl, bffi/_validation.jsonl
   /path/to/scratchpad/overnight-sample-2026-05-13/stage-events.jsonl
+    + bibframe/_errors.jsonl, bffi/_validation.jsonl
   /path/to/scratchpad/data-cataloguer-audit-2026-05-13-v2/stage-events.jsonl
+    + bibframe/_errors.jsonl, bffi/_validation.jsonl
 [bffi-pipeline] watch-glob: '**/stage-events.jsonl' (rescan every 30s, will pick up new sidecars automatically)
 ```
 
-So an operator reading the exporter logs can immediately see whether their run's sidecar is being watched.
+So an operator reading the exporter logs can immediately see whether their run's sidecar AND its co-located error JSONLs are being watched.
 
 Surface: ~10 lines in `cli.py`.
 
@@ -92,10 +118,12 @@ Surface: ~10 lines in `cli.py`.
 
 - [ ] `--sidecar` accepts multiple invocations (repeatable typer option). Default behaviour (single path from `BFFI_DATA_DIR` or `BFFI_OBSERVABILITY_SIDECAR`) preserved.
 - [ ] `--watch-glob` accepts a glob pattern; rescanned every `--glob-rescan-seconds` (default 30 s). New matches auto-attach.
-- [ ] Startup-log echoes the resolved sidecar set + active globs.
+- [ ] Each attached sidecar synthesises its own pair of error-spec paths from the sidecar's **parent dir**, not from a single global `data_dir` (step C). `--error-spec` escape hatch available for non-standard layouts.
+- [ ] Startup-log echoes the resolved sidecar set + each sidecar's co-located error JSONLs + active globs.
 - [ ] Unit test: two synthetic sidecars in a temp dir; rehydrate + tail picks up events from both. Assert that `bffi_stage_started_timestamp{run_uuid=...}` is set for run_uuids from each file.
+- [ ] Unit test: a sidecar in dir X with an `_errors.jsonl` in `X/bibframe/`; `bffi_stage_errors_total{run_uuid=...}` is set from that file (not from a separate `data/` dir). Pins step C's per-sidecar error-spec derivation.
 - [ ] Unit test: a glob that matches no files at launch but matches one mid-run; assert the new file's events surface within one rescan interval.
-- [ ] Smoke test on the bench: launch exporter with `--watch-glob '**/stage-events.jsonl'`, run a pipeline against any `BFFI_DATA_DIR`; dashboard shows the new run without an exporter restart.
+- [ ] Smoke test on the bench: launch exporter with `--watch-glob '**/stage-events.jsonl'`, run a pipeline against any `BFFI_DATA_DIR`; dashboard shows the new run AND the M2+M3 failure-mode bargauge populates without an exporter restart.
 - [ ] `make lint && make test` green.
 
 ## What this proposal does NOT do
