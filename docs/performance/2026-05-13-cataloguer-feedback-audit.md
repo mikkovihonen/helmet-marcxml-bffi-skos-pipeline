@@ -112,26 +112,55 @@ Two of three correctly declined at sub-floor lexical similarity — pipeline ref
 
 The b22057407 result is encouraging: the LLM picker is **robust against superseded name forms** even without the asteri-id. Generalised: lexical-floor declines and LLM recoveries are both working as designed for source-data quality issues.
 
-### Category 7 — Bilingual yso/fin + yso/swe co-occurrence (1 of 4 records had both subjects materialise, confirmed bug)
+### Category 7 — Bilingual yso/fin + yso/swe co-occurrence (root cause traced to M3, NOT M9)
 
-Four records were tagged with this category but only one (`b26322791`) produced both Finnish and Swedish subject literals at the M3 → M8 boundary. The other three (`b26356557`, `b26304119`, `b2635665x`) had only person entities materialise in M9; their subject side was either bnoded out by the BIBFRAME → BFFI shape or one of the languages was shape-rejected. **Worth a separate dig**, tracked as a follow-up below.
+Initial reading of the audit suggested an M9 design gap (two URIs for one concept). A deeper trace through `scratchpad/data-cataloguer-audit-2026-05-13/` clarifies that **M9 is not buggy** — the bug is upstream:
 
-The one record that did materialise both shows the **bug the cataloguer flagged**:
+#### Step 1 — source MARCXML (cataloguer did the right thing)
 
-| Literal | Vocab | Bound URI |
-|---|---|---|
-| Italia (fi) | yso | yso:p105111 |
-| Italien (sv) | **allars** | allars:Y30493 |
+Both `Italia` and `Italien` on `b26322791` carry the same `$0` URI:
 
-**Two different URIs for the same concept**: `yso:p105111` (the multilingual YSO concept "Italy") *and* `allars:Y30493` (the Swedish-allmänna-ämnesord concept "Italien"). The same record now carries both, which is exactly what the cataloguer flagged.
+```xml
+<datafield tag="651" ind2="7">
+  <subfield code="a">Italia</subfield><subfield code="2">yso/fin</subfield>
+  <subfield code="0">http://www.yso.fi/onto/yso/p105111</subfield>
+</datafield>
+<datafield tag="651" ind2="7">
+  <subfield code="a">Italien</subfield><subfield code="2">yso/swe</subfield>
+  <subfield code="0">http://www.yso.fi/onto/yso/p105111</subfield>
+</datafield>
+```
 
-`allars` is a Finnish-Swedish authority kept in parallel with YSO; YSO concepts have multilingual labels (Finnish, Swedish, English) but `allars` is a separate URI namespace. The pipeline today reconciles each literal against its source-language authority independently and binds whichever URI matches first. There's no cross-walk between `allars:Y30493` and `yso:p105111` even though they refer to the same concept.
+#### Step 2 — M2 BIBFRAME (marc2bibframe2 emits `bf:Place` with per-record URI + authority cross-link)
 
-**This is a real M9 design gap** — surfaced as a new proposal at [`docs/plans/proposed/prop-15-bilingual-subject-reconciliation.md`](../plans/proposed/prop-15-bilingual-subject-reconciliation.md).
+For `651` Place subjects, marc2bibframe2 produces:
 
-### Category 7b — slm/fin + slm/swe (1 record, none materialised)
+```xml
+<bf:Place rdf:about="http://urn.fi/URN:NBN:fi:bib:raw/b26322791#Place651-54">
+  <rdfs:label>Italien</rdfs:label>
+  <madsrdf:isIdentifiedByAuthority rdf:resource="http://www.yso.fi/onto/yso/p105111"/>
+</bf:Place>
+```
 
-`b26346564` was flagged as slm/fin + slm/swe. The audit run produced only author + language entries, no SLM subjects. The SLM bindings were dropped before reaching M9 — either at the M2 → M3 boundary (shape rejection on the `bf:Genre` triples) or at M3 → M8 (no genre carrier in the canonical Work shape). Tracked as a follow-up; same root cause likely as Category 7's b26356557 et al.
+The cataloguer-supplied `yso:p105111` is preserved — but as the *authority cross-link*, not as the entity's identity. (Compare with `650` Topic subjects, where marc2bibframe2 uses the YSO URI directly as `bf:Topic rdf:about=<yso-uri>`.)
+
+#### Step 3 — M3 BFFI (drops the cross-link)
+
+The M3 SPARQL CONSTRUCT emits `bffi:subject <Place651-54>` — the per-record raw URI — and the `madsrdf:isIdentifiedByAuthority` triple is not propagated. **The cataloguer's `$0` URI is now lost** from the BFFI graph.
+
+#### Step 4 — M9 reconciles from the literal label, finds the wrong URI for Swedish
+
+M9 sees `<Place651-54>` as an unbound URI labelled `"Italien"`. Tier-0 looks for a Finnish `skos:prefLabel "Italien"` in YSO — miss (the Swedish forms live in `skos:altLabel`). Falls through to allars, where `Y30493` matches lexically. Binds `Italien → allars:Y30493`.
+
+End result: two URIs for one cataloguer-supplied concept. **M9 is doing exactly what its inputs ask** — the inputs are wrong because M3 lost the URI cross-link.
+
+#### Fix surface
+
+The bug is one M3 SPARQL CONSTRUCT clause: when a `bf:Place` / `bf:Person` / `bf:Organization` / `bf:Meeting` carries `madsrdf:isIdentifiedByAuthority <authority-uri>`, the `bffi:subject` triple should point at the authority URI, not the per-record raw URI. Then M9 sees the entity already pre-bound and skips reconcile entirely.
+
+Surfaced as [`prop-15`](../plans/proposed/prop-15-bilingual-subject-reconciliation.md) (revised from the original M9-crosswalk proposal once the root cause was confirmed).
+
+The other three records in this category (`b26356557`, `b26304119`, `b2635665x`) and the slm record (`b26346564`) didn't have *their* subjects show up in the per-record audit at all — but that turned out to be a **false alarm too**: those records use `650` Topic subjects, which marc2bibframe2 emits with `bf:Topic rdf:about=<yso-uri>` directly. M9 has nothing to reconcile because the entities arrive at M9 already wearing their YSO URIs. Confirmed by inspecting `canonical-reconciled.ttl` for each — the YSO subjects are present, just not in the M9 provenance graph (because no reconciliation activity fired). So all four records' subjects are landing correctly; only the `651`-driven `b26322791` case needs the prop-15 fix.
 
 ## Headline numbers
 
@@ -141,8 +170,8 @@ The one record that did materialise both shows the **bug the cataloguer flagged*
 | no-candidate (not in KANTO) | 5 | 4/5 ✓ (1 fallback with needs-review) | Williams, John false-positive — by design, mitigated by needs-review flag |
 | lexical match despite missing $0 | 1 | **1/1 ✓** | Distinctive name bound at conf 1.00 |
 | observe then fix | 3 | 2 declined + 1 LLM-recovered | Pipeline correctly refuses sub-floor matches; LLM handles old name forms |
-| single URI for bilingual subject | 5 | **0/1 surfaced** | Confirmed bug (b26322791); 4 records' subjects didn't materialise (separate follow-up) |
-| **Overall** | **19** | **17 of 19 outcomes match cataloguer expectation** | |
+| single URI for bilingual subject | 5 | **4/5 ✓** (1 needs M3 fix) | 4 records use `650` Topic subjects → bind correctly to YSO directly via marc2bibframe2. `b26322791` uses `651` Place subjects → M3 drops the authority cross-link → M9 picks `allars` for the Swedish form. Surfaced as `prop-15`. |
+| **Overall** | **19** | **18 of 19 outcomes match cataloguer expectation** | (1 false-positive fallback bind on common name; 1 `651`-Place trace needs M3 fix) |
 
 ## Recommendations
 
@@ -150,9 +179,11 @@ The one record that did materialise both shows the **bug the cataloguer flagged*
 
 2. **Promote P-14 Phase C re-bench priority**: the 5/5 KANTO authors going through tier-2 picker instead of tier-0 is direct evidence that `BFFI_M9_TIER0_EXPANSION=True` would meaningfully reduce M9 wall on a representative corpus. Worth re-benching even before the M5 Max 128 GB arrives — the M2 Max's prompt-cache OOM that crashed the original Phase C attempt happened at the picker phase, not Phase 1 SPARQL; the tier-0 expansion can be measured independently.
 
-3. **Surface the bilingual-subject bug**: see [`prop-15`](../plans/proposed/prop-15-bilingual-subject-reconciliation.md).
+3. **Land prop-15** (M3 preserves `madsrdf:isIdentifiedByAuthority` for `bf:Place` / `bf:Person` etc., so the cataloguer's `$0` URI propagates to canonical without re-reconciliation). One-clause SPARQL change. See [`prop-15`](../plans/proposed/prop-15-bilingual-subject-reconciliation.md).
 
-4. **Dig into the missing-subject cases**: 3 of 4 yso-bilingual records and the slm record had their subjects vanish before reaching M9. Likely a `bf:Genre` / `bf:subject` shape issue at M3. Needs a small follow-up audit of those four records' `bibframe/<bib>.rdf` outputs to pinpoint where the subjects drop.
+4. **Decide whether to add fallback-tier knobs** (`prop-16`). The `b23481833` false positive isn't enough evidence to change defaults, but the knobs themselves are cheap and let the P-14 audit's verdict translate into a config flip. See [`prop-16`](../plans/proposed/prop-16-fallback-tier-confidence-gating.md).
+
+5. ~~**Dig into the missing-subject cases**~~: resolved during this audit's deeper trace. The "missing subjects" were `650` Topic subjects already pre-bound to YSO URIs upstream, so they never entered the M9 reconcile path. The provenance graph correctly reflects no reconciliation activity — the subjects are in the canonical graph, just not in the M9 activity log.
 
 ## Sidecar — load step ran end-to-end
 

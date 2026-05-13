@@ -110,14 +110,24 @@ plan documents *when the execution was scheduled*.
   the nine-site FI-HELME URI cluster into a config-driven
   `LibrarySource` registry keyed on MARC 003.
 - [`prop-15-bilingual-subject-reconciliation.md`](prop-15-bilingual-subject-reconciliation.md)
-  — `proposed`. M9 today binds `Italia` (Finnish) to `yso:p105111`
-  and `Italien` (Swedish) to `allars:Y30493` — two URIs for the
-  same concept. Confirmed against the 2026-05-13 cataloguer-feedback
-  audit (`b26322791`). Proposes a three-layer fix:
-  `skos:exactMatch`-driven cross-walk at reconcile time, post-M8
-  subject deduplication, and the same treatment for `slm/fin` +
-  `slm/swe`. Numbering note: prop-15 collides with no existing plan;
-  if it graduates the plan should pick a non-colliding `p-NN`.
+  — `proposed`. The 2026-05-13 audit surfaced `Italia` / `Italien`
+  on `b26322791` binding to two URIs (`yso:p105111` + `allars:Y30493`)
+  despite both carrying the same `$0 yso:p105111` in the source
+  MARCXML. Root cause traced to M3 dropping the
+  `madsrdf:isIdentifiedByAuthority` cross-link from `bf:Place` /
+  `bf:Person` etc. — M9 then re-reconciles the literal from scratch
+  and picks the wrong vocab. Fix: M3 SPARQL CONSTRUCT change to
+  preserve the cataloguer-supplied authority URI. Smaller surface
+  than the original `skos:exactMatch`-crosswalk approach.
+- [`prop-16-fallback-tier-confidence-gating.md`](prop-16-fallback-tier-confidence-gating.md)
+  — `proposed`. The 2026-05-13 audit's one false-positive bind
+  (`Williams, John` at conf 0.80 → wrong `finaf` URI) is by design
+  — `reconciliation-fallback` tagged `needs-review`. But the
+  downstream `needs-review` filter is unbuilt and namesake-rich
+  authorities (finaf, viaf) produce visibly-wrong public binds at
+  the current lexical floor. Proposes three independently-shippable
+  knobs: per-stage lexical-fallback floor, per-vocabulary floor,
+  and a hard disable. No default change without P-14 audit data.
 
 ## Graduated / completed / abandoned
 
