@@ -9,6 +9,7 @@ from typing import Annotated
 import httpx
 import typer
 
+from bffi_pipeline import status as status_module
 from bffi_pipeline.config import Settings, get_settings
 from bffi_pipeline.eval import embed_benchmark
 from bffi_pipeline.eval import grow as eval_grow
@@ -231,6 +232,98 @@ def bf_to_bffi_command(
     # do not abort the pipeline unless *every* record errored.
     if summary.errored and not summary.converted and not summary.skipped_idempotent:
         raise typer.Exit(code=1)
+
+
+@app.command("status")
+def status_command(
+    sidecar: Annotated[
+        Path | None,
+        typer.Option(
+            "--sidecar",
+            help=(
+                "Path to the stage-events.jsonl sidecar. Defaults to "
+                "BFFI_OBSERVABILITY_SIDECAR (typically "
+                "<BFFI_DATA_DIR>/stage-events.jsonl)."
+            ),
+            resolve_path=True,
+        ),
+    ] = None,
+    tail: Annotated[
+        bool,
+        typer.Option(
+            "--tail",
+            help="Re-render the summary as new events arrive (polling, 200ms).",
+        ),
+    ] = False,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help=(
+                "Filter to events with ts >= this ISO-8601 timestamp. "
+                "Pass 'now' to anchor on the latest start event."
+            ),
+        ),
+    ] = None,
+    run_uuid: Annotated[
+        str | None,
+        typer.Option(
+            "--run-uuid",
+            help="Filter to a specific run_uuid (default: all runs in the file).",
+        ),
+    ] = None,
+) -> None:
+    """Render the current pipeline state from the P-11 stage-events sidecar.
+
+    The events come from Phase A's per-stage emitters; this command is
+    a pure consumer — it doesn't write any sidecar entries of its own,
+    and the observability bootstrap in ``_root`` parks an emitter that
+    stays idle here.
+    """
+    settings = get_settings()
+    if sidecar is None:
+        sidecar_str = settings.observability_sidecar.strip()
+        if not sidecar_str:
+            sidecar = settings.data_dir / "stage-events.jsonl"
+        elif sidecar_str.lower() in {"none", "/dev/null", "off"}:
+            typer.echo(
+                "BFFI_OBSERVABILITY_SIDECAR disables the sidecar — nothing to read.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        else:
+            sidecar = Path(sidecar_str)
+
+    since_dt = None
+    if since is not None:
+        if since.lower() == "now":
+            # Anchor: latest `start` ts in the file. The CLI uses
+            # ``now`` as shorthand for "the run that's actually running
+            # right now", which in practice is the most recent start.
+            rows = status_module.parse_sidecar(sidecar)
+            start_rows = [r for r in rows if r.event == "start"]
+            if start_rows:
+                since_dt = start_rows[-1].ts
+        else:
+            try:
+                from datetime import datetime as _dt
+
+                since_dt = _dt.fromisoformat(since.replace("Z", "+00:00"))
+            except ValueError as exc:
+                typer.echo(f"Invalid --since timestamp: {since!r} ({exc})", err=True)
+                raise typer.Exit(code=2) from exc
+
+    if not tail:
+        rows = status_module.parse_sidecar(sidecar, since=since_dt, run_uuid=run_uuid)
+        typer.echo(status_module.render(status_module.collate(rows)))
+        return
+
+    # --tail: re-render on new events. Clean exit on Ctrl-C.
+    try:
+        for rendered in status_module.tail(sidecar, since=since_dt, run_uuid=run_uuid):
+            typer.echo("\033[2J\033[H" + rendered)  # clear screen, home cursor
+    except KeyboardInterrupt:
+        typer.echo("", err=True)  # clean newline on exit
 
 
 @app.command("workkey-stats")
