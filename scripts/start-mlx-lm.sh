@@ -68,15 +68,42 @@ if [[ ! -d "$MODEL_PATH" ]]; then
     exit 1
 fi
 
+# Resolve a python interpreter that has ``mlx_lm`` available. Order:
+# 1. MLX_LM_PYTHON env override (operator escape hatch).
+# 2. The conventional venv at ~/.venvs/mlx-lm/bin/python — matches
+#    docs/local-inference.md § Installation and the path
+#    scripts/llm-pull.sh expects.
+# 3. The active ``python`` on PATH, if it can import mlx_lm.
+# Otherwise abort with a clear hint instead of letting mlx-lm fail
+# inside a wrong-venv exec.
+mlx_lm_python=""
+if [[ -n "${MLX_LM_PYTHON:-}" && -x "$MLX_LM_PYTHON" ]]; then
+    mlx_lm_python="$MLX_LM_PYTHON"
+elif [[ -x "$HOME/.venvs/mlx-lm/bin/python" ]]; then
+    mlx_lm_python="$HOME/.venvs/mlx-lm/bin/python"
+elif command -v python >/dev/null 2>&1 && python -c "import mlx_lm" >/dev/null 2>&1; then
+    mlx_lm_python="python"
+fi
+
+if [[ -z "$mlx_lm_python" ]]; then
+    echo "ERROR: no python interpreter with mlx_lm installed was found." >&2
+    echo "  Tried: \$MLX_LM_PYTHON, ~/.venvs/mlx-lm/bin/python, \$PATH python." >&2
+    echo "  See docs/local-inference.md § Installation to create the venv:" >&2
+    echo "    python -m venv ~/.venvs/mlx-lm && \\\\" >&2
+    echo "      ~/.venvs/mlx-lm/bin/pip install mlx-lm" >&2
+    exit 1
+fi
+
 echo "mlx-lm server starting"
-echo "  port:  $PORT"
-echo "  model: $MODEL_PATH"
-echo "  args:  $*"
+echo "  port:   $PORT"
+echo "  model:  $MODEL_PATH"
+echo "  python: $mlx_lm_python"
+echo "  args:   $*"
 echo
 
 # Argparse takes the LAST occurrence of any duplicated flag, so trailing
 # "$@" cleanly overrides the safe defaults below for per-run tweaks.
-exec python -m mlx_lm server \
+exec "$mlx_lm_python" -m mlx_lm server \
     --model "$MODEL_PATH" \
     --host 127.0.0.1 --port "$PORT" \
     --chat-template-args '{"enable_thinking":false}' \
