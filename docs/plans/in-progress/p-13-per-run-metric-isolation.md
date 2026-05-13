@@ -11,7 +11,7 @@ config/grafana/dashboards/bffi-pipeline.json
 docs/observability.md`.
 **Phase commits**:
 
-- Phase A (exporter: add `run_uuid` label to every Counter + Gauge): `<unfilled>`
+- Phase A (exporter: add `run_uuid` label to every Counter + Gauge): `b95597e` (2026-05-13). Every metric in `PipelineMetrics` now carries `run_uuid`; `apply_event` + `_update_throughput` thread it to every `.labels(...)` site; rolling-window throughput history keyed by `(stage, phase, run_uuid)`. Three new regression tests cover cross-run isolation, legacy empty-string `run_uuid` fallback, and per-run throughput-history separation. Existing test assertions adjusted for the new alphabetical label ordering. 935 total green; intentionally a no-op on dashboard panels until Phase B adds the filter.
 - Phase B (dashboard JSON: filter every panel by `$active_run` + docs): `<unfilled>`
 
 **Owner**: TBD.
