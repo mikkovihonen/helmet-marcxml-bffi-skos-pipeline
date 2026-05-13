@@ -70,9 +70,12 @@ class PipelineMetrics:
     """
 
     registry: CollectorRegistry = field(default_factory=CollectorRegistry)
-    # _history[(stage, phase)] → list of (ts_unix, processed) for
-    # throughput derivation. Bounded at _THROUGHPUT_WINDOW per key.
-    _history: dict[tuple[str, str], list[tuple[float, int]]] = field(default_factory=dict)
+    # _history[(stage, phase, run_uuid)] → list of (ts_unix, processed)
+    # for throughput derivation. Bounded at _THROUGHPUT_WINDOW per key.
+    # P-13 Phase A: ``run_uuid`` is part of the key so two runs don't
+    # share a rolling-window history (which would inflate throughput at
+    # run boundaries).
+    _history: dict[tuple[str, str, str], list[tuple[float, int]]] = field(default_factory=dict)
 
     # Per-metric handles wired up in __post_init__.
     stage_started_ts: Gauge = field(init=False)
@@ -100,46 +103,50 @@ class PipelineMetrics:
             labelnames=("stage", "run_uuid"),
             registry=self.registry,
         )
+        # P-13 Phase A: every Counter + Gauge carries ``run_uuid`` so
+        # the dashboard can scope every panel to the active invocation
+        # via ``run_uuid="$active_run"``. The two timestamp gauges
+        # above already had ``run_uuid``; this brings the rest in line.
         self.stage_entities_total = Gauge(
             "bffi_stage_entities_total",
             "Total entities the stage / phase is processing.",
-            labelnames=("stage", "phase"),
+            labelnames=("stage", "phase", "run_uuid"),
             registry=self.registry,
         )
         self.stage_entities_processed_total = Counter(
             "bffi_stage_entities_processed_total",
             "Cumulative entities the stage / phase has processed.",
-            labelnames=("stage", "phase"),
+            labelnames=("stage", "phase", "run_uuid"),
             registry=self.registry,
         )
         self.stage_outcomes_total = Counter(
             "bffi_stage_outcomes_total",
             "Per-outcome cumulative count (e.g. M9 tier counts).",
-            labelnames=("stage", "outcome"),
+            labelnames=("stage", "outcome", "run_uuid"),
             registry=self.registry,
         )
         self.stage_throughput_per_minute = Gauge(
             "bffi_stage_throughput_per_minute",
             "Recent throughput, derived from a rolling window of progress events.",
-            labelnames=("stage", "phase"),
+            labelnames=("stage", "phase", "run_uuid"),
             registry=self.registry,
         )
         self.stage_eta_seconds = Gauge(
             "bffi_stage_eta_seconds",
             "Estimated seconds to phase boundary (or stage end).",
-            labelnames=("stage", "phase"),
+            labelnames=("stage", "phase", "run_uuid"),
             registry=self.registry,
         )
         self.dependency_health = Gauge(
             "bffi_dependency_health",
             "Health probe verdict: 2 up, 1 degraded, 0 down, NaN not_configured.",
-            labelnames=("stage", "dep"),
+            labelnames=("stage", "dep", "run_uuid"),
             registry=self.registry,
         )
         self.dependency_probe_latency_ms = Gauge(
             "bffi_dependency_probe_latency_ms",
             "Latency of the most recent dependency probe in milliseconds.",
-            labelnames=("stage", "dep"),
+            labelnames=("stage", "dep", "run_uuid"),
             registry=self.registry,
         )
         # P-12 Phase C: timestamp of the most recent health event per
@@ -149,13 +156,13 @@ class PipelineMetrics:
         self.dependency_last_probe_timestamp = Gauge(
             "bffi_dependency_last_probe_timestamp",
             "Unix timestamp of the most recent `health` event for this stage / dep.",
-            labelnames=("stage", "dep"),
+            labelnames=("stage", "dep", "run_uuid"),
             registry=self.registry,
         )
         self.watchdog_events_total = Counter(
             "bffi_watchdog_events_total",
             "Cumulative watchdog events emitted by the pipeline.",
-            labelnames=("stage", "event"),
+            labelnames=("stage", "event", "run_uuid"),
             registry=self.registry,
         )
 
@@ -182,9 +189,10 @@ def _update_throughput(
     processed: int,
     total: int,
     ts_unix: float,
+    run_uuid: str,
 ) -> None:
     """Update the rolling throughput history + the derived gauges."""
-    key = (stage, phase)
+    key = (stage, phase, run_uuid)
     history = metrics._history.setdefault(key, [])
     history.append((ts_unix, processed))
     if len(history) > _THROUGHPUT_WINDOW:
@@ -198,29 +206,42 @@ def _update_throughput(
     if elapsed <= 0 or delta <= 0:
         return
     per_second = delta / elapsed
-    metrics.stage_throughput_per_minute.labels(stage=stage, phase=phase).set(per_second * 60.0)
+    metrics.stage_throughput_per_minute.labels(stage=stage, phase=phase, run_uuid=run_uuid).set(
+        per_second * 60.0
+    )
     remaining = total - last_processed
     if remaining > 0:
-        metrics.stage_eta_seconds.labels(stage=stage, phase=phase).set(remaining / per_second)
+        metrics.stage_eta_seconds.labels(stage=stage, phase=phase, run_uuid=run_uuid).set(
+            remaining / per_second
+        )
     else:
-        metrics.stage_eta_seconds.labels(stage=stage, phase=phase).set(0.0)
+        metrics.stage_eta_seconds.labels(stage=stage, phase=phase, run_uuid=run_uuid).set(0.0)
 
 
 def apply_event(
     metrics: PipelineMetrics,
     row: StageEventRow,
 ) -> None:
-    """Apply one parsed event to the Prometheus registry."""
+    """Apply one parsed event to the Prometheus registry.
+
+    P-13 Phase A: every metric is labelled with ``row.run_uuid`` so
+    dashboards can scope queries to the active invocation via
+    ``run_uuid="$active_run"``. Legacy events without a ``run_uuid``
+    field surface under ``run_uuid=""`` (Pydantic / StageEventRow's
+    empty-string default), visually distinguishable from real runs
+    in PromQL queries.
+    """
     ts_unix = row.ts.timestamp()
+    run = row.run_uuid
     if row.event == "start":
-        metrics.stage_started_ts.labels(stage=row.stage, run_uuid=row.run_uuid).set(ts_unix)
+        metrics.stage_started_ts.labels(stage=row.stage, run_uuid=run).set(ts_unix)
         if "total" in row.counters:
-            metrics.stage_entities_total.labels(stage=row.stage, phase="_").set(
+            metrics.stage_entities_total.labels(stage=row.stage, phase="_", run_uuid=run).set(
                 row.counters["total"]
             )
     elif row.event == "phase_boundary" and row.phase is not None:
         if "total" in row.counters:
-            metrics.stage_entities_total.labels(stage=row.stage, phase=row.phase).set(
+            metrics.stage_entities_total.labels(stage=row.stage, phase=row.phase, run_uuid=run).set(
                 row.counters["total"]
             )
     elif row.event == "progress":
@@ -232,37 +253,45 @@ def apply_event(
         # let Prometheus compute rate() at query time. We use the
         # underlying ``_value`` setter so the cumulative semantics are
         # preserved across scrapes.
-        metric = metrics.stage_entities_processed_total.labels(stage=row.stage, phase=phase)
+        metric = metrics.stage_entities_processed_total.labels(
+            stage=row.stage, phase=phase, run_uuid=run
+        )
         # prometheus_client doesn't expose a public Counter reset; use
         # the internal API to set it to the cumulative event value.
         metric._value.set(processed)
         if total > 0:
-            metrics.stage_entities_total.labels(stage=row.stage, phase=phase).set(total)
-        _update_throughput(metrics, row.stage, phase, processed, total, ts_unix)
+            metrics.stage_entities_total.labels(stage=row.stage, phase=phase, run_uuid=run).set(
+                total
+            )
+        _update_throughput(metrics, row.stage, phase, processed, total, ts_unix, run)
     elif row.event == "end":
-        metrics.stage_ended_ts.labels(stage=row.stage, run_uuid=row.run_uuid).set(ts_unix)
+        metrics.stage_ended_ts.labels(stage=row.stage, run_uuid=run).set(ts_unix)
         # Per-outcome buckets — M9 emits a rich counters dict here.
         for outcome, value in row.counters.items():
             if outcome == "total":
                 continue
-            outcome_metric = metrics.stage_outcomes_total.labels(stage=row.stage, outcome=outcome)
+            outcome_metric = metrics.stage_outcomes_total.labels(
+                stage=row.stage, outcome=outcome, run_uuid=run
+            )
             outcome_metric._value.set(int(value))
     elif row.event == "health":
         probes = row.extra.get("probes") or {}
         for dep, probe in probes.items():
             status_value = _HEALTH_STATUS_VALUE.get(probe.get("status"), 0.0)
-            metrics.dependency_health.labels(stage=row.stage, dep=dep).set(status_value)
-            metrics.dependency_probe_latency_ms.labels(stage=row.stage, dep=dep).set(
+            metrics.dependency_health.labels(stage=row.stage, dep=dep, run_uuid=run).set(
+                status_value
+            )
+            metrics.dependency_probe_latency_ms.labels(stage=row.stage, dep=dep, run_uuid=run).set(
                 probe.get("latency_ms", 0)
             )
             # P-12 Phase C: per-(stage, dep) freshness gauge for the
             # dashboard's stale-detection overlay.
-            metrics.dependency_last_probe_timestamp.labels(stage=row.stage, dep=dep).set(
-                row.ts.timestamp()
-            )
+            metrics.dependency_last_probe_timestamp.labels(
+                stage=row.stage, dep=dep, run_uuid=run
+            ).set(row.ts.timestamp())
     elif row.event == "watchdog":
         inner_event = row.extra.get("event") or "unknown"
-        metrics.watchdog_events_total.labels(stage=row.stage, event=inner_event).inc()
+        metrics.watchdog_events_total.labels(stage=row.stage, event=inner_event, run_uuid=run).inc()
 
 
 def rehydrate(metrics: PipelineMetrics, sidecar_path: Path) -> int:

@@ -1,6 +1,6 @@
 # P-13 — Per-run metric isolation
 
-**Status**: backlog.
+**Status**: in-progress.
 **Source proposal**: [`docs/proposals/prop-13-per-run-metric-isolation.md`](../../proposals/prop-13-per-run-metric-isolation.md)
 at commit `40abb2d`.
 **Plan-base commit**: `40abb2d`. To gauge drift before executing,

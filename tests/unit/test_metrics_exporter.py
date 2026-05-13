@@ -124,6 +124,118 @@ def test_end_records_outcome_buckets() -> None:
     assert 'outcome="total"' not in text
 
 
+def test_per_run_label_separates_metrics_across_run_uuids() -> None:
+    """P-13 Phase A: two runs writing the same (stage, phase) produce
+    two distinct series, each labelled with its own ``run_uuid``.
+
+    Pre-P-13 they would have collapsed into one series with last-write
+    semantics on the gauge / cumulative semantics on the counter,
+    polluting the dashboard across runs. Pins forward-compat with the
+    dashboard's ``run_uuid="$active_run"`` filter.
+    """
+    metrics = PipelineMetrics()
+    for run_id, processed in (("run-a", 100), ("run-b", 250)):
+        apply_event(
+            metrics,
+            _row(
+                event="progress",
+                phase="phase1",
+                counters={"processed": processed, "total": 1000},
+                run_uuid=run_id,
+            ),
+        )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    # Each run gets its own series on the cumulative-progress counter.
+    assert 'run_uuid="run-a"' in text
+    assert 'run_uuid="run-b"' in text
+    # And on the per-run total gauge.
+    assert 'bffi_stage_entities_total{phase="phase1",run_uuid="run-a",stage="m9"} 1000.0' in text
+    assert 'bffi_stage_entities_total{phase="phase1",run_uuid="run-b",stage="m9"} 1000.0' in text
+    # Per-run processed counter values are independent.
+    run_a = metrics.stage_entities_processed_total.labels(
+        stage="m9", phase="phase1", run_uuid="run-a"
+    )._value.get()
+    run_b = metrics.stage_entities_processed_total.labels(
+        stage="m9", phase="phase1", run_uuid="run-b"
+    )._value.get()
+    assert run_a == 100
+    assert run_b == 250
+
+
+def test_per_run_label_handles_empty_run_uuid_for_legacy_events() -> None:
+    """P-13 Phase A: events without a ``run_uuid`` field land under
+    ``run_uuid=""`` instead of crashing.
+
+    Old sidecar fixtures from unit-test runs before P-11 Phase A's
+    run_uuid field existed get rehydrated this way. The empty-string
+    label is a valid Prometheus value, visually distinguishable from
+    real runs.
+    """
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="watchdog",
+            stage="watchdog",
+            run_uuid="",
+            extra={"event": "timeout", "pair_id": "a+b"},
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    assert 'event="timeout"' in text
+    assert 'run_uuid=""' in text
+
+
+def test_per_run_throughput_history_isolated_per_run() -> None:
+    """P-13 Phase A: ``_history`` is keyed by ``(stage, phase, run_uuid)``
+    so a second run's first progress event doesn't compute a throughput
+    against the prior run's history.
+
+    Pre-P-13 the rolling-window history was keyed by ``(stage, phase)``
+    only; a new run's first progress event would derive a wildly
+    inflated throughput against the prior run's last-processed value.
+    """
+    metrics = PipelineMetrics()
+    # Run A: two progress events 60s apart, 200 → 400 processed.
+    for processed, dt in ((200, 0), (400, 60)):
+        apply_event(
+            metrics,
+            _row(
+                event="progress",
+                phase="phase1",
+                counters={"processed": processed, "total": 1000},
+                ts_unix=1_700_000_000.0 + dt,
+                run_uuid="run-a",
+            ),
+        )
+    # Run B starts with processed=50 at ts=1000000s later — pre-P-13 the
+    # throughput calc would see (400 → 50) and either clamp or invert.
+    apply_event(
+        metrics,
+        _row(
+            event="progress",
+            phase="phase1",
+            counters={"processed": 50, "total": 1000},
+            ts_unix=1_700_001_000.0,
+            run_uuid="run-b",
+        ),
+    )
+    # Run B's history has only one sample → throughput gauge unset
+    # (the function early-returns when len(history) < 2). Run A's
+    # throughput remains the steady value derived from its window.
+    run_a_throughput = metrics.stage_throughput_per_minute.labels(
+        stage="m9", phase="phase1", run_uuid="run-a"
+    )._value.get()
+    # 200 items over 60s = 200/min.
+    assert run_a_throughput == 200.0
+    # Run B's gauge hasn't been set (single-sample history).
+    # Accessing it via .labels() will return 0.0 (the default).
+    run_b_throughput = metrics.stage_throughput_per_minute.labels(
+        stage="m9", phase="phase1", run_uuid="run-b"
+    )._value.get()
+    assert run_b_throughput == 0.0
+
+
 def test_health_event_sets_last_probe_timestamp_gauge() -> None:
     """P-12 Phase C: every probe records its event timestamp into
     ``bffi_dependency_last_probe_timestamp`` so the dashboard can
@@ -169,7 +281,9 @@ def test_health_event_sets_last_probe_timestamp_gauge() -> None:
             },
         ),
     )
-    ts = metrics.dependency_last_probe_timestamp.labels(stage="m9", dep="fuseki")._value.get()
+    ts = metrics.dependency_last_probe_timestamp.labels(
+        stage="m9", dep="fuseki", run_uuid="r"
+    )._value.get()
     assert ts == 1_700_000_999.0, f"Expected the latest probe ts (1_700_000_999) to win; got {ts}."
 
 
@@ -196,14 +310,17 @@ def test_health_event_maps_not_configured_to_nan_gauge() -> None:
             },
         ),
     )
-    gauge_value = metrics.dependency_health.labels(stage="m6", dep="mlx-lm-fallback")._value.get()
+    gauge_value = metrics.dependency_health.labels(
+        stage="m6", dep="mlx-lm-fallback", run_uuid="r"
+    )._value.get()
     assert math.isnan(gauge_value), (
         f"not_configured should map to NaN; got {gauge_value!r}. "
         "The dashboard's grey-out value-mapping depends on this."
     )
     # Wire-format check too: prometheus_client serialises NaN literally.
+    # P-13 adds the run_uuid label; labels render alphabetically.
     text = generate_latest(metrics.registry).decode("utf-8")
-    assert 'bffi_dependency_health{dep="mlx-lm-fallback",stage="m6"} NaN' in text
+    assert 'bffi_dependency_health{dep="mlx-lm-fallback",run_uuid="r",stage="m6"} NaN' in text
 
 
 def test_health_event_maps_status_to_gauge() -> None:
@@ -238,10 +355,12 @@ def test_health_event_maps_status_to_gauge() -> None:
     )
     text = generate_latest(metrics.registry).decode("utf-8")
     assert "bffi_dependency_health" in text
-    # Numeric mapping verified: up=2, degraded=1, down=0.
-    assert 'bffi_dependency_health{dep="fuseki",stage="m9"} 2.0' in text
-    assert 'bffi_dependency_health{dep="mlx-lm",stage="m9"} 1.0' in text
-    assert 'bffi_dependency_health{dep="finto",stage="m9"} 0.0' in text
+    # Numeric mapping verified: up=2, degraded=1, down=0. P-13 adds the
+    # run_uuid="r" label (default from the _row factory); labels are
+    # rendered alphabetically.
+    assert 'bffi_dependency_health{dep="fuseki",run_uuid="r",stage="m9"} 2.0' in text
+    assert 'bffi_dependency_health{dep="mlx-lm",run_uuid="r",stage="m9"} 1.0' in text
+    assert 'bffi_dependency_health{dep="finto",run_uuid="r",stage="m9"} 0.0' in text
     # Latency gauge also populated.
     assert "bffi_dependency_probe_latency_ms" in text
 
@@ -334,9 +453,17 @@ def _watchdog_event_row(ts: str, inner: str) -> dict[str, object]:
     }
 
 
-def _watchdog_total(metrics: PipelineMetrics, inner: str) -> float:
-    """Helper: read the ``bffi_watchdog_events_total`` counter for one inner event."""
-    return float(metrics.watchdog_events_total.labels(stage="watchdog", event=inner)._value.get())
+def _watchdog_total(metrics: PipelineMetrics, inner: str, *, run_uuid: str = "r") -> float:
+    """Helper: read the ``bffi_watchdog_events_total`` counter for one inner event.
+
+    P-13 Phase A added ``run_uuid`` as a required label; defaults to
+    ``"r"`` to match the default :func:`_row` factory.
+    """
+    return float(
+        metrics.watchdog_events_total.labels(
+            stage="watchdog", event=inner, run_uuid=run_uuid
+        )._value.get()
+    )
 
 
 def test_tail_step_idle_polls_do_not_double_count(tmp_path: Path) -> None:
