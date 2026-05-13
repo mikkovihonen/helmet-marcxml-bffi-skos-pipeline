@@ -14,7 +14,7 @@ config/grafana/dashboards/bffi-pipeline.json`.
 **Phase commits**:
 
 - Phase A (exporter tail-loop double-count fix): `0eaea9b` (2026-05-13). One-char fix in `metrics_exporter.py:279` (`<=` → `<`) plus three regression tests covering idle-poll no-op, truncation-still-re-reads, and the bench-realistic mixed pattern. 906 total tests green; lint + mypy clean. `docs/observability.md` extended with the Counter inheritance section.
-- Phase B (`not_configured` health status): `<unfilled>`
+- Phase B (`not_configured` health status): `3990a9d` (2026-05-13). `ProbeStatus` Literal extended; `probe_mlx_lm("")` short-circuits to `not_configured` with zero HTTP attempts; M6's call site in `judge.py` collapses `fallback_url == primary_url` to empty so the fallback reports `not_configured` on dev boxes. Exporter maps the status to `float("nan")`; Grafana greys the cell out. Two new tests cover the probe short-circuit + the exporter's NaN gauge serialisation. 925 total green.
 - Phase C (dashboard freshness overlay): `<unfilled>`
 - Phase D (M9 Phase 2 progress events): `<unfilled>`
 - Phase E (top-of-dashboard pipeline overview row + remove the noisy bottom panel): `<unfilled>`
