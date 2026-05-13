@@ -1,6 +1,6 @@
 # P-13 — Per-run metric isolation
 
-**Status**: proposed.
+**Status**: planning (graduated → [`docs/plans/backlog/p-13-per-run-metric-isolation.md`](../plans/backlog/p-13-per-run-metric-isolation.md)).
 **Scope**: ~1 day.
 **Proposal-base commit**: `8e05225`.
 
