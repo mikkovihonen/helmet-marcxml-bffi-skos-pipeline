@@ -1972,7 +1972,7 @@ def test_apply_reconciliation_byte_stable_across_picker_ordering_modes() -> None
     invariant under any picker dispatch order. This is the load-bearing
     guarantee for Phase E's rollback knob.
     """
-    # prefix-cache ordering (default).
+    # prefix-cache ordering.
     labels_pc, client_pc, picker_pc = _twelve_ambiguous_creators()
     g_pc = _build_canonical_with_n_creators(labels_pc)
     apply_reconciliation(

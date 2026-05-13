@@ -1677,9 +1677,13 @@ def _field_id(request: EntityRequest) -> str:
 
 
 #: Valid values for ``BFFI_M9_PICKER_ORDERING`` / ``apply_reconciliation``'s
-#: ``picker_ordering`` parameter. ``prefix-cache`` is the Phase E default;
-#: ``submission`` preserves the pre-Phase-E walk order for bench A/B and
-#: rollback.
+#: ``picker_ordering`` parameter. ``submission`` (default) preserves the
+#: walk order ``_collect_requests`` yielded; ``prefix-cache`` sorts by
+#: prompt-prefix-similarity. Phase E's 2026-05-13 A/B bench (see
+#: ``docs/performance/2026-05-13-5k-m2-max-phase-e.md``) showed
+#: ``prefix-cache`` was a +5 % regression on the 5 k sample, so default
+#: stays on ``submission`` until a re-bench on a more-homogeneous corpus
+#: shows otherwise.
 PickerOrdering = LiteralType["prefix-cache", "submission"]
 
 PICKER_ORDERING_PREFIX_CACHE: Final[PickerOrdering] = "prefix-cache"
@@ -2292,12 +2296,15 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     GPU-bound mlx-lm picker, so it tolerates higher concurrency.
 
     P-10 Phase E: ``picker_ordering`` controls the dispatch order of
-    deferred picker entries. ``"prefix-cache"`` (default) sorts so that
-    consecutive ``POST /v1/chat/completions`` calls share the longest
-    possible prompt prefix, maximising mlx-lm prefix-cache reuse.
-    ``"submission"`` preserves the pre-Phase-E walk order. Output is
-    byte-stable under both modes — the orchestrator re-sorts results by
-    submission ``idx`` before graph mutation.
+    deferred picker entries. ``"submission"`` (default) preserves the
+    walk order ``_collect_requests`` yielded; ``"prefix-cache"`` sorts
+    so consecutive ``POST /v1/chat/completions`` calls share the longest
+    possible prompt prefix, intended to lift mlx-lm prefix-cache reuse.
+    The 2026-05-13 A/B bench showed ``"prefix-cache"`` regressed the
+    picker-phase wall by 5 % on the heterogeneous 5 k sample, so the
+    default stays on ``"submission"``. Output is byte-stable under both
+    modes — the orchestrator re-sorts results by submission ``idx``
+    before graph mutation.
 
     P-10 Phase B: ``picker_cache`` is a :class:`PickerCache` shared
     across worker threads; when set, picker-bound entries first

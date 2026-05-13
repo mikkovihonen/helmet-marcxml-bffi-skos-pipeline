@@ -149,18 +149,24 @@ class Settings(BaseSettings):
         alias="BFFI_M9_TIER0_EXPANSION",
     )
     # P-10 Phase E: ordering of the deferred picker queue before
-    # ThreadPoolExecutor dispatch. ``prefix-cache`` (default) sorts by
+    # ThreadPoolExecutor dispatch. ``submission`` (default) preserves the
+    # walk order ``_collect_requests`` yielded. ``prefix-cache`` sorts by
     # (request.kind, candidates[0].source_vocabulary, sorted-candidate-URI
     # fingerprint, request.literal) so consecutive picker calls share the
-    # longest possible prompt prefix — mlx-lm's prompt-prefix cache
-    # collapses per-call wall to roughly decode-time on runs of same-kind
-    # calls. ``submission`` preserves the pre-Phase-E walk order (the
-    # order ``_collect_requests`` yielded them); useful for bench A/B
-    # comparison and rollback. Byte-stability is guaranteed under both
-    # values because the orchestrator sorts results by submission ``idx``
-    # before graph-write.
+    # longest possible prompt prefix — intended to lift mlx-lm's
+    # prompt-prefix cache hit rate.
+    #
+    # 2026-05-13 A/B bench (docs/performance/2026-05-13-5k-m2-max-phase-e.md)
+    # showed ``prefix-cache`` produced a +5.0 % picker-phase wall regression
+    # vs ``submission`` on the heterogeneous 5 k cataloguer-curated sample,
+    # failing the Phase E ≥ 5 % reduction gate. Default reverted to
+    # ``submission``; ``prefix-cache`` stays available behind the env var
+    # for future re-benches against more-homogeneous corpora (e.g. a
+    # YSO-heavy slice). Byte-stability is guaranteed under both values
+    # because the orchestrator sorts results by submission ``idx`` before
+    # graph-write.
     m9_picker_ordering: str = Field(
-        default="prefix-cache",
+        default="submission",
         alias="BFFI_M9_PICKER_ORDERING",
     )
     # P-10 Phase B: emergency-disable knob for the persistent picker
