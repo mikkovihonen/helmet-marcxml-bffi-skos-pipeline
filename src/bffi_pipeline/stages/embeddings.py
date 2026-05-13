@@ -35,6 +35,7 @@ from rdflib.namespace import RDF, RDFS
 from bffi_pipeline.blocking import compute_blocking_key
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.observability import emit_if_active
 
 if TYPE_CHECKING:
     import numpy as np
@@ -73,6 +74,13 @@ DEFAULT_BATCH_SIZE: Final[int] = 64
 INDEX_FILENAME: Final[str] = "embeddings.faiss"
 IDMAP_FILENAME: Final[str] = "embeddings.idmap.json"
 CANDIDATES_FILENAME: Final[str] = "embed-candidates.jsonl"
+
+#: P-12 Phase D cadence for M5 progress events. Chosen so a 5k-record
+#: bench emits ~10 events (cheap, dashboard-friendly) and an 800k-record
+#: full corpus emits ~1600 (still cheap; the embed loop's per-batch
+#: cost dwarfs the emit cost). Each progress event drives the
+#: dashboard's M5 row-2 bargauge + the state-tile ETA derivation.
+_M5_PROGRESS_CADENCE: Final[int] = 500
 
 _LANG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
 _CONTENT_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/contentTypes/"
@@ -347,19 +355,41 @@ def _embed(
     device: str,
     batch_size: int,
 ) -> np.ndarray[Any, Any]:
-    """Encode ``strings`` with the configured model. Returns an L2-normalised float32 matrix."""
+    """Encode ``strings`` with the configured model. Returns an L2-normalised float32 matrix.
+
+    Encoding happens in cadence-sized chunks rather than one giant
+    ``model.encode`` call so the embed loop can emit ``progress`` stage
+    events between chunks. The exporter's throughput logic then derives
+    a rate + ETA for the dashboard's M5 state tile. The chunk size
+    (``_M5_PROGRESS_CADENCE``) is independent of ``batch_size`` — batch
+    size is the GPU-saturation knob, chunk size is the dashboard-update
+    knob.
+    """
     import numpy as np
     from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer(model_name, device=device)
-    vectors = model.encode(
-        strings,
-        batch_size=batch_size,
-        convert_to_numpy=True,
-        normalize_embeddings=False,  # do it ourselves so the policy is explicit
-        show_progress_bar=True,
-    )
-    matrix = np.asarray(vectors, dtype=np.float32)
+    total = len(strings)
+    pieces: list[np.ndarray[Any, Any]] = []
+    for chunk_start in range(0, total, _M5_PROGRESS_CADENCE):
+        chunk_end = min(chunk_start + _M5_PROGRESS_CADENCE, total)
+        chunk_vectors = model.encode(
+            strings[chunk_start:chunk_end],
+            batch_size=batch_size,
+            convert_to_numpy=True,
+            normalize_embeddings=False,  # do it ourselves so the policy is explicit
+            show_progress_bar=False,  # we drive our own progress via stage events
+        )
+        pieces.append(np.asarray(chunk_vectors, dtype=np.float32))
+        emit_if_active(
+            stage="m5",
+            event="progress",
+            counters={"processed": chunk_end, "total": total},
+        )
+    if pieces:
+        matrix = np.concatenate(pieces, axis=0)
+    else:
+        matrix = np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
     return _l2_normalize(matrix)
 
 
@@ -450,8 +480,24 @@ def build_index(
 
     if not force and _is_index_fresh(index_path, idmap_path, inputs, model_name):
         idmap = json.loads(idmap_path.read_text(encoding="utf-8"))
+        n_cached = idmap.get("n_works", 0)
+        # Skip-when-fresh path still emits start + end so the dashboard
+        # shows the stage as ``done`` (with zero elapsed) rather than
+        # staying ``pending``. The total carries the cached n_works.
+        emit_if_active(
+            stage="m5",
+            event="start",
+            counters={"total": n_cached},
+            extra={"skipped": True, "model": model_name},
+        )
+        emit_if_active(
+            stage="m5",
+            event="end",
+            counters={"total": n_cached, "skipped": 1},
+            extra={"skipped": True},
+        )
         return IndexBuildResult(
-            n_works=idmap.get("n_works", 0),
+            n_works=n_cached,
             ndim=idmap.get("ndim", EMBEDDING_DIM),
             model_name=model_name,
             hnsw_m=idmap.get("hnsw_m", HNSW_M),
@@ -470,6 +516,12 @@ def build_index(
             "Did M2 + M3 run, and is the directory layout bffi/<id>.ttl + bibframe/<id>.rdf?"
         )
 
+    emit_if_active(
+        stage="m5",
+        event="start",
+        counters={"total": len(works)},
+        extra={"model": model_name, "device": device, "batch_size": batch_size},
+    )
     started = time.monotonic()
     strings = [embedding_input_string(w) for w in works]
     matrix = _embed(strings, model_name=model_name, device=device, batch_size=batch_size)
@@ -501,6 +553,12 @@ def build_index(
     tmp_index.replace(index_path)
     tmp_idmap.replace(idmap_path)
 
+    emit_if_active(
+        stage="m5",
+        event="end",
+        counters={"total": len(works), "ndim": int(matrix.shape[1])},
+        extra={"build_seconds": build_seconds},
+    )
     return IndexBuildResult(
         n_works=len(works),
         ndim=int(matrix.shape[1]),

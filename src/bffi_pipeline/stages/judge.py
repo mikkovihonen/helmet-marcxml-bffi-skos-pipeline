@@ -1598,6 +1598,21 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
                     cascade_used=cascade_used,
                 ),
             )
+            # P-12 Phase D + follow-up: emit progress at the checkpoint
+            # cadence so the exporter can derive throughput / ETA + the
+            # dashboard's M6 outcome bargauge populates live (via the
+            # _PROGRESS_OUTCOME_KEYS bridge in metrics_exporter.py).
+            emit_if_active(
+                stage="m6",
+                event="progress",
+                counters={"processed": completed, "total": total},
+                extra={
+                    "cache_hits": cache_hits,
+                    "fresh_calls": fresh_calls,
+                    "cascade_used": cascade_used,
+                    "auto_merged": auto_merge_written,
+                },
+            )
             if progress_callback is not None:
                 progress_callback(
                     JudgeBatchProgress(

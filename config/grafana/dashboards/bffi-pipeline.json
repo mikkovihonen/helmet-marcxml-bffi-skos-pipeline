@@ -133,8 +133,13 @@
         },
         {
           "refId": "B",
+          "expr": "bffi_stage_eta_seconds{stage=\"m2\",phase=\"_\",run_uuid=\"$active_run\"} unless on(stage,run_uuid) bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}",
+          "legendFormat": "ETA"
+        },
+        {
+          "refId": "C",
           "expr": "bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}",
-          "legendFormat": "time"
+          "legendFormat": ""
         }
       ],
       "options": {
@@ -144,7 +149,7 @@
           ]
         },
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "colorMode": "background",
         "orientation": "vertical"
       },
@@ -188,6 +193,18 @@
           {
             "matcher": {
               "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": " "
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
               "options": "B"
             },
             "properties": [
@@ -209,6 +226,41 @@
                   "mode": "fixed",
                   "fixedColor": "text"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "ETA"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": " "
               }
             ]
           }
@@ -238,8 +290,13 @@
         },
         {
           "refId": "B",
+          "expr": "bffi_stage_eta_seconds{stage=\"m3\",phase=\"_\",run_uuid=\"$active_run\"} unless on(stage,run_uuid) bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}",
+          "legendFormat": "ETA"
+        },
+        {
+          "refId": "C",
           "expr": "bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}",
-          "legendFormat": "time"
+          "legendFormat": ""
         }
       ],
       "options": {
@@ -249,7 +306,7 @@
           ]
         },
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "colorMode": "background",
         "orientation": "vertical"
       },
@@ -293,6 +350,18 @@
           {
             "matcher": {
               "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": " "
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
               "options": "B"
             },
             "properties": [
@@ -314,6 +383,41 @@
                   "mode": "fixed",
                   "fixedColor": "text"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "ETA"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": " "
               }
             ]
           }
@@ -343,8 +447,13 @@
         },
         {
           "refId": "B",
+          "expr": "bffi_stage_eta_seconds{stage=\"m5\",phase=\"_\",run_uuid=\"$active_run\"} unless on(stage,run_uuid) bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}",
+          "legendFormat": "ETA"
+        },
+        {
+          "refId": "C",
           "expr": "bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}",
-          "legendFormat": "time"
+          "legendFormat": ""
         }
       ],
       "options": {
@@ -354,7 +463,7 @@
           ]
         },
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "colorMode": "background",
         "orientation": "vertical"
       },
@@ -398,6 +507,18 @@
           {
             "matcher": {
               "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": " "
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
               "options": "B"
             },
             "properties": [
@@ -419,6 +540,41 @@
                   "mode": "fixed",
                   "fixedColor": "text"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "ETA"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": " "
               }
             ]
           }
@@ -448,8 +604,13 @@
         },
         {
           "refId": "B",
+          "expr": "bffi_stage_eta_seconds{stage=\"m6\",phase=\"_\",run_uuid=\"$active_run\"} unless on(stage,run_uuid) bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}",
+          "legendFormat": "ETA"
+        },
+        {
+          "refId": "C",
           "expr": "bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}",
-          "legendFormat": "time"
+          "legendFormat": ""
         }
       ],
       "options": {
@@ -459,7 +620,7 @@
           ]
         },
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "colorMode": "background",
         "orientation": "vertical"
       },
@@ -503,6 +664,18 @@
           {
             "matcher": {
               "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": " "
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
               "options": "B"
             },
             "properties": [
@@ -524,6 +697,41 @@
                   "mode": "fixed",
                   "fixedColor": "text"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "ETA"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": " "
               }
             ]
           }
@@ -553,8 +761,13 @@
         },
         {
           "refId": "B",
+          "expr": "bffi_stage_eta_seconds{stage=\"m8\",phase=\"_\",run_uuid=\"$active_run\"} unless on(stage,run_uuid) bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}",
+          "legendFormat": "ETA"
+        },
+        {
+          "refId": "C",
           "expr": "bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"} - bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}",
-          "legendFormat": "time"
+          "legendFormat": ""
         }
       ],
       "options": {
@@ -564,7 +777,7 @@
           ]
         },
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "colorMode": "background",
         "orientation": "vertical"
       },
@@ -608,6 +821,18 @@
           {
             "matcher": {
               "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": " "
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
               "options": "B"
             },
             "properties": [
@@ -629,6 +854,41 @@
                   "mode": "fixed",
                   "fixedColor": "text"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "ETA"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "noValue",
+                "value": ""
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": " "
               }
             ]
           }

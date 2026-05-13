@@ -62,6 +62,13 @@ CANONICAL_CONFLICTS_FILENAME: Final[str] = "canonical-conflicts.jsonl"
 JUDGE_DECISIONS_FILENAME: Final[str] = "judge-decisions.jsonl"
 HELMET_MAP_FILENAME: Final[str] = "helmet-map.jsonl"
 
+#: P-12 Phase D cadence for M8 progress events. Emitted once per N
+#: canonical groups processed so the exporter's throughput derivation
+#: + dashboard ETA reflect real progress through the per-group mint
+#: loop. ~200 emissions across a full 800k-record canonical-group
+#: walk feels responsive without saturating the JSONL sidecar.
+_M8_PROGRESS_CADENCE: Final[int] = 500
+
 
 # --- Union-find -----------------------------------------------------------
 
@@ -1107,8 +1114,6 @@ def apply_merge(
     variants_sidecar_path = variants_sidecar_path or (settings.data_dir / VARIANTS_SIDECAR_NAME)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     merged_at = (now or datetime.now(UTC)).replace(microsecond=0)
-    emit_if_active(stage="m8", event="start")
-
     decisions = _load_decisions(decisions_path)
     same_work_edges = [(d.work_a, d.work_b) for d in decisions if d.decision == "same_work"]
     different_work_edges = [
@@ -1137,11 +1142,16 @@ def apply_merge(
         frozenset({d.work_a, d.work_b}): d for d in decisions
     }
 
+    # Now that ``groups`` is known we can emit ``start`` with the
+    # canonical-group count as the ETA denominator. P-12 follow-up.
+    emit_if_active(stage="m8", event="start", counters={"total": len(groups)})
+
     g = Graph()
     _bind_prefixes(g)
     canonical_entries: list[CanonicalEntry] = []
 
-    for root in sorted(groups):
+    sorted_roots = sorted(groups)
+    for processed, root in enumerate(sorted_roots, start=1):
         member_uris = groups[root]
         if member_uris[0] in conflict_roots:
             continue  # Flagged for review; do not silently merge.
@@ -1173,6 +1183,13 @@ def apply_merge(
             description_change_date=merged_at,
         )
         canonical_entries.append(entry)
+        if processed % _M8_PROGRESS_CADENCE == 0 or processed == len(sorted_roots):
+            emit_if_active(
+                stage="m8",
+                event="progress",
+                counters={"processed": processed, "total": len(sorted_roots)},
+                extra={"canonical_works": len(canonical_entries)},
+            )
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label
