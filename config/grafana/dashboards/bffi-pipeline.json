@@ -1753,8 +1753,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m2\",run_uuid=\"$active_run\"})",
-          "legendFormat": "M2 processed"
+          "expr": "sum(bffi_stage_outcomes_total{stage=\"m2\",outcome=\"succeeded\",run_uuid=\"$active_run\"})",
+          "legendFormat": "M2 converted"
         },
         {
           "refId": "B",
@@ -1763,8 +1763,8 @@
         },
         {
           "refId": "C",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m3\",run_uuid=\"$active_run\"})",
-          "legendFormat": "M3 processed"
+          "expr": "sum(bffi_stage_outcomes_total{stage=\"m3\",outcome=\"converted\",run_uuid=\"$active_run\"})",
+          "legendFormat": "M3 converted"
         },
         {
           "refId": "D",
