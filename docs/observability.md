@@ -93,15 +93,15 @@ the UI; operators clone-and-edit if they want a custom view.
 
 | Panel | Type | What it shows |
 |---|---|---|
+| Pipeline overview (top row, 8 tiles) | Stat × 8 | One tile per stage (M2 / M3 / M5 / M6 / M8 / M9 / Skosify / Load). Coloured green if running, blue if done, grey if idle. Filtered to the active run via `$active_run`. Added in P-12 Phase E. |
 | M9 reconcile — Phase 1 progress | Stat | Processed / total for M9 Phase 1 (the bench-relevant bottleneck). |
 | M9 Phase 1 ETA | Stat | Linear-extrapolation ETA. |
 | M9 Phase 1 throughput | Stat | Entities per minute over the last 5 progress events. |
 | M9 outcome distribution | Bar gauge | Per-tier counts after M9 ends (`local`, `lexical`, `llm`, `fallback`, `no_candidate`, …). |
-| Dependency health | State timeline | Fuseki / mlx-lm / Finto verdict over time. Mapped colours: green = up, amber = degraded, red = down. |
+| Dependency health | State timeline | Fuseki / mlx-lm / Finto verdict over time. P-12 Phase C: series whose last probe is >60 s old drop to a grey gap rather than extending stale state. P-12 Phase B: `not_configured` deps render as NaN (grey) rather than red. |
 | Per-stage throughput | Time series | All stages, all phases — overlay view of who's currently moving. |
 | Watchdog event rate (5m) | Time series | Per-event-type rate; spikes here precede stuck runs. |
 | Dependency probe latency | Stat | Most recent probe latency per dep. |
-| Pipeline stages — last timestamps | Stat | Start / end ts per stage for sequence visibility. |
 
 The dashboard schema is `v39` (Grafana 11.x). Image versions are
 pinned in `docker-compose.yml`; on Grafana major-version bumps the

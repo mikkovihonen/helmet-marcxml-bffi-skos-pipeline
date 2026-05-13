@@ -1,7 +1,11 @@
 {
   "title": "BFFI pipeline",
   "uid": "bffi-pipeline",
-  "tags": ["bffi", "pipeline", "p-11"],
+  "tags": [
+    "bffi",
+    "pipeline",
+    "p-11"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -12,11 +16,499 @@
   },
   "panels": [
     {
+      "id": 9,
+      "type": "stat",
+      "title": "M2 marc-to-bf",
+      "description": "Current state of pipeline stage `m2` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"} - on(stage, run_uuid) (bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"} or vector(0))",
+          "legendFormat": "delta"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "done",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "M3 bf-to-bffi",
+      "description": "Current state of pipeline stage `m3` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"} - on(stage, run_uuid) (bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"} or vector(0))",
+          "legendFormat": "delta"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "done",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "M5 embeddings",
+      "description": "Current state of pipeline stage `m5` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"} - on(stage, run_uuid) (bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"} or vector(0))",
+          "legendFormat": "delta"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "done",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "M6 judge",
+      "description": "Current state of pipeline stage `m6` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"} - on(stage, run_uuid) (bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"} or vector(0))",
+          "legendFormat": "delta"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "done",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "M8 consolidate",
+      "description": "Current state of pipeline stage `m8` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"} - on(stage, run_uuid) (bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"} or vector(0))",
+          "legendFormat": "delta"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "done",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "M9 reconcile",
+      "description": "Current state of pipeline stage `m9` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"} - on(stage, run_uuid) (bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"} or vector(0))",
+          "legendFormat": "delta"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "done",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Skosify",
+      "description": "Current state of pipeline stage `skosify` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"} - on(stage, run_uuid) (bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"} or vector(0))",
+          "legendFormat": "delta"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "done",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Load \u2192 Fuseki",
+      "description": "Current state of pipeline stage `load` for the active run. Green=running, blue=done, grey=idle / not-yet-started. P-12 Phase E.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"} - on(stage, run_uuid) (bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"} or vector(0))",
+          "legendFormat": "delta"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "done",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": 1,
       "type": "stat",
-      "title": "M9 reconcile — Phase 1 progress",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "title": "M9 reconcile \u2014 Phase 1 progress",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 4
+      },
       "targets": [
         {
           "refId": "A",
@@ -31,7 +523,15 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
         }
       }
     },
@@ -39,8 +539,16 @@
       "id": 2,
       "type": "stat",
       "title": "M9 Phase 1 ETA (seconds)",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 4
+      },
       "targets": [
         {
           "refId": "A",
@@ -49,15 +557,25 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "s"}
+        "defaults": {
+          "unit": "s"
+        }
       }
     },
     {
       "id": 3,
       "type": "stat",
       "title": "M9 Phase 1 throughput (per minute)",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 4
+      },
       "targets": [
         {
           "refId": "A",
@@ -70,8 +588,16 @@
       "id": 4,
       "type": "bargauge",
       "title": "M9 outcome distribution (per tier)",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
@@ -89,8 +615,16 @@
       "type": "state-timeline",
       "title": "Dependency health",
       "description": "Per-(stage, dep) health verdict. P-12 Phase C: series whose most recent probe is older than 60s are filtered out by the freshness clause so the timeline shows a gap (grey) instead of extending stale state indefinitely. P-12 Phase B: not_configured deps (NaN gauge) render as grey too.",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
@@ -102,9 +636,33 @@
         "defaults": {
           "noValue": "stale",
           "mappings": [
-            {"type": "value", "options": {"0": {"text": "down", "color": "red"}}},
-            {"type": "value", "options": {"1": {"text": "degraded", "color": "orange"}}},
-            {"type": "value", "options": {"2": {"text": "up", "color": "green"}}}
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "down",
+                  "color": "red"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "degraded",
+                  "color": "orange"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "2": {
+                  "text": "up",
+                  "color": "green"
+                }
+              }
+            }
           ]
         }
       }
@@ -113,8 +671,16 @@
       "id": 6,
       "type": "timeseries",
       "title": "Per-stage throughput",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
       "targets": [
         {
           "refId": "A",
@@ -127,8 +693,16 @@
       "id": 7,
       "type": "timeseries",
       "title": "Watchdog event rate (5m)",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
       "targets": [
         {
           "refId": "A",
@@ -137,15 +711,25 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "/min"}
+        "defaults": {
+          "unit": "/min"
+        }
       }
     },
     {
       "id": 8,
       "type": "stat",
       "title": "Dependency probe latency (ms)",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 20},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
       "targets": [
         {
           "refId": "A",
@@ -154,30 +738,34 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "ms"}
-      }
-    },
-    {
-      "id": 9,
-      "type": "stat",
-      "title": "Pipeline stages (last start / end timestamps)",
-      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
-      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 20},
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "bffi_stage_started_timestamp",
-          "legendFormat": "{{stage}} started"
-        },
-        {
-          "refId": "B",
-          "expr": "bffi_stage_ended_timestamp",
-          "legendFormat": "{{stage}} ended"
+        "defaults": {
+          "unit": "ms"
         }
-      ],
-      "fieldConfig": {
-        "defaults": {"unit": "dateTimeFromNow"}
       }
     }
-  ]
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "active_run",
+        "label": "active run",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "bffi-prometheus"
+        },
+        "query": "topk(1, bffi_stage_started_timestamp) by (run_uuid)",
+        "regex": "/.*run_uuid=\"([^\"]+)\".*/",
+        "refresh": 2,
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "selected": false,
+          "text": "auto",
+          "value": "auto"
+        }
+      }
+    ]
+  }
 }

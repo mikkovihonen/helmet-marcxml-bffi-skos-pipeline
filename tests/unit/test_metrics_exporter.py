@@ -442,6 +442,77 @@ def test_tail_step_mixed_idle_and_append_pattern(tmp_path: Path) -> None:
 # --- dashboard JSON schema sanity ---------------------------------------
 
 
+def test_grafana_dashboard_has_active_run_templating_variable() -> None:
+    """P-12 Phase E: the top-of-dashboard overview row filters every
+    stage tile by ``run_uuid=$active_run``, where ``$active_run`` is
+    a Grafana templating variable that auto-tracks the latest start
+    event. The variable must exist and target ``run_uuid``."""
+    dashboard_path = (
+        Path(__file__).resolve().parents[2]
+        / "config"
+        / "grafana"
+        / "dashboards"
+        / "bffi-pipeline.json"
+    )
+    data = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    variables = data.get("templating", {}).get("list", [])
+    assert any(v.get("name") == "active_run" for v in variables), (
+        "Missing $active_run templating variable; overview row needs it "
+        "to filter tiles to the currently-active pipeline invocation."
+    )
+    active_run = next(v for v in variables if v.get("name") == "active_run")
+    # Must read from the Prometheus datasource and produce a run_uuid.
+    assert "bffi_stage_started_timestamp" in active_run["query"]
+    assert "run_uuid" in active_run["query"] + active_run.get("regex", "")
+
+
+def test_grafana_dashboard_pipeline_overview_row_covers_every_stage() -> None:
+    """P-12 Phase E: the top row has one stat tile per pipeline stage.
+
+    Pins the eight-stage set so a future stage addition (or accidental
+    deletion) shows up in CI rather than as a silent dashboard
+    regression. The 'Pipeline stages (last start / end timestamps)'
+    panel that this row replaces is also asserted gone.
+    """
+    dashboard_path = (
+        Path(__file__).resolve().parents[2]
+        / "config"
+        / "grafana"
+        / "dashboards"
+        / "bffi-pipeline.json"
+    )
+    data = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    # Overview row sits at y=0 with width-3 stat tiles.
+    overview_tiles = [
+        p
+        for p in data["panels"]
+        if p.get("type") == "stat"
+        and p.get("gridPos", {}).get("y") == 0
+        and p.get("gridPos", {}).get("w") == 3
+    ]
+    assert len(overview_tiles) == 8, (
+        f"Expected 8 overview tiles at the top of the dashboard; "
+        f"got {len(overview_tiles)} ({[t['title'] for t in overview_tiles]})."
+    )
+    # The 8 cover the M2 → load span.
+    expected_stages = {"m2", "m3", "m5", "m6", "m8", "m9", "skosify", "load"}
+    seen_stages = {
+        s
+        for tile in overview_tiles
+        for s in expected_stages
+        if f'stage="{s}"' in tile["targets"][0]["expr"]
+    }
+    assert seen_stages == expected_stages, (
+        f"Overview tiles missing stages: {expected_stages - seen_stages}"
+    )
+    # The noisy 'Pipeline stages' panel is gone.
+    titles = {p["title"] for p in data["panels"]}
+    assert not any("last start / end timestamps" in t for t in titles), (
+        "The unreadable 'Pipeline stages (last start / end timestamps)' "
+        "panel should have been removed in P-12 Phase E."
+    )
+
+
 def test_grafana_dashboard_json_parses() -> None:
     """The bundled dashboard JSON must parse as valid JSON and carry
     the load-bearing top-level fields. A schema-level bug here
