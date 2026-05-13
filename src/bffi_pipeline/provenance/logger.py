@@ -194,6 +194,7 @@ def log_reconciliation(
     started_at: datetime | None = None,
     ended_at: datetime | None = None,
     activity_uri: URIRef | None = None,
+    was_influenced_by: URIRef | None = None,
 ) -> URIRef:
     """Mint a ``bffi-prov:Reconciliation`` Activity per spec § 6 / BUILD_PLAN M9.
 
@@ -206,6 +207,12 @@ def log_reconciliation(
 
     ``candidates`` is an iterable of ``(authority_uri, lexical_similarity)``
     pairs covering the full top-k pool the decision was drawn from.
+
+    ``was_influenced_by`` records the URI of an earlier Activity whose
+    verdict this Activity replays — used by P-10 Phase B to mark
+    picker-cache hits: the new Activity carries
+    ``prov:wasInfluencedBy <cached-activity-uri>`` so the audit trail
+    distinguishes "fresh LLM verdict" from "reused cached verdict".
     """
     activity = activity_uri or V.BIB[f"reconcile/{ULID()}"]
     started = started_at or _now()
@@ -223,6 +230,8 @@ def log_reconciliation(
     g.add((activity, V.rationale, Literal(rationale)))
     if chosen_authority_uri is not None:
         g.add((activity, V.chosenAuthorityUri, URIRef(chosen_authority_uri)))
+    if was_influenced_by is not None:
+        g.add((activity, V.PROV.wasInfluencedBy, was_influenced_by))
     for cand_uri, lex in candidates:
         g.add((activity, V.candidateAuthorityUri, URIRef(cand_uri)))
         g.add(

@@ -1101,6 +1101,22 @@ def reconcile_command(
             ),
         ),
     ] = None,
+    cache: Annotated[
+        bool | None,
+        typer.Option(
+            "--cache/--no-cache",
+            help=(
+                "P-10 Phase B: enable the persistent picker decision cache "
+                "(<data_dir>/reconcile-cache.sqlite). Cached verdicts skip "
+                "the LLM picker entirely on the next run; per-vocabulary "
+                "Finto-dump SHA-256 invalidates the cache on refresh. "
+                "Defaults to ON unless BFFI_M9_CACHE_DISABLED=1. Pass "
+                "--no-cache to bench a cold run without disabling the env "
+                "var. See docs/plans/in-progress/p-10-m9-reconcile-"
+                "throughput.md Phase B."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Reconcile canonical Work creators + subjects against KANTO / VIAF / YSO / KAUNO / MUSO."""
     settings = get_settings()
@@ -1137,9 +1153,16 @@ def reconcile_command(
         if settings.m9_picker_ordering == reconcile.PICKER_ORDERING_PREFIX_CACHE
         else reconcile.PICKER_ORDERING_SUBMISSION
     )
+    # P-10 Phase B: cache resolution. The --no-cache flag wins over the env
+    # var (operator-friendly bench knob); the env var BFFI_M9_CACHE_DISABLED
+    # is the durable rollback. None means "fall through to env".
+    cache_enabled = (not settings.m9_cache_disabled) if cache is None else cache
     watchdog_sidecar = settings.data_dir / "watchdog-events.jsonl"
 
     http_client = httpx.Client(timeout=10.0)
+    picker_cache: reconcile.PickerCache | None = (
+        reconcile.PickerCache(reconcile.picker_cache_default_path()) if cache_enabled else None
+    )
     try:
         client = reconcile.FintoSkosmosClient(http_client=http_client)
         fallback = reconcile.ViafClient(http_client=http_client)
@@ -1178,6 +1201,7 @@ def reconcile_command(
                     watchdog_sidecar_path=watchdog_sidecar,
                     phase1_concurrency=effective_phase1_concurrency,
                     picker_ordering=effective_picker_ordering,
+                    picker_cache=picker_cache,
                 )
         else:
             summary, _outcomes = reconcile.apply_reconciliation(
@@ -1193,9 +1217,12 @@ def reconcile_command(
                 watchdog_sidecar_path=watchdog_sidecar,
                 phase1_concurrency=effective_phase1_concurrency,
                 picker_ordering=effective_picker_ordering,
+                picker_cache=picker_cache,
             )
     finally:
         http_client.close()
+        if picker_cache is not None:
+            picker_cache.close()
     typer.echo(summary.render())
 
 

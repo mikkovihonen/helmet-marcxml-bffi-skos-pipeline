@@ -187,6 +187,24 @@ LLM_BASE_URL=http://localhost:11434/v1 \
 #   bffi-pipeline reconcile --kinds creators        # KANTO + VIAF only
 #   bffi-pipeline reconcile --kinds subjects,genres # YSO + KAUNO + MUSO
 #
+# P-10 Phase B knobs (persistent picker decision cache):
+#   --cache / --no-cache (per-run override of the env var)
+#   BFFI_M9_CACHE_DISABLED=1 disables the cache durably; pipeline runs
+#     the LLM picker for every deferred entry, byte-stable with the
+#     post-Phase-E behaviour.
+#   The cache lives at <BFFI_DATA_DIR>/reconcile-cache.sqlite. Each row
+#     binds (literal, sorted candidate URIs, prompt hash, model name,
+#     vocab+finto_sha) to a validated picker decision. A refresh of
+#     data/finto-dumps/<vocab>-skos.ttl changes that vocab's SHA-256
+#     and invalidates its cached entries on the next lookup — no
+#     polling, no timestamp chasing. VIAF picks are deliberately not
+#     cached (no local dump to anchor the version of).
+#   Provenance: cache-hit Activities carry prov:wasInfluencedBy
+#     <original-activity-uri> so the audit trail distinguishes "fresh
+#     LLM verdict" from "reused cached verdict".
+#   Use `make clean-caches` to drop both M6 and M9 caches when
+#     starting a cold-cache bench or recovering from corruption.
+
 # P-10 Phase E knob (env-var only — no CLI flag):
 #   BFFI_M9_PICKER_ORDERING=prefix-cache (default) reorders deferred
 #     picker calls so consecutive POST /v1/chat/completions calls share

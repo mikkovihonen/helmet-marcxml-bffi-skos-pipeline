@@ -163,6 +163,19 @@ class Settings(BaseSettings):
         default="prefix-cache",
         alias="BFFI_M9_PICKER_ORDERING",
     )
+    # P-10 Phase B: emergency-disable knob for the persistent picker
+    # decision cache (``<data_dir>/reconcile-cache.sqlite``). When
+    # ``True`` the CLI does not construct a :class:`PickerCache`, so
+    # ``apply_reconciliation`` runs the picker for every deferred entry
+    # — the post-Phase-A2 + Phase-E behaviour. Mirrors M6's pattern of
+    # having the cache always on by default with an env-var rollback.
+    # Useful for benching (one run with cache, one without) and for
+    # recovering when a corrupted SQLite file would otherwise block a
+    # production run.
+    m9_cache_disabled: bool = Field(
+        default=False,
+        alias="BFFI_M9_CACHE_DISABLED",
+    )
     # P-11 Phase A: per-invocation structured event stream.
     # ``observability_sidecar`` is the canonical JSONL file every stage
     # appends to (start / progress / phase_boundary / end / health /

@@ -18,9 +18,10 @@ import httpx
 import pytest
 from pydantic import ValidationError
 from rdflib import BNode, Graph, Literal, URIRef
-from rdflib.namespace import RDF
+from rdflib.namespace import RDF, Namespace
 
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.provenance.vocab import PROV
 from bffi_pipeline.stages.local_concept_resolver import LocalConceptHit
 from bffi_pipeline.stages.reconcile import (
     ALL_AUTHORITY_KINDS,
@@ -40,6 +41,7 @@ from bffi_pipeline.stages.reconcile import (
     EntityRequest,
     FintoSkosmosClient,
     LangChainLLMPicker,
+    PickerCache,
     PickerDecision,
     StubAuthorityClient,
     StubPicker,
@@ -47,6 +49,8 @@ from bffi_pipeline.stages.reconcile import (
     _order_deferred_picker_queue,
     _picker_queue_sort_key,
     apply_reconciliation,
+    compute_finto_shas,
+    compute_picker_cache_key,
     decide_reconciliation,
     lexical_similarity,
     picker_prompt_hash,
@@ -2033,4 +2037,361 @@ def test_picker_ordering_default_is_prefix_cache_in_apply_reconciliation() -> No
     assert bytes_default == bytes_explicit, (
         "Default picker_ordering is not 'prefix-cache' — the Phase E "
         "opt-in/opt-out contract is broken."
+    )
+
+
+# --- P-10 Phase B: persistent picker decision cache -----------------------
+
+
+def _make_finto_dumps(tmp_path: Path, vocabs: list[str]) -> Path:
+    """Create a stand-in ``finto-dumps`` dir with one tiny TTL per vocab.
+
+    The orchestrator hashes ``<vocab>-skos.ttl`` to anchor the cache
+    key per vocabulary. Tests only need the files to *exist* with
+    deterministic content; we don't parse them.
+    """
+    dumps = tmp_path / "finto-dumps"
+    dumps.mkdir(parents=True, exist_ok=True)
+    for vocab in vocabs:
+        (dumps / f"{vocab}-skos.ttl").write_text(
+            f"# Stub dump for {vocab} — used by P-10 Phase B unit tests.\n",
+            encoding="utf-8",
+        )
+    return dumps
+
+
+def test_picker_cache_insert_lookup_roundtrip(tmp_path: Path) -> None:
+    """One insert + one lookup with the same key returns the stored decision."""
+    cache = PickerCache(tmp_path / "cache.sqlite")
+    try:
+        decision = PickerDecision(
+            decision="chose",
+            chosen_uri="http://kanto/a",
+            confidence=0.91,
+            rationale=(
+                "Phase B round-trip test: candidate A wins on prefLabel "
+                "+ surname match against the cataloguer's literal."
+            ),
+        )
+        cache.set(
+            "key-A",
+            decision=decision,
+            finto_vocab="finaf",
+            finto_sha="deadbeef" * 8,
+            prompt_hash_value="sha256:fakeprompt",
+            model_name="qwen3-8b-stub",
+            activity_uuid="http://urn.fi/URN:NBN:fi:bib:reconcile/01",
+        )
+        hit = cache.get("key-A")
+        assert hit is not None
+        assert hit.decision == decision
+        assert hit.activity_uuid == "http://urn.fi/URN:NBN:fi:bib:reconcile/01"
+        # Unrelated key → miss.
+        assert cache.get("key-B") is None
+    finally:
+        cache.close()
+
+
+def test_picker_cache_finto_sha_mismatch_invalidates(tmp_path: Path) -> None:
+    """Different ``finto_sha`` → different key → cache miss (per-vocab refresh)."""
+    request = EntityRequest(
+        work_uri="http://urn.fi/URN:NBN:fi:bib:work:x",
+        literal="Tolstoy, Leo,",
+        kind="person",
+    )
+    candidates = [_candidate("http://kanto/a", "Tolstoy, L A", 0.97)]
+
+    old = compute_picker_cache_key(
+        request=request,
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "old-sha"},
+    )
+    new = compute_picker_cache_key(
+        request=request,
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "new-sha"},
+    )
+    assert old is not None
+    assert new is not None
+    assert old[0] != new[0], (
+        "Cache keys should differ after a Finto refresh — otherwise the "
+        "per-vocabulary invalidation contract is broken."
+    )
+
+
+def test_picker_cache_key_skips_when_no_local_sha(tmp_path: Path) -> None:
+    """Vocab without a local dump → no key → caller must skip caching."""
+    request = EntityRequest(
+        work_uri="http://urn.fi/URN:NBN:fi:bib:work:x",
+        literal="Ada Lovelace",
+        kind="person",
+    )
+    candidates = [_candidate("http://viaf.org/viaf/1234", "Lovelace, Ada", 0.97, vocab="viaf")]
+    key_info = compute_picker_cache_key(
+        request=request,
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={},  # no local dumps
+    )
+    assert key_info is None
+
+
+def test_picker_cache_key_skips_viaf_even_with_sha(tmp_path: Path) -> None:
+    """VIAF is remote-only — never cached even if a dump hash were present."""
+    request = EntityRequest(
+        work_uri="http://urn.fi/URN:NBN:fi:bib:work:x",
+        literal="Ada Lovelace",
+        kind="person",
+    )
+    candidates = [_candidate("http://viaf.org/viaf/1234", "Lovelace, Ada", 0.97, vocab="viaf")]
+    key_info = compute_picker_cache_key(
+        request=request,
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"viaf": "anything"},
+    )
+    assert key_info is None
+
+
+def test_picker_cache_key_diacritic_equivalent_literals_collide(tmp_path: Path) -> None:
+    """``Tolstoï`` and ``Tolstoi`` fold to the same key.
+
+    The cache key uses ``fold_label`` (NFKC + diacritic-fold + casefold)
+    so diacritic-equivalent literals reuse the cached decision. This
+    is the same fold the rest of M9 applies to lexical similarity.
+    """
+    candidates = [_candidate("http://kanto/a", "Tolstoy", 0.97)]
+    key_a = compute_picker_cache_key(
+        request=EntityRequest(work_uri="w", literal="Tolstoï", kind="person"),
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "sha"},
+    )
+    key_b = compute_picker_cache_key(
+        request=EntityRequest(work_uri="w", literal="Tolstoi", kind="person"),
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "sha"},
+    )
+    assert key_a is not None
+    assert key_b is not None
+    assert key_a[0] == key_b[0]
+
+
+def test_picker_cache_cross_thread_writes_no_interface_error(tmp_path: Path) -> None:
+    """Four threads writing distinct keys must not raise sqlite3.InterfaceError.
+
+    Regression-pins the cross-thread fix mirrored from M6 commit
+    ``1452a4f`` — without the lock, concurrent ``execute()`` on a
+    shared connection raises ``InterfaceError: bad parameter or other
+    API misuse``.
+    """
+    cache = PickerCache(tmp_path / "cache.sqlite")
+    decision = PickerDecision(
+        decision="chose",
+        chosen_uri="http://kanto/a",
+        confidence=0.91,
+        rationale=(
+            "Cross-thread write regression test — decision content does "
+            "not matter, the schema-level lock is what's under test."
+        ),
+    )
+    errors: list[Exception] = []
+    lock = threading.Lock()
+
+    def _writer(i: int) -> None:
+        try:
+            cache.set(
+                f"key-{i}",
+                decision=decision,
+                finto_vocab="finaf",
+                finto_sha="sha",
+                prompt_hash_value="sha256:ph",
+                model_name="qwen3-8b-stub",
+                activity_uuid=f"http://urn.fi/URN:NBN:fi:bib:reconcile/{i:02d}",
+            )
+        except Exception as exc:
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=_writer, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    cache.close()
+    assert errors == []
+
+
+def test_compute_finto_shas_returns_per_file_hashes(tmp_path: Path) -> None:
+    """Each ``<vocab>-skos.ttl`` in the dumps dir yields one entry keyed by slug."""
+    dumps = _make_finto_dumps(tmp_path, ["finaf", "yso", "kauno"])
+    shas = compute_finto_shas(dumps)
+    assert set(shas.keys()) == {"finaf", "yso", "kauno"}
+    # Different vocabs have different (file content) hashes.
+    assert len(set(shas.values())) == 3
+    # Missing dir → empty.
+    assert compute_finto_shas(tmp_path / "nope") == {}
+
+
+def test_apply_reconciliation_warm_cache_skips_picker_and_marks_provenance(
+    tmp_path: Path,
+) -> None:
+    """Second run on the same input + warm cache produces cache hits.
+
+    Verifies the end-to-end contract:
+    1. First run dispatches the picker for every ambiguous creator.
+    2. Cache is populated.
+    3. Second run with the same cache + finto_dumps_dir hits the cache.
+    4. The picker is *not* called on the second run for cached entries.
+    5. Provenance Activities on the second run carry
+       ``prov:wasInfluencedBy`` pointing at the first-run Activity URI.
+    6. Canonical Turtle is byte-stable across the two runs.
+    """
+    dumps = _make_finto_dumps(tmp_path, ["finaf"])
+    cache_path = tmp_path / "reconcile-cache.sqlite"
+
+    # Both runs must surface the same picker ``model_name`` because the
+    # cache key includes it — a model swap is a deliberate invalidation
+    # signal in production.
+    class _ModelNamedStubPicker:
+        model_name = "stub-shared-model"
+
+        def __init__(self, decisions: dict) -> None:
+            self.inner = StubPicker(decisions=dict(decisions))
+            self.call_count = 0
+
+        def pick(
+            self,
+            *,
+            request: EntityRequest,
+            candidates: list[AuthorityCandidate],
+        ) -> PickerDecision:
+            self.call_count += 1
+            return self.inner.pick(request=request, candidates=candidates)
+
+    # --- First run (cold cache) ----------------------------------------
+    labels_1, client_1, stub_1 = _twelve_ambiguous_creators()
+    g_1 = _build_canonical_with_n_creators(labels_1)
+    prov_1 = Graph()
+    cache_1 = PickerCache(cache_path)
+    apply_reconciliation(
+        client=client_1,
+        picker_factory=lambda decisions=stub_1.decisions: _ModelNamedStubPicker(decisions),  # type: ignore[return-value]
+        graph=g_1,
+        provenance_graph=prov_1,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        picker_cache=cache_1,
+        finto_dumps_dir=dumps,
+    )
+    bytes_1 = g_1.serialize(format="turtle")
+    cache_1.close()
+
+    # --- Second run (warm cache, counting picker invocations) ----------
+    labels_2, client_2, stub_2 = _twelve_ambiguous_creators()
+    g_2 = _build_canonical_with_n_creators(labels_2)
+    prov_2 = Graph()
+
+    counters: list[_ModelNamedStubPicker] = []
+
+    def _factory(decisions: dict = stub_2.decisions) -> _ModelNamedStubPicker:
+        wrapper = _ModelNamedStubPicker(decisions)
+        counters.append(wrapper)
+        return wrapper
+
+    cache_2 = PickerCache(cache_path)
+    apply_reconciliation(
+        client=client_2,
+        picker_factory=_factory,  # type: ignore[arg-type]
+        graph=g_2,
+        provenance_graph=prov_2,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        picker_cache=cache_2,
+        finto_dumps_dir=dumps,
+    )
+    bytes_2 = g_2.serialize(format="turtle")
+    cache_2.close()
+
+    # Picker invocation count on the second run is the load-bearing
+    # claim: warm cache → 0 picker calls.
+    total_picker_calls_run_2 = sum(c.call_count for c in counters)
+    assert total_picker_calls_run_2 == 0, (
+        f"Warm-cache run made {total_picker_calls_run_2} picker calls; expected 0."
+    )
+
+    # Canonical graph is byte-stable across the two runs.
+    assert bytes_1 == bytes_2, (
+        "Canonical Turtle diverged between cold and warm runs — the "
+        "cache-hit code path produced different bindings than fresh picks."
+    )
+
+    # Provenance on the second run must carry wasInfluencedBy → first-run URIs.
+    prov_ns = Namespace("http://www.w3.org/ns/prov#")
+    influenced_pairs = list(prov_2.subject_objects(prov_ns.wasInfluencedBy))
+    assert influenced_pairs, (
+        "Phase B contract broken: warm-cache run emitted zero prov:wasInfluencedBy triples."
+    )
+    # The targets of wasInfluencedBy must all be Activity subjects from run 1.
+    run_1_activity_subjects = {s for s, _p, _o in prov_1.triples((None, PROV.startedAtTime, None))}
+    targets = {o for _s, o in influenced_pairs}
+    assert targets <= run_1_activity_subjects, (
+        "wasInfluencedBy targets reference URIs that are not Activities in "
+        "the first-run provenance graph."
+    )
+
+
+def test_apply_reconciliation_cache_disabled_runs_picker_every_time(
+    tmp_path: Path,
+) -> None:
+    """``picker_cache=None`` reverts to pre-Phase-B behaviour: picker fires every run."""
+    dumps = _make_finto_dumps(tmp_path, ["finaf"])
+    labels, client, stub = _twelve_ambiguous_creators()
+    g = _build_canonical_with_n_creators(labels)
+
+    call_count = 0
+    inner_factory = lambda decisions=stub.decisions: StubPicker(decisions=dict(decisions))  # noqa: E731
+
+    class _CountingStub:
+        model_name = "stub-counting"
+
+        def __init__(self) -> None:
+            self.inner = inner_factory()
+
+        def pick(
+            self,
+            *,
+            request: EntityRequest,
+            candidates: list[AuthorityCandidate],
+        ) -> PickerDecision:
+            nonlocal call_count
+            call_count += 1
+            return self.inner.pick(request=request, candidates=candidates)
+
+    apply_reconciliation(
+        client=client,
+        picker_factory=_CountingStub,  # type: ignore[arg-type]
+        graph=g,
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        concurrency=4,
+        field_timeout_seconds=0,
+        picker_cache=None,  # explicit: no caching
+        finto_dumps_dir=dumps,
+    )
+    # With 12 ambiguous creators routed to the picker and no cache,
+    # the picker fires for every one of them.
+    assert call_count == len(labels), (
+        f"Cache-disabled path made {call_count} picker calls; expected "
+        f"{len(labels)} (one per ambiguous creator)."
     )

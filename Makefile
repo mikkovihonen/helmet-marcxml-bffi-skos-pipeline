@@ -1,5 +1,5 @@
 .PHONY: help convert eval publish refresh-finto test test-integration lint format \
-        observability-up observability-down
+        observability-up observability-down clean-caches
 
 help:
 	@echo "Targets:"
@@ -13,6 +13,7 @@ help:
 	@echo "  format             - ruff format + ruff check --fix"
 	@echo "  observability-up   - start local Prometheus + Grafana (P-11 Phase D)"
 	@echo "  observability-down - stop the observability stack"
+	@echo "  clean-caches       - remove the M6 judge and M9 picker decision caches"
 
 convert:
 	@echo "not implemented"
@@ -62,3 +63,19 @@ observability-up:
 
 observability-down:
 	docker compose --profile observability stop prometheus grafana
+
+# P-10 Phase B: remove the M6 judge-pair and M9 picker-decision caches.
+# Cache files are gitignored; this is the operator-side reset knob for
+# benching cold-cache scenarios or recovering from a corrupted SQLite
+# file. Safe to run at any time — the next pipeline invocation
+# rebuilds the schema lazily on first miss.
+clean-caches:
+	@DATA_DIR=$$(uv run python -c 'from bffi_pipeline.config import get_settings; print(get_settings().data_dir)') ; \
+	  for f in judge-cache.sqlite reconcile-cache.sqlite ; do \
+	    if [ -f "$$DATA_DIR/$$f" ]; then \
+	      echo "removing $$DATA_DIR/$$f" ; \
+	      rm -f "$$DATA_DIR/$$f" ; \
+	    else \
+	      echo "$$DATA_DIR/$$f not present (already clean)" ; \
+	    fi ; \
+	  done

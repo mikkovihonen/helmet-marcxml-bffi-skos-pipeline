@@ -1,4 +1,8 @@
 ### SYSTEM
+# NOTE: Changes to this prompt invalidate data/reconcile-cache.sqlite
+# (the P-10 Phase B picker decision cache) — the SHA-256 of this file
+# is part of every cache key, so any non-whitespace edit triggers a
+# clean re-pick on the next run.
 You are a cataloguing assistant resolving a literal Finnish-cataloguer
 string into the correct authority URI from a candidate list pulled
 from a Finto vocabulary (KANTO for persons + corporate bodies; YSO

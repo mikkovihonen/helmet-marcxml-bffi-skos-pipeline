@@ -37,9 +37,11 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import re
+import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
@@ -60,7 +62,7 @@ from rdflib import Graph, Literal, URIRef
 from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF
 
-from bffi_pipeline.blocking import fold_diacritics
+from bffi_pipeline.blocking import fold_diacritics, fold_label
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import logger as P
@@ -293,6 +295,14 @@ class ReconciliationOutcome:
     the ``bffi-prov:stage = "watchdog-aborted"`` literal in the
     provenance graph (overrides ``stage`` for provenance purposes);
     the canonical-graph mutation stays the same as a normal fallback.
+
+    ``cached_activity_uuid`` is populated by the P-10 Phase B
+    picker-cache lookup: when set, the freshly-minted provenance
+    Activity for this outcome carries ``prov:wasInfluencedBy
+    <cached_activity_uuid>`` so the audit trail distinguishes "fresh
+    LLM verdict" from "reused cached verdict". ``None`` for cache
+    misses and for non-picker outcomes (tier-0 / tier-1 / no-candidate
+    / fictional / watchdog-aborted).
     """
 
     request: EntityRequest
@@ -303,6 +313,7 @@ class ReconciliationOutcome:
     candidates: list[AuthorityCandidate]
     needs_review: bool
     was_watchdog_aborted: bool = False
+    cached_activity_uuid: str | None = None
 
     @property
     def is_success(self) -> bool:
@@ -1327,9 +1338,9 @@ def _emit_provenance(
     outcome: ReconciliationOutcome,
     started_at: datetime,
     ended_at: datetime,
-) -> None:
+) -> URIRef | None:
     if writer_graph is None:
-        return
+        return None
     # Watchdog-aborted outcomes are recorded as ``"watchdog-aborted"`` in
     # provenance (matching M6's contract). The ``outcome.stage`` field
     # stays ``STAGE_FALLBACK`` for canonical-graph purposes — the
@@ -1337,7 +1348,12 @@ def _emit_provenance(
     # "LLM said uncertain" (``reconciliation-fallback``) from "LLM never
     # answered in time" (``watchdog-aborted``).
     stage_literal: str = STAGE_WATCHDOG_ABORTED if outcome.was_watchdog_aborted else outcome.stage
-    P.log_reconciliation(
+    # P-10 Phase B: cache-hit outcomes carry the cached Activity URI so
+    # the new Activity links back via ``prov:wasInfluencedBy``.
+    was_influenced_by = (
+        URIRef(outcome.cached_activity_uuid) if outcome.cached_activity_uuid else None
+    )
+    return P.log_reconciliation(
         writer_graph,
         work_uri=outcome.request.work_uri,
         input_literal=outcome.request.literal,
@@ -1351,6 +1367,7 @@ def _emit_provenance(
         rationale=outcome.rationale,
         started_at=started_at,
         ended_at=ended_at,
+        was_influenced_by=was_influenced_by,
     )
 
 
@@ -1843,6 +1860,247 @@ def _picker_call_with_budget(
 _MIN_CONCURRENCY_FOR_FACTORY: Final[int] = 2
 
 
+# --- P-10 Phase B: persistent picker decision cache -----------------------
+#
+# Mirrors M6's :class:`~bffi_pipeline.stages.judge.JudgeCache`:
+# a SQLite-backed key/value store that survives ``apply_reconciliation``
+# runs so the same ``(literal, candidate_set, prompt, model,
+# finto_vocab+sha)`` tuple does not re-pay an LLM picker call. The key
+# is Finto-version-aware: refreshing a vocabulary dump (different
+# SHA-256) invalidates the per-vocab slice cleanly on next lookup.
+
+#: Default filename. Mirrors M6's ``judge-cache.sqlite`` naming.
+PICKER_CACHE_FILENAME: Final[str] = "reconcile-cache.sqlite"
+
+
+def picker_cache_default_path() -> Path:
+    """Return ``<BFFI_DATA_DIR>/reconcile-cache.sqlite`` from live Settings."""
+    return get_settings().data_dir / PICKER_CACHE_FILENAME
+
+
+def hash_finto_dump(path: Path) -> str:
+    """SHA-256 of one Finto vocabulary dump file.
+
+    Read in 1 MiB chunks so the hash is bounded by I/O, not by file
+    size — KANTO is ~183 MB and LCSH ~465 MB decompressed.
+    """
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def compute_finto_shas(dumps_dir: Path) -> dict[str, str]:
+    """Hash every ``<vocab>-skos.ttl`` in ``dumps_dir``.
+
+    Returns a dict keyed by vocab slug (the part before ``-skos.ttl``).
+    Missing / non-existent dumps directories return an empty dict so
+    callers distinguish "vocab not cached locally" (skip caching) from
+    "vocab cached but refreshed" (key mismatch → cache miss). Computed
+    once per :func:`apply_reconciliation` run, not per-call.
+    """
+    if not dumps_dir.is_dir():
+        return {}
+    shas: dict[str, str] = {}
+    for path in sorted(dumps_dir.glob("*-skos.ttl")):
+        vocab = path.stem.removesuffix("-skos")
+        shas[vocab] = hash_finto_dump(path)
+    return shas
+
+
+def compute_picker_cache_key(
+    *,
+    request: EntityRequest,
+    candidates: Iterable[AuthorityCandidate],
+    prompt_hash_value: str,
+    model_name: str,
+    finto_shas: dict[str, str],
+) -> tuple[str, str, str] | None:
+    """Return ``(key, vocab, finto_sha)`` or ``None`` if the call must skip cache.
+
+    Skip conditions (return ``None``):
+
+    - Empty candidate list — picker would short-circuit to ``uncertain``
+      anyway, no value in caching.
+    - VIAF-source candidates — no local dump to anchor the version,
+      so caching would risk binding to upstream-drifted data.
+    - Vocab has no on-disk Finto dump (no SHA to invalidate against).
+
+    Otherwise key = SHA-256 of:
+
+    .. code-block:: text
+
+        fold(literal) | sorted(candidate.uri) | prompt_hash |
+        model_name | vocab:finto_sha
+
+    ``fold(literal)`` uses :func:`bffi_pipeline.blocking.fold_label`
+    so diacritic-equivalent literals hit the same cached decision.
+    """
+    candidate_list = list(candidates)
+    if not candidate_list:
+        return None
+    vocab = candidate_list[0].source_vocabulary
+    if vocab == VOCAB_VIAF:
+        return None
+    finto_sha = finto_shas.get(vocab)
+    if not finto_sha:
+        return None
+    payload = "|".join(
+        (
+            fold_label(request.literal),
+            ",".join(sorted(c.uri for c in candidate_list)),
+            prompt_hash_value,
+            model_name,
+            f"{vocab}:{finto_sha}",
+        )
+    )
+    key = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return key, vocab, finto_sha
+
+
+@dataclass(frozen=True)
+class CacheHit:
+    """One row returned by :meth:`PickerCache.get`.
+
+    Carries the cached :class:`PickerDecision` plus the original
+    Activity URI so the orchestrator wires the new provenance Activity
+    through ``prov:wasInfluencedBy``.
+    """
+
+    decision: PickerDecision
+    activity_uuid: str
+
+
+class PickerCache:
+    """SQLite-backed cache for validated :class:`PickerDecision` rows.
+
+    Writes happen only after the picker has returned a structurally
+    and semantically valid response (the same gate
+    :class:`~bffi_pipeline.stages.judge.JudgeCache` applies): a
+    ``ValidationError`` short-circuits before the write so a re-run
+    can recover once the model is updated or the prompt is fixed.
+
+    Concurrency contract: one instance is shared across picker-pool
+    worker threads. A :class:`threading.Lock` serialises every SQLite
+    call (mirroring M6's cross-thread fix in commit ``1452a4f``: the
+    ``sqlite3`` module does *not* serialise concurrent statement
+    execution on a shared connection). The lock is held only for the
+    SQLite call itself, so contention is negligible next to the
+    seconds-long LLM call. ``BEGIN IMMEDIATE`` on writes prevents two
+    threads from racing on the same key.
+    """
+
+    _SCHEMA: Final[str] = """
+    CREATE TABLE IF NOT EXISTS picker_cache (
+      cache_key       TEXT PRIMARY KEY,
+      decision_json   TEXT NOT NULL,
+      finto_vocab     TEXT NOT NULL,
+      finto_sha       TEXT NOT NULL,
+      prompt_hash     TEXT NOT NULL,
+      model_name      TEXT NOT NULL,
+      activity_uuid   TEXT NOT NULL,
+      decided_at      TEXT NOT NULL
+    )
+    """
+
+    _INDEX: Final[str] = (
+        "CREATE INDEX IF NOT EXISTS picker_cache_vocab_sha ON picker_cache(finto_vocab, finto_sha)"
+    )
+
+    def __init__(self, path: Path | str) -> None:
+        self._path = Path(path)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        with self._lock:
+            self._conn.execute(self._SCHEMA)
+            self._conn.execute(self._INDEX)
+            self._conn.commit()
+
+    def __enter__(self) -> PickerCache:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the underlying SQLite connection (idempotent)."""
+        with suppress(sqlite3.ProgrammingError), self._lock:
+            self._conn.close()
+
+    def get(self, key: str) -> CacheHit | None:
+        """Return the cached :class:`CacheHit` for ``key`` or ``None``."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT decision_json, activity_uuid FROM picker_cache WHERE cache_key = ?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return CacheHit(
+            decision=PickerDecision.model_validate_json(row[0]),
+            activity_uuid=row[1],
+        )
+
+    def set(
+        self,
+        key: str,
+        *,
+        decision: PickerDecision,
+        finto_vocab: str,
+        finto_sha: str,
+        prompt_hash_value: str,
+        model_name: str,
+        activity_uuid: str,
+    ) -> None:
+        """Insert-or-replace the cached decision for ``key``.
+
+        Uses ``BEGIN IMMEDIATE`` so two worker threads that compute
+        the same key concurrently never produce a half-written row —
+        the second writer blocks at the BEGIN and then overwrites
+        cleanly (idempotent in content; decision JSON / Activity URI
+        are deterministic per input).
+        """
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO picker_cache "
+                    "(cache_key, decision_json, finto_vocab, finto_sha, "
+                    "prompt_hash, model_name, activity_uuid, decided_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        key,
+                        decision.model_dump_json(),
+                        finto_vocab,
+                        finto_sha,
+                        prompt_hash_value,
+                        model_name,
+                        activity_uuid,
+                        datetime.now(UTC).isoformat(),
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+
+@dataclass(frozen=True)
+class _CachePending:
+    """Phase-2 → Phase-3 hand-off for cache misses that need write-back.
+
+    Stored per-``idx`` while the picker pool runs. Phase 3 reads this
+    after :func:`_emit_provenance` mints the Activity URI; the URI is
+    then committed to the cache as ``activity_uuid``.
+    """
+
+    cache_key: str
+    finto_vocab: str
+    finto_sha: str
+    decision: PickerDecision
+
+
 def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator (tier-0/1, picker dispatch, mutation + provenance); splitting fragments shared state across phases.
     canonical_path: Path | None = None,
     *,
@@ -1863,6 +2121,8 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     watchdog_sidecar_path: Path | None = None,
     phase1_concurrency: int = 1,
     picker_ordering: PickerOrdering = PICKER_ORDERING_PREFIX_CACHE,
+    picker_cache: PickerCache | None = None,
+    finto_dumps_dir: Path | None = None,
 ) -> tuple[ReconciliationSummary, list[ReconciliationOutcome]]:
     """Walk canonical.ttl, reconcile creators + subjects, and write the graph back.
 
@@ -1903,6 +2163,17 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     ``"submission"`` preserves the pre-Phase-E walk order. Output is
     byte-stable under both modes — the orchestrator re-sorts results by
     submission ``idx`` before graph mutation.
+
+    P-10 Phase B: ``picker_cache`` is a :class:`PickerCache` shared
+    across worker threads; when set, picker-bound entries first
+    consult the cache before dispatching to the LLM. Cache hits skip
+    the picker entirely and write a provenance Activity with
+    ``prov:wasInfluencedBy <cached-activity>``. Cache misses run the
+    picker as before, then write the verdict back so a re-run hits.
+    ``finto_dumps_dir`` (defaults to ``<data_dir>/finto-dumps``)
+    locates the per-vocab dumps whose SHA-256 anchors cache validity —
+    a refresh of one ``<vocab>-skos.ttl`` invalidates that vocab's
+    cached entries on the next lookup.
 
     Pass ``picker_factory`` for concurrent runs (one ``LLMPicker`` is
     built per worker thread). Pass ``picker`` for single-threaded
@@ -2031,20 +2302,88 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         if (i + 1) % _M9_HEALTH_PROBE_CADENCE == 0:
             _m9_probe_dependencies(local_resolver)
 
+    # --- Phase 1.5: consult the picker cache for deferred entries ---------
+    # P-10 Phase B: single-threaded loop *before* the pool dispatch so that
+    # N worker threads cannot race on the same uncached key. Cache hits
+    # short-circuit Phase 2 entirely with the cached PickerDecision +
+    # the original Activity URI (later wired through wasInfluencedBy).
+    # Cache misses stay in ``deferred_misses`` and feed Phase 2; their
+    # write-back metadata is stashed in ``cache_pending`` for Phase 3.
+    model_name_for_cache = (
+        getattr(seq_picker, "model_name", None) if seq_picker is not None else None
+    ) or "unknown"
+    prompt_hash_value = picker_prompt_hash() if picker_cache is not None else ""
+    finto_shas: dict[str, str] = {}
+    if picker_cache is not None:
+        dumps_dir = (
+            finto_dumps_dir if finto_dumps_dir is not None else (settings.data_dir / "finto-dumps")
+        )
+        finto_shas = compute_finto_shas(dumps_dir)
+    cache_lookup_keys: dict[int, tuple[str, str, str]] = {}
+    deferred_misses: list[tuple[int, EntityRequest, list[AuthorityCandidate]]] = []
+    cache_hits = 0
+    for idx, request, sorted_candidates in deferred:
+        key_info: tuple[str, str, str] | None = None
+        if picker_cache is not None:
+            key_info = compute_picker_cache_key(
+                request=request,
+                candidates=sorted_candidates,
+                prompt_hash_value=prompt_hash_value,
+                model_name=model_name_for_cache,
+                finto_shas=finto_shas,
+            )
+        hit: CacheHit | None = None
+        if key_info is not None and picker_cache is not None:
+            hit = picker_cache.get(key_info[0])
+        if hit is not None:
+            outcome = _decide_with_pick(
+                request=request, sorted_candidates=sorted_candidates, pick=hit.decision
+            )
+            pre_outcomes[idx] = ReconciliationOutcome(
+                request=outcome.request,
+                stage=outcome.stage,
+                chosen_uri=outcome.chosen_uri,
+                confidence=outcome.confidence,
+                rationale=outcome.rationale,
+                candidates=outcome.candidates,
+                needs_review=outcome.needs_review,
+                was_watchdog_aborted=outcome.was_watchdog_aborted,
+                cached_activity_uuid=hit.activity_uuid,
+            )
+            cache_hits += 1
+        else:
+            deferred_misses.append((idx, request, sorted_candidates))
+            if key_info is not None:
+                cache_lookup_keys[idx] = key_info
+
+    emit_if_active(
+        stage="m9",
+        event="progress",
+        phase="cache-lookup",
+        counters={
+            "deferred_to_picker": len(deferred),
+            "cache_hits": cache_hits,
+            "cache_misses": len(deferred_misses),
+        },
+    )
+
     # --- Phase 2: dispatch deferred picker calls --------------------------
     # P-10 Phase E: reorder the queue so consecutive picker calls share
     # the longest possible prompt prefix. Output Turtle stays byte-stable
     # because the result-merge below sorts by submission ``idx``.
-    deferred = _order_deferred_picker_queue(deferred, ordering=picker_ordering)
+    deferred_misses = _order_deferred_picker_queue(deferred_misses, ordering=picker_ordering)
     emit_if_active(
         stage="m9",
         event="phase_boundary",
         phase="phase2",
-        counters={"deferred_to_picker": len(deferred)},
+        counters={
+            "deferred_to_picker": len(deferred_misses),
+            "cache_hits": cache_hits,
+        },
         extra={"picker_ordering": picker_ordering},
     )
     picker_results: list[tuple[int, ReconciliationOutcome]] = []
-    if deferred:
+    if deferred_misses:
         # Derive a model_name string for watchdog events. Falls back to "
         # unknown" if the picker is a stub or doesn't expose model_name.
         probe_picker = (
@@ -2057,7 +2396,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         if concurrency <= 1:
             assert seq_picker is not None  # narrow for mypy; validated above
             picker_results = _picker_phase_seq(
-                deferred,
+                deferred_misses,
                 picker=seq_picker,
                 field_timeout_seconds=field_timeout_seconds,
                 model_name=model_name,
@@ -2066,7 +2405,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         else:
             assert picker_factory is not None  # narrow; validated above
             picker_results = _picker_phase_pool(
-                deferred,
+                deferred_misses,
                 picker_factory=picker_factory,
                 concurrency=concurrency,
                 field_timeout_seconds=field_timeout_seconds,
@@ -2074,8 +2413,35 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 watchdog_sidecar_path=watchdog_sidecar_path,
             )
 
+    # P-10 Phase B: stash write-back data per idx — Phase 3 reads it
+    # after _emit_provenance returns the freshly-minted Activity URI.
+    cache_pending: dict[int, _CachePending] = {}
     for idx, outcome in picker_results:
         pre_outcomes[idx] = outcome
+        if (
+            picker_cache is not None
+            and idx in cache_lookup_keys
+            and outcome.stage == STAGE_LLM
+            and not outcome.was_watchdog_aborted
+            and outcome.chosen_uri is not None
+        ):
+            # Only cache verdicts where the LLM picked a candidate
+            # (decision="chose" with confidence >= threshold). Fallback,
+            # uncertain, and watchdog-aborted outcomes are not cached so a
+            # re-run with a fixed prompt or recovered LLM can produce a
+            # better answer.
+            cache_key, vocab, finto_sha = cache_lookup_keys[idx]
+            cache_pending[idx] = _CachePending(
+                cache_key=cache_key,
+                finto_vocab=vocab,
+                finto_sha=finto_sha,
+                decision=PickerDecision(
+                    decision="chose",
+                    chosen_uri=outcome.chosen_uri,
+                    confidence=outcome.confidence,
+                    rationale=outcome.rationale,
+                ),
+            )
 
     # --- Phase 3: apply graph mutations + provenance in request order -----
     emit_if_active(
@@ -2114,12 +2480,28 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 needs_review=outcome.needs_review,
                 now=moment,
             )
-        _emit_provenance(
+        activity_uri = _emit_provenance(
             provenance_graph,
             outcome=outcome,
             started_at=started_at[idx],
             ended_at=datetime.now(UTC),
         )
+        # P-10 Phase B: commit fresh picker verdicts to the cache *after*
+        # the Activity URI is minted, so the cache row's ``activity_uuid``
+        # matches the URI a future cache hit will hand to wasInfluencedBy.
+        # Cache hits don't reappear here (cache_pending only has misses
+        # that went through the picker).
+        if picker_cache is not None and activity_uri is not None and idx in cache_pending:
+            pending = cache_pending[idx]
+            picker_cache.set(
+                pending.cache_key,
+                decision=pending.decision,
+                finto_vocab=pending.finto_vocab,
+                finto_sha=pending.finto_sha,
+                prompt_hash_value=prompt_hash_value,
+                model_name=model_name_for_cache,
+                activity_uuid=str(activity_uri),
+            )
 
     if own_graph:
         tmp = output_path.with_suffix(output_path.suffix + ".tmp")
@@ -2150,6 +2532,7 @@ __all__ = [
     "LEXICAL_DIRECT_THRESHOLD",
     "LEXICAL_FLOOR",
     "LLM_CONFIDENCE_THRESHOLD",
+    "PICKER_CACHE_FILENAME",
     "PICKER_CONNECTION_BACKOFF_SECONDS",
     "PICKER_MAX_CONNECTION_RETRIES",
     "PICKER_MAX_VALIDATION_RETRIES",
@@ -2174,10 +2557,12 @@ __all__ = [
     "AuthorityCandidate",
     "AuthorityClient",
     "AuthorityKind",
+    "CacheHit",
     "EntityRequest",
     "FintoSkosmosClient",
     "LLMPicker",
     "LangChainLLMPicker",
+    "PickerCache",
     "PickerDecision",
     "PickerOrdering",
     "ReconciliationOutcome",
@@ -2187,8 +2572,12 @@ __all__ = [
     "StubPicker",
     "ViafClient",
     "apply_reconciliation",
+    "compute_finto_shas",
+    "compute_picker_cache_key",
     "decide_reconciliation",
+    "hash_finto_dump",
     "lexical_similarity",
+    "picker_cache_default_path",
     "picker_prompt_hash",
     "picker_prompt_text",
     "reconcile_one",
