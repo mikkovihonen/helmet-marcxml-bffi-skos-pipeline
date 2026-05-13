@@ -17,10 +17,14 @@ from prometheus_client import generate_latest
 
 from bffi_pipeline.metrics_exporter import (
     PipelineMetrics,
+    _ErrorFileSpec,
+    _ErrorFileTailState,
+    _tail_error_step,
     _tail_step,
     _TailState,
     apply_event,
     rehydrate,
+    rehydrate_error_files,
 )
 from bffi_pipeline.status import StageEventRow
 
@@ -688,3 +692,145 @@ def test_grafana_dashboard_json_parses() -> None:
     for panel in data["panels"]:
         if "datasource" in panel:
             assert panel["datasource"]["uid"] == "bffi-prometheus"
+
+
+# --- _tail_error_step (P-12 Option B: error-file tailing) ---------------
+
+
+def test_tail_error_step_increments_counter_per_row(tmp_path: Path) -> None:
+    """Each appended row in M2's _errors.jsonl ticks
+    ``bffi_stage_errors_total{stage="m2",error_type=<row.error_type>}``."""
+    err_path = tmp_path / "_errors.jsonl"
+    err_path.write_text(
+        "\n".join(
+            json.dumps(r)
+            for r in [
+                {
+                    "helmet_bib_id": "1",
+                    "filename": "1.xml",
+                    "error_type": "bibframe-shape",
+                    "message": "x",
+                },
+                {
+                    "helmet_bib_id": "2",
+                    "filename": "2.xml",
+                    "error_type": "bibframe-shape",
+                    "message": "y",
+                },
+                {
+                    "helmet_bib_id": "3",
+                    "filename": "3.xml",
+                    "error_type": "marcxml-content-minimum",
+                    "message": "z",
+                },
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    metrics = PipelineMetrics()
+    spec = _ErrorFileSpec(
+        stage="m2",
+        path=err_path,
+        type_for_row=lambda row: str(row.get("error_type") or "unknown"),
+    )
+    state = _ErrorFileTailState()
+    applied = _tail_error_step(metrics, spec, state)
+    assert applied == 3
+    assert (
+        metrics.stage_errors_total.labels(
+            stage="m2", error_type="bibframe-shape", run_uuid=""
+        )._value.get()
+        == 2
+    )
+    assert (
+        metrics.stage_errors_total.labels(
+            stage="m2", error_type="marcxml-content-minimum", run_uuid=""
+        )._value.get()
+        == 1
+    )
+
+
+def test_tail_error_step_idle_polls_do_not_double_count(tmp_path: Path) -> None:
+    """Regression pin for the same off-by-one class as ``_tail_step``:
+    idle polls must not re-read the file from the start."""
+    err_path = tmp_path / "_errors.jsonl"
+    err_path.write_text(
+        json.dumps({"error_type": "shape", "message": "x"}) + "\n",
+        encoding="utf-8",
+    )
+    metrics = PipelineMetrics()
+    spec = _ErrorFileSpec(
+        stage="m2", path=err_path, type_for_row=lambda r: str(r.get("error_type"))
+    )
+    state = _ErrorFileTailState()
+    _tail_error_step(metrics, spec, state)
+    before = metrics.stage_errors_total.labels(
+        stage="m2", error_type="shape", run_uuid=""
+    )._value.get()
+    for _ in range(20):
+        _tail_error_step(metrics, spec, state)
+    after = metrics.stage_errors_total.labels(
+        stage="m2", error_type="shape", run_uuid=""
+    )._value.get()
+    assert before == after == 1
+
+
+def test_tail_error_step_picks_up_run_uuid_from_row(tmp_path: Path) -> None:
+    """Rows carrying a ``run_uuid`` field label the counter accordingly;
+    rows without one land under ``run_uuid=""`` (legacy fallback)."""
+    err_path = tmp_path / "_errors.jsonl"
+    err_path.write_text(
+        "\n".join(
+            json.dumps(r)
+            for r in [
+                {"error_type": "shape", "run_uuid": "abc"},
+                {"error_type": "shape", "run_uuid": "def"},
+                {"error_type": "shape"},  # legacy row
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    metrics = PipelineMetrics()
+    spec = _ErrorFileSpec(
+        stage="m2", path=err_path, type_for_row=lambda r: str(r.get("error_type"))
+    )
+    _tail_error_step(metrics, spec, _ErrorFileTailState())
+    assert (
+        metrics.stage_errors_total.labels(
+            stage="m2", error_type="shape", run_uuid="abc"
+        )._value.get()
+        == 1
+    )
+    assert (
+        metrics.stage_errors_total.labels(
+            stage="m2", error_type="shape", run_uuid="def"
+        )._value.get()
+        == 1
+    )
+    assert (
+        metrics.stage_errors_total.labels(stage="m2", error_type="shape", run_uuid="")._value.get()
+        == 1
+    )
+
+
+def test_rehydrate_error_files_returns_states_with_post_rehydrate_positions(
+    tmp_path: Path,
+) -> None:
+    """``rehydrate_error_files`` replays every spec once then yields a
+    state map ``serve`` can continue tailing from."""
+    err_path = tmp_path / "_errors.jsonl"
+    err_path.write_text(json.dumps({"error_type": "shape"}) + "\n", encoding="utf-8")
+    metrics = PipelineMetrics()
+    spec = _ErrorFileSpec(
+        stage="m2", path=err_path, type_for_row=lambda r: str(r.get("error_type"))
+    )
+    states = rehydrate_error_files(metrics, [spec])
+    assert str(err_path) in states
+    assert states[str(err_path)].last_pos == err_path.stat().st_size
+    # Counter ticked once.
+    assert (
+        metrics.stage_errors_total.labels(stage="m2", error_type="shape", run_uuid="")._value.get()
+        == 1
+    )

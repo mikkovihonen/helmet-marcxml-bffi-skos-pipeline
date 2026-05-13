@@ -36,10 +36,11 @@ from __future__ import annotations
 import io
 import json as _json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime as _dt
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from prometheus_client import (
     CollectorRegistry,
@@ -48,6 +49,7 @@ from prometheus_client import (
     start_http_server,
 )
 
+from bffi_pipeline.config import get_settings
 from bffi_pipeline.status import (
     StageEventRow,
     parse_sidecar,
@@ -89,6 +91,7 @@ class PipelineMetrics:
     dependency_probe_latency_ms: Gauge = field(init=False)
     dependency_last_probe_timestamp: Gauge = field(init=False)
     watchdog_events_total: Counter = field(init=False)
+    stage_errors_total: Counter = field(init=False)
 
     def __post_init__(self) -> None:
         self.stage_started_ts = Gauge(
@@ -163,6 +166,20 @@ class PipelineMetrics:
             "bffi_watchdog_events_total",
             "Cumulative watchdog events emitted by the pipeline.",
             labelnames=("stage", "event", "run_uuid"),
+            registry=self.registry,
+        )
+        # P-12 follow-up (Option B from the 2026-05-13 live dashboard
+        # session): per-stage typed-error counter sourced from the on-
+        # disk error JSONLs that M2 / M3 already write. One bar per
+        # ``(stage, error_type)`` lets the dashboard surface mid-run
+        # spikes of e.g. ``marcxml-content-minimum`` failures while
+        # the stage is still running, rather than waiting for the
+        # stage's ``end`` event to roll up an aggregate. Legacy error
+        # rows without a ``run_uuid`` field surface under ``run_uuid=""``.
+        self.stage_errors_total = Counter(
+            "bffi_stage_errors_total",
+            "Cumulative per-stage typed errors (one tick per row in the stage's error JSONL).",
+            labelnames=("stage", "error_type", "run_uuid"),
             registry=self.registry,
         )
 
@@ -371,6 +388,114 @@ def _tail_step(metrics: PipelineMetrics, sidecar_path: Path, state: _TailState) 
     return applied
 
 
+# --- Error-file tail (P-12 Phase B follow-up, Option B) -------------------
+#
+# M2 writes one JSONL row per failed record to ``<data_dir>/bibframe/_errors.jsonl``;
+# M3 writes Boundary-3 SHACL failures to ``<data_dir>/bffi/_validation.jsonl``.
+# These files already encode error type (``error_type`` for M2; M3
+# entries are uniformly ``boundary-3``). The tail loop below
+# increments ``bffi_stage_errors_total`` per row, giving the dashboard
+# mid-run visibility without waiting for the stage's ``end`` event.
+
+
+@dataclass(frozen=True)
+class _ErrorFileSpec:
+    """One on-disk error JSONL file the exporter tails."""
+
+    stage: str
+    path: Path
+    #: How to derive ``error_type`` for one row. M2 reads its own
+    #: ``error_type`` field; M3 doesn't carry one so we hard-code
+    #: ``boundary-3``. Future per-stage extensions add their own.
+    type_for_row: Callable[[dict[str, Any]], str]
+
+
+@dataclass
+class _ErrorFileTailState:
+    """Per-file bookkeeping, mirrors ``_TailState`` for the events sidecar."""
+
+    last_pos: int = 0
+
+
+def _default_error_specs(data_dir: Path) -> list[_ErrorFileSpec]:
+    """Default set of (stage, path, type_for_row) the exporter tails.
+
+    Operators can extend this by passing a custom list to
+    :func:`serve` if they introduce new stages with on-disk error
+    streams.
+    """
+    return [
+        _ErrorFileSpec(
+            stage="m2",
+            path=data_dir / "bibframe" / "_errors.jsonl",
+            type_for_row=lambda row: str(row.get("error_type") or "unknown"),
+        ),
+        _ErrorFileSpec(
+            stage="m3",
+            # Every row in _validation.jsonl is a Boundary-3 SHACL
+            # failure by construction (the file is the SHACL validator
+            # output). Hard-code the label.
+            path=data_dir / "bffi" / "_validation.jsonl",
+            type_for_row=lambda _row: "boundary-3",
+        ),
+    ]
+
+
+def _tail_error_step(
+    metrics: PipelineMetrics, spec: _ErrorFileSpec, state: _ErrorFileTailState
+) -> int:
+    """One iteration of the error-file tail loop.
+
+    Mirrors :func:`_tail_step` but increments
+    ``bffi_stage_errors_total`` instead of dispatching to
+    ``apply_event``. Returns the number of error rows applied this
+    step.
+    """
+    path = spec.path
+    if not path.is_file():
+        return 0
+    size = path.stat().st_size
+    if size < state.last_pos:
+        state.last_pos = 0
+    if size == state.last_pos:
+        return 0
+    with path.open("rb") as fh:
+        fh.seek(state.last_pos)
+        new_bytes = fh.read()
+        state.last_pos = fh.tell()
+    text = new_bytes.decode("utf-8", errors="replace")
+    applied = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = _json.loads(line)
+        except ValueError:
+            continue
+        error_type = spec.type_for_row(row)
+        run_uuid = str(row.get("run_uuid") or "")
+        metrics.stage_errors_total.labels(
+            stage=spec.stage, error_type=error_type, run_uuid=run_uuid
+        ).inc()
+        applied += 1
+    return applied
+
+
+def rehydrate_error_files(
+    metrics: PipelineMetrics, specs: list[_ErrorFileSpec]
+) -> dict[str, _ErrorFileTailState]:
+    """Replay every error file from byte 0 at startup, returning the
+    per-file tail-state map so :func:`serve` can continue from where
+    rehydration ended.
+    """
+    states: dict[str, _ErrorFileTailState] = {}
+    for spec in specs:
+        st = _ErrorFileTailState(last_pos=0)
+        _tail_error_step(metrics, spec, st)
+        states[str(spec.path)] = st
+    return states
+
+
 def serve(
     sidecar_path: Path,
     *,
@@ -378,6 +503,7 @@ def serve(
     poll_seconds: float = 1.0,
     iterations: int | None = None,
     metrics: PipelineMetrics | None = None,
+    error_specs: list[_ErrorFileSpec] | None = None,
 ) -> None:
     """Run the exporter: rehydrate, then tail forever serving ``/metrics``.
 
@@ -390,6 +516,13 @@ def serve(
     rehydrate(metrics, sidecar_path)
     state = _TailState(last_pos=sidecar_path.stat().st_size if sidecar_path.is_file() else 0)
 
+    # P-12 follow-up: rehydrate + tail the per-stage error JSONLs so
+    # mid-stage error type spikes show on the dashboard live, not
+    # only after the stage's ``end`` event.
+    if error_specs is None:
+        error_specs = _default_error_specs(get_settings().data_dir)
+    error_states = rehydrate_error_files(metrics, error_specs)
+
     # ``start_http_server`` spawns a daemon-thread HTTP server bound
     # to 0.0.0.0 by default — perfect for the local-only deployment
     # where Prometheus in the sibling Docker container scrapes the
@@ -400,6 +533,8 @@ def serve(
         count = 0
         while iterations is None or count < iterations:
             _tail_step(metrics, sidecar_path, state)
+            for spec in error_specs:
+                _tail_error_step(metrics, spec, error_states[str(spec.path)])
             time.sleep(poll_seconds)
             count += 1
     finally:
