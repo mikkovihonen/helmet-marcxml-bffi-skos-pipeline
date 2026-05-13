@@ -92,6 +92,7 @@ class PipelineMetrics:
     dependency_last_probe_timestamp: Gauge = field(init=False)
     watchdog_events_total: Counter = field(init=False)
     stage_errors_total: Counter = field(init=False)
+    stage_planned: Gauge = field(init=False)
 
     def __post_init__(self) -> None:
         self.stage_started_ts = Gauge(
@@ -182,6 +183,19 @@ class PipelineMetrics:
             labelnames=("stage", "error_type", "run_uuid"),
             registry=self.registry,
         )
+        # P-12 follow-up: runner-script-emitted "plan" event sets this
+        # gauge to 1 for every stage the script intends to run. The
+        # dashboard then distinguishes "skipped" (planned=0, no events)
+        # from "pending" (planned=1, no start yet) when rendering the
+        # 8 stage state tiles. Direct ``bffi-pipeline <subcmd>`` calls
+        # don't emit a plan, so non-active stages stay correctly
+        # ``skipped`` in their dashboard view.
+        self.stage_planned = Gauge(
+            "bffi_stage_planned",
+            "1 if the runner script declared this stage as part of the planned run; else absent.",
+            labelnames=("stage", "run_uuid"),
+            registry=self.registry,
+        )
 
 
 #: Health-status string → numeric gauge mapping. Matches the Grafana
@@ -235,7 +249,7 @@ def _update_throughput(
         metrics.stage_eta_seconds.labels(stage=stage, phase=phase, run_uuid=run_uuid).set(0.0)
 
 
-def apply_event(
+def apply_event(  # noqa: PLR0912 — dispatch table over the StageEvent enum; flattening it into helpers fragments the row-context state needed for throughput / dependency labels.
     metrics: PipelineMetrics,
     row: StageEventRow,
 ) -> None:
@@ -309,6 +323,17 @@ def apply_event(
     elif row.event == "watchdog":
         inner_event = row.extra.get("event") or "unknown"
         metrics.watchdog_events_total.labels(stage=row.stage, event=inner_event, run_uuid=run).inc()
+    elif row.event == "plan":
+        # Runner-script "plan" event: extra.stages lists every stage the
+        # invocation intends to run. Set bffi_stage_planned=1 for each
+        # so the dashboard's state-tile expression can distinguish
+        # ``pending`` (planned, not yet started) from ``skipped`` (not
+        # in plan at all).
+        planned_stages = row.extra.get("stages") or []
+        if isinstance(planned_stages, list):
+            for stage in planned_stages:
+                if isinstance(stage, str):
+                    metrics.stage_planned.labels(stage=stage, run_uuid=run).set(1)
 
 
 def rehydrate(metrics: PipelineMetrics, sidecar_path: Path) -> int:

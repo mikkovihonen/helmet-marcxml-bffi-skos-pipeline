@@ -55,6 +55,7 @@ StageEvent = Literal[
     "end",
     "health",
     "watchdog",
+    "plan",
 ]
 
 #: stderr prefix; mirror of :data:`bffi_pipeline.stages.watchdog.WATCHDOG_STDERR_PREFIX`.
@@ -203,12 +204,36 @@ def emit_if_active(
         )
 
 
+def emit_plan(stages: list[str]) -> None:
+    """Emit a single ``plan`` event listing every stage the active run
+    intends to execute.
+
+    Runner scripts call this once at start (typically via the
+    ``bffi-pipeline plan`` CLI shim) so the dashboard's state tiles
+    can distinguish "pending" (stage planned, not yet started) from
+    "skipped" (stage not in plan at all). Direct ``bffi-pipeline
+    <subcmd>`` invocations don't emit a plan; their non-active
+    stages correctly stay "skipped" in the dashboard view.
+
+    No-op when no emitter is active (test fixtures that bypass the
+    CLI bootstrap).
+    """
+    emitter = _active_emitter
+    if emitter is not None:
+        emitter.emit(
+            stage="pipeline",
+            event="plan",
+            extra={"stages": list(stages)},
+        )
+
+
 __all__ = [
     "DEFAULT_PROGRESS_CADENCE",
     "STAGE_EVENT_STDERR_PREFIX",
     "StageEvent",
     "StageEventEmitter",
     "emit_if_active",
+    "emit_plan",
     "get_active_emitter",
     "set_active_emitter",
 ]

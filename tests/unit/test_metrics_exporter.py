@@ -815,6 +815,54 @@ def test_tail_error_step_picks_up_run_uuid_from_row(tmp_path: Path) -> None:
     )
 
 
+def test_plan_event_sets_stage_planned_gauge() -> None:
+    """P-12 follow-up: a ``plan`` event with ``extra.stages = [...]``
+    sets ``bffi_stage_planned{stage, run_uuid}`` to 1 for every listed
+    stage. Stages not in the list remain absent (which the dashboard
+    state expression reads as 0 / skipped).
+    """
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="plan",
+            stage="pipeline",
+            run_uuid="run-A",
+            extra={"stages": ["m2", "m3", "m8", "skosify", "load"]},
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    for s in ("m2", "m3", "m8", "skosify", "load"):
+        assert f'bffi_stage_planned{{run_uuid="run-A",stage="{s}"}} 1.0' in text, (
+            f"Expected stage {s} flagged as planned in /metrics output."
+        )
+    # Stages NOT in the plan are absent (no series → dashboard reads
+    # as skipped). Asserting absence:
+    for s in ("m5", "m6", "m9"):
+        assert f'bffi_stage_planned{{run_uuid="run-A",stage="{s}"}}' not in text, (
+            f"Stage {s} was not planned and should not appear."
+        )
+
+
+def test_plan_event_ignores_malformed_extra() -> None:
+    """Defence-in-depth: an event with a missing / non-list ``stages``
+    field doesn't crash apply_event; it's silently treated as
+    'no stages planned'.
+    """
+    metrics = PipelineMetrics()
+    apply_event(metrics, _row(event="plan", stage="pipeline", extra={}))
+    apply_event(
+        metrics,
+        _row(event="plan", stage="pipeline", extra={"stages": "not-a-list"}),
+    )
+    apply_event(
+        metrics,
+        _row(event="plan", stage="pipeline", extra={"stages": [1, 2, 3]}),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    assert "bffi_stage_planned{" not in text
+
+
 def test_rehydrate_error_files_returns_states_with_post_rehydrate_positions(
     tmp_path: Path,
 ) -> None:

@@ -36,6 +36,13 @@ fi
 PIPELINE_LOG="${PIPELINE_LOG:-$BFFI_DATA_DIR/pipeline.log}"
 export BFFI_DATA_DIR
 
+# Pin BFFI_RUN_UUID so every subcommand emits stage-events under the
+# same run_uuid. Generated upfront so the plan event below can attach.
+if [[ -z "${BFFI_RUN_UUID:-}" ]]; then
+    BFFI_RUN_UUID="$(uuidgen | tr 'A-Z' 'a-z' | tr -d '-')"
+fi
+export BFFI_RUN_UUID
+
 log() { echo "$@" | tee -a "$PIPELINE_LOG"; }
 
 # Order matters; ordinal lets us "skip stages strictly before --from-stage".
@@ -46,8 +53,19 @@ if [[ -z "${STAGE_ORDER[$FROM_STAGE]:-}" ]]; then
 fi
 FROM_ORD="${STAGE_ORDER[$FROM_STAGE]}"
 
+# Plan: every stage from $FROM_STAGE onwards. Stages strictly before
+# stay absent from the plan — dashboard shows them ``skipped`` (they
+# were intentionally not in this re-publish's scope).
+PLAN=()
+for s in m5 m6 m8 m9 skosify load; do
+    if (( ${STAGE_ORDER[$s]} >= FROM_ORD )); then PLAN+=("$s"); fi
+done
+uv run bffi-pipeline plan "${PLAN[@]}" >>"$PIPELINE_LOG" 2>&1 || true
+
 T0=$(date +%s)
 log "PIPELINE_START $(date -u +%Y-%m-%dT%H:%M:%SZ) (from $FROM_STAGE)"
+log "  BFFI_RUN_UUID=$BFFI_RUN_UUID"
+log "  plan: ${PLAN[*]}"
 
 run_stage() {
     local name="$1" ord="${STAGE_ORDER[$1]}"

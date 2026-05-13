@@ -391,6 +391,41 @@ def serve_metrics_command(
         typer.echo("\nExporter stopped.", err=True)
 
 
+@app.command("plan")
+def plan_command(
+    stages: Annotated[
+        list[str],
+        typer.Argument(
+            help=(
+                "Stages this pipeline invocation will run, in order "
+                "(e.g. m2 m3 m5 m6 m8 m9 skosify load). Emits one "
+                "``plan`` stage-events row that the dashboard reads "
+                "to distinguish ``pending`` (planned, not yet started) "
+                "from ``skipped`` (not in plan)."
+            ),
+        ),
+    ],
+) -> None:
+    """Declare the planned stage set for the active run.
+
+    Runner scripts call this once at start with the full list of
+    stages they intend to fire, so the dashboard's state tiles can
+    render a real four-state model (pending / running / done /
+    skipped). For ``BFFI_RUN_UUID`` continuity across subsequent
+    subcommand invocations, the runner script should pin
+    ``BFFI_RUN_UUID`` before invoking ``bffi-pipeline plan``.
+
+    Direct subcommand invocations (e.g. ``bffi-pipeline reconcile``)
+    do not need to call this — they'll show their single stage as
+    ``running`` and every other stage as ``skipped``, which is the
+    correct interpretation for a one-shot invocation.
+    """
+    from bffi_pipeline.stages.observability import emit_plan as _emit_plan
+
+    _emit_plan(stages)
+    typer.echo(f"Declared plan: {', '.join(stages)}", err=True)
+
+
 @app.command("workkey-stats")
 def workkey_stats_command(
     path: Annotated[

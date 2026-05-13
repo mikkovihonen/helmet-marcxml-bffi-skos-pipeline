@@ -50,12 +50,35 @@ mkdir -p "$(dirname "$PIPELINE_LOG")"
 
 export BFFI_DATA_DIR
 
+# Pin BFFI_RUN_UUID so every subcommand in the chain emits its
+# stage-events under the same run_uuid. The Grafana dashboard's
+# ``$active_run`` filter then sees one coherent run across stages
+# instead of N independent invocations. Generated upfront so the
+# planner event below can attach to it.
+if [[ -z "${BFFI_RUN_UUID:-}" ]]; then
+    BFFI_RUN_UUID="$(uuidgen | tr 'A-Z' 'a-z' | tr -d '-')"
+fi
+export BFFI_RUN_UUID
+
 log() { echo "$@" | tee -a "$PIPELINE_LOG"; }
 
 T0=$(date +%s)
 log "PIPELINE_START $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 log "  MARCXML_DIR=$MARCXML_DIR"
 log "  BFFI_DATA_DIR=$BFFI_DATA_DIR"
+log "  BFFI_RUN_UUID=$BFFI_RUN_UUID"
+
+# Declare the planned stage set up-front. The dashboard's 4-state
+# tile expression uses ``bffi_stage_planned`` to distinguish
+# ``pending`` (planned, not yet started) from ``skipped`` (not in
+# plan at all). Subtract skipped stages so they show as skipped.
+PLAN=(m2 m3)
+if [[ "${SKIP_M5_M6:-0}" != "1" ]]; then PLAN+=(m5 m6); fi
+PLAN+=(m8)
+if [[ "${SKIP_RECONCILE:-0}" != "1" ]]; then PLAN+=(m9); fi
+PLAN+=(skosify load)
+uv run bffi-pipeline plan "${PLAN[@]}" >>"$PIPELINE_LOG" 2>&1 || true
+log "  plan: ${PLAN[*]}"
 
 # --- M2 ------------------------------------------------------------------
 TS=$(date +%s); log "STAGE_M2_START"

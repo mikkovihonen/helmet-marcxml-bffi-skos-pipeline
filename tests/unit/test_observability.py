@@ -19,6 +19,7 @@ from bffi_pipeline.stages.observability import (
     STAGE_EVENT_STDERR_PREFIX,
     StageEventEmitter,
     emit_if_active,
+    emit_plan,
     get_active_emitter,
     set_active_emitter,
 )
@@ -239,3 +240,36 @@ def test_watchdog_event_no_op_on_stage_stream_when_no_active_emitter(
     wd_rows = _load_sidecar(watchdog_sidecar)
     assert len(wd_rows) == 1  # forensic sidecar still works
     assert not (tmp_path / "stage-events.jsonl").exists()  # no stage stream
+
+
+# --- emit_plan (P-12 follow-up) -----------------------------------------
+
+
+def test_emit_plan_writes_plan_event_with_stages_list(tmp_path: Path) -> None:
+    """``emit_plan`` writes one ``plan`` event tagged ``stage="pipeline"``
+    with ``extra.stages = [...]``. Used by runner scripts to declare
+    the up-front stage list so the dashboard can distinguish
+    ``pending`` from ``skipped``.
+    """
+    sidecar = tmp_path / "stage-events.jsonl"
+    emitter = StageEventEmitter(sidecar_path=sidecar, run_uuid="run-plan")
+    set_active_emitter(emitter)
+    try:
+        emit_plan(["m2", "m3", "m8", "skosify", "load"])
+    finally:
+        set_active_emitter(None)
+    rows = _load_sidecar(sidecar)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["event"] == "plan"
+    assert row["stage"] == "pipeline"
+    assert row["run_uuid"] == "run-plan"
+    assert row["extra"]["stages"] == ["m2", "m3", "m8", "skosify", "load"]
+
+
+def test_emit_plan_is_no_op_without_active_emitter() -> None:
+    """No emitter active → emit_plan returns silently (no crash, no
+    side-effect). Same contract as ``emit_if_active``."""
+    set_active_emitter(None)
+    # Just calling it must not raise.
+    emit_plan(["m2", "m3"])
