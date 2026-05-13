@@ -128,6 +128,103 @@ def test_end_records_outcome_buckets() -> None:
     assert 'outcome="total"' not in text
 
 
+def test_progress_event_mirrors_outcome_keys_from_extra() -> None:
+    """Mid-run M9 progress events carry per-tier counts in ``extra``.
+
+    The exporter mirrors them into ``bffi_stage_outcomes_total`` so the
+    dashboard's M9 outcome bargauge populates live during Phase 1/2
+    instead of jumping from empty to fully populated at ``end``. Only
+    keys in ``_PROGRESS_OUTCOME_KEYS`` are propagated; stray keys must
+    NOT create new outcome series.
+    """
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="progress",
+            phase="phase1",
+            counters={"processed": 4000, "total": 12666},
+            extra={
+                "resolved": 3200,
+                "deferred_to_picker": 800,
+                "local": 2800,
+                "lexical": 100,
+                "no_candidate": 250,
+                "fictional": 50,
+                # Stray key: must NOT show up as an outcome.
+                "deferred_to_picker_extra": 999,
+            },
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    assert 'outcome="local"' in text
+    assert 'outcome="lexical"' in text
+    assert 'outcome="no_candidate"' in text
+    assert 'outcome="fictional"' in text
+    # The two Phase-1-only header counters must not leak into outcomes.
+    assert 'outcome="resolved"' not in text
+    assert 'outcome="deferred_to_picker"' not in text
+    assert 'outcome="deferred_to_picker_extra"' not in text
+
+
+def test_progress_event_mirrors_phase2_outcome_keys() -> None:
+    """Phase 2 events emit ``llm_pick`` + ``fallback`` + ``watchdog_aborted``
+    in ``extra``; exporter forwards them to ``bffi_stage_outcomes_total``."""
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="progress",
+            phase="phase2",
+            counters={"processed": 500, "total": 800},
+            extra={
+                "cache_hits": 0,
+                "watchdog_aborted": 3,
+                "llm_pick": 380,
+                "fallback": 117,
+            },
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    assert 'outcome="llm_pick"' in text
+    assert 'outcome="fallback"' in text
+    assert 'outcome="watchdog_aborted"' in text
+    # ``cache_hits`` is a M6-relevant key but also valid for M9 phase2;
+    # since it's in _PROGRESS_OUTCOME_KEYS it does mirror — assert that
+    # the dashboard does NOT see a stray cache_misses series.
+    assert 'outcome="cache_misses"' not in text
+
+
+def test_progress_event_outcome_values_are_cumulative() -> None:
+    """Each progress event resets ``outcome`` series to the cumulative
+    value carried in ``extra`` (gauge-like Counter semantics matching
+    the existing processed-cumulative pattern)."""
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="progress",
+            phase="phase1",
+            counters={"processed": 2000, "total": 12666},
+            extra={"local": 1500},
+        ),
+    )
+    apply_event(
+        metrics,
+        _row(
+            event="progress",
+            phase="phase1",
+            counters={"processed": 4000, "total": 12666},
+            extra={"local": 3000},
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    # Second event's cumulative 3000 (not 1500+3000=4500) is the
+    # current series value.
+    assert "3000" in text
+    assert 'outcome="local"' in text
+
+
 def test_per_run_label_separates_metrics_across_run_uuids() -> None:
     """P-13 Phase A: two runs writing the same (stage, phase) produce
     two distinct series, each labelled with its own ``run_uuid``.

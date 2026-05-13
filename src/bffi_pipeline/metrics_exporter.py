@@ -209,6 +209,33 @@ class PipelineMetrics:
         )
 
 
+#: Per-stage outcome keys that may appear in a ``progress`` event's
+#: ``extra`` dict. When present, the exporter mirrors them into
+#: ``bffi_stage_outcomes_total`` so the dashboard's outcome bargauge
+#: populates live during the run, not only after the ``end`` event.
+#: M9 emits these from its Phase 1 and Phase 2 loops; M6 emits its
+#: own set via the same mechanism. The set is bounded so a stray
+#: ``extra`` key (like ``deferred_to_picker``) doesn't accidentally
+#: create new high-cardinality outcome series.
+_PROGRESS_OUTCOME_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        # M9
+        "local",
+        "lexical",
+        "llm_pick",
+        "fallback",
+        "no_candidate",
+        "fictional",
+        "watchdog_aborted",
+        # M6 (when its progress events grow extra outcome fields)
+        "cache_hits",
+        "fresh_calls",
+        "cascade_used",
+        "auto_merged",
+    }
+)
+
+
 #: Health-status string → numeric gauge mapping. Matches the Grafana
 #: dashboard's state-timeline thresholds: 2 = up (green), 1 = degraded
 #: (amber), 0 = down (red). P-12 Phase B adds ``not_configured`` →
@@ -306,6 +333,22 @@ def apply_event(  # noqa: PLR0912 — dispatch table over the StageEvent enum; f
                 total
             )
         _update_throughput(metrics, row.stage, phase, processed, total, ts_unix, run)
+        # Mid-run per-outcome counters — Phase 1 / Phase 2 of M9 emit
+        # cumulative tier counts in ``extra`` (local, lexical, llm_pick,
+        # fallback, no_candidate, fictional, watchdog_aborted) so the
+        # outcome bargauge populates live instead of jumping from empty
+        # to fully populated at the ``end`` event. Bounded by
+        # ``_PROGRESS_OUTCOME_KEYS`` to keep cardinality fixed.
+        for outcome in _PROGRESS_OUTCOME_KEYS:
+            if outcome not in row.extra:
+                continue
+            try:
+                value = int(row.extra[outcome])
+            except (TypeError, ValueError):
+                continue
+            metrics.stage_outcomes_total.labels(
+                stage=row.stage, outcome=outcome, run_uuid=run
+            )._value.set(value)
     elif row.event == "end":
         metrics.stage_ended_ts.labels(stage=row.stage, run_uuid=run).set(ts_unix)
         # Per-outcome buckets — M9 emits a rich counters dict here.

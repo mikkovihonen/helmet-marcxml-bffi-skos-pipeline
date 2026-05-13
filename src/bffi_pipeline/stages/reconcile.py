@@ -1748,19 +1748,32 @@ def _emit_picker_progress(
     total: int,
     cache_hits: int,
     watchdog_aborted: int,
+    llm_pick: int,
+    fallback: int,
 ) -> None:
     """Emit one M9 Phase 2 ``progress`` event.
 
     Centralised here so the seq + pool paths share one payload shape;
     the dashboard's m9 progress panel can render both cold and warm
     runs without per-path branching. P-12 Phase D.
+
+    ``llm_pick`` and ``fallback`` are mid-run cumulative tier counts
+    the exporter mirrors into ``bffi_stage_outcomes_total`` so the
+    dashboard's M9 outcome bargauge populates live during Phase 2
+    instead of jumping from empty to fully populated at the ``end``
+    event.
     """
     emit_if_active(
         stage="m9",
         event="progress",
         phase="phase2",
         counters={"processed": completed, "total": total},
-        extra={"cache_hits": cache_hits, "watchdog_aborted": watchdog_aborted},
+        extra={
+            "cache_hits": cache_hits,
+            "watchdog_aborted": watchdog_aborted,
+            "llm_pick": llm_pick,
+            "fallback": fallback,
+        },
     )
 
 
@@ -1783,6 +1796,8 @@ def _picker_phase_seq(
     """
     results: list[tuple[int, ReconciliationOutcome]] = []
     watchdog_aborted = 0
+    llm_pick = 0
+    fallback = 0
     for idx, request, sorted_candidates in deferred:
         outcome, _events = _picker_call_with_budget(
             picker=picker,
@@ -1795,12 +1810,18 @@ def _picker_phase_seq(
         results.append((idx, outcome))
         if outcome.was_watchdog_aborted:
             watchdog_aborted += 1
+        if outcome.stage == STAGE_LLM:
+            llm_pick += 1
+        elif outcome.stage == STAGE_FALLBACK:
+            fallback += 1
         if progress_cadence > 0 and len(results) % progress_cadence == 0:
             _emit_picker_progress(
                 len(results),
                 total=len(deferred),
                 cache_hits=cache_hits,
                 watchdog_aborted=watchdog_aborted,
+                llm_pick=llm_pick,
+                fallback=fallback,
             )
     # End-of-phase flush: emit one final progress event when the run
     # didn't land on a cadence boundary, so the dashboard's processed
@@ -1812,6 +1833,8 @@ def _picker_phase_seq(
             total=len(deferred),
             cache_hits=cache_hits,
             watchdog_aborted=watchdog_aborted,
+            llm_pick=llm_pick,
+            fallback=fallback,
         )
     return results
 
@@ -1868,6 +1891,8 @@ def _picker_phase_pool(
 
     results: list[tuple[int, ReconciliationOutcome]] = []
     watchdog_aborted = 0
+    llm_pick = 0
+    fallback = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [pool.submit(_run, item) for item in deferred]
         for fut in concurrent.futures.as_completed(futures):
@@ -1875,12 +1900,18 @@ def _picker_phase_pool(
             results.append((idx, outcome))
             if outcome.was_watchdog_aborted:
                 watchdog_aborted += 1
+            if outcome.stage == STAGE_LLM:
+                llm_pick += 1
+            elif outcome.stage == STAGE_FALLBACK:
+                fallback += 1
             if progress_cadence > 0 and len(results) % progress_cadence == 0:
                 _emit_picker_progress(
                     len(results),
                     total=len(deferred),
                     cache_hits=cache_hits,
                     watchdog_aborted=watchdog_aborted,
+                    llm_pick=llm_pick,
+                    fallback=fallback,
                 )
     # End-of-phase flush — see _picker_phase_seq for rationale.
     if progress_cadence > 0 and len(results) > 0 and len(results) % progress_cadence != 0:
@@ -1889,6 +1920,8 @@ def _picker_phase_pool(
             total=len(deferred),
             cache_hits=cache_hits,
             watchdog_aborted=watchdog_aborted,
+            llm_pick=llm_pick,
+            fallback=fallback,
         )
     results.sort(key=lambda t: t[0])
     return results
@@ -2381,15 +2414,30 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         )
 
     # Phase 1 result collation + per-cadence progress emission. We tally
-    # tier-0 + no-candidate hits as we go so the dashboard can show the
-    # outcome distribution mid-run, not only at end.
+    # per-tier outcomes as we go so the dashboard's M9 outcome bargauge
+    # populates live during Phase 1 — split out by tier (local /
+    # lexical / no_candidate / fictional) so the exporter can mirror
+    # the keys into ``bffi_stage_outcomes_total`` via the
+    # ``_PROGRESS_OUTCOME_KEYS`` bridge.
     phase1_local = 0
     phase1_deferred = 0
+    tier_local = 0
+    tier_lexical = 0
+    tier_no_candidate = 0
+    tier_fictional = 0
     for i, result in enumerate(phase1_results):
         started_at[result.idx] = result.started_at
         if result.outcome is not None:
             pre_outcomes[result.idx] = result.outcome
             phase1_local += 1
+            if result.outcome.stage == STAGE_LOCAL:
+                tier_local += 1
+            elif result.outcome.stage == STAGE_LEXICAL:
+                tier_lexical += 1
+            elif result.outcome.stage == STAGE_NO_CANDIDATE:
+                tier_no_candidate += 1
+            elif result.outcome.stage == STAGE_FICTIONAL:
+                tier_fictional += 1
         else:
             assert result.sorted_candidates is not None  # invariant from _Phase1Result
             deferred.append((result.idx, result.request, result.sorted_candidates))
@@ -2400,7 +2448,14 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 event="progress",
                 phase="phase1",
                 counters={"processed": i + 1, "total": len(request_list)},
-                extra={"resolved": phase1_local, "deferred_to_picker": phase1_deferred},
+                extra={
+                    "resolved": phase1_local,
+                    "deferred_to_picker": phase1_deferred,
+                    "local": tier_local,
+                    "lexical": tier_lexical,
+                    "no_candidate": tier_no_candidate,
+                    "fictional": tier_fictional,
+                },
             )
         # P-11 Phase C: re-probe mid-stage so the dashboard catches a
         # late-run dependency outage (e.g. Fuseki OOM at hour 4 of an
@@ -2424,7 +2479,14 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 "processed": len(phase1_results),
                 "total": len(request_list),
             },
-            extra={"resolved": phase1_local, "deferred_to_picker": phase1_deferred},
+            extra={
+                "resolved": phase1_local,
+                "deferred_to_picker": phase1_deferred,
+                "local": tier_local,
+                "lexical": tier_lexical,
+                "no_candidate": tier_no_candidate,
+                "fictional": tier_fictional,
+            },
         )
 
     # --- Phase 1.5: consult the picker cache for deferred entries ---------
