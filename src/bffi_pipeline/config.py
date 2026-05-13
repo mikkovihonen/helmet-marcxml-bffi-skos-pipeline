@@ -176,6 +176,16 @@ class Settings(BaseSettings):
         default=False,
         alias="BFFI_M9_CACHE_DISABLED",
     )
+    # P-12 Phase D: cadence for M9 progress events (Phase 1's tier-0 /
+    # candidate-query walk AND Phase 2's picker-pool dispatch). Default
+    # 200 matches the value the orchestrator constants used pre-P-12;
+    # operators bench-tuning can crank it down (e.g. 50) on short
+    # corpora where the default leaves Phase 2 too quiet for the
+    # dashboard's m9 progress panel. 0 disables emission entirely.
+    m9_progress_cadence: int = Field(
+        default=200,
+        alias="BFFI_M9_PROGRESS_CADENCE",
+    )
     # P-11 Phase A: per-invocation structured event stream.
     # ``observability_sidecar`` is the canonical JSONL file every stage
     # appends to (start / progress / phase_boundary / end / health /

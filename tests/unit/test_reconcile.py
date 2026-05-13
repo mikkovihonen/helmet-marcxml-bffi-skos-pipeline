@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,10 @@ from rdflib.namespace import RDF, Namespace
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.vocab import PROV
 from bffi_pipeline.stages.local_concept_resolver import LocalConceptHit
+from bffi_pipeline.stages.observability import (
+    StageEventEmitter,
+    set_active_emitter,
+)
 from bffi_pipeline.stages.reconcile import (
     ALL_AUTHORITY_KINDS,
     LEXICAL_DIRECT_THRESHOLD,
@@ -47,6 +52,8 @@ from bffi_pipeline.stages.reconcile import (
     StubPicker,
     _iter_subject_requests,
     _order_deferred_picker_queue,
+    _picker_phase_pool,
+    _picker_phase_seq,
     _picker_queue_sort_key,
     apply_reconciliation,
     compute_finto_shas,
@@ -2395,3 +2402,163 @@ def test_apply_reconciliation_cache_disabled_runs_picker_every_time(
         f"Cache-disabled path made {call_count} picker calls; expected "
         f"{len(labels)} (one per ambiguous creator)."
     )
+
+
+# --- P-12 Phase D: M9 Phase 2 progress events -----------------------------
+
+
+def _build_picker_queue(n: int) -> list[tuple[int, EntityRequest, list[AuthorityCandidate]]]:
+    """N synthetic deferred entries with two-candidate ambiguity per entry."""
+    queue: list[tuple[int, EntityRequest, list[AuthorityCandidate]]] = []
+    for i in range(n):
+        req = EntityRequest(
+            work_uri=f"http://urn.fi/URN:NBN:fi:bib:work:cadence-{i}",
+            literal=f"Author {i:04d}",
+            kind="person",
+        )
+        cands = [
+            _candidate(f"http://kanto/{i:04d}-a", f"Author {i:04d} A", 0.97),
+            _candidate(f"http://kanto/{i:04d}-b", f"Author {i:04d} B", 0.96),
+        ]
+        queue.append((i, req, cands))
+    return queue
+
+
+def _picker_for_queue(
+    queue: list[tuple[int, EntityRequest, list[AuthorityCandidate]]],
+) -> StubPicker:
+    """StubPicker wired to pick candidate-A for every entry in the queue."""
+    decisions: dict[tuple[str, str], PickerDecision] = {}
+    for _idx, req, cands in queue:
+        decisions[(req.work_uri, req.literal)] = PickerDecision(
+            decision="chose",
+            chosen_uri=cands[0].uri,
+            confidence=0.95,
+            rationale=(
+                "Cadence-test stub: bind candidate A. "
+                "Filler text to satisfy minimum-length validator."
+            ),
+        )
+    return StubPicker(decisions=decisions)
+
+
+def _capture_progress_events(tmp_path: Path, fn: Callable[[], object]) -> list[dict[str, object]]:
+    """Run ``fn`` with a fresh StageEventEmitter active; return its Phase 2 progress events."""
+    sidecar = tmp_path / "events.jsonl"
+    emitter = StageEventEmitter(sidecar_path=sidecar, run_uuid="cadence-test")
+    set_active_emitter(emitter)
+    try:
+        fn()
+    finally:
+        set_active_emitter(None)
+    if not sidecar.exists():
+        # Emitter creates the sidecar lazily on first write; cadence=0
+        # leaves it absent. Empty event stream is the right semantic.
+        return []
+    rows = [json.loads(line) for line in sidecar.read_text(encoding="utf-8").splitlines() if line]
+    return [r for r in rows if r.get("event") == "progress" and r.get("phase") == "phase2"]
+
+
+def test_picker_phase_seq_emits_progress_events_at_cadence(tmp_path: Path) -> None:
+    """600 deferred + cadence=200 → exactly 3 phase2 progress events on the seq path."""
+    queue = _build_picker_queue(600)
+    picker = _picker_for_queue(queue)
+
+    progress = _capture_progress_events(
+        tmp_path,
+        lambda: _picker_phase_seq(
+            queue,
+            picker=picker,
+            field_timeout_seconds=0,
+            model_name="stub",
+            watchdog_sidecar_path=None,
+            progress_cadence=200,
+            cache_hits=0,
+        ),
+    )
+    assert len(progress) == 3, (
+        f"Expected 3 progress events at cadence=200 over 600 entries; got {len(progress)}."
+    )
+    # Counts must be 200, 400, 600 in submission order.
+    processed = [int(p["counters"]["processed"]) for p in progress]
+    assert processed == [200, 400, 600]
+    # The total is the deferred-pool size, not the canonical-total.
+    assert all(int(p["counters"]["total"]) == 600 for p in progress)
+    # cache_hits + watchdog_aborted ride in extra.
+    assert progress[0]["extra"]["cache_hits"] == 0
+    assert progress[0]["extra"]["watchdog_aborted"] == 0
+
+
+def test_picker_phase_pool_emits_progress_events_at_cadence(tmp_path: Path) -> None:
+    """Same fixture, pool path: 3 progress events on completion-order cadence."""
+    queue = _build_picker_queue(600)
+    base_picker = _picker_for_queue(queue)
+
+    progress = _capture_progress_events(
+        tmp_path,
+        lambda: _picker_phase_pool(
+            queue,
+            picker_factory=lambda d=base_picker.decisions: StubPicker(decisions=dict(d)),
+            concurrency=4,
+            field_timeout_seconds=0,
+            model_name="stub",
+            watchdog_sidecar_path=None,
+            progress_cadence=200,
+            cache_hits=12,
+        ),
+    )
+    assert len(progress) == 3, f"Expected 3 progress events on the pool path; got {len(progress)}."
+    # Pool emits on completion order, not submission order — counts may
+    # not match seq exactly but must still total cleanly at the boundaries.
+    processed = [int(p["counters"]["processed"]) for p in progress]
+    assert processed == [200, 400, 600]
+    # cache_hits flows through verbatim from the caller's Phase-1.5 count.
+    assert all(int(p["extra"]["cache_hits"]) == 12 for p in progress)
+
+
+def test_picker_phase_progress_cadence_zero_disables_emission(tmp_path: Path) -> None:
+    """``progress_cadence=0`` (operator override) emits no phase2 events."""
+    queue = _build_picker_queue(400)
+    picker = _picker_for_queue(queue)
+
+    progress = _capture_progress_events(
+        tmp_path,
+        lambda: _picker_phase_seq(
+            queue,
+            picker=picker,
+            field_timeout_seconds=0,
+            model_name="stub",
+            watchdog_sidecar_path=None,
+            progress_cadence=0,
+            cache_hits=0,
+        ),
+    )
+    assert progress == []
+
+
+def test_picker_phase_progress_no_partial_emission(tmp_path: Path) -> None:
+    """500 entries at cadence=200 emits 2 events (at 200 + 400), not 3.
+
+    The trailing 100 entries below the cadence boundary do NOT trigger
+    an emission; the final state is communicated via the existing
+    ``m9 end`` event in ``apply_reconciliation`` itself. Pinning this
+    so the dashboard doesn't double-count the last boundary.
+    """
+    queue = _build_picker_queue(500)
+    picker = _picker_for_queue(queue)
+
+    progress = _capture_progress_events(
+        tmp_path,
+        lambda: _picker_phase_seq(
+            queue,
+            picker=picker,
+            field_timeout_seconds=0,
+            model_name="stub",
+            watchdog_sidecar_path=None,
+            progress_cadence=200,
+            cache_hits=0,
+        ),
+    )
+    assert len(progress) == 2
+    processed = [int(p["counters"]["processed"]) for p in progress]
+    assert processed == [200, 400]

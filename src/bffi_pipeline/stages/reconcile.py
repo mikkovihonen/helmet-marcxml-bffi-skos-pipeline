@@ -1720,6 +1720,28 @@ def _order_deferred_picker_queue(
     return sorted(deferred, key=_picker_queue_sort_key)
 
 
+def _emit_picker_progress(
+    completed: int,
+    *,
+    total: int,
+    cache_hits: int,
+    watchdog_aborted: int,
+) -> None:
+    """Emit one M9 Phase 2 ``progress`` event.
+
+    Centralised here so the seq + pool paths share one payload shape;
+    the dashboard's m9 progress panel can render both cold and warm
+    runs without per-path branching. P-12 Phase D.
+    """
+    emit_if_active(
+        stage="m9",
+        event="progress",
+        phase="phase2",
+        counters={"processed": completed, "total": total},
+        extra={"cache_hits": cache_hits, "watchdog_aborted": watchdog_aborted},
+    )
+
+
 def _picker_phase_seq(
     deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]],
     *,
@@ -1727,9 +1749,18 @@ def _picker_phase_seq(
     field_timeout_seconds: int,
     model_name: str,
     watchdog_sidecar_path: Path | None,
+    progress_cadence: int = _M9_PROGRESS_CADENCE,
+    cache_hits: int = 0,
 ) -> list[tuple[int, ReconciliationOutcome]]:
-    """Sequential (c=1) path: call the shared picker inline per field."""
+    """Sequential (c=1) path: call the shared picker inline per field.
+
+    P-12 Phase D: emit a ``progress`` event every ``progress_cadence``
+    completed calls. ``cache_hits`` is fixed at Phase-1.5 exit time so
+    the caller passes it in once; ``watchdog_aborted`` is tallied
+    locally from the results stream.
+    """
     results: list[tuple[int, ReconciliationOutcome]] = []
+    watchdog_aborted = 0
     for idx, request, sorted_candidates in deferred:
         outcome, _events = _picker_call_with_budget(
             picker=picker,
@@ -1740,6 +1771,15 @@ def _picker_phase_seq(
             watchdog_sidecar_path=watchdog_sidecar_path,
         )
         results.append((idx, outcome))
+        if outcome.was_watchdog_aborted:
+            watchdog_aborted += 1
+        if progress_cadence > 0 and len(results) % progress_cadence == 0:
+            _emit_picker_progress(
+                len(results),
+                total=len(deferred),
+                cache_hits=cache_hits,
+                watchdog_aborted=watchdog_aborted,
+            )
     return results
 
 
@@ -1751,6 +1791,8 @@ def _picker_phase_pool(
     field_timeout_seconds: int,
     model_name: str,
     watchdog_sidecar_path: Path | None,
+    progress_cadence: int = _M9_PROGRESS_CADENCE,
+    cache_hits: int = 0,
 ) -> list[tuple[int, ReconciliationOutcome]]:
     """Concurrent (c>=2) path: thread-local pickers, parallel dispatch.
 
@@ -1762,6 +1804,14 @@ def _picker_phase_pool(
     Worker results are collected and returned in submission-index
     order so the caller can apply graph mutations deterministically
     regardless of completion order.
+
+    P-12 Phase D: the orchestrator-side ``as_completed`` loop is
+    single-threaded, so the cadence counter + emit run inline there
+    (no worker-thread emission, no shared lock). Each completed
+    future increments ``completed``; on a cadence boundary the
+    progress event fires with the running counts of cache hits +
+    watchdog-aborted picks so the dashboard surfaces picker stress
+    live.
     """
     thread_local = threading.local()
     _RunArgs = tuple[int, EntityRequest, list[AuthorityCandidate]]
@@ -1784,10 +1834,21 @@ def _picker_phase_pool(
         return idx, outcome
 
     results: list[tuple[int, ReconciliationOutcome]] = []
+    watchdog_aborted = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [pool.submit(_run, item) for item in deferred]
         for fut in concurrent.futures.as_completed(futures):
-            results.append(fut.result())
+            idx, outcome = fut.result()
+            results.append((idx, outcome))
+            if outcome.was_watchdog_aborted:
+                watchdog_aborted += 1
+            if progress_cadence > 0 and len(results) % progress_cadence == 0:
+                _emit_picker_progress(
+                    len(results),
+                    total=len(deferred),
+                    cache_hits=cache_hits,
+                    watchdog_aborted=watchdog_aborted,
+                )
     results.sort(key=lambda t: t[0])
     return results
 
@@ -2184,6 +2245,10 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     canonical_path = canonical_path or (settings.data_dir / "canonical.ttl")
     output_path = output_path or canonical_path
     moment = (now or datetime.now(UTC)).replace(microsecond=0)
+    # P-12 Phase D: cadence is operator-tunable via BFFI_M9_PROGRESS_CADENCE
+    # so short benches can crank it down (e.g. 50) for a livelier dashboard.
+    # Default 200 matches the pre-P-12 module-level constant.
+    progress_cadence = settings.m9_progress_cadence
     selected_kinds: frozenset[AuthorityKind] = (
         ALL_AUTHORITY_KINDS if kinds is None else frozenset(kinds)
     )
@@ -2288,7 +2353,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             assert result.sorted_candidates is not None  # invariant from _Phase1Result
             deferred.append((result.idx, result.request, result.sorted_candidates))
             phase1_deferred += 1
-        if (i + 1) % _M9_PROGRESS_CADENCE == 0:
+        if progress_cadence > 0 and (i + 1) % progress_cadence == 0:
             emit_if_active(
                 stage="m9",
                 event="progress",
@@ -2401,6 +2466,8 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 field_timeout_seconds=field_timeout_seconds,
                 model_name=model_name,
                 watchdog_sidecar_path=watchdog_sidecar_path,
+                progress_cadence=progress_cadence,
+                cache_hits=cache_hits,
             )
         else:
             assert picker_factory is not None  # narrow; validated above
@@ -2411,6 +2478,8 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 field_timeout_seconds=field_timeout_seconds,
                 model_name=model_name,
                 watchdog_sidecar_path=watchdog_sidecar_path,
+                progress_cadence=progress_cadence,
+                cache_hits=cache_hits,
             )
 
     # P-10 Phase B: stash write-back data per idx — Phase 3 reads it
