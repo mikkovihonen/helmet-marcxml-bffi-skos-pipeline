@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Start the mlx-lm primary server, sourcing configuration from .env.
+#
+# Reads LLM_BASE_URL_PRIMARY (port) and LLM_MODEL_PRIMARY (model path)
+# from the repo's .env file. Other flags follow docs/local-inference.md
+# with --prompt-cache-size 100 — the safe budget on M2 Max 64 GB after
+# the P-10 Phase C bench attempt OOM'd at 49.86 GB VRAM with size 200.
+#
+# Foreground by default so stdout streams to the launching terminal.
+# Background with '&' or with `nohup ... &`. Any extra arguments are
+# forwarded to ``python -m mlx_lm server`` so per-run tweaks (e.g.
+# ``--prompt-cache-size 200`` on the M5 Max 128 GB) are one-liners
+# without editing this script.
+#
+# Examples:
+#   scripts/start-mlx-lm.sh                              # primary + safe defaults
+#   scripts/start-mlx-lm.sh --prompt-cache-size 200      # M5 Max budget
+#   scripts/start-mlx-lm.sh > /tmp/mlx-lm-8001.log 2>&1 &  # background
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+if [[ ! -f .env ]]; then
+    echo "ERROR: .env not found at $REPO_ROOT/.env" >&2
+    exit 1
+fi
+
+# Export every KEY=VALUE in .env so they're visible to the python child.
+# The pipeline reads them via pydantic-settings anyway; we just need the
+# port + model path here.
+set -a
+# shellcheck source=/dev/null
+source .env
+set +a
+
+# Port comes from LLM_BASE_URL_PRIMARY (preferred) or LLM_BASE_URL.
+URL="${LLM_BASE_URL_PRIMARY:-${LLM_BASE_URL:-http://127.0.0.1:8001/v1}}"
+if [[ "$URL" =~ :([0-9]+)(/|$) ]]; then
+    PORT="${BASH_REMATCH[1]}"
+else
+    PORT=8001
+fi
+
+MODEL="${LLM_MODEL_PRIMARY:-}"
+if [[ -z "$MODEL" ]]; then
+    echo "ERROR: LLM_MODEL_PRIMARY not set in .env" >&2
+    exit 1
+fi
+
+# mlx-lm 0.31 reports the absolute path passed to --model as the model
+# ID at /v1/models. LangChain 401s when the request's `model` field
+# doesn't match what mlx-lm returns there — so .env must hold the
+# path, not an Ollama tag (per docs/local-inference.md § Model lookup).
+if [[ "$MODEL" == *":"* && "$MODEL" != /* && "$MODEL" != "~"* ]]; then
+    echo "WARNING: LLM_MODEL_PRIMARY='$MODEL' looks like Ollama tag syntax." >&2
+    echo "         mlx-lm 0.31 wants an absolute path; the picker will 401" >&2
+    echo "         at /v1/chat/completions until .env is updated." >&2
+fi
+
+# Expand a leading ~ for shell-style paths.
+MODEL_PATH="${MODEL/#\~/$HOME}"
+
+if [[ ! -d "$MODEL_PATH" ]]; then
+    echo "ERROR: model directory not found at $MODEL_PATH" >&2
+    echo "       Pull it with scripts/llm-pull.sh <hf-org/name>." >&2
+    exit 1
+fi
+
+echo "mlx-lm server starting"
+echo "  port:  $PORT"
+echo "  model: $MODEL_PATH"
+echo "  args:  $*"
+echo
+
+# Argparse takes the LAST occurrence of any duplicated flag, so trailing
+# "$@" cleanly overrides the safe defaults below for per-run tweaks.
+exec python -m mlx_lm server \
+    --model "$MODEL_PATH" \
+    --host 127.0.0.1 --port "$PORT" \
+    --chat-template-args '{"enable_thinking":false}' \
+    --decode-concurrency 4 \
+    --prompt-concurrency 4 \
+    --prompt-cache-size 100 \
+    --prompt-cache-bytes 1073741824 \
+    "$@"

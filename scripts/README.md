@@ -118,4 +118,5 @@ emit `STAGE_*` milestones:
 | Script | Purpose |
 |---|---|
 | [`llm-pull.sh`](llm-pull.sh) | Convert a Hugging Face checkpoint to MLX 4-bit and write it under `~/.mlx_models/` — the parity move for `ollama pull` in the mlx-lm setup. Activate `~/.venvs/mlx-lm` first. P-02 § D2. |
+| [`start-mlx-lm.sh`](start-mlx-lm.sh) | Start `mlx_lm.server` with port + model resolved from `.env` (`LLM_BASE_URL_PRIMARY`, `LLM_MODEL_PRIMARY`). Defaults match `docs/local-inference.md` with `--prompt-cache-size 100` (the M2 Max 64 GB safe budget per the P-10 Phase C bench attempt). Extra args pass through to mlx-lm. |
 | [`p02-parity-bench.sh`](p02-parity-bench.sh) | Run the gold-set eval twice (Ollama baseline vs. mlx-lm candidate) and diff the verdicts to gate P-02 Phase A on regression. |
