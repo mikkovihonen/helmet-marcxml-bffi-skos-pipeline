@@ -47,7 +47,7 @@ from rdflib.namespace import RDF, RDFS, XSD
 from bffi_pipeline import __version__ as PIPELINE_VERSION
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.observability import emit_if_active
+from bffi_pipeline.stages.observability import emit_if_active, get_active_emitter
 from bffi_pipeline.validation.bibframe import BibframeShapeError, assert_conforms
 from bffi_pipeline.validation.marcxml import MarcXmlValidationError, validate
 
@@ -78,12 +78,20 @@ class HelmetMapRow:
 
 @dataclass(frozen=True)
 class ConversionErrorRow:
-    """One row of ``_errors.jsonl`` per failed record."""
+    """One row of ``_errors.jsonl`` per failed record.
+
+    ``run_uuid`` is populated from the active observability emitter
+    so the exporter's error-tail loop (P-12 Option B) can attribute
+    each row to its originating pipeline invocation. Empty string
+    when no emitter is active (e.g. unit tests that bypass the CLI
+    bootstrap) — rows surface under ``run_uuid=""`` in metrics.
+    """
 
     helmet_bib_id: str | None
     filename: str
     error_type: str
     message: str
+    run_uuid: str = ""
 
 
 @dataclass
@@ -566,6 +574,13 @@ def run(
     helmet_map_path = output_dir / "helmet-map.jsonl"
     errors_path = output_dir / "bibframe" / "_errors.jsonl"
 
+    # P-12 Option B: include the active run_uuid on every error row so
+    # the exporter's error-tail loop can attribute each typed failure
+    # to its originating pipeline invocation. Empty when no emitter is
+    # active (e.g. tests).
+    emitter = get_active_emitter()
+    run_uuid = emitter.run_uuid if emitter is not None else ""
+
     xml_files = list(_iter_xml_files(input_dir))
     emit_if_active(
         stage="m2",
@@ -593,6 +608,7 @@ def run(
                 filename=xml_path.name,
                 error_type=exc.error_type,
                 message=exc.message,
+                run_uuid=run_uuid,
             )
             summary.failed.append(row)
             _append_jsonl(errors_path, asdict(row))
@@ -603,6 +619,7 @@ def run(
                 filename=xml_path.name,
                 error_type="bibframe-shape",
                 message=exc.message,
+                run_uuid=run_uuid,
             )
             summary.failed.append(row)
             _append_jsonl(
@@ -616,6 +633,7 @@ def run(
                 filename=xml_path.name,
                 error_type="bibframe-conversion",
                 message=str(exc),
+                run_uuid=run_uuid,
             )
             summary.failed.append(row)
             _append_jsonl(errors_path, asdict(row))

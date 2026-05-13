@@ -34,7 +34,7 @@ from bffi_pipeline.contrib_variants import (
     truncate_sidecar,
 )
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.observability import emit_if_active
+from bffi_pipeline.stages.observability import emit_if_active, get_active_emitter
 from bffi_pipeline.uris import (
     mint_raw_expression_uri,
     mint_raw_work_uri,
@@ -114,12 +114,20 @@ SKOS_prefLabel: Final[URIRef] = URIRef("http://www.w3.org/2004/02/skos/core#pref
 
 @dataclass(frozen=True)
 class ValidationRow:
-    """One row of ``_validation.jsonl`` per (Boundary-3-failing) record."""
+    """One row of ``_validation.jsonl`` per (Boundary-3-failing) record.
+
+    ``run_uuid`` is populated from the active observability emitter
+    so the exporter's error-tail loop (P-12 Option B) can attribute
+    each row to its originating pipeline invocation. Empty string
+    when no emitter is active (e.g. unit tests that bypass the CLI
+    bootstrap) — rows surface under ``run_uuid=""`` in metrics.
+    """
 
     helmet_bib_id: str
     output_file: str
     conforms: bool
     report_text: str
+    run_uuid: str = ""
 
 
 @dataclass
@@ -838,6 +846,13 @@ def run(
     if force:
         truncate_sidecar(sidecar_path)
 
+    # P-12 Option B: include the active run_uuid on every validation
+    # row so the exporter's error-tail loop attributes Boundary-3
+    # failures to their originating pipeline invocation. Empty when
+    # no emitter is active (tests).
+    emitter = get_active_emitter()
+    run_uuid = emitter.run_uuid if emitter is not None else ""
+
     rdf_files = list(_iter_bibframe_files(bibframe_dir))
     emit_if_active(
         stage="m3",
@@ -888,6 +903,7 @@ def run(
                         output_file=str(out_path.name),
                         conforms=False,
                         report_text=report.text,
+                        run_uuid=run_uuid,
                     )
                 ),
             )
