@@ -137,6 +137,17 @@ class Settings(BaseSettings):
         default=180,
         alias="LLM_M9_FIELD_TIMEOUT_SECONDS",
     )
+    # P-10 Phase C: tier-0 expansion (folded-lookup + altLabel inclusion
+    # via the ``bffi:foldedLabel`` predicate that ``load-finto`` materialises).
+    # Default off: the feature is gated by the 200-sample cataloguer audit
+    # in plan § C.5. Operators flip this to True only after the audit
+    # confirms zero false-positive bindings on their corpus. When off, the
+    # resolver falls back to the pre-Phase-C exact-string match path —
+    # byte-stable with the post-Phase-A2 behaviour.
+    m9_tier0_expansion: bool = Field(
+        default=False,
+        alias="BFFI_M9_TIER0_EXPANSION",
+    )
 
     # Triple store.
     fuseki_url: str = Field(

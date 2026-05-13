@@ -26,10 +26,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Final, Protocol
+from typing import Any, Final, Protocol
 
 import httpx
 
+from bffi_pipeline.blocking import fold_label
 from bffi_pipeline.stages.reconcile import (
     VOCAB_KAUNO,
     VOCAB_MUSO,
@@ -108,11 +109,23 @@ _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
 
 @dataclass(frozen=True)
 class LocalConceptHit:
-    """One concept matched in a locally-loaded authority graph."""
+    """One concept matched in a locally-loaded authority graph.
+
+    ``is_fuzzy_match`` is set by the P-10 Phase C folded-lookup path
+    when the bind required the diacritic-fold or date/role-marker
+    strip to align cataloguer literal with authority label. The
+    reconcile orchestrator inspects this flag to set
+    ``bffi:descriptionAuthentication = <bib:auth/needs-review>`` on the
+    canonical Work's AdminMetadata so cataloguers can audit the
+    imperfect match in Skosmos. Exact-string matches (the pre-Phase-C
+    path) leave it ``False`` and the binding is treated as
+    auto-merged.
+    """
 
     uri: str
     pref_label: str
     source_vocabulary: str
+    is_fuzzy_match: bool = False
 
 
 class LocalConceptResolver(Protocol):
@@ -161,6 +174,40 @@ def _build_query(literal: str, graph_uris: tuple[str, ...]) -> str:
     )
 
 
+#: ``bffi:foldedLabel`` predicate URI; materialised by ``load-finto``
+#: when its ``--fold-pref-labels`` flag is on (P-10 Phase C.1).
+_BFFI_FOLDED_LABEL_URI: Final[str] = "http://urn.fi/URN:NBN:fi:schema:bffi:foldedLabel"
+
+
+def _build_folded_query(folded_literal: str, graph_uris: tuple[str, ...]) -> str:
+    """Build the P-10 Phase C tier-0 SPARQL against ``bffi:foldedLabel``.
+
+    Sibling of :func:`_build_query` — same shape, same language-
+    preference ORDER BY, but matching the pre-folded predicate
+    materialised at load time. The ``?label`` projection still
+    returns the *original* prefLabel so the caller can detect whether
+    the bind required the fold (and stamp ``needs-review`` if so).
+    """
+    values_clause = " ".join(f"<{uri}>" for uri in graph_uris)
+    quoted = _quote_sparql_literal(folded_literal)
+    return (
+        "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+        f"PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>\n"
+        "SELECT ?uri ?label ?graph WHERE {\n"
+        f"  VALUES ?graph {{ {values_clause} }}\n"
+        "  GRAPH ?graph {\n"
+        "    ?uri bffi:foldedLabel ?folded .\n"
+        "    OPTIONAL { ?uri skos:prefLabel ?label . }\n"
+        f"    FILTER (str(?folded) = {quoted})\n"
+        "  }\n"
+        "}\n"
+        'ORDER BY DESC(IF(LANG(?label) = "fi", 3, '
+        'IF(LANG(?label) = "sv", 2, '
+        'IF(LANG(?label) = "en", 1, 0))))\n'
+        "LIMIT 1\n"
+    )
+
+
 @dataclass
 class FusekiConceptResolver:
     """Tier-0 resolver backed by a SPARQL endpoint.
@@ -170,15 +217,25 @@ class FusekiConceptResolver:
     Caches on ``(kind, literal)`` because a corpus-scale walk asks for
     ``"Tampere"`` once per Helmet record that mentions Tampere — we'd
     otherwise do thousands of identical SPARQL round-trips.
+
+    ``tier0_expansion_enabled`` (P-10 Phase C, default ``False``) gates
+    the folded-lookup fallback: when the exact-string match misses, the
+    resolver folds the cataloguer literal via
+    :func:`bffi_pipeline.blocking.fold_label` and queries
+    ``bffi:foldedLabel`` (materialised by ``load-finto --fold-pref-labels``).
+    Folded matches return a :class:`LocalConceptHit` with
+    ``is_fuzzy_match=True`` so the caller flags the bind for
+    cataloguer audit.
     """
 
     http_client: httpx.Client
     fuseki_url: str
     timeout_seconds: float = 5.0
+    tier0_expansion_enabled: bool = False
     _cache: dict[tuple[AuthorityKind, str], LocalConceptHit | None] = field(default_factory=dict)
 
     def resolve(self, *, literal: str, kind: AuthorityKind) -> LocalConceptHit | None:
-        """SPARQL the local authority graphs for an exact prefLabel match."""
+        """SPARQL the local authority graphs for an exact-or-folded prefLabel match."""
         graphs = _KIND_TO_GRAPHS.get(kind)
         if not graphs:
             return None
@@ -187,7 +244,14 @@ class FusekiConceptResolver:
             return self._cache[cache_key]
 
         graph_uris = tuple(g for _, g in graphs)
-        query = _build_query(literal, graph_uris)
+        hit = self._exact_match(literal=literal, graph_uris=graph_uris, graphs=graphs)
+        if hit is None and self.tier0_expansion_enabled:
+            hit = self._folded_match(literal=literal, graph_uris=graph_uris, graphs=graphs)
+        self._cache[cache_key] = hit
+        return hit
+
+    def _post_sparql(self, query: str) -> list[dict[str, Any]] | None:
+        """POST ``query`` to Fuseki; return bindings or ``None`` on error / empty."""
         try:
             response = self.http_client.post(
                 f"{self.fuseki_url.rstrip('/')}/sparql",
@@ -198,24 +262,62 @@ class FusekiConceptResolver:
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError):
-            self._cache[cache_key] = None
             return None
-
         bindings = payload.get("results", {}).get("bindings", [])
+        return bindings or None
+
+    def _exact_match(
+        self,
+        *,
+        literal: str,
+        graph_uris: tuple[str, ...],
+        graphs: tuple[tuple[str, str], ...],
+    ) -> LocalConceptHit | None:
+        bindings = self._post_sparql(_build_query(literal, graph_uris))
         if not bindings:
-            self._cache[cache_key] = None
             return None
-        row = bindings[0]
+        return self._hit_from_row(bindings[0], graphs=graphs, is_fuzzy_match=False)
+
+    def _folded_match(
+        self,
+        *,
+        literal: str,
+        graph_uris: tuple[str, ...],
+        graphs: tuple[tuple[str, str], ...],
+    ) -> LocalConceptHit | None:
+        folded = fold_label(literal)
+        if not folded:
+            return None
+        bindings = self._post_sparql(_build_folded_query(folded, graph_uris))
+        if not bindings:
+            return None
+        # is_fuzzy_match if the bound prefLabel doesn't equal the cataloguer
+        # literal verbatim. ``label`` is OPTIONAL on the folded query (a
+        # concept might match its altLabel only); treat empty / missing as
+        # fuzzy by definition.
+        pref_label = bindings[0].get("label", {}).get("value", "")
+        is_fuzzy = (not pref_label) or (str(pref_label) != literal)
+        return self._hit_from_row(bindings[0], graphs=graphs, is_fuzzy_match=is_fuzzy)
+
+    def _hit_from_row(
+        self,
+        row: dict[str, Any],
+        *,
+        graphs: tuple[tuple[str, str], ...],
+        is_fuzzy_match: bool,
+    ) -> LocalConceptHit | None:
         uri = row.get("uri", {}).get("value")
         label = row.get("label", {}).get("value", "")
         graph = row.get("graph", {}).get("value")
         if not uri or not graph:
-            self._cache[cache_key] = None
             return None
         vocab_tag = next((tag for tag, g_uri in graphs if g_uri == graph), graphs[0][0])
-        hit = LocalConceptHit(uri=str(uri), pref_label=str(label), source_vocabulary=vocab_tag)
-        self._cache[cache_key] = hit
-        return hit
+        return LocalConceptHit(
+            uri=str(uri),
+            pref_label=str(label),
+            source_vocabulary=vocab_tag,
+            is_fuzzy_match=is_fuzzy_match,
+        )
 
 
 @dataclass

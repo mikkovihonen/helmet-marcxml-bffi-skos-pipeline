@@ -1323,11 +1323,17 @@ def _emit_provenance(
 
 
 def _local_outcome(request: EntityRequest, hit: LocalConceptHit) -> ReconciliationOutcome:
-    """Build a tier-0 outcome for an exact local prefLabel match.
+    """Build a tier-0 outcome for a local-graph match.
 
     Synthesises a single :class:`AuthorityCandidate` with similarity
     1.0 so downstream provenance + summary code can treat tier-0 hits
     uniformly with the other tiers.
+
+    P-10 Phase C: when the bind required the diacritic-fold + strip
+    (``hit.is_fuzzy_match == True``), the outcome sets
+    ``needs_review`` so cataloguers see the imperfect match in
+    Skosmos. Exact-string matches keep ``needs_review=False`` and the
+    binding is treated as auto-merged.
     """
     candidate = AuthorityCandidate(
         uri=hit.uri,
@@ -1335,17 +1341,26 @@ def _local_outcome(request: EntityRequest, hit: LocalConceptHit) -> Reconciliati
         source_vocabulary=hit.source_vocabulary,
         lexical_similarity=1.0,
     )
+    if hit.is_fuzzy_match:
+        rationale = (
+            f"Folded-label match in local {hit.source_vocabulary} graph: "
+            f"cataloguer literal {request.literal!r} aligned with "
+            f"{hit.pref_label!r} after diacritic-fold + decoration strip "
+            f"(no Finto API call). Flagged needs-review for cataloguer audit."
+        )
+    else:
+        rationale = (
+            f"Exact prefLabel match in local {hit.source_vocabulary} graph: "
+            f"{hit.pref_label!r} (no Finto API call)."
+        )
     return ReconciliationOutcome(
         request=request,
         stage=STAGE_LOCAL,
         chosen_uri=hit.uri,
         confidence=1.0,
-        rationale=(
-            f"Exact prefLabel match in local {hit.source_vocabulary} graph: "
-            f"{hit.pref_label!r} (no Finto API call)."
-        ),
+        rationale=rationale,
         candidates=[candidate],
-        needs_review=False,
+        needs_review=hit.is_fuzzy_match,
     )
 
 

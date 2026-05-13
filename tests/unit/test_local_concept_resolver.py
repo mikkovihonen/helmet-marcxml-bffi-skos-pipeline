@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -429,3 +430,171 @@ def test_apply_reconciliation_emits_tier0_provenance_with_local_stage() -> None:
     stages = {str(s) for s in prov.objects(activity, V.stage)}
     assert STAGE_LOCAL in stages
     assert URIRef(yso_uri) in set(prov.objects(activity, V.chosenAuthorityUri))
+
+
+# --- P-10 Phase C: folded-lookup tier-0 expansion -------------------------
+
+
+def _folded_query_handler(folded_value: str, response_json: dict[str, Any]) -> Any:
+    """Return an httpx mock handler that distinguishes the exact-match
+    SPARQL POST from the Phase C folded-match SPARQL POST.
+
+    The exact-match query carries ``skos:prefLabel ?label``; the folded
+    query carries ``bffi:foldedLabel ?folded``. The handler URL-decodes
+    the form-encoded body (the resolver posts
+    ``application/x-www-form-urlencoded``) and dispatches on the
+    presence of ``bffi:foldedLabel``: empty bindings for the exact
+    query so the resolver falls through, the wired payload for the
+    folded query.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode("utf-8")
+        # Form-encoded body: ``query=<percent-encoded-sparql>``.
+        query = parse_qs(body).get("query", [""])[0]
+        if "bffi:foldedLabel" in query:
+            # Verify the cataloguer-side fold was applied before sending.
+            assert folded_value in query, (
+                f"Expected folded value {folded_value!r} in SPARQL query, got: {query!r}"
+            )
+            return httpx.Response(200, json=response_json)
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    return handler
+
+
+def test_resolver_falls_through_to_folded_lookup_when_expansion_enabled() -> None:
+    """When exact match misses AND tier0_expansion_enabled, the resolver
+    falls back to the bffi:foldedLabel SPARQL with the literal folded
+    Python-side. The hit carries is_fuzzy_match=True because the bound
+    prefLabel differs from the cataloguer literal.
+
+    Exercised through ``kind=subject`` since the YSO graph is in
+    ``_KIND_TO_GRAPHS`` and the fold mechanism is kind-agnostic.
+    """
+    yso_uri = "http://www.yso.fi/onto/yso/p99999"
+    transport = httpx.MockTransport(
+        _folded_query_handler(
+            # Both the cataloguer literal "Muncheniläiset" (plain u) and
+            # the authority prefLabel "Müncheniläiset" (German ü) fold to
+            # the same value because ü is non-native and gets folded
+            # while the Finnish ä is preserved.
+            folded_value="muncheniläiset",
+            response_json=_bindings(yso_uri, "Müncheniläiset", "fi", "http://www.yso.fi/onto/yso/"),
+        )
+    )
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=transport),
+        fuseki_url="http://localhost:3030/bffi",
+        tier0_expansion_enabled=True,
+    )
+    hit = resolver.resolve(literal="Muncheniläiset", kind="subject")
+    assert hit is not None
+    assert hit.uri == yso_uri
+    assert hit.pref_label == "Müncheniläiset"
+    assert hit.is_fuzzy_match is True
+
+
+def test_resolver_folded_lookup_disabled_by_default() -> None:
+    """tier0_expansion_enabled defaults to False; the resolver must
+    only query the exact-match SPARQL and not call the folded one,
+    even when the exact misses."""
+    seen_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode("utf-8")
+        query = parse_qs(body).get("query", [""])[0]
+        seen_queries.append(query)
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    assert resolver.resolve(literal="Muncheniläiset", kind="subject") is None
+    assert len(seen_queries) == 1  # only the exact query
+    assert "bffi:foldedLabel" not in seen_queries[0]
+
+
+def test_resolver_exact_match_skips_folded_lookup_even_when_expansion_enabled() -> None:
+    """Exact match short-circuits the folded path. is_fuzzy_match
+    stays False on exact hits so the canonical Work stays
+    auto-merged (no needs-review)."""
+    yso_uri = "http://www.yso.fi/onto/yso/p105076"
+
+    seen_bffi: list[bool] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode("utf-8")
+        query = parse_qs(body).get("query", [""])[0]
+        seen_bffi.append("bffi:foldedLabel" in query)
+        return httpx.Response(
+            200, json=_bindings(yso_uri, "Tampere", "fi", "http://www.yso.fi/onto/yso/")
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+        tier0_expansion_enabled=True,
+    )
+    hit = resolver.resolve(literal="Tampere", kind="subject")
+    assert hit is not None
+    assert hit.is_fuzzy_match is False
+    # Only one POST = only the exact query.
+    assert seen_bffi == [False]
+
+
+def test_resolver_folded_lookup_with_decoration_strip() -> None:
+    """A cataloguer literal carrying a trailing date strips + folds
+    before the SPARQL FILTER is built. The folded SPARQL request body
+    therefore contains the post-strip, post-fold form. Exercised on a
+    subject (temporal YSO concept) since persons aren't in tier-0
+    today."""
+    yso_uri = "http://www.yso.fi/onto/yso/p12345"
+    transport = httpx.MockTransport(
+        _folded_query_handler(
+            folded_value="sotavuodet",
+            response_json=_bindings(
+                yso_uri,
+                "Sotavuodet",
+                "fi",
+                "http://www.yso.fi/onto/yso/",
+            ),
+        )
+    )
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=transport),
+        fuseki_url="http://localhost:3030/bffi",
+        tier0_expansion_enabled=True,
+    )
+    hit = resolver.resolve(literal="Sotavuodet (1939-1945)", kind="subject")
+    assert hit is not None
+    assert hit.uri == yso_uri
+    assert hit.is_fuzzy_match is True  # literal != prefLabel after strip
+
+
+def test_resolver_folded_match_not_fuzzy_when_preflabel_equals_literal() -> None:
+    """If the cataloguer literal happens to equal the prefLabel verbatim
+    AND the exact-match path missed for some reason (e.g. graph
+    pre-load not present), the folded path's bind is still NOT marked
+    fuzzy. Edge case but pinned for completeness."""
+    yso_uri = "http://www.yso.fi/onto/yso/p54321"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode("utf-8")
+        query = parse_qs(body).get("query", [""])[0]
+        if "bffi:foldedLabel" in query:
+            return httpx.Response(
+                200,
+                json=_bindings(yso_uri, "Verbatim", "fi", "http://www.yso.fi/onto/yso/"),
+            )
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+        tier0_expansion_enabled=True,
+    )
+    hit = resolver.resolve(literal="Verbatim", kind="subject")
+    assert hit is not None
+    assert hit.is_fuzzy_match is False

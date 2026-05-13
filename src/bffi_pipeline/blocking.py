@@ -36,6 +36,7 @@ minting (``uris.py``); the three stages serve different goals.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from typing import Final
 
@@ -94,6 +95,109 @@ _TITLE_STOP_WORDS: Final[frozenset[str]] = frozenset(
 #: characters, so cataloguer-supplied input matches authority labels
 #: only when åäö are kept.
 _NATIVE_DIACRITICS: Final[frozenset[str]] = frozenset("åäöÅÄÖ")
+
+
+#: Trailing parenthetical-date pattern stripped by
+#: :func:`strip_label_decoration`. Examples matched:
+#: ``"Tolkien, J. R. R. (1892-1973)"`` → ``"Tolkien, J. R. R."``;
+#: ``"Hamilton, Guy. (1923-)"`` → ``"Hamilton, Guy."``;
+#: ``"Bond, James (fiktiivinen hahmo)"`` → unchanged (no digits).
+_TRAILING_PARENTHETICAL_DATE: Final[re.Pattern[str]] = re.compile(
+    r"\s*\(\d{4}\s*(?:[-–]\s*\d{0,4}\s*)?\)\s*$"  # noqa: RUF001 — en-dash is intentional (KANTO date form)
+)
+
+#: MARC subfield ``$e`` role-marker whitelist (Finnish / Swedish) stripped
+#: by :func:`strip_label_decoration` when they trail an agent literal
+#: separated by a comma. Kept conservative: the entry only fires when
+#: the last comma-separated segment is *exactly* one of these tokens
+#: after casefolding + whitespace strip. Expand cautiously — the test
+#: corpus needs to confirm a token isn't a legitimate part of a name.
+_ROLE_MARKER_TOKENS: Final[frozenset[str]] = frozenset(
+    {
+        # Finnish
+        "ohjaaja",
+        "näyttelijä",
+        "näyttelijät",
+        "kuvaaja",
+        "käsikirjoittaja",
+        "säveltäjä",
+        "sovittaja",
+        "kääntäjä",
+        "toimittaja",
+        "kirjoittaja",
+        "tuottaja",
+        "esittäjä",
+        # Swedish
+        "regissör",
+        "skådespelare",
+        "fotograf",
+        "manusförfattare",
+        "kompositör",
+        "översättare",
+        "redaktör",
+        "författare",
+        "producent",
+        "dirigent",
+    }
+)
+
+
+def strip_label_decoration(s: str) -> str:
+    """Strip trailing parenthetical dates + MARC ``$e`` role markers.
+
+    Designed for tier-0 lookups in
+    :mod:`bffi_pipeline.stages.local_concept_resolver` — the cataloguer-
+    side literal often carries decoration the authority's prefLabel
+    doesn't, blocking exact matches. Applied symmetrically to both
+    cataloguer literals and authority labels at fold time so the
+    folded forms align.
+
+    Rules (applied in order, both idempotent):
+
+    1. **Trailing parenthetical date**: ``"Foo (1892-1973)"`` →
+       ``"Foo"``. Pattern :data:`_TRAILING_PARENTHETICAL_DATE`.
+    2. **Trailing role marker**: if the final comma-separated segment
+       is in :data:`_ROLE_MARKER_TOKENS` after casefolding, strip the
+       trailing ``, <token>`` (and any whitespace around it). Example:
+       ``"Hamilton, Guy, ohjaaja"`` → ``"Hamilton, Guy"``. The
+       ``(fiktiivinen hahmo)`` / ``(fiktiv gestalt)`` qualifiers are
+       *not* in the whitelist — those are deliberately preserved so
+       the upstream fictional-character marker path keeps routing
+       them correctly.
+    """
+    out = _TRAILING_PARENTHETICAL_DATE.sub("", s).rstrip()
+    if "," in out:
+        head, _, tail = out.rpartition(",")
+        if tail.strip().casefold() in _ROLE_MARKER_TOKENS:
+            out = head.rstrip()
+    return out
+
+
+def fold_label(s: str) -> str:
+    """Canonical label fold for tier-0 normalised lookup.
+
+    Composes the four steps that align cataloguer-supplied literals
+    with authority labels at the lexical level:
+
+    1. :func:`strip_label_decoration` — drop trailing parenthetical
+       dates and MARC role markers.
+    2. NFKC Unicode normalisation — collapse compatibility variants
+       like fullwidth digits.
+    3. :func:`fold_diacritics` — fold foreign Latin diacritics,
+       preserve Finnish / Swedish ``åäö``.
+    4. ``str.casefold`` — lower-case for case-insensitive match.
+    5. Whitespace collapse — ``" ".join(s.split())``.
+
+    The same function is used by ``load-finto`` to materialise
+    ``bffi:foldedLabel`` triples on every concept's ``skos:prefLabel``
+    and ``skos:altLabel``, and by ``FusekiConceptResolver`` to fold
+    the cataloguer literal before querying. Both sides go through
+    *exactly* the same composition so the folded forms align.
+    """
+    stripped = strip_label_decoration(s)
+    nfkc = unicodedata.normalize("NFKC", stripped)
+    folded = fold_diacritics(nfkc).casefold()
+    return " ".join(folded.split())
 
 
 def fold_diacritics(s: str) -> str:
@@ -184,4 +288,9 @@ def compute_blocking_key(work: dict[str, str | None]) -> str:
     return _KEY_SEPARATOR.join((surname, title_word, content))
 
 
-__all__ = ["compute_blocking_key", "fold_diacritics"]
+__all__ = [
+    "compute_blocking_key",
+    "fold_diacritics",
+    "fold_label",
+    "strip_label_decoration",
+]
