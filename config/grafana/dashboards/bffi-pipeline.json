@@ -1560,7 +1560,7 @@
           "uid": "bffi-prometheus"
         },
         "query": "query_result(min(bffi_stage_started_timestamp{run_uuid=\"$active_run\"}) * 1000)",
-        "regex": "/([0-9]+\\.?[0-9]*)\\s*$/",
+        "regex": "/([0-9]+\\.?[0-9]*)\\s+[0-9]+\\s*$/",
         "refresh": 1,
         "hide": 2,
         "current": {
