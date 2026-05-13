@@ -754,7 +754,7 @@
       "id": 17,
       "type": "bargauge",
       "title": "${m2_total} records",
-      "description": "M2 marc-to-bf \u2014 cumulative entities processed (top) and current throughput in items/min (bottom). Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -809,7 +809,7 @@
       "id": 18,
       "type": "bargauge",
       "title": "${m3_total} records",
-      "description": "M3 bf-to-bffi \u2014 cumulative entities processed (top) and current throughput in items/min (bottom). Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -864,7 +864,7 @@
       "id": 19,
       "type": "bargauge",
       "title": "${m5_total} embeddings",
-      "description": "M5 embeddings \u2014 cumulative entities processed (top) and current throughput in items/min (bottom). Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -919,7 +919,7 @@
       "id": 20,
       "type": "bargauge",
       "title": "${m6_total} pairs",
-      "description": "M6 judge \u2014 cumulative entities processed (top) and current throughput in items/min (bottom). Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -974,7 +974,7 @@
       "id": 21,
       "type": "bargauge",
       "title": "${m8_total} works",
-      "description": "M8 consolidate \u2014 cumulative entities processed (top) and current throughput in items/min (bottom). Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -1029,7 +1029,7 @@
       "id": 22,
       "type": "bargauge",
       "title": "${m9_total} entities",
-      "description": "M9 reconcile: top-line title shows the freshest phase's processed/total fraction; bars show each M9 phase's percent done (phase 1 = entity walk, phase 2 = picker calls). Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -1089,7 +1089,7 @@
       "id": 23,
       "type": "bargauge",
       "title": "${skosify_total} records",
-      "description": "Skosify \u2014 cumulative entities processed (top) and current throughput in items/min (bottom). Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
@@ -1144,7 +1144,7 @@
       "id": 24,
       "type": "bargauge",
       "title": "${load_total} records",
-      "description": "Load \u2192 Fuseki \u2014 cumulative entities processed (top) and current throughput in items/min (bottom). Active run only.",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "bffi-prometheus"
