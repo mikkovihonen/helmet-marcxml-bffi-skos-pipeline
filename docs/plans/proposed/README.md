@@ -109,6 +109,22 @@ plan documents *when the execution was scheduled*.
   `bib_id` from MARC 001 instead of the filename stem; Phase B pulls
   the nine-site FI-HELME URI cluster into a config-driven
   `LibrarySource` registry keyed on MARC 003.
+- [`prop-18-m8-emit-start-before-corpus-load.md`](prop-18-m8-emit-start-before-corpus-load.md)
+  — `proposed`. The dashboard shows M8 as `pending` for ~8 minutes
+  after M6 ends, despite M8's Python process actively loading the
+  BFFI corpus the whole time. Move the M8 ``start`` event to the
+  top of ``merge.run()`` and add a ``phase_boundary`` once
+  ``len(groups)`` is known. ~5 lines.
+- [`prop-19-m8-corpus-load-throughput.md`](prop-19-m8-corpus-load-throughput.md)
+  — `proposed`. M8's corpus-load phase reads 19 570 individual
+  BFFI Turtle files via rdflib at ~8 min wall on 20 k records;
+  linearly extrapolating to ~5.5 h on the 800 k corpus. Proposes
+  layering a single ``bffi-corpus.ttl`` stream over the
+  per-record `.ttl` store. Trade-offs across four options
+  (concat file, multi-proc pool, bespoke streaming parser,
+  status quo); recommendation is Option A (concat file written
+  at M3 finalisation) as the smallest-surface largest-win
+  first step.
 - [`prop-17-exporter-multi-sidecar-discovery.md`](prop-17-exporter-multi-sidecar-discovery.md)
   — `proposed`. The metrics exporter resolves its sidecar path AND
   its error-spec paths at process startup from `BFFI_DATA_DIR` /
