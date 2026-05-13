@@ -1,6 +1,6 @@
 # P-12 — Observability cleanup: exporter tail bug + Phase 2 progress + dashboard overview row + freshness + `not_configured` health status
 
-**Status**: planning (graduated → [`docs/plans/backlog/p-12-observability-cleanup.md`](../plans/backlog/p-12-observability-cleanup.md)).
+**Status**: done (→ [`docs/plans/completed/p-12-observability-cleanup.md`](../plans/completed/p-12-observability-cleanup.md), shipped 2026-05-13 across phases A `0eaea9b` / B `3990a9d` / C `08f6121` / D `5ef8e51` / E `af45d25`).
 **Scope**: ~1 day (five small, independent fixes). The Phase 2
 progress emitter is the largest single item (~half a day for the
 thread-safe completion counter + test fixtures); the dashboard

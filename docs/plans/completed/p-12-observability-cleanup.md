@@ -1,6 +1,6 @@
 # P-12 — Observability cleanup: exporter tail bug + Phase 2 progress + dashboard overview row + freshness + `not_configured` health status
 
-**Status**: in-progress.
+**Status**: completed.
 **Source proposal**: [`docs/proposals/prop-12-dashboard-stale-and-not-configured.md`](../../proposals/prop-12-dashboard-stale-and-not-configured.md)
 at commit `374eb60`.
 **Plan-base commit**: `374eb60`. To gauge drift before executing,
@@ -17,7 +17,7 @@ config/grafana/dashboards/bffi-pipeline.json`.
 - Phase B (`not_configured` health status): `3990a9d` (2026-05-13). `ProbeStatus` Literal extended; `probe_mlx_lm("")` short-circuits to `not_configured` with zero HTTP attempts; M6's call site in `judge.py` collapses `fallback_url == primary_url` to empty so the fallback reports `not_configured` on dev boxes. Exporter maps the status to `float("nan")`; Grafana greys the cell out. Two new tests cover the probe short-circuit + the exporter's NaN gauge serialisation. 925 total green.
 - Phase C (dashboard freshness overlay): `08f6121` (2026-05-13). New gauge `bffi_dependency_last_probe_timestamp{stage,dep}`; dashboard's Dependency health panel PromQL filters via `time() - bffi_dependency_last_probe_timestamp < 60` so stale series drop to gap (grey) instead of extending the last colour. Threshold matches `_M9_HEALTH_PROBE_CADENCE`. One new test for the timestamp gauge. 926 total green; Grafana auto-reloaded the JSON.
 - Phase D (M9 Phase 2 progress events): `5ef8e51` (2026-05-13). Both `_picker_phase_seq` + `_picker_phase_pool` emit a `progress` event every `progress_cadence` completed calls; the orchestrator-side `as_completed` loop drives the cadence inline (no shared lock). Cadence is operator-tunable via `BFFI_M9_PROGRESS_CADENCE` (default 200, matches the pre-P-12 module-level constant); 0 disables emission on both Phase 1 + Phase 2. Each phase2 event carries `{cache_hits, watchdog_aborted}` in extra so the dashboard can surface picker stress live. Four new tests pin cadence + content. 930 total green.
-- Phase E (top-of-dashboard pipeline overview row + remove the noisy bottom panel): `<unfilled>`
+- Phase E (top-of-dashboard pipeline overview row + remove the noisy bottom panel): `af45d25` (2026-05-13). JSON-only edit: new `$active_run` Grafana templating variable, full-width 8-tile overview row at y=0 (one stat per stage filtered to the active run), existing panels pushed down by 4, panel id=9 ("Pipeline stages last timestamps") removed. Two new schema tests pin the templating variable shape + the 8-stage coverage. 932 total green; `docs/observability.md` panel-set table updated; Grafana auto-reloaded the JSON.
 
 **Owner**: TBD.
 **Estimated wall-time**: ~1 day end-to-end. Phase A is minute-scale
