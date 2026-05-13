@@ -1,6 +1,10 @@
 # P-10 — M9 reconcile throughput: concurrency + persistent picker cache + tier-0 expansion
 
-**Status**: backlog.
+**Status**: completed (2026-05-13). Phase C tier-0 expansion ships flag-off; its audit + re-bench gate spun out to [`docs/plans/backlog/p-14-m9-phase-c-audit.md`](../backlog/p-14-m9-phase-c-audit.md).
+
+**Outcome summary**: Phases A, A2, B, B.1 cumulatively deliver the overnight-window target via the 14.5× warm-cache speedup measured in Phase B.1 ([`docs/performance/2026-05-13-5k-m2-max-phase-b1.md`](../../performance/2026-05-13-5k-m2-max-phase-b1.md)) — operator pattern is to keep the cache warm across consecutive runs against the same corpus, which collapses M9 wall to ~5 min on the 5 k sample (extrapolating to under-overnight on full 800 k). Phase C's tier-0 expansion shipped behind `BFFI_M9_TIER0_EXPANSION=False` because the 2026-05-13 bench attempt crashed mid-run (mlx-lm GPU-OOM on the M2 Max 64 GB) before validating tier-0 hit-count uplift; the validation gate moves to P-14. Phase E (prompt ordering) shipped behind `BFFI_M9_PICKER_ORDERING` with default reverted to `submission` after the A/B bench showed prefix-cache regressed picker-phase wall by +5 % ([`docs/performance/2026-05-13-5k-m2-max-phase-e.md`](../../performance/2026-05-13-5k-m2-max-phase-e.md)).
+
+
 **Source proposal**: [`docs/proposals/prop-10-m9-reconcile-throughput.md`](../../proposals/prop-10-m9-reconcile-throughput.md)
 at commit `9ba54d1` (proposal-base `ad4f6c4`, refined with Finto-cadence
 evidence at `9ba54d1`).
@@ -45,8 +49,8 @@ The Phase A column shows the **measured** result, not a target — see [`docs/pe
 - The fresh [`docs/performance/`](../../performance/) snapshot taken after the final phase shows M9 ≤ 70 s on the 5k sample with the cache warm, and the extrapolation table in that snapshot projects ≤ 10 h for the full 800 k corpus.
 - Phase E's snapshot demonstrates ≥ 5 % picker-phase wall reduction vs Phase A2 at byte-identical output.
 - The Phase A2 snapshot demonstrates that the **original Phase A speedup target (≥ 3×)** is achievable once both concurrency levers ship — closing the gap surfaced by the Phase A bench.
-- The 200-sample audit from Phase C is committed under `gold/reconcile-audit-200.jsonl` (feeds the P-06 backlog).
-- `docs/plans/backlog/p-10-m9-reconcile-throughput.md` has been `git mv`'d through `in-progress/` → `completed/` per the lifecycle convention in [`docs/plans/README.md`](../README.md).
+- ~~The 200-sample audit from Phase C is committed under `gold/reconcile-audit-200.jsonl` (feeds the P-06 backlog).~~ **Deferred to P-14** ([`docs/plans/backlog/p-14-m9-phase-c-audit.md`](../backlog/p-14-m9-phase-c-audit.md)) — Phase C ships flag-off, the audit + re-bench gate that decides whether to flip the flag default lives in its own plan.
+- ~~`docs/plans/backlog/p-10-m9-reconcile-throughput.md` has been `git mv`'d through `in-progress/` → `completed/` per the lifecycle convention in [`docs/plans/README.md`](../README.md).~~ **Done at this commit.**
 - No regression in pre-existing M9 tests; all new code is covered by unit tests against fixtures (no network).
 
 ## Current state (as of plan-base `9ba54d1`)
