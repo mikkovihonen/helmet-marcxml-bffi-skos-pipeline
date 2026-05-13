@@ -1,9 +1,11 @@
-# P-12 — Observability cleanup: exporter tail bug + Phase 2 progress + dashboard freshness + `not_configured` health status
+# P-12 — Observability cleanup: exporter tail bug + Phase 2 progress + dashboard overview row + freshness + `not_configured` health status
 
 **Status**: proposed.
-**Scope**: ~1 day (four small, independent fixes; the Phase 2
-progress emitter adds ~half a day for the thread-safe completion
-counter + test fixtures).
+**Scope**: ~1 day (five small, independent fixes). The Phase 2
+progress emitter is the largest single item (~half a day for the
+thread-safe completion counter + test fixtures); the dashboard
+overview row is JSON-only (no test code) so ~1 hour. The other
+three are minute-scale fixes plus tests.
 **Proposal-base commit**: `cbaa7b2`.
 
 ## Motivation
@@ -103,14 +105,38 @@ against the deferred-pool total. The dashboard's existing m9 progress
 panel will then render a smooth curve through Phase 2 instead of
 flatlining.
 
-All four bugs produce the same operator confusion: the dashboard
+### Bug 5 — Dashboard layout is overview-hostile
+
+The current dashboard (9 panels, `config/grafana/dashboards/bffi-pipeline.json`)
+puts three M9-Phase-1-specific stat tiles at the top and a
+`Pipeline stages (last start / end timestamps)` panel at the
+bottom. That bottom panel is the worst offender:
+
+- It's a `stat` panel rendering one tile per `(stage, run_uuid)`
+  pair from `bffi_stage_started_timestamp` *and*
+  `bffi_stage_ended_timestamp`. With 10+ historical runs in the
+  sidecar, the panel paints **20+ tiny tiles** in a 12-wide row,
+  each cropped to "..." because labels don't fit.
+- It mixes the *currently active* run with prior runs (the same
+  staleness root cause as Bug 1). Operators reading the dashboard
+  mid-bench can't tell which row reflects "right now".
+- There's no top-of-screen "what's the pipeline doing right now"
+  overview — the operator has to scroll past the M9-specific
+  detail to discover M9 is even running.
+
+The dashboard's primary use case is "I just kicked off
+`run-full-pipeline.sh`, where is it?" — and the panel set today
+doesn't answer that question without scanning the whole layout.
+
+All five bugs produce the same operator confusion: the dashboard
 shouts about things that are either historical, by-design, phantom
-counts from idle re-reads — or **silent during the work that
-matters most**.
+counts from idle re-reads, silent during the work that matters
+most — or **drowning the answer to "what's running now?" in
+historical-run dust**.
 
 ## Approach
 
-Four small, independent changes:
+Five small, independent changes:
 
 ### 1. Fix the exporter tail-loop double-count (one-character bug)
 
@@ -130,10 +156,10 @@ Unit test: drive `_tail_step` with no appended bytes between calls
 and assert no event is re-applied (e.g. counter delta == 0 across
 N idle polls).
 
-This is the smallest of the four changes (one character + one
+This is the smallest of the five changes (one character + one
 test) but the most impactful: it makes the watchdog and outcome
 counters readable during a live bench. Should be the first commit
-in the PR so the other three changes can be visually verified
+in the PR so the other four changes can be visually verified
 against accurate counts.
 
 ### 2. New health status `not_configured` (gauge value `NaN`)
@@ -218,6 +244,53 @@ Test: replay a fixture with N=600 deferred calls, assert the picker
 phase emits exactly `floor(600/200) = 3` progress events plus the
 existing start/end boundaries, in submission order.
 
+### 5. Top-of-dashboard pipeline-overview row + remove the noisy bottom panel
+
+Two changes to the Grafana dashboard JSON:
+
+**Add** a full-width pipeline-overview row at `(x=0, y=0, w=24, h=4)`,
+pushing every existing panel down by 4 rows. Eight `stat` tiles in
+one row (3 columns wide each, `24 / 8 = 3`), one per pipeline
+stage: **m2**, **m3**, **m5**, **m6**, **m8**, **m9**, **skosify**,
+**load**. Each tile shows:
+
+| Field | Source | Value mapping |
+|---|---|---|
+| Title | hard-coded stage name | — |
+| Big number | most recent ``bffi_stage_entities_total{stage="<stage>"}`` over the active run only | — |
+| Sub-label | progress fraction when available (M9 has `processed`/`total` from `progress` events; other stages just show "running" / "done" / "idle") | — |
+| Background | ``time() - bffi_stage_started_timestamp`` < 60 s **and** ``bffi_stage_ended_timestamp`` < ``started`` → green "running"; ``ended >= started`` → blue "done"; otherwise → grey "idle" | colour drives the at-a-glance overview |
+
+Selecting "active run only" requires filtering by ``run_uuid``. The
+exporter already labels every metric with ``run_uuid``; the new
+top row uses a Grafana variable ``$active_run`` populated from
+``topk(1, bffi_stage_started_timestamp)`` so the dashboard
+auto-tracks the most recent invocation without an operator
+manually editing the query.
+
+**Remove** Panel 9 (``Pipeline stages (last start / end
+timestamps)``) entirely. Its information is fully covered by the
+new top row (current state) and by Prometheus's history (for
+post-run analysis via ``range`` queries / ad-hoc PromQL). The
+operator-visible regression is small: anyone wanting historical
+timestamps now PromQL's them via Grafana's Explore tab instead of a
+broken stat tile. Acceptable trade-off — the panel as currently
+configured is unreadable on any run with >2 prior history entries.
+
+Implementation: edit ``config/grafana/dashboards/bffi-pipeline.json``
+once; Grafana auto-provisions on next dashboard refresh because the
+file is bind-mounted into the container by ``docker-compose.yml``.
+No code change in ``metrics_exporter.py`` — the existing metrics
+already carry every label needed (``run_uuid``, ``stage``,
+``processed``, ``total``).
+
+Visual smoke test on the next bench: at any point during the run,
+the top row should show m9 green/running with its processed/total
+sub-label, every other stage either done (blue, if M9 follows them
+in the same shell driver) or idle (grey). Compare against the
+current dashboard's bottom-right panel and verify the same
+information is conveyed with eight tiles instead of 20+.
+
 ## Out of scope
 
 - Changing the per-stage probe wiring so that *all* stages share one
@@ -250,6 +323,13 @@ existing start/end boundaries, in submission order.
   dashboard's m9 progress panel renders a continuous curve from
   Phase 1 start through Phase 2 end on the next bench, with no
   flatline gap between `phase_boundary=phase2` and `m9 end`.
+- Dashboard JSON has a new top-of-screen pipeline overview row with
+  eight stage tiles, filtered to the active run via the
+  ``$active_run`` Grafana variable; the bottom-right "Pipeline
+  stages (last start / end timestamps)" panel is removed. Visual
+  check during the next bench: the top row shows m9 green/running
+  with its processed/total sub-label, no broken-tile-cropping on
+  the cleaned-up layout.
 - No regression in the existing P-11 health-probe tests; M9
   byte-stability tests still pass (the new emissions only add JSONL
   lines, no graph mutation).
