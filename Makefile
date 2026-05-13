@@ -1,4 +1,5 @@
-.PHONY: help convert eval publish refresh-finto test test-integration lint format
+.PHONY: help convert eval publish refresh-finto test test-integration lint format \
+        observability-up observability-down
 
 help:
 	@echo "Targets:"
@@ -10,6 +11,8 @@ help:
 	@echo "  test-integration   - run integration tests (Docker stack required)"
 	@echo "  lint               - ruff check + ruff format --check + mypy --strict"
 	@echo "  format             - ruff format + ruff check --fix"
+	@echo "  observability-up   - start local Prometheus + Grafana (P-11 Phase D)"
+	@echo "  observability-down - stop the observability stack"
 
 convert:
 	@echo "not implemented"
@@ -42,3 +45,20 @@ lint:
 format:
 	uv run ruff format src tests
 	uv run ruff check --fix src tests
+
+# P-11 Phase D local observability stack. The two services use the
+# ``observability`` Docker Compose profile so they're excluded from
+# the default ``docker compose up`` and only fire when an operator
+# explicitly opts in. Pair with ``bffi-pipeline serve-metrics`` on
+# the host (the exporter Prometheus scrapes).
+observability-up:
+	docker compose --profile observability up -d prometheus grafana
+	@echo
+	@echo "Prometheus:  http://localhost:9091"
+	@echo "Grafana:     http://localhost:3001  (anonymous Viewer; bundled bffi-pipeline dashboard)"
+	@echo
+	@echo "Run the exporter alongside the pipeline:"
+	@echo "  uv run bffi-pipeline serve-metrics"
+
+observability-down:
+	docker compose --profile observability stop prometheus grafana

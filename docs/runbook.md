@@ -437,6 +437,44 @@ Once production data is flowing:
 
 (Quarterly is a comfortable margin under the 90-day staleness floor.)
 
+## Local observability stack (P-11)
+
+The pipeline emits a structured event stream to
+`<BFFI_DATA_DIR>/stage-events.jsonl` per P-11 Phase A. Two consumers
+read it:
+
+- `bffi-pipeline status` (Phase B) — one-shot or `--tail` rendering
+  of the current pipeline state. Cheap, single command.
+- A Prometheus exporter (Phase D) feeding a local Grafana dashboard.
+
+### One-command interactive status
+
+```sh
+bffi-pipeline status                 # one-shot summary
+bffi-pipeline status --tail          # re-render on new events (~200ms cadence)
+bffi-pipeline status --since now     # filter to the latest run
+```
+
+### Dashboard (Prometheus + Grafana, Docker)
+
+```sh
+make observability-up                # docker compose up -d prometheus grafana
+uv run bffi-pipeline serve-metrics   # exporter on :9100 (tails the sidecar)
+```
+
+Then point a browser at:
+
+- **Grafana**: http://localhost:3001 — anonymous Viewer; bundled
+  `bffi-pipeline` dashboard auto-loaded. Read-only by design (clone
+  in the UI if you want a custom view).
+- **Prometheus**: http://localhost:9091 — for ad-hoc PromQL.
+
+Stop the stack with `make observability-down` (the exporter is a
+foreground process; Ctrl-C stops it).
+
+The metric vocabulary the dashboard renders is documented in
+[`docs/observability.md`](observability.md).
+
 ## What's still missing
 
 The end-to-end pipeline through M12 is committed. Outstanding work:

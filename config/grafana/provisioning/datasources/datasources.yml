@@ -1,0 +1,15 @@
+# P-11 Phase D: auto-provision the Prometheus datasource at Grafana
+# startup. Points at the in-compose Prometheus service. UID is fixed
+# (``bffi-prometheus``) so the bundled dashboard JSON's datasource
+# references resolve consistently across redeploys.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: bffi-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

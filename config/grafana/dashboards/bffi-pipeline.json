@@ -1,0 +1,181 @@
+{
+  "title": "BFFI pipeline",
+  "uid": "bffi-pipeline",
+  "tags": ["bffi", "pipeline", "p-11"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "M9 reconcile — Phase 1 progress",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase1\"}",
+          "legendFormat": "processed"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_entities_total{stage=\"m9\",phase=\"phase1\"}",
+          "legendFormat": "total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "M9 Phase 1 ETA (seconds)",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_eta_seconds{stage=\"m9\",phase=\"phase1\"}",
+          "legendFormat": "ETA"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s"}
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "M9 Phase 1 throughput (per minute)",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"m9\",phase=\"phase1\"}",
+          "legendFormat": "per min"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "bargauge",
+      "title": "M9 outcome distribution (per tier)",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_outcomes_total{stage=\"m9\"}",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic"
+      }
+    },
+    {
+      "id": 5,
+      "type": "state-timeline",
+      "title": "Dependency health",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_dependency_health",
+          "legendFormat": "{{stage}}/{{dep}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "down", "color": "red"}}},
+            {"type": "value", "options": {"1": {"text": "degraded", "color": "orange"}}},
+            {"type": "value", "options": {"2": {"text": "up", "color": "green"}}}
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Per-stage throughput",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_throughput_per_minute",
+          "legendFormat": "{{stage}}/{{phase}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Watchdog event rate (5m)",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(bffi_watchdog_events_total[5m]) * 60",
+          "legendFormat": "{{stage}}/{{event}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "/min"}
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Dependency probe latency (ms)",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 20},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_dependency_probe_latency_ms",
+          "legendFormat": "{{stage}}/{{dep}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "ms"}
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Pipeline stages (last start / end timestamps)",
+      "datasource": {"type": "prometheus", "uid": "bffi-prometheus"},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bffi_stage_started_timestamp",
+          "legendFormat": "{{stage}} started"
+        },
+        {
+          "refId": "B",
+          "expr": "bffi_stage_ended_timestamp",
+          "legendFormat": "{{stage}} ended"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "dateTimeFromNow"}
+      }
+    }
+  ]
+}

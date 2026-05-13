@@ -326,6 +326,71 @@ def status_command(
         typer.echo("", err=True)  # clean newline on exit
 
 
+@app.command("serve-metrics")
+def serve_metrics_command(
+    port: Annotated[
+        int,
+        typer.Option(
+            "--port",
+            help="HTTP port to expose /metrics on. Default 9100.",
+        ),
+    ] = 9100,
+    sidecar: Annotated[
+        Path | None,
+        typer.Option(
+            "--sidecar",
+            help=(
+                "Path to the stage-events.jsonl sidecar to tail. Defaults "
+                "to BFFI_OBSERVABILITY_SIDECAR / <BFFI_DATA_DIR>/stage-events.jsonl."
+            ),
+            resolve_path=True,
+        ),
+    ] = None,
+    poll_seconds: Annotated[
+        float,
+        typer.Option(
+            "--poll-seconds",
+            help="Tail-loop poll interval in seconds. Default 1.0.",
+        ),
+    ] = 1.0,
+) -> None:
+    """Run the P-11 Phase D Prometheus exporter.
+
+    Tails the stage-events sidecar and exposes the canonical pipeline
+    metric vocabulary at ``/metrics`` on the configured port. Designed
+    to run for an arbitrarily long time independent of the pipeline —
+    survives stage transitions and pipeline restarts.
+
+    Pair with the local Prometheus + Grafana stack via
+    ``make observability-up`` (configured under ``docker-compose.yml``;
+    Grafana auto-loads the provisioned bffi-pipeline dashboard).
+    """
+    settings = get_settings()
+    if sidecar is None:
+        sidecar_str = settings.observability_sidecar.strip()
+        if not sidecar_str:
+            sidecar = settings.data_dir / "stage-events.jsonl"
+        elif sidecar_str.lower() in {"none", "/dev/null", "off"}:
+            typer.echo(
+                "BFFI_OBSERVABILITY_SIDECAR disables the sidecar — nothing to export.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        else:
+            sidecar = Path(sidecar_str)
+
+    typer.echo(
+        f"Serving Prometheus metrics at http://0.0.0.0:{port}/metrics (tailing {sidecar})",
+        err=True,
+    )
+    from bffi_pipeline.metrics_exporter import serve
+
+    try:
+        serve(sidecar, port=port, poll_seconds=poll_seconds)
+    except KeyboardInterrupt:
+        typer.echo("\nExporter stopped.", err=True)
+
+
 @app.command("workkey-stats")
 def workkey_stats_command(
     path: Annotated[

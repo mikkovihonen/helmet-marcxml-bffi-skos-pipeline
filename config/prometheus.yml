@@ -1,0 +1,21 @@
+# P-11 Phase D — Prometheus scrape config for the local observability stack.
+#
+# Scrapes the `bffi-pipeline serve-metrics` exporter running on the
+# host machine (the exporter tails stage-events.jsonl and exposes
+# /metrics on port 9100 by default). The exporter is *not* a Docker
+# service — operators run it on the host alongside the pipeline so
+# it shares the BFFI_DATA_DIR mount without volume mapping.
+#
+# All local; no remote targets. See
+# docs/proposals/prop-11-structured-observability.md § Phase D.
+
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+
+scrape_configs:
+  - job_name: "bffi-pipeline"
+    static_configs:
+      - targets: ["host.docker.internal:9100"]
+        labels:
+          deployment: "local"

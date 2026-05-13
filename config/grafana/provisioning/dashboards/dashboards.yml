@@ -1,0 +1,16 @@
+# P-11 Phase D: auto-load the bundled dashboards from the mounted
+# directory at Grafana startup. Read-only (``allowUiUpdates: false``)
+# so the committed JSON stays the source of truth; operators clone
+# the dashboard if they want a custom view.
+
+apiVersion: 1
+
+providers:
+  - name: "bffi-pipeline"
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

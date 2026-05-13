@@ -50,5 +50,43 @@ services:
       - ./config/skosmos-config.ttl:/var/www/html/config.ttl:ro
     restart: unless-stopped
 
+  # P-11 Phase D: local observability stack. Scrapes the
+  # ``bffi-pipeline serve-metrics`` exporter running on the host
+  # (Prometheus reaches it via ``host.docker.internal``) and renders
+  # the bundled Grafana dashboard. All local; no outbound telemetry.
+  # Start / stop via ``make observability-up`` / ``make observability-down``.
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: bffi-prometheus
+    ports:
+      - "9091:9090"  # 9090 already taken by bffi-skosmos
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Linux compat; macOS / Windows native
+    restart: unless-stopped
+    profiles: ["observability"]  # Excluded from the default ``up`` set
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: bffi-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    profiles: ["observability"]
+
 volumes:
   fuseki-data:
+  prometheus-data:
+  grafana-data:

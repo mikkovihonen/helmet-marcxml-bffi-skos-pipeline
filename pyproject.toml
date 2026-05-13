@@ -26,6 +26,13 @@ dependencies = [
     "httpx>=0.27",
     "requests>=2.32",
     "lingua-language-detector>=2.0",
+    # P-11 Phase D: local-only Prometheus exporter for the
+    # ``bffi-pipeline serve-metrics`` subcommand. The dep is pulled in
+    # only when the operator runs serve-metrics; pipeline stages never
+    # import it. Outbound-telemetry-free — the exporter just exposes a
+    # local ``/metrics`` endpoint that the operator's own Prometheus
+    # container scrapes. See docs/proposals/prop-11-structured-observability.md.
+    "prometheus-client>=0.20",
     # `marcxml_export_pipeline.sierra` — Sierra Postgres replica → MARCXML
     # export, migrated from the (now-archived) helmet-sierra-data-tools repo.
     "sqlalchemy[asyncio]>=2.0",
