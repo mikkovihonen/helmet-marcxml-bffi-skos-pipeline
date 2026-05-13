@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import uuid as _uuid
 from pathlib import Path
 from typing import Annotated
 
 import httpx
 import typer
 
-from bffi_pipeline.config import get_settings
+from bffi_pipeline.config import Settings, get_settings
 from bffi_pipeline.eval import embed_benchmark
 from bffi_pipeline.eval import grow as eval_grow
 from bffi_pipeline.eval import harness as eval_harness
@@ -27,6 +28,45 @@ from bffi_pipeline.stages import (
     workkey,
     ysa_disambiguation_report,
 )
+from bffi_pipeline.stages.observability import (
+    StageEventEmitter,
+    set_active_emitter,
+)
+
+
+def _init_observability(settings: Settings) -> StageEventEmitter | None:
+    """Construct + register the per-invocation StageEventEmitter (P-11 Phase A).
+
+    Resolves ``settings.observability_sidecar`` and
+    ``settings.run_uuid`` into a configured :class:`StageEventEmitter`
+    and parks it as the process-wide active emitter so any
+    pipeline-stage call can emit without function-signature plumbing.
+
+    ``observability_sidecar`` resolution:
+    - empty (default): ``<data_dir>/stage-events.jsonl``.
+    - ``"none"`` or ``"/dev/null"`` (case-insensitive): stderr-only,
+      no JSONL append.
+    - any other value: treated as a path.
+
+    ``run_uuid`` resolution:
+    - empty (default): a fresh ``uuid4().hex`` per invocation.
+    - any other value: pinned (operator-controlled, useful for
+      replay).
+    """
+    sidecar_str = settings.observability_sidecar.strip()
+    sidecar_path: Path | None
+    if not sidecar_str:
+        sidecar_path = settings.data_dir / "stage-events.jsonl"
+    elif sidecar_str.lower() in {"none", "/dev/null", "off"}:
+        sidecar_path = None
+    else:
+        sidecar_path = Path(sidecar_str)
+
+    run_uuid = settings.run_uuid.strip() or _uuid.uuid4().hex
+    emitter = StageEventEmitter(sidecar_path=sidecar_path, run_uuid=run_uuid)
+    set_active_emitter(emitter)
+    return emitter
+
 
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
 provenance_app = typer.Typer(help="Provenance graph maintenance (M7).", no_args_is_help=True)
@@ -39,11 +79,16 @@ def _root() -> None:
 
     Runs the stale-provenance warning per spec § 8 / BUILD_PLAN M7
     every invocation; suppressed silently when no provenance file
-    exists (early-milestone or first-run case).
+    exists (early-milestone or first-run case). Also bootstraps the
+    P-11 Phase A active observability emitter so every subcommand can
+    emit events without per-command plumbing — read-only commands
+    (``status``, ``workkey-stats``, etc.) simply never call
+    ``emit_if_active`` and the registered emitter stays idle.
     """
     warning = prov_writer.stale_provenance_warning()
     if warning is not None:
         typer.echo(warning, err=True)
+    _init_observability(get_settings())
 
 
 @app.command("marc-to-bf")

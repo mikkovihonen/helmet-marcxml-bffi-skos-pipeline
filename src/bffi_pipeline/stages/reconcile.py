@@ -65,7 +65,13 @@ from bffi_pipeline.config import get_settings
 from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import logger as P
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.observability import emit_if_active
 from bffi_pipeline.stages.watchdog import emit_watchdog_event
+
+#: P-11 Phase A progress cadence for M9. Sparse enough that the
+#: sidecar stays bounded; dense enough that the status CLI's tail
+#: feels responsive across a 90-min Phase 1.
+_M9_PROGRESS_CADENCE: Final[int] = 200
 
 # --- Constants ------------------------------------------------------------
 
@@ -1838,6 +1844,23 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
 
     summary = ReconciliationSummary(total=len(request_list))
 
+    # P-11 Phase A: stage-level start event so the status CLI / dashboard
+    # see M9 begin. Per-phase progress events fire from the helpers below.
+    emit_if_active(
+        stage="m9",
+        event="start",
+        counters={"total": len(request_list)},
+        extra={
+            "concurrency": concurrency,
+            "phase1_concurrency": phase1_concurrency,
+            "field_timeout_seconds": field_timeout_seconds,
+            "tier0_expansion_enabled": (
+                local_resolver is not None
+                and getattr(local_resolver, "tier0_expansion_enabled", False)
+            ),
+        },
+    )
+
     # --- Phase 1: walk requests through tier-0 + candidate-query ----------
     # Each request resolves either to a final outcome (fictional / tier-0 /
     # lexical / no-candidate) or to a deferred ``(request, sorted_candidates)``
@@ -1848,6 +1871,13 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     pre_outcomes: dict[int, ReconciliationOutcome] = {}
     deferred: list[tuple[int, EntityRequest, list[AuthorityCandidate]]] = []
     started_at: dict[int, datetime] = {}
+
+    emit_if_active(
+        stage="m9",
+        event="phase_boundary",
+        phase="phase1",
+        counters={"total": len(request_list)},
+    )
 
     phase1_results: list[_Phase1Result]
     if phase1_concurrency <= 1:
@@ -1868,15 +1898,36 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             phase1_concurrency=phase1_concurrency,
         )
 
-    for result in phase1_results:
+    # Phase 1 result collation + per-cadence progress emission. We tally
+    # tier-0 + no-candidate hits as we go so the dashboard can show the
+    # outcome distribution mid-run, not only at end.
+    phase1_local = 0
+    phase1_deferred = 0
+    for i, result in enumerate(phase1_results):
         started_at[result.idx] = result.started_at
         if result.outcome is not None:
             pre_outcomes[result.idx] = result.outcome
+            phase1_local += 1
         else:
             assert result.sorted_candidates is not None  # invariant from _Phase1Result
             deferred.append((result.idx, result.request, result.sorted_candidates))
+            phase1_deferred += 1
+        if (i + 1) % _M9_PROGRESS_CADENCE == 0:
+            emit_if_active(
+                stage="m9",
+                event="progress",
+                phase="phase1",
+                counters={"processed": i + 1, "total": len(request_list)},
+                extra={"resolved": phase1_local, "deferred_to_picker": phase1_deferred},
+            )
 
     # --- Phase 2: dispatch deferred picker calls --------------------------
+    emit_if_active(
+        stage="m9",
+        event="phase_boundary",
+        phase="phase2",
+        counters={"deferred_to_picker": len(deferred)},
+    )
     picker_results: list[tuple[int, ReconciliationOutcome]] = []
     if deferred:
         # Derive a model_name string for watchdog events. Falls back to "
@@ -1912,6 +1963,12 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         pre_outcomes[idx] = outcome
 
     # --- Phase 3: apply graph mutations + provenance in request order -----
+    emit_if_active(
+        stage="m9",
+        event="phase_boundary",
+        phase="phase3",
+        counters={"total": len(request_list)},
+    )
     # Deterministic by construction: sorted by the original request index.
     outcomes: list[ReconciliationOutcome] = []
     for idx in range(len(request_list)):
@@ -1954,6 +2011,20 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         target_graph.serialize(destination=str(tmp), format="turtle")
         tmp.replace(output_path)
 
+    emit_if_active(
+        stage="m9",
+        event="end",
+        counters={
+            "total": summary.total,
+            "local": summary.local,
+            "lexical": summary.lexical,
+            "llm_pick": summary.llm_pick,
+            "fallback": summary.fallback,
+            "no_candidate": summary.no_candidate,
+            "fictional": summary.fictional,
+            "watchdog_aborted": summary.watchdog_aborted,
+        },
+    )
     return summary, outcomes
 
 

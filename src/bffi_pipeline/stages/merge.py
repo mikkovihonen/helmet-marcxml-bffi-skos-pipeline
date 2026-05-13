@@ -51,6 +51,7 @@ from bffi_pipeline.contrib_variants import (
 )
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.logger import model_agent_uri
+from bffi_pipeline.stages.observability import emit_if_active
 from bffi_pipeline.uris import mint_work_uri
 
 # --- Constants ------------------------------------------------------------
@@ -1106,6 +1107,7 @@ def apply_merge(
     variants_sidecar_path = variants_sidecar_path or (settings.data_dir / VARIANTS_SIDECAR_NAME)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     merged_at = (now or datetime.now(UTC)).replace(microsecond=0)
+    emit_if_active(stage="m8", event="start")
 
     decisions = _load_decisions(decisions_path)
     same_work_edges = [(d.work_a, d.work_b) for d in decisions if d.decision == "same_work"]
@@ -1191,6 +1193,18 @@ def apply_merge(
     _emit_conflicts(conflicts_path, conflicts)
     del variants_bound  # value is for future telemetry; not yet exposed
 
+    emit_if_active(
+        stage="m8",
+        event="end",
+        counters={
+            "total_works": len(work_records),
+            "canonical_works": len(canonical_entries),
+            "conflict_groups": len(conflicts),
+            "same_work_decisions": len(same_work_edges),
+            "different_work_decisions": len(different_work_edges),
+            "uncertain_decisions": uncertain_count,
+        },
+    )
     return MergeResult(
         total_works=len(work_records),
         same_work_decisions=len(same_work_edges),

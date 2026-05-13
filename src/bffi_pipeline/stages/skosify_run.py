@@ -30,6 +30,7 @@ from rdflib import Graph
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.observability import emit_if_active
 
 #: Default filenames under ``BFFI_DATA_DIR``.
 SKOSIFIED_FILENAME: Final[str] = "canonical-skosified.ttl"
@@ -137,6 +138,7 @@ def run(
     config_path = config_path or DEFAULT_CONFIG_PATH
     output_path = output_path or (settings.data_dir / SKOSIFIED_FILENAME)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    emit_if_active(stage="skosify", event="start", extra={"input": str(canonical_path)})
 
     if not canonical_path.is_file():
         raise FileNotFoundError(
@@ -148,7 +150,14 @@ def run(
     if not force and _is_output_fresh(output_path, inputs):
         existing = Graph()
         existing.parse(str(output_path), format="turtle")
-        return _summarise(existing, input_triples=0, output_path=output_path, skipped=True)
+        result = _summarise(existing, input_triples=0, output_path=output_path, skipped=True)
+        emit_if_active(
+            stage="skosify",
+            event="end",
+            counters={"output_triples": len(existing)},
+            extra={"skipped": True},
+        )
+        return result
 
     pre_graph = Graph()
     pre_graph.parse(str(canonical_path), format="turtle")
@@ -161,6 +170,12 @@ def run(
     skosified.serialize(destination=str(tmp), format="turtle")
     tmp.replace(output_path)
 
+    emit_if_active(
+        stage="skosify",
+        event="end",
+        counters={"input_triples": input_triples, "output_triples": len(skosified)},
+        extra={"skipped": False},
+    )
     return _summarise(
         skosified, input_triples=input_triples, output_path=output_path, skipped=False
     )

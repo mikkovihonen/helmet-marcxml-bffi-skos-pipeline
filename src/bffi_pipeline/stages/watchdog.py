@@ -70,6 +70,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal
 
+from bffi_pipeline.stages.observability import emit_if_active
+
 WatchdogEvent = Literal[
     "timeout",
     "retry",
@@ -119,6 +121,17 @@ def emit_watchdog_event(
         sidecar_path.parent.mkdir(parents=True, exist_ok=True)
         with sidecar_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+    # P-11 Phase A: forward a copy to the active stage-event emitter
+    # so the unified status / dashboard surfaces watchdog activity
+    # alongside per-stage progress. Operators can still tail
+    # ``watchdog-events.jsonl`` for forensic audit (where the
+    # standalone shape is committed); ``stage-events.jsonl`` carries
+    # the same payload under ``event="watchdog"``.
+    emit_if_active(
+        stage="watchdog",
+        event="watchdog",
+        extra=payload,
+    )
 
 
 __all__ = ["WATCHDOG_STDERR_PREFIX", "WatchdogEvent", "emit_watchdog_event"]

@@ -33,6 +33,7 @@ import httpx
 from jinja2 import Template
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.stages.observability import emit_if_active
 
 #: Repo paths to the canonical config files.
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
@@ -329,6 +330,7 @@ def run(
         bffi_works_graph=bffi_works_graph,
         provenance_graph=provenance_graph,
     )
+    emit_if_active(stage="load", event="start", extra={"fuseki_url": fuseki_url})
 
     try:
         _run_pipeline(
@@ -346,6 +348,16 @@ def run(
         if own_client:
             http_client.close()
 
+    emit_if_active(
+        stage="load",
+        event="end",
+        counters={
+            "bffi_works_uploaded": len(result.bffi_works_uploaded),
+            "provenance_uploaded": len(result.provenance_uploaded),
+            "smoke_total": len(result.smoke_results),
+        },
+        extra={"success": result.success, "rolled_back": result.rolled_back},
+    )
     return result
 
 

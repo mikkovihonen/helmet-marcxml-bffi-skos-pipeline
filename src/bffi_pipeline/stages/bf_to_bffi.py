@@ -34,6 +34,7 @@ from bffi_pipeline.contrib_variants import (
     truncate_sidecar,
 )
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.observability import emit_if_active
 from bffi_pipeline.uris import (
     mint_raw_expression_uri,
     mint_raw_work_uri,
@@ -43,6 +44,9 @@ from bffi_pipeline.validation.bffi import validate_graph
 
 _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 _SPARQL_DIR: Final[Path] = _BFFI_PIPELINE_REPO_ROOT / "sparql"
+
+#: P-11 Phase A progress cadence for M3 bf-to-bffi.
+_M3_PROGRESS_CADENCE: Final[int] = 100
 
 _LANG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
 # 3-letter MARC language code -> BCP-47 2-letter. The first three —
@@ -834,7 +838,26 @@ def run(
     if force:
         truncate_sidecar(sidecar_path)
 
-    for rdf_path in _iter_bibframe_files(bibframe_dir):
+    rdf_files = list(_iter_bibframe_files(bibframe_dir))
+    emit_if_active(
+        stage="m3",
+        event="start",
+        counters={"total": len(rdf_files)},
+    )
+
+    for i, rdf_path in enumerate(rdf_files, start=1):
+        if i % _M3_PROGRESS_CADENCE == 0:
+            emit_if_active(
+                stage="m3",
+                event="progress",
+                counters={"processed": i, "total": len(rdf_files)},
+                extra={
+                    "converted": len(summary.converted),
+                    "skipped": len(summary.skipped_idempotent),
+                    "errored": len(summary.errored),
+                    "failed_shape": len(summary.failed_shape),
+                },
+            )
         bib_id = rdf_path.stem
         out_path = base / "bffi" / f"{bib_id}.ttl"
         if not force and _is_output_fresh(rdf_path, out_path):
@@ -870,6 +893,17 @@ def run(
             )
         summary.converted.append(bib_id)
 
+    emit_if_active(
+        stage="m3",
+        event="end",
+        counters={
+            "total": len(rdf_files),
+            "converted": len(summary.converted),
+            "skipped": len(summary.skipped_idempotent),
+            "errored": len(summary.errored),
+            "failed_shape": len(summary.failed_shape),
+        },
+    )
     return summary
 
 

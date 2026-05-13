@@ -47,11 +47,15 @@ from rdflib.namespace import RDF, RDFS, XSD
 from bffi_pipeline import __version__ as PIPELINE_VERSION
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.observability import emit_if_active
 from bffi_pipeline.validation.bibframe import BibframeShapeError, assert_conforms
 from bffi_pipeline.validation.marcxml import MarcXmlValidationError, validate
 
 _BASEURI: Final[str] = "http://urn.fi/URN:NBN:fi:bib:raw/"
 _HELMET_RECORD_NS: Final[str] = "http://urn.fi/URN:NBN:fi:bib:helmet/"
+
+#: P-11 Phase A progress cadence for M2 marc-to-bf.
+_M2_PROGRESS_CADENCE: Final[int] = 100
 _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 _MARC2BIBFRAME2_DIR: Final[Path] = _BFFI_PIPELINE_REPO_ROOT / "third_party" / "marc2bibframe2"
 _XSLT_PATH: Final[Path] = _MARC2BIBFRAME2_DIR / "xsl" / "marc2bibframe2.xsl"
@@ -562,7 +566,25 @@ def run(
     helmet_map_path = output_dir / "helmet-map.jsonl"
     errors_path = output_dir / "bibframe" / "_errors.jsonl"
 
-    for xml_path in _iter_xml_files(input_dir):
+    xml_files = list(_iter_xml_files(input_dir))
+    emit_if_active(
+        stage="m2",
+        event="start",
+        counters={"total": len(xml_files)},
+    )
+
+    for i, xml_path in enumerate(xml_files, start=1):
+        if i % _M2_PROGRESS_CADENCE == 0:
+            emit_if_active(
+                stage="m2",
+                event="progress",
+                counters={"processed": i, "total": len(xml_files)},
+                extra={
+                    "succeeded": len(summary.succeeded),
+                    "skipped": len(summary.skipped_idempotent),
+                    "failed": len(summary.failed),
+                },
+            )
         try:
             map_row, status = _convert_one(xml_path, output_dir, force=force)
         except MarcXmlValidationError as exc:
@@ -608,6 +630,16 @@ def run(
         _append_jsonl(helmet_map_path, asdict(map_row))
 
     _dedupe_helmet_map(helmet_map_path)
+    emit_if_active(
+        stage="m2",
+        event="end",
+        counters={
+            "total": len(xml_files),
+            "succeeded": len(summary.succeeded),
+            "skipped": len(summary.skipped_idempotent),
+            "failed": len(summary.failed),
+        },
+    )
     return summary
 
 

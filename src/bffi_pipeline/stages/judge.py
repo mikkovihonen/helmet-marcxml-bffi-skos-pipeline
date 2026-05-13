@@ -63,6 +63,7 @@ from bffi_pipeline.config import get_settings
 from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.writer import ProvenanceWriter
+from bffi_pipeline.stages.observability import emit_if_active
 from bffi_pipeline.stages.watchdog import emit_watchdog_event
 
 # --- Constants ------------------------------------------------------------
@@ -1458,6 +1459,12 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
 
     candidates = _load_candidate_jsonl(candidates_path)
     total = len(candidates)
+    emit_if_active(
+        stage="m6",
+        event="start",
+        counters={"total": total},
+        extra={"concurrency": concurrency, "resume": resume},
+    )
 
     if work_records is None:
         if bffi_corpus_dir is None:
@@ -1631,6 +1638,19 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
         if own_cache and cache is not None:
             cache.close()
 
+    emit_if_active(
+        stage="m6",
+        event="end",
+        counters={
+            "total_pairs": total,
+            "completed": total,
+            "cache_hits": cache_hits,
+            "fresh_calls": fresh_calls,
+            "cascade_used": cascade_used,
+            "auto_merged": auto_merge_written,
+        },
+        extra={"elapsed_seconds": time.monotonic() - started},
+    )
     return JudgeBatchResult(
         total_pairs=total,
         completed=total,

@@ -148,6 +148,24 @@ class Settings(BaseSettings):
         default=False,
         alias="BFFI_M9_TIER0_EXPANSION",
     )
+    # P-11 Phase A: per-invocation structured event stream.
+    # ``observability_sidecar`` is the canonical JSONL file every stage
+    # appends to (start / progress / phase_boundary / end / health /
+    # watchdog). Set to "" to disable (stderr emission only — useful for
+    # tests, the operator-side rollback knob). Empty string is treated
+    # as ``None`` by the CLI's emitter-construction code.
+    observability_sidecar: str = Field(
+        default="",
+        alias="BFFI_OBSERVABILITY_SIDECAR",
+    )
+    # ``run_uuid`` anchors every event from one CLI invocation. Empty
+    # default = the CLI auto-generates a fresh UUID at command entry; an
+    # explicit value lets the operator pin a run identity across nested
+    # invocations or replay scenarios.
+    run_uuid: str = Field(
+        default="",
+        alias="BFFI_RUN_UUID",
+    )
 
     # Triple store.
     fuseki_url: str = Field(
