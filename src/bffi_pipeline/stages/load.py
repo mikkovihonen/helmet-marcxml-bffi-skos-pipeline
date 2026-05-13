@@ -34,6 +34,7 @@ from jinja2 import Template
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.stages.observability import emit_if_active
+from bffi_pipeline.stages.probes import emit_health_probes, probe_fuseki
 
 #: Repo paths to the canonical config files.
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
@@ -331,6 +332,10 @@ def run(
         provenance_graph=provenance_graph,
     )
     emit_if_active(stage="load", event="start", extra={"fuseki_url": fuseki_url})
+    # P-11 Phase C: probe Fuseki at entry — the load stage's whole job
+    # is talking to Fuseki, so an unreachable Fuseki should surface on
+    # the dashboard the moment the stage starts.
+    emit_health_probes("load", {"fuseki": probe_fuseki(fuseki_url)})
 
     try:
         _run_pipeline(

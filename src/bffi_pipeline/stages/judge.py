@@ -64,6 +64,7 @@ from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.writer import ProvenanceWriter
 from bffi_pipeline.stages.observability import emit_if_active
+from bffi_pipeline.stages.probes import emit_health_probes, probe_mlx_lm
 from bffi_pipeline.stages.watchdog import emit_watchdog_event
 
 # --- Constants ------------------------------------------------------------
@@ -1464,6 +1465,18 @@ def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair re
         event="start",
         counters={"total": total},
         extra={"concurrency": concurrency, "resume": resume},
+    )
+    # P-11 Phase C: probe both mlx-lm cascade ports at entry. The
+    # primary at :8001 and the fallback at :8002 are independent
+    # processes; either can be down without the other.
+    primary_url = settings.llm_base_url_primary or settings.llm_base_url
+    fallback_url = settings.llm_base_url_fallback or settings.llm_base_url
+    emit_health_probes(
+        "m6",
+        {
+            "mlx-lm-primary": probe_mlx_lm(primary_url, dep="mlx-lm-primary"),
+            "mlx-lm-fallback": probe_mlx_lm(fallback_url, dep="mlx-lm-fallback"),
+        },
     )
 
     if work_records is None:

@@ -66,12 +66,38 @@ from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import logger as P
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.observability import emit_if_active
+from bffi_pipeline.stages.probes import (
+    emit_health_probes,
+    probe_finto,
+    probe_fuseki,
+    probe_mlx_lm,
+)
 from bffi_pipeline.stages.watchdog import emit_watchdog_event
 
 #: P-11 Phase A progress cadence for M9. Sparse enough that the
 #: sidecar stays bounded; dense enough that the status CLI's tail
 #: feels responsive across a 90-min Phase 1.
 _M9_PROGRESS_CADENCE: Final[int] = 200
+
+#: P-11 Phase C re-probe cadence for M9 Phase 1. One health probe per
+#: N entities surfaces mid-stage degradation in the 12-hour overnight
+#: run (a single entry probe doesn't catch a Fuseki crash at hour 4).
+#: Picked larger than the progress cadence so probes don't pile up
+#: every status-rendering pass.
+_M9_HEALTH_PROBE_CADENCE: Final[int] = 1000
+
+
+def _m9_probe_dependencies(local_resolver: LocalConceptResolver | None) -> None:
+    """Run the M9 dependency probes + emit a single ``health`` event."""
+    settings = get_settings()
+    probes_to_emit = {
+        "mlx-lm": probe_mlx_lm(settings.llm_base_url),
+        "finto": probe_finto(),
+    }
+    if local_resolver is not None:
+        probes_to_emit["fuseki"] = probe_fuseki(settings.fuseki_url)
+    emit_health_probes("m9", probes_to_emit)
+
 
 # --- Constants ------------------------------------------------------------
 
@@ -1860,6 +1886,9 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             ),
         },
     )
+    # P-11 Phase C: probe Fuseki / mlx-lm / Finto at entry; surfaces a
+    # red panel on the dashboard immediately if any are unreachable.
+    _m9_probe_dependencies(local_resolver)
 
     # --- Phase 1: walk requests through tier-0 + candidate-query ----------
     # Each request resolves either to a final outcome (fictional / tier-0 /
@@ -1920,6 +1949,11 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 counters={"processed": i + 1, "total": len(request_list)},
                 extra={"resolved": phase1_local, "deferred_to_picker": phase1_deferred},
             )
+        # P-11 Phase C: re-probe mid-stage so the dashboard catches a
+        # late-run dependency outage (e.g. Fuseki OOM at hour 4 of an
+        # overnight run). Cheap — one probe per 1000 entities.
+        if (i + 1) % _M9_HEALTH_PROBE_CADENCE == 0:
+            _m9_probe_dependencies(local_resolver)
 
     # --- Phase 2: dispatch deferred picker calls --------------------------
     emit_if_active(
