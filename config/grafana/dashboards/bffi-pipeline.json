@@ -137,7 +137,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m2\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
+          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * (count(bffi_stage_planned{stage=\"m2\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m2"
         },
         {
@@ -260,7 +260,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m3\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
+          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * (count(bffi_stage_planned{stage=\"m3\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m3"
         },
         {
@@ -383,7 +383,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m5\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
+          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * (count(bffi_stage_planned{stage=\"m5\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m5"
         },
         {
@@ -506,7 +506,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m6\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
+          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * (count(bffi_stage_planned{stage=\"m6\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m6"
         },
         {
@@ -629,7 +629,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m8\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
+          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * (count(bffi_stage_planned{stage=\"m8\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m8"
         },
         {
@@ -752,7 +752,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"m9\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
+          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * (count(bffi_stage_planned{stage=\"m9\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "m9"
         },
         {
@@ -875,7 +875,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"skosify\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
+          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * (count(bffi_stage_planned{stage=\"skosify\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "skosify"
         },
         {
@@ -984,7 +984,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * ((bffi_stage_planned{stage=\"load\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
+          "expr": "sum(30 * (count(bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) or on() vector(0)) + 20 * ((count(bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) unless count(bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"})) or on() vector(0)) + 10 * (count(bffi_stage_planned{stage=\"load\",run_uuid=\"$active_run\"} unless on(stage, run_uuid) bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) or on() vector(0))) or on() vector(0)",
           "legendFormat": "load"
         },
         {
