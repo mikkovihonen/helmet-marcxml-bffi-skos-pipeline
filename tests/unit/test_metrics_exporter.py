@@ -593,6 +593,33 @@ def test_grafana_dashboard_has_active_run_templating_variable() -> None:
     assert "run_uuid" in active_run["query"] + active_run.get("regex", "")
 
 
+def test_grafana_dashboard_every_panel_filters_by_active_run() -> None:
+    """P-13 Phase B: every panel's PromQL target filters by
+    ``run_uuid="$active_run"`` so the dashboard reflects the active
+    invocation only. Forward-incompat trap: adding a new panel
+    without the filter trips this test.
+    """
+    dashboard_path = (
+        Path(__file__).resolve().parents[2]
+        / "config"
+        / "grafana"
+        / "dashboards"
+        / "bffi-pipeline.json"
+    )
+    data = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    offenders: list[str] = []
+    for panel in data["panels"]:
+        for target in panel.get("targets", []):
+            expr = target.get("expr", "")
+            if not expr:
+                continue
+            if 'run_uuid="$active_run"' not in expr:
+                offenders.append(f"panel id={panel['id']} ({panel.get('title', '?')!r}): {expr}")
+    assert offenders == [], (
+        'Panels without ``run_uuid="$active_run"`` filter:\n  - ' + "\n  - ".join(offenders)
+    )
+
+
 def test_grafana_dashboard_pipeline_overview_row_covers_every_stage() -> None:
     """P-12 Phase E: the top row has one stat tile per pipeline stage.
 

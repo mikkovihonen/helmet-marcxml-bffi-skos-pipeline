@@ -512,12 +512,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase1\"}",
+          "expr": "bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}",
           "legendFormat": "processed"
         },
         {
           "refId": "B",
-          "expr": "bffi_stage_entities_total{stage=\"m9\",phase=\"phase1\"}",
+          "expr": "bffi_stage_entities_total{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}",
           "legendFormat": "total"
         }
       ],
@@ -552,7 +552,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_stage_eta_seconds{stage=\"m9\",phase=\"phase1\"}",
+          "expr": "bffi_stage_eta_seconds{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}",
           "legendFormat": "ETA"
         }
       ],
@@ -579,7 +579,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_stage_throughput_per_minute{stage=\"m9\",phase=\"phase1\"}",
+          "expr": "bffi_stage_throughput_per_minute{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}",
           "legendFormat": "per min"
         }
       ]
@@ -601,7 +601,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_stage_outcomes_total{stage=\"m9\"}",
+          "expr": "bffi_stage_outcomes_total{stage=\"m9\",run_uuid=\"$active_run\"}",
           "legendFormat": "{{outcome}}"
         }
       ],
@@ -628,7 +628,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_dependency_health and on(stage, dep) (time() - bffi_dependency_last_probe_timestamp < 60)",
+          "expr": "bffi_dependency_health{run_uuid=\"$active_run\"} and on(stage, dep) (time() - bffi_dependency_last_probe_timestamp{run_uuid=\"$active_run\"} < 60)",
           "legendFormat": "{{stage}}/{{dep}}"
         }
       ],
@@ -684,7 +684,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_stage_throughput_per_minute",
+          "expr": "bffi_stage_throughput_per_minute{run_uuid=\"$active_run\"}",
           "legendFormat": "{{stage}}/{{phase}}"
         }
       ]
@@ -706,7 +706,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(bffi_watchdog_events_total[5m]) * 60",
+          "expr": "rate(bffi_watchdog_events_total{run_uuid=\"$active_run\"}[5m]) * 60",
           "legendFormat": "{{stage}}/{{event}}"
         }
       ],
@@ -733,7 +733,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "bffi_dependency_probe_latency_ms",
+          "expr": "bffi_dependency_probe_latency_ms{run_uuid=\"$active_run\"}",
           "legendFormat": "{{stage}}/{{dep}}"
         }
       ],

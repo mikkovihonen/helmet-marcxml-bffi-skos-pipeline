@@ -49,6 +49,22 @@ than raw counter values across the boundary). The Grafana
 dashboard does this for `Watchdog event rate (5m)` already; the
 other counter-based panels show cumulative-by-design.
 
+### Per-run metric isolation
+
+Every Counter and Gauge carries an explicit `run_uuid` label (P-13
+Phase A). Dashboards filter every panel by `run_uuid="$active_run"`
+(P-13 Phase B), where `$active_run` is a Grafana templating variable
+derived from `topk(1, bffi_stage_started_timestamp) by (run_uuid)`
+— i.e. "the run whose start event is the most recent".
+
+Effect: starting a new pipeline run instantly flips the dashboard
+view to that run. Prior runs' data remains queryable in Prometheus
+(filter by an explicit `run_uuid=` value) for forensic comparison
+but does not visually compete with the live view.
+
+Cardinality estimate at the bottom of the next section accounts for
+this label.
+
 ## Metric vocabulary
 
 The exporter publishes the canonical metric set below. Every metric
@@ -58,14 +74,15 @@ maps one-to-one to a Phase A `stage-events.jsonl` event field.
 |---|---|---|---|---|
 | `bffi_stage_started_timestamp` | Gauge | `stage`, `run_uuid` | `start` | Unix ts the stage began. |
 | `bffi_stage_ended_timestamp` | Gauge | `stage`, `run_uuid` | `end` | Unix ts the stage finished. |
-| `bffi_stage_entities_total` | Gauge | `stage`, `phase` | `start` / `phase_boundary` | Total entities the stage/phase will process. |
-| `bffi_stage_entities_processed_total` | Counter | `stage`, `phase` | `progress` | Cumulative entities processed so far. |
-| `bffi_stage_outcomes_total` | Counter | `stage`, `outcome` | `end` | Per-outcome bucket counts (M9 tier counts: `local`, `lexical`, `llm_pick`, `fallback`, `no_candidate`, `fictional`, `watchdog_aborted`). |
-| `bffi_stage_throughput_per_minute` | Gauge | `stage`, `phase` | derived | Rolling-window throughput from the last 5 progress events. |
-| `bffi_stage_eta_seconds` | Gauge | `stage`, `phase` | derived | Linear-extrapolation ETA to phase boundary or stage end. |
-| `bffi_dependency_health` | Gauge | `stage`, `dep` | `health` | `2`=up (green), `1`=degraded (amber), `0`=down (red). |
-| `bffi_dependency_probe_latency_ms` | Gauge | `stage`, `dep` | `health` | Most recent probe round-trip latency in ms. |
-| `bffi_watchdog_events_total` | Counter | `stage`, `event` | `watchdog` | Cumulative watchdog events (`timeout`, `retry`, `give_up`, `field_budget_exceeded`, `pair_budget_exceeded`). |
+| `bffi_stage_entities_total` | Gauge | `stage`, `phase`, `run_uuid` | `start` / `phase_boundary` | Total entities the stage/phase will process. |
+| `bffi_stage_entities_processed_total` | Counter | `stage`, `phase`, `run_uuid` | `progress` | Cumulative entities processed so far. |
+| `bffi_stage_outcomes_total` | Counter | `stage`, `outcome`, `run_uuid` | `end` | Per-outcome bucket counts (M9 tier counts: `local`, `lexical`, `llm_pick`, `fallback`, `no_candidate`, `fictional`, `watchdog_aborted`). |
+| `bffi_stage_throughput_per_minute` | Gauge | `stage`, `phase`, `run_uuid` | derived | Rolling-window throughput from the last 5 progress events. |
+| `bffi_stage_eta_seconds` | Gauge | `stage`, `phase`, `run_uuid` | derived | Linear-extrapolation ETA to phase boundary or stage end. |
+| `bffi_dependency_health` | Gauge | `stage`, `dep`, `run_uuid` | `health` | `2`=up (green), `1`=degraded (amber), `0`=down (red), `NaN`=not_configured (grey). |
+| `bffi_dependency_probe_latency_ms` | Gauge | `stage`, `dep`, `run_uuid` | `health` | Most recent probe round-trip latency in ms. |
+| `bffi_dependency_last_probe_timestamp` | Gauge | `stage`, `dep`, `run_uuid` | `health` | Unix ts of the most recent probe (drives the dashboard's freshness overlay; P-12 Phase C). |
+| `bffi_watchdog_events_total` | Counter | `stage`, `event`, `run_uuid` | `watchdog` | Cumulative watchdog events (`timeout`, `retry`, `give_up`, `field_budget_exceeded`, `pair_budget_exceeded`). |
 
 ### Label cardinality
 
@@ -79,9 +96,17 @@ maps one-to-one to a Phase A `stage-events.jsonl` event field.
 - `run_uuid` is one value per pipeline invocation; old runs prune
   naturally as Prometheus retention rolls forward.
 
-Cardinality cap: ~6 stages × ~4 phases + ~5 deps + ~7 outcomes +
-~5 watchdog event types ≈ 100 series total. Well within Prometheus's
-comfort zone.
+Cardinality cap (per `run_uuid`): ~6 stages × ~4 phases + ~5 deps
++ ~7 outcomes + ~5 watchdog event types ≈ 100 series. Multiplied by
+runs accumulated in the current exporter session (an exporter
+restart resets to zero — see § Counter inheritance above):
+
+- **Dev box**: <20 runs / restart → ~2 000 series. Well within
+  Prometheus's comfort zone.
+- **Production**: 1 run / night, weekly restart → ~700 series.
+- **Long-uptime hypothetical**: 1 run / hour for a month → ~72 000
+  series. Still fine but the runbook recommends monthly exporter
+  restarts.
 
 ## Bundled Grafana dashboard
 
