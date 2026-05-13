@@ -33,7 +33,7 @@ Each proposal carries these sections:
 
 - **Status** — `proposed` / `rejected (reason)`. Read that first
   before treating anything in here as a plan of record.
-- **Scope** — rough size (half-day / 1-2 days / 1-2 weeks / milestone).
+- **Scope** — rough size (half-day / 1-2 days / 1-2 weeks / multi-stage).
 - **Proposal-base commit** — see "Tying proposals to version
   control" below.
 - **Motivation** — what the current pipeline does, and what's

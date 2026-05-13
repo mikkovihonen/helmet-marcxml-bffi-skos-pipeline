@@ -12,7 +12,7 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - `docs/ci-strategy.md` — CI rationale and PR template.
 - `docs/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions; consult before adding any `bffi:*` term to spec, code, or shapes.**
 - `docs/plans/` — committed-to-action plans of record (`p-<NN>-<slug>.md`). Each plan has sequenced phases with verification checkpoints, a risk register, and a rollback procedure, plus a `Plan-base commit` and `Phase commits` for tying execution to git history. **State is encoded by sub-folder**: `proposed/` (forward-looking ideas, `prop-<NN>-<slug>.md`, status `proposed | rejected (reason)`), `backlog/` (graduated, drafted, not started), `in-progress/` (at least one phase shipped), `completed/` (done), `abandoned/` (dropped, with reason). State transitions happen via `git mv` in the same commit as the corresponding phase commit. When a proposal graduates into a backlog plan, the proposal file is **deleted** — the plan's own `Source proposal:` field preserves the link backwards. **Consult `docs/plans/proposed/` and the current plans before recommending an architectural change** — the idea may already be on record.
-- `docs/archived/` — historical / superseded documents kept for reference only. Includes `BUILD_PLAN.md` (milestone-ordered checklist M0-M13; the live execution detail has moved to `docs/plans/`) and `marcxml-to-bffi-skosmos-pipeline.md` (original technical spec; live successors are listed in the document's archived banner). Path references from source code or live docs may point here; do not edit archived material except for typos or to add a supersede pointer.
+- `docs/archived/` — historical / superseded documents kept for reference only. Includes `BUILD_PLAN.md` (original build-order checklist for M0-M13 — superseded by `docs/plans/`; **don't cite it as the source of M-number meanings in new code or docs**, the M-prefix today means pipeline stage, not build milestone) and `marcxml-to-bffi-skosmos-pipeline.md` (original technical spec; live successors are listed in the document's archived banner). Path references from source code or live docs may point here; do not edit archived material except for typos or to add a supersede pointer.
 
 ## Operating constraints
 
@@ -50,8 +50,8 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - Before starting work on a plan, read it through and run its `git diff <plan-base>..HEAD -- <relevant paths>` drift check. If you're not working off a plan, check `docs/plans/` (all sub-folders, including `proposed/`) first to see whether a plan or proposal already covers the work.
 - `make lint && make test` must pass before any commit.
 - LLM eval (`make eval`) runs locally on the M5 Max — never in CI. Output is pasted into the PR description if the PR touches `prompts/`, `gold/`, or `src/bffi_pipeline/stages/judge.py`.
-- Commit messages tag the relevant milestone or plan phase, e.g. `M3: BIBFRAME → BFFI conversion` for milestone work or `P-04 Phase A: lock embedding model` for plan execution.
-- When a plan phase completes, fill in its `Phase commit` field in the plan document with the merge commit hash. Don't update the historical milestone checkboxes in `docs/archived/BUILD_PLAN.md`.
+- Commit messages tag the relevant pipeline stage or plan phase, e.g. `M3: BIBFRAME → BFFI conversion` for stage-scoped work (M3 = pipeline stage `bf-to-bffi`; the M-prefix is the live stage ID, not a `BUILD_PLAN` milestone reference) or `P-04 Phase A: lock embedding model` for plan execution.
+- When a plan phase completes, fill in its `Phase commit` field in the plan document with the merge commit hash. The archived `docs/archived/BUILD_PLAN.md` checklist is frozen and is not updated as new work ships.
 
 ## What not to do
 

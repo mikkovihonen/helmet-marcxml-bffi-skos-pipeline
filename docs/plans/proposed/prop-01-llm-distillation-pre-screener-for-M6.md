@@ -1,7 +1,7 @@
 # P-01 — LLM-distillation pre-screener for M6
 
 **Status**: proposed.
-**Scope**: 1-2 days for the MVP (Option 1 below); milestone-sized if
+**Scope**: 1-2 days for the MVP (Option 1 below); multi-stage if
 we also want Options 2 + 3.
 **Proposal-base commit**: `8f4affe` (initial draft as part of the
 combined `performance-enhancements.md`). Material updates since

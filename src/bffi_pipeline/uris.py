@@ -5,7 +5,9 @@ concatenate URI strings elsewhere (see ``CLAUDE.md`` "Conventions"). URIs
 are SHA-1 hashes of canonicalised inputs so re-runs and the merge step in
 M8 are idempotent under benign surface variations.
 
-Two minting rules coexist (see spec § 3 and BUILD_PLAN M1/M3):
+Two minting rules coexist (see spec § 3; the two pipeline stages
+involved are M1 — canonical mint — and M3 — raw mint inside the
+BIBFRAME→BFFI hop):
 
 * **Canonical** (M1, used by M8 merge):
   :func:`mint_work_uri` ``(creator_uri, original_title)``,

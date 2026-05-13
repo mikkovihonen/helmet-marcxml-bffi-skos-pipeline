@@ -14,8 +14,7 @@ running the LLM. Extractor-driven mode returns the full
 ``bffi:Contribution`` blocks on the relevant Expression.
 
 Tokenisation and the stop-word list were tuned against a 5,000-record
-random sample from the 800k Helmet corpus; see
-``docs/archived/BUILD_PLAN.md`` § M3 for the measurement rationale.
+random sample from the 800k Helmet corpus.
 """
 
 from __future__ import annotations

@@ -1,11 +1,11 @@
 # Pipeline driver scripts
 
 End-to-end runners that chain the BFFI pipeline stages together with
-per-stage milestone logging. Each emits `STAGE_<NAME>_START` and
+per-stage progress logging. Each emits `STAGE_<NAME>_START` and
 `STAGE_<NAME>_DONE <elapsed>s` lines to stdout + a per-run log so a
 `tail -F | grep STAGE_` streams progress without polling. Per-stage
 stdout/stderr (rdflib warnings, summary tables) goes only to the log
-file — the milestone stream stays uncluttered.
+file — the stage-event stream stays uncluttered.
 
 ## When to use which
 
@@ -113,7 +113,7 @@ is recovered where checkpointed.
 ## Operator helpers (not pipeline drivers)
 
 One-shot wrappers that exist for operator-side convenience and don't
-emit `STAGE_*` milestones:
+emit `STAGE_*` events:
 
 | Script | Purpose |
 |---|---|

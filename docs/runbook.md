@@ -1,12 +1,12 @@
 # Production runbook
 
 End-to-end recipe for running the BFFI pipeline against the
-~800 k-record Helmet corpus on the M5 Max. M0-M12 are committed;
-the surface-level checks of the Skosmos UI (M11) are user-side
-smoke checks documented near the bottom of this file.
+~800 k-record Helmet corpus on the M5 Max. All stages M2-M10 are
+committed; the surface-level checks of the Skosmos UI (M11) are
+user-side smoke checks documented near the bottom of this file.
 
 This is the *canonical* sequence — start here, not from individual
-milestone notes.
+stage docs.
 
 ## Pinned versions
 

@@ -27,4 +27,4 @@ N/A
       `make eval` output is pasted above and compared against main
 - [ ] Documentation updated (README / runbook / docstrings) if the
       user-facing surface changed
-- [ ] BUILD_PLAN milestone checklist updated where applicable
+- [ ] If this PR ships a plan-phase commit, the plan's `Phase commits:` field is filled with the merge hash and the plan moved to the correct lifecycle folder if applicable

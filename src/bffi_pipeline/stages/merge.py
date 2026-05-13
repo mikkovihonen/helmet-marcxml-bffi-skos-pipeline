@@ -6,8 +6,7 @@ via :func:`bffi_pipeline.uris.mint_work_uri`, unions the
 ``bf:identifiedBy`` sets so the canonical Work carries one
 identifier per absorbed Helmet record, rewrites
 ``bffi:expressionOf`` to point at the canonical URI, and emits one
-``bffi:AdminMetadata`` block per canonical Work per spec § 8 +
-BUILD_PLAN M8.
+``bffi:AdminMetadata`` block per canonical Work per spec § 8.
 
 Outputs land under ``BFFI_DATA_DIR``:
 
@@ -964,7 +963,7 @@ def _emit_canonical_work(
     # creators to reconcile. Without this, M9 returns 0 entities.
     _propagate_primary_contributions(g, canonical_uri=canonical_uri, members=members)
 
-    # AdminMetadata block — every predicate from spec § 8 / BUILD_PLAN M8.
+    # AdminMetadata block — every predicate from spec § 8.
     admin_uri = _admin_metadata_uri(str(canonical_uri))
     earliest = _earliest_converted_at(members, helmet_entries)
     merged_at_iso = description_change_date.isoformat()

@@ -1,7 +1,7 @@
 """Stage M9: reconciliation against KANTO / VIAF / YSO / KAUNO / MUSO.
 
 Resolves the literal creator / subject strings on canonical Works
-into authority URIs. The decision logic (spec § 6 + BUILD_PLAN M9)
+into authority URIs. The decision logic (spec § 6)
 keeps the LLM out of the loop when lexical evidence is decisive:
 
 0. ``"reconciliation-local"`` — tier-0 exact-prefLabel match against
@@ -104,7 +104,7 @@ def _m9_probe_dependencies(local_resolver: LocalConceptResolver | None) -> None:
 # --- Constants ------------------------------------------------------------
 
 #: Spec § 6 thresholds. Tightening these requires a corresponding
-#: BUILD_PLAN amendment so policy changes stay visible in review.
+#: plan amendment so policy changes stay visible in review.
 LEXICAL_DIRECT_THRESHOLD: Final[float] = 0.95
 LEXICAL_FLOOR: Final[float] = 0.70
 LLM_CONFIDENCE_THRESHOLD: Final[float] = 0.80
@@ -152,7 +152,7 @@ def _finto_search_query(literal: str) -> str:
     return literal if literal.endswith("*") else f"{literal}*"
 
 
-#: Stage tags, kept aligned with spec § 8 / BUILD_PLAN M9. These are the
+#: Stage tags, kept aligned with spec § 8. These are the
 #: same Literal type as :data:`ReconciliationStage` below; declared via
 #: forward strings so mypy treats the constants as the narrowed Literal,
 #: not just ``str``.
@@ -863,7 +863,7 @@ def decide_reconciliation(
     candidates: list[AuthorityCandidate],
     picker: LLMPicker,
 ) -> ReconciliationOutcome:
-    """Apply the four-tier logic from spec § 6 + BUILD_PLAN M9.
+    """Apply the four-tier logic from spec § 6.
 
     Kept for backwards compatibility with the ``reconcile_one``
     single-threaded path and existing unit tests. The P-10 Phase A
@@ -904,7 +904,7 @@ _KIND_TO_FINTO_VOCAB: Final[dict[AuthorityKind, str]] = {
 class FintoSkosmosClient:
     """Real client for Finto's REST API (https://api.finto.fi/rest/v1).
 
-    Caches results per ``(vocab, query, date)`` per spec § 6 / BUILD_PLAN M9
+    Caches results per ``(vocab, query, date)`` per spec § 6
     so re-runs within the day don't hammer the public service. Inject
     ``http_client`` (an ``httpx.Client``) so tests can use
     ``httpx.MockTransport`` to assert on the request shape and feed

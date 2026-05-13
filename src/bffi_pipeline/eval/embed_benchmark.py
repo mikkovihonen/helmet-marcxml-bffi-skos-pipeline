@@ -2,7 +2,7 @@
 
 Picks the embedding model for Stage 2 by measuring the cosine-similarity
 gap between ``same_work`` and ``different_work`` gold pairs. The wider
-the gap, the more discriminating the model. Spec § 6 / BUILD_PLAN M5
+the gap, the more discriminating the model. Spec § 6
 budget half a day for this comparison across BGE-M3, multilingual-e5,
 and jina-v3.
 

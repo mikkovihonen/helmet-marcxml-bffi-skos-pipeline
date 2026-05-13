@@ -44,7 +44,7 @@ PROVENANCE_META_GRAPH_URI: Final[str] = "http://urn.fi/URN:NBN:fi:bib:graph:prov
 PROVENANCE_FILENAME: Final[str] = "provenance.ttl"
 PROVENANCE_META_FILENAME: Final[str] = "provenance-meta.ttl"
 
-#: Compaction policy from spec § 8 / BUILD_PLAN M7. ``rawResponse`` literals
+#: Compaction policy from spec § 8. ``rawResponse`` literals
 #: older than this become eligible for stripping; CLI startup nags when
 #: ``lastCompactedAt`` is older than this.
 COMPACTION_AGE_DAYS: Final[int] = 90
@@ -238,9 +238,10 @@ def stale_provenance_warning(
 ) -> str | None:
     """Return a human-readable warning string when the provenance graph is stale.
 
-    Suppressed silently when no provenance file exists (early-milestone
-    or first-run case). Fires when the file exists *and* either the
-    meta sentinel is missing or its date is older than the policy.
+    Suppressed silently when no provenance file exists (first-run
+    case, before any stage emits provenance). Fires when the file
+    exists *and* either the meta sentinel is missing or its date is
+    older than the policy.
     """
     prov_target = provenance_path or default_provenance_path()
     if not prov_target.is_file():

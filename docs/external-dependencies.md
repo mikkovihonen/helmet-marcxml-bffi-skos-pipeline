@@ -1,6 +1,6 @@
 # External dependencies — records to request from Helmet cataloguers
 
-The pipeline can be built autonomously through M0–M4 using synthetic MARCXML, but **M5 onwards requires real records** because the dedup quality, embedding benchmark, and gold-set development all depend on realistic field content. Surface these asks at the milestones below — don't proceed past the gates listed on synthetic data alone.
+Pipeline stages up to and including M4 (blocking-key derivation) can run autonomously on synthetic MARCXML, but **M5 onwards requires real records** because the dedup quality, embedding benchmark, and gold-set development all depend on realistic field content. Surface these asks at the stage gates below — don't proceed past the gates listed on synthetic data alone.
 
 A Finnish-language snapshot of the cataloguer-facing requests is available in `docs/archived/cataloguer-asks-fi.md` for forwarding directly to Helmet staff. The English version here is the live source — regenerate the Finnish copy from this document if the asks change.
 
@@ -167,7 +167,7 @@ These are dependencies on a human cataloguer, not technical decisions Claude Cod
 - **Before starting M9:** remind about Ask 2.
 - **Before the M10 production publish (not the sample publish):** remind about Ask 4.
 
-If asks are not yet fulfilled, proceed with synthetic data where possible and explicitly note in the PR description and runbook which milestone is currently "blocked on external input." The user decides whether to wait or work around.
+If asks are not yet fulfilled, proceed with synthetic data where possible and explicitly note in the PR description and runbook which pipeline stage is currently "blocked on external input." The user decides whether to wait or work around.
 
 ## Phrasing for the cataloguer
 

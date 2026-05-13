@@ -56,8 +56,10 @@ flowchart TD
     PROV -.-> M12[M12: gold-set eval<br/>+ growth from overrides]
 ```
 
-Each box maps to a milestone in [`docs/archived/BUILD_PLAN.md`](docs/archived/BUILD_PLAN.md).
-Stage code lives in [`src/bffi_pipeline/stages/`](src/bffi_pipeline/stages/);
+Each box is a pipeline stage. The M-prefixed stage IDs (M2, M3, M5,
+M6, M8, M9, M10) are the canonical identifiers used throughout the
+code and docs.  Stage code lives in
+[`src/bffi_pipeline/stages/`](src/bffi_pipeline/stages/);
 orchestration in [`src/bffi_pipeline/cli.py`](src/bffi_pipeline/cli.py).
 
 The MARCXML at the head of the diagram is produced by a sibling package,
@@ -150,11 +152,10 @@ plan than to interrupt.
 │   ├── validation-strategy.md # five validation boundaries
 │   ├── local-inference.md     # Apple Silicon / mlx-lm setup
 │   ├── ci-strategy.md         # CI + PR template rationale
-│   ├── proposals/             # forward-looking sketches (prop-<NN>-<slug>.md)
-│   ├── plans/                 # plans of record (p-<NN>-<slug>.md)
-│   └── archived/              # reference only — BUILD_PLAN.md, original spec, etc.
+│   ├── plans/                 # plans of record (p-<NN>-<slug>.md, plus proposed/ subfolder)
+│   └── archived/              # reference only — original spec + the old BUILD_PLAN.md
 ├── src/bffi_pipeline/
-│   ├── stages/                # per-milestone stage code (don't cross-import)
+│   ├── stages/                # per-stage code (don't cross-import)
 │   ├── eval/                  # gold-set loader, harness, growth
 │   ├── provenance/            # PROV-O + bffi-prov writer / compaction
 │   ├── validation/            # SHACL boundary validators

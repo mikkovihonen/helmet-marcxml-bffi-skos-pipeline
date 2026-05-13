@@ -84,9 +84,9 @@ app.add_typer(provenance_app, name="provenance")
 def _root() -> None:
     """Root callback so subcommands attach cleanly.
 
-    Runs the stale-provenance warning per spec § 8 / BUILD_PLAN M7
-    every invocation; suppressed silently when no provenance file
-    exists (early-milestone or first-run case). Also bootstraps the
+    Runs the stale-provenance warning per spec § 8 every invocation;
+    suppressed silently when no provenance file exists (first-run
+    case, before any stage has emitted provenance). Also bootstraps the
     P-11 Phase A active observability emitter so every subcommand can
     emit events without per-command plumbing — read-only commands
     (``status``, ``workkey-stats``, etc.) simply never call

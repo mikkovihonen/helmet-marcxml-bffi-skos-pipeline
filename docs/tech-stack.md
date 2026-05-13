@@ -195,4 +195,4 @@ PR template prompts for the eval block whenever a PR touches `prompts/`, `gold/`
 - New to the project? Read [`runbook.md`](runbook.md) first — that's the canonical end-to-end recipe.
 - Setting up the LLM stack? [`local-inference.md`](local-inference.md).
 - Adding a new validation step? [`validation-strategy.md`](validation-strategy.md).
-- Adding a new milestone or refactor? Surface as a proposal under [`docs/plans/proposed/`](plans/proposed/) first; graduate to a plan under [`docs/plans/backlog/`](plans/backlog/) once committed.
+- Adding a new pipeline stage or significant refactor? Surface as a proposal under [`docs/plans/proposed/`](plans/proposed/) first; graduate to a plan under [`docs/plans/backlog/`](plans/backlog/) once committed.

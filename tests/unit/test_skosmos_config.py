@@ -139,7 +139,7 @@ def test_vocabulary_sparql_dialect_is_jenatext(graph: Graph) -> None:
 
 
 def test_index_show_class_carries_both_bffi_types(graph: Graph) -> None:
-    """BUILD_PLAN M11 commits two indexShowClass entries: bffi:Work and bffi:Expression."""
+    """M11 (Skosmos config) commits two indexShowClass entries: bffi:Work and bffi:Expression."""
     vocab = _vocabulary_subject(graph)
     classes = set(graph.objects(vocab, SKOSMOS.indexShowClass))
     assert BFFI.Work in classes

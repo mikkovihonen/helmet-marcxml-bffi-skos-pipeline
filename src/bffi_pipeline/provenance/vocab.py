@@ -2,7 +2,7 @@
 
 The provenance graph is layered with the BFFI-native AdminMetadata view (see
 spec § 8). M2 emits the first :data:`MarcConversion` Activities; later
-milestones extend the vocabulary with :data:`WorkMergeDecision` (M6) and
+stages extend the vocabulary with :data:`WorkMergeDecision` (M6) and
 :data:`HumanReview` (M7+).
 
 This module is intentionally pure constants — no I/O, no graph mutation —

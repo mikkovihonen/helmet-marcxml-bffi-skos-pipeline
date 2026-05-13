@@ -137,8 +137,8 @@ def load_contrib_gold_set(path: Path | None = None) -> list[ContribGoldCase]:
     if not target.is_file():
         raise FileNotFoundError(
             f"Contributor-extraction gold set not found at {target!s}. "
-            "Bootstrap with cases drawn from real Helmet records (see "
-            "docs/archived/BUILD_PLAN.md § M3 for the contrib-cascade follow-ups)."
+            "Bootstrap with cases drawn from real Helmet records "
+            "(see docs/plans/backlog/p-05-m3-cascade-follow-ups.md)."
         )
     cases: list[ContribGoldCase] = []
     for line_no, line in enumerate(target.read_text(encoding="utf-8").splitlines(), start=1):

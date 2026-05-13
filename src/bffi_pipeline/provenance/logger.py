@@ -1,4 +1,4 @@
-"""Provenance writers for spec § 8 + BUILD_PLAN M7.
+"""Provenance writers for spec § 8.
 
 Two public entry points:
 
@@ -196,7 +196,7 @@ def log_reconciliation(
     activity_uri: URIRef | None = None,
     was_influenced_by: URIRef | None = None,
 ) -> URIRef:
-    """Mint a ``bffi-prov:Reconciliation`` Activity per spec § 6 / BUILD_PLAN M9.
+    """Mint a ``bffi-prov:Reconciliation`` Activity per spec § 6.
 
     The four ``stage`` values (``"reconciliation-lexical"``,
     ``"reconciliation-llm"``, ``"reconciliation-fallback"``,
