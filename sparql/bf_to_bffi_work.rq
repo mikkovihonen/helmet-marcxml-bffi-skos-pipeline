@@ -11,13 +11,14 @@
 # (not `bflc:PrimaryContribution` as the spec example uses). We match the
 # converter's actual output here.
 
-PREFIX bf:    <http://id.loc.gov/ontologies/bibframe/>
-PREFIX bflc:  <http://id.loc.gov/ontologies/bflc/>
-PREFIX bffi:  <http://urn.fi/URN:NBN:fi:schema:bffi:>
-PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX rdfs:  <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX skos:  <http://www.w3.org/2004/02/skos/core#>
-PREFIX arq:   <http://jena.apache.org/ARQ/function#>
+PREFIX bf:      <http://id.loc.gov/ontologies/bibframe/>
+PREFIX bflc:    <http://id.loc.gov/ontologies/bflc/>
+PREFIX bffi:    <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX madsrdf: <http://www.loc.gov/mads/rdf/v1#>
+PREFIX rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos:    <http://www.w3.org/2004/02/skos/core#>
+PREFIX arq:     <http://jena.apache.org/ARQ/function#>
 
 CONSTRUCT {
   ?workURI a bffi:Work ;
@@ -65,7 +66,21 @@ WHERE {
        bf:agent ?primaryAgent .
     BIND(BNODE() AS ?contrib)
   }
-  OPTIONAL { ?bfWork bf:subject        ?subject }
+  # P-15: when marc2bibframe2 emits the subject as a bf:Place / bf:Person /
+  # bf:Organization / bf:Meeting with a cataloguer-supplied authority URI
+  # (MARC $0 → ``madsrdf:isIdentifiedByAuthority <auth-uri>`` on the
+  # subject node), prefer the authority URI as the bffi:subject value.
+  # Without this, M9 re-reconciles the literal label from scratch and
+  # may bind the Swedish form to ``allars`` while the Finnish form binds
+  # to ``yso`` (the bilingual-subject bug surfaced by the 2026-05-13
+  # cataloguer-audit on b26322791). ``bf:Topic`` (650 topical subjects)
+  # already emits the authority URI directly as ``rdf:about``, so the
+  # COALESCE is a no-op for the Topic case (?bfSubjectAuth is unbound).
+  OPTIONAL {
+    ?bfWork bf:subject ?bfSubject .
+    OPTIONAL { ?bfSubject madsrdf:isIdentifiedByAuthority ?bfSubjectAuth }
+    BIND(COALESCE(?bfSubjectAuth, ?bfSubject) AS ?subject)
+  }
   OPTIONAL { ?bfWork bf:classification ?class }
   OPTIONAL { ?bfWork bf:originDate     ?originDate }
   OPTIONAL { ?bfWork bf:genreForm      ?workGenre }

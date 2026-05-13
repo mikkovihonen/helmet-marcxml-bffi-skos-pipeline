@@ -144,6 +144,82 @@ def test_helmet_identifier_preserved_on_both_sides() -> None:
         assert (ident, RDF.value, Literal("10000001")) in bffi
 
 
+def test_subject_with_authority_cross_link_resolves_to_authority_uri() -> None:
+    """P-15: bf:Place with ``madsrdf:isIdentifiedByAuthority`` collapses to the
+    authority URI as ``bffi:subject``, not the per-record raw URI.
+
+    Reproduces the b26322791 case from the 2026-05-13 cataloguer audit:
+    marc2bibframe2 emits 651 geographic subjects as ``bf:Place`` with a
+    per-record raw URI plus a ``madsrdf:isIdentifiedByAuthority`` link
+    to the cataloguer-supplied ``$0`` URI. Pre-fix M3 emitted the raw URI
+    as ``bffi:subject`` and M9 re-reconciled from the literal label —
+    binding the Swedish form to ``allars`` instead of ``yso``. Post-fix
+    the YSO URI propagates directly so M9 sees the entity pre-bound and
+    skips reconcile.
+    """
+    yso_italy = URIRef("http://www.yso.fi/onto/yso/p105111")
+    raw_place_uri = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b26322791#Place651-54")
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:      <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix madsrdf: <http://www.loc.gov/mads/rdf/v1#> .
+            @prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Mafia-saga" ] ;
+                bf:subject <{raw_place_uri}> .
+
+            <{raw_place_uri}> a bf:Place ;
+                rdfs:label "Italien" ;
+                madsrdf:isIdentifiedByAuthority <{yso_italy}> .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    subjects = set(bffi.objects(EXPECTED_WORK, V.BFFI.subject))
+    assert yso_italy in subjects, f"YSO URI missing from bffi:subject: {subjects}"
+    assert raw_place_uri not in subjects, (
+        f"raw bf:Place URI leaked into bffi:subject (P-15 fix did not apply): {subjects}"
+    )
+
+
+def test_subject_without_authority_cross_link_falls_back_to_bf_subject_uri() -> None:
+    """P-15: subjects WITHOUT a ``madsrdf:isIdentifiedByAuthority`` link
+    continue to use the bf:subject URI as the ``bffi:subject`` value.
+
+    Pre-existing behaviour is preserved for ``bf:Topic`` (650 topical
+    subjects), which marc2bibframe2 emits with the YSO URI directly as
+    ``rdf:about`` and no separate authority cross-link. The COALESCE
+    path's else-branch covers this case.
+    """
+    yso_topic = URIRef("http://www.yso.fi/onto/yso/p19771")  # religionspsykologia
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Religionspsykologi" ] ;
+                bf:subject <{yso_topic}> .
+
+            <{yso_topic}> a bf:Topic ;
+                rdfs:label "religionspsykologia" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    subjects = set(bffi.objects(EXPECTED_WORK, V.BFFI.subject))
+    assert yso_topic in subjects, f"bf:Topic URI missing from bffi:subject: {subjects}"
+
+
 def test_post_process_tags_pref_labels_with_language() -> None:
     source = _build_source()
     bffi = construct_bffi(source)
