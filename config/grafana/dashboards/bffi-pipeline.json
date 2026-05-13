@@ -1713,7 +1713,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1777,7 +1781,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -1866,7 +1874,11 @@
         "displayMode": "basic",
         "orientation": "horizontal",
         "showUnfilled": true,
-        "valueMode": "color"
+        "valueMode": "color",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
