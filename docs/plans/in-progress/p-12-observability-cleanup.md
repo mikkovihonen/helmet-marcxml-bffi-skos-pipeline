@@ -13,7 +13,7 @@ src/bffi_pipeline/stages/judge.py
 config/grafana/dashboards/bffi-pipeline.json`.
 **Phase commits**:
 
-- Phase A (exporter tail-loop double-count fix): `<unfilled>`
+- Phase A (exporter tail-loop double-count fix): `0eaea9b` (2026-05-13). One-char fix in `metrics_exporter.py:279` (`<=` → `<`) plus three regression tests covering idle-poll no-op, truncation-still-re-reads, and the bench-realistic mixed pattern. 906 total tests green; lint + mypy clean. `docs/observability.md` extended with the Counter inheritance section.
 - Phase B (`not_configured` health status): `<unfilled>`
 - Phase C (dashboard freshness overlay): `<unfilled>`
 - Phase D (M9 Phase 2 progress events): `<unfilled>`
