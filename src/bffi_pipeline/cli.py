@@ -66,6 +66,12 @@ def _init_observability(settings: Settings) -> StageEventEmitter | None:
     run_uuid = settings.run_uuid.strip() or _uuid.uuid4().hex
     emitter = StageEventEmitter(sidecar_path=sidecar_path, run_uuid=run_uuid)
     set_active_emitter(emitter)
+    # Echo the active run_uuid so operators inspecting a fresh invocation
+    # (especially direct ``bffi-pipeline <subcmd>`` calls that bypass the
+    # runner scripts) know which run to pick from Grafana's
+    # ``$active_run`` dropdown. Stderr so it stays out of any stdout
+    # capture / pipe consumers.
+    typer.echo(f"[bffi-pipeline] BFFI_RUN_UUID={run_uuid}", err=True)
     return emitter
 
 

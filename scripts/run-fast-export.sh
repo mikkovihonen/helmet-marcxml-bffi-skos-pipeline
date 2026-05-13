@@ -30,7 +30,16 @@ BFFI_DATA_DIR="${BFFI_DATA_DIR:-./data}"
 PIPELINE_LOG="${PIPELINE_LOG:-$BFFI_DATA_DIR/pipeline.log}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-export BFFI_DATA_DIR PIPELINE_LOG SKIP_M5_M6=1 SKIP_RECONCILE=1
+# Pin run_uuid here (not just in the delegate) so the operator
+# tailing this script's stdout sees it without grepping the
+# delegate's log. The delegate inherits via export.
+if [[ -z "${BFFI_RUN_UUID:-}" ]]; then
+    BFFI_RUN_UUID="$(uuidgen | tr 'A-Z' 'a-z' | tr -d '-')"
+fi
+
+export BFFI_DATA_DIR PIPELINE_LOG BFFI_RUN_UUID SKIP_M5_M6=1 SKIP_RECONCILE=1
+
+echo "[run-fast-export] BFFI_RUN_UUID=$BFFI_RUN_UUID" >&2
 
 mkdir -p "$BFFI_DATA_DIR"
 
