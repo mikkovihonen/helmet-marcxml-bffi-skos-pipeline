@@ -1,8 +1,6 @@
 # Generated / runtime data (configurable via BFFI_*_DIR env vars).
 # Anchor with a leading slash so test fixtures under tests/data/ are tracked.
 /data/
-# Side-data dirs from focused audit / bench runs (one per timestamp).
-/data-*/
 /logs/
 /eval-runs/
 /marcxml/

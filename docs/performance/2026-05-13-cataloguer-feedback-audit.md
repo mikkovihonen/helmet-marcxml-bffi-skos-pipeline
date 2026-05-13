@@ -22,7 +22,7 @@ in `gold/` and feeds directly into the P-14 Phase C audit gate
 | Git HEAD at run start | `7ba3587` |
 | Source | Cataloguer email 2026-05-13, persisted at [`gold/cataloguer-feedback-2026-05-13.jsonl`](../../gold/cataloguer-feedback-2026-05-13.jsonl) |
 | Records | 19 MARCXML files in `marcxml/sierra/` (pre-pulled from full Helmet export) |
-| Working dir | `data-cataloguer-audit-2026-05-13/` |
+| Working dir | `scratchpad/data-cataloguer-audit-2026-05-13/` (gitignored — local-only run artefacts) |
 | Run UUID | `b2ef5a220e944f2e8e1e8f283f1416a7` |
 | `mlx_lm.server` 8B | Same flags as P-10 Phase E bench |
 | M9 flags | Default: cache enabled, `submission` ordering, tier-0 expansion **off** |
