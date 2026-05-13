@@ -196,6 +196,17 @@ class PipelineMetrics:
             labelnames=("stage", "run_uuid"),
             registry=self.registry,
         )
+        # Free-text run description set via ``bffi-pipeline plan
+        # --description "..."`` (forwarded to ``emit_plan(..., description=)``).
+        # Stored as a label so the dashboard's templating layer can
+        # extract it via ``label_values()``. Value is always 1 — the
+        # gauge exists only to carry the label.
+        self.run_description = Gauge(
+            "bffi_run_description",
+            "Free-text description of the run, set by the runner script.",
+            labelnames=("run_uuid", "description"),
+            registry=self.registry,
+        )
 
 
 #: Health-status string → numeric gauge mapping. Matches the Grafana
@@ -334,6 +345,9 @@ def apply_event(  # noqa: PLR0912 — dispatch table over the StageEvent enum; f
             for stage in planned_stages:
                 if isinstance(stage, str):
                     metrics.stage_planned.labels(stage=stage, run_uuid=run).set(1)
+        description = row.extra.get("description") or ""
+        if isinstance(description, str) and description:
+            metrics.run_description.labels(run_uuid=run, description=description).set(1)
 
 
 def rehydrate(metrics: PipelineMetrics, sidecar_path: Path) -> int:

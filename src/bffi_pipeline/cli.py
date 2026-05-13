@@ -411,8 +411,21 @@ def plan_command(
             ),
         ),
     ],
+    description: Annotated[
+        str,
+        typer.Option(
+            "--description",
+            "-d",
+            help=(
+                "Free-text description of the run (e.g. 'Phase E A/B "
+                "shot 1: submission ordering'). Surfaced in the "
+                "dashboard's top header tile via the "
+                "``bffi_run_description`` gauge."
+            ),
+        ),
+    ] = "",
 ) -> None:
-    """Declare the planned stage set for the active run.
+    """Declare the planned stage set + optional description for the active run.
 
     Runner scripts call this once at start with the full list of
     stages they intend to fire, so the dashboard's state tiles can
@@ -428,8 +441,12 @@ def plan_command(
     """
     from bffi_pipeline.stages.observability import emit_plan as _emit_plan
 
-    _emit_plan(stages)
-    typer.echo(f"Declared plan: {', '.join(stages)}", err=True)
+    _emit_plan(stages, description=description)
+    rendered = ", ".join(stages)
+    if description:
+        typer.echo(f"Declared plan ({description}): {rendered}", err=True)
+    else:
+        typer.echo(f"Declared plan: {rendered}", err=True)
 
 
 @app.command("workkey-stats")

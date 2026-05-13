@@ -204,7 +204,7 @@ def emit_if_active(
         )
 
 
-def emit_plan(stages: list[str]) -> None:
+def emit_plan(stages: list[str], description: str = "") -> None:
     """Emit a single ``plan`` event listing every stage the active run
     intends to execute.
 
@@ -215,15 +215,23 @@ def emit_plan(stages: list[str]) -> None:
     <subcmd>`` invocations don't emit a plan; their non-active
     stages correctly stay "skipped" in the dashboard view.
 
+    Optional ``description`` is a free-text label (e.g. "Full pipeline
+    on /data/marcxml-2026-Q2") that the dashboard surfaces in the
+    header tile. Stored as a label on the ``bffi_run_description``
+    gauge so Grafana's templating layer can interpolate it.
+
     No-op when no emitter is active (test fixtures that bypass the
     CLI bootstrap).
     """
     emitter = _active_emitter
     if emitter is not None:
+        extra: dict[str, Any] = {"stages": list(stages)}
+        if description:
+            extra["description"] = description
         emitter.emit(
             stage="pipeline",
             event="plan",
-            extra={"stages": list(stages)},
+            extra=extra,
         )
 
 

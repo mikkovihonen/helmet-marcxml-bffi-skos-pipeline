@@ -77,8 +77,16 @@ if [[ "${SKIP_M5_M6:-0}" != "1" ]]; then PLAN+=(m5 m6); fi
 PLAN+=(m8)
 if [[ "${SKIP_RECONCILE:-0}" != "1" ]]; then PLAN+=(m9); fi
 PLAN+=(skosify load)
-uv run bffi-pipeline plan "${PLAN[@]}" >>"$PIPELINE_LOG" 2>&1 || true
+RUN_DESCRIPTION="Full pipeline run · MARCXML=$MARCXML_DIR"
+if [[ "${SKIP_M5_M6:-0}" == "1" || "${SKIP_RECONCILE:-0}" == "1" ]]; then
+    RUN_DESCRIPTION="${RUN_DESCRIPTION} (skipping:"
+    [[ "${SKIP_M5_M6:-0}" == "1" ]] && RUN_DESCRIPTION+=" M5+M6"
+    [[ "${SKIP_RECONCILE:-0}" == "1" ]] && RUN_DESCRIPTION+=" M9"
+    RUN_DESCRIPTION+=")"
+fi
+uv run bffi-pipeline plan "${PLAN[@]}" --description "$RUN_DESCRIPTION" >>"$PIPELINE_LOG" 2>&1 || true
 log "  plan: ${PLAN[*]}"
+log "  description: $RUN_DESCRIPTION"
 
 # --- M2 ------------------------------------------------------------------
 TS=$(date +%s); log "STAGE_M2_START"

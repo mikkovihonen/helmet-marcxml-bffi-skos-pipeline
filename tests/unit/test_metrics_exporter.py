@@ -640,13 +640,13 @@ def test_grafana_dashboard_pipeline_overview_row_covers_every_stage() -> None:
         / "bffi-pipeline.json"
     )
     data = json.loads(dashboard_path.read_text(encoding="utf-8"))
-    # Overview row sits at y=0 with width-3 stat tiles.
+    # Overview row used to sit at y=0; the run-header row added later
+    # pushed it down. Locate it by shape (w=3 stat tiles, one per stage)
+    # rather than by literal coordinate.
     overview_tiles = [
         p
         for p in data["panels"]
-        if p.get("type") == "stat"
-        and p.get("gridPos", {}).get("y") == 0
-        and p.get("gridPos", {}).get("w") == 3
+        if p.get("type") == "stat" and p.get("gridPos", {}).get("w") == 3
     ]
     assert len(overview_tiles) == 8, (
         f"Expected 8 overview tiles at the top of the dashboard; "

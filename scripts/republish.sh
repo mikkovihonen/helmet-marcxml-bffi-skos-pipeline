@@ -60,7 +60,8 @@ PLAN=()
 for s in m5 m6 m8 m9 skosify load; do
     if (( ${STAGE_ORDER[$s]} >= FROM_ORD )); then PLAN+=("$s"); fi
 done
-uv run bffi-pipeline plan "${PLAN[@]}" >>"$PIPELINE_LOG" 2>&1 || true
+RUN_DESCRIPTION="Republish from $FROM_STAGE"
+uv run bffi-pipeline plan "${PLAN[@]}" --description "$RUN_DESCRIPTION" >>"$PIPELINE_LOG" 2>&1 || true
 
 T0=$(date +%s)
 log "PIPELINE_START $(date -u +%Y-%m-%dT%H:%M:%SZ) (from $FROM_STAGE)"
