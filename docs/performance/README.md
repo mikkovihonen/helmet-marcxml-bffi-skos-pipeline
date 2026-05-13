@@ -58,3 +58,16 @@ in [`docs/local-inference.md`](../local-inference.md) §
   below the ≥3× target; A2 + B + C projected to close the
   gap. Outcome distribution byte-identical to Phase A
   (modulo run-time `descriptionChangeDate`).
+- [`2026-05-13-5k-m2-max-phase-c-attempt.md`](2026-05-13-5k-m2-max-phase-c-attempt.md)
+  — P-10 Phase C bench **attempt** (tier-0 expansion flag on).
+  Did not complete: mlx-lm crashed with Metal GPU
+  out-of-memory at ~2h 20m elapsed (prompt cache hit 49.86 GB
+  on the M2 Max 64 GB). 1 500 picker calls had completed —
+  already past Phase A2's 1 348 baseline without finishing,
+  suggesting Phase C does *not* shrink tier-2 work on this
+  corpus. Phase 1 ran ~30 % slower than A2 because each
+  tier-0 miss now triggers a second SPARQL query against
+  `bffi:foldedLabel`. The 200-sample audit gate (plan § C.5)
+  remains un-run; next attempt either drops mlx-lm
+  `--prompt-cache-size` to 100 or waits for the production
+  M5 Max 128 GB.
