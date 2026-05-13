@@ -155,7 +155,8 @@ plan documents *when the execution was scheduled*.
   one-shot `provenance migrate-v2` CLI rewrites existing
   `data/provenance.ttl`.
 - [`prop-11-structured-observability.md`](prop-11-structured-observability.md)
-  — `proposed`. Add a canonical structured-event stream so operators
+  — `planning (graduated)`. Plan lives at [`docs/plans/backlog/p-11-structured-observability.md`](../plans/backlog/p-11-structured-observability.md).
+  Add a canonical structured-event stream so operators
   can answer "is the pipeline making forward progress?" from a single
   source instead of composing five unrelated tools (`ps`, `curl`,
   `grep` against three different log files). Phase A emits

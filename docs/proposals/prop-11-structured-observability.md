@@ -1,6 +1,8 @@
 # P-11 — Structured pipeline observability for long unattended runs
 
-**Status**: proposed.
+**Status**: planning (graduated). See
+[`docs/plans/backlog/p-11-structured-observability.md`](../plans/backlog/p-11-structured-observability.md)
+for the executable plan with sub-step detail, acceptance gates, and rollback procedures per phase.
 **Scope**: 3-4.5 days. Phase A (structured event emission from every stage) is 1-2 days. Phase B (`bffi-pipeline status` CLI that tails the event sidecar) is half a day. Phase C (dependency health probes wired into the same event stream) is half a day. Phase D (`bffi-pipeline serve-metrics` Prometheus exporter + provisioned Grafana dashboard) is 1-1.5 days. Each phase is independently shippable; A is the prerequisite for B / C / D, but B-C-D can land in any order after A.
 
 > **Policy note** — `CLAUDE.md` § "Operating constraints" reads "No telemetry / error reporting." Confirmed scope: this refers to *outbound* monitoring to external services (Datadog, Sentry, Honeycomb, etc.). Running an observability stack **locally in a container** — Prometheus scraping `localhost:9100`, Grafana querying the local Prometheus — is in-scope: no data leaves the operator's machine. The original "lean defer until policy is settled" hedge in the open-questions section has been dropped; Phase D ships.
