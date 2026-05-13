@@ -1754,13 +1754,13 @@
         },
         {
           "refId": "B",
-          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m3\",run_uuid=\"$active_run\"})",
-          "legendFormat": "M3 processed"
+          "expr": "topk(10, sum by (error_type)(bffi_stage_errors_total{stage=\"m2\",run_uuid=\"$active_run\"}))",
+          "legendFormat": "M2 {{error_type}}"
         },
         {
           "refId": "C",
-          "expr": "topk(10, sum by (error_type)(bffi_stage_errors_total{stage=\"m2\",run_uuid=\"$active_run\"}))",
-          "legendFormat": "M2 {{error_type}}"
+          "expr": "sum(bffi_stage_entities_processed_total{stage=\"m3\",run_uuid=\"$active_run\"})",
+          "legendFormat": "M3 processed"
         },
         {
           "refId": "D",
