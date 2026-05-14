@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -240,15 +242,188 @@ def mark_run_complete(data_dir: Path, status: RunStatus = "completed") -> None:
     )
 
 
+# --- Discovery + filters (P-32 Phase B / C / D shared) ------------------
+
+
+@dataclass(frozen=True)
+class DiscoveredRun:
+    """One manifested run found under ``BFFI_RUNS_ROOT``.
+
+    The ``manifest`` field is the parsed :class:`RunManifest`; ``path``
+    is the on-disk run dir. ``size_bytes`` is computed eagerly by the
+    caller when needed — directory walks are expensive enough that we
+    don't want them implicit in attribute access.
+    """
+
+    manifest: RunManifest
+    path: Path
+
+
+def discover_runs(runs_root: Path) -> list[DiscoveredRun]:
+    """Walk ``runs_root`` and return every dir with a parseable ``bffi-run.json``.
+
+    Returns runs in ascending ``started_at`` order. Dirs without a
+    manifest are silently skipped — they're legacy / non-canonical
+    and outside this plan's managed scope (post Phase F drop, see
+    plan's "What this plan does NOT do"). Operator can adopt them
+    case-by-case via the deferred ``runs adopt`` command if a need
+    surfaces.
+    """
+    if not runs_root.is_dir():
+        return []
+    out: list[DiscoveredRun] = []
+    for child in runs_root.iterdir():
+        if not child.is_dir():
+            continue
+        manifest_path = child / MANIFEST_FILENAME
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = read_manifest(manifest_path)
+        except (ValueError, OSError):
+            # Corrupt or unreadable manifest — skip with no fanfare;
+            # the operator can ``runs info <uuid>`` for the per-run
+            # diagnostic.
+            continue
+        out.append(DiscoveredRun(manifest=manifest, path=child))
+    out.sort(key=lambda r: r.manifest.started_at)
+    return out
+
+
+def compute_dir_size(path: Path) -> int:
+    """Recursive file-size sum for one run dir.
+
+    Best-effort: unreadable files are silently skipped (counted as 0
+    bytes). The pre-flight output uses this to show the operator how
+    much they're about to free; an undercount due to permission
+    issues is acceptable — they'll see the right size for the files
+    the prune actually deletes.
+    """
+    total = 0
+    if not path.is_dir():
+        return 0
+    for p in path.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+_DURATION_RE = re.compile(r"^(\d+)(d|w|mo|y)$")
+
+
+def parse_duration(s: str) -> timedelta:
+    """Parse an operator-style duration string into a :class:`timedelta`.
+
+    Recognised suffixes:
+
+    - ``d`` — days (``30d`` = 30 days)
+    - ``w`` — weeks (``2w`` = 14 days)
+    - ``mo`` — months, approximated as 30 days (``6mo`` = 180 days)
+    - ``y`` — years, approximated as 365 days (``1y`` = 365 days)
+
+    Approximate units are sufficient for "older-than X" filters —
+    operators don't expect calendar-precise semantics. Raises
+    :class:`ValueError` on malformed input.
+    """
+    m = _DURATION_RE.match(s.strip())
+    if not m:
+        raise ValueError(f"Invalid duration {s!r}; expected NN<unit> with unit in {{d, w, mo, y}}.")
+    n = int(m.group(1))
+    unit = m.group(2)
+    if unit == "d":
+        return timedelta(days=n)
+    if unit == "w":
+        return timedelta(weeks=n)
+    if unit == "mo":
+        return timedelta(days=30 * n)
+    # "y"
+    return timedelta(days=365 * n)
+
+
+def select_for_pruning(
+    runs: list[DiscoveredRun],
+    *,
+    older_than: timedelta | None = None,
+    statuses: list[str] | None = None,
+    tags: list[str] | None = None,
+    keep_last: int | None = None,
+    keep_tagged: bool = False,
+    now: datetime | None = None,
+) -> tuple[list[DiscoveredRun], list[DiscoveredRun]]:
+    """Apply prune filters; return ``(to_delete, preserved)``.
+
+    Selection logic:
+
+    1. Start with all candidates matching the inclusion filters
+       (``older_than``, ``statuses``, ``tags``). A run is a candidate
+       iff ALL provided filters match.
+    2. Apply ``keep_last`` — the N most-recent runs (by
+       ``started_at`` descending) are preserved across the entire
+       discovered set, not just the candidate set. So
+       ``--keep-last 5`` always preserves the five newest runs,
+       even if they match ``--older-than`` (unusual case).
+    3. Apply ``keep_tagged`` — any run with at least one tag is
+       preserved.
+    4. ``to_delete`` is the candidate set minus the preserved set;
+       ``preserved`` is the subset of the discovered set that was
+       in the candidate set but rescued by ``keep_*``.
+
+    ``now`` is injectable so tests can pin "what counts as old".
+    """
+    if not runs:
+        return [], []
+
+    current = now if now is not None else datetime.now(UTC)
+
+    def _matches(run: DiscoveredRun) -> bool:
+        if older_than is not None:
+            started = run.manifest.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            if current - started < older_than:
+                return False
+        if statuses and run.manifest.status not in statuses:
+            return False
+        if tags:
+            run_tags = set(run.manifest.tags)
+            if not all(t in run_tags for t in tags):
+                return False
+        return True
+
+    candidates = [r for r in runs if _matches(r)]
+
+    # Compute preserved set across all runs (not just candidates).
+    by_started_desc = sorted(runs, key=lambda r: r.manifest.started_at, reverse=True)
+    keep_last_set: set[Path] = set()
+    if keep_last is not None and keep_last > 0:
+        keep_last_set = {r.path for r in by_started_desc[:keep_last]}
+    keep_tagged_set: set[Path] = set()
+    if keep_tagged:
+        keep_tagged_set = {r.path for r in runs if r.manifest.tags}
+
+    preserved_paths = keep_last_set | keep_tagged_set
+    to_delete = [r for r in candidates if r.path not in preserved_paths]
+    preserved = [r for r in candidates if r.path in preserved_paths]
+    return to_delete, preserved
+
+
 __all__ = [
     "DESCRIPTION_MAX_CHARS",
     "MANIFEST_FILENAME",
+    "DiscoveredRun",
     "RunManifest",
     "RunStatus",
     "append_stage_completed",
     "append_stage_observed",
+    "compute_dir_size",
+    "discover_runs",
     "mark_run_complete",
+    "parse_duration",
     "read_manifest",
+    "select_for_pruning",
     "update_manifest_field",
     "write_initial_manifest",
     "write_manifest",

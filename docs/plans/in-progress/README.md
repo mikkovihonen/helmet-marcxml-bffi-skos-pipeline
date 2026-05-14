@@ -25,5 +25,9 @@ If the plan is dropped before completion, `git mv` it to
   distinguishes canonical from override; 5 unit tests) shipped at
   `1b9f1f0`. **Phase F (legacy-dir migration) dropped 2026-05-14**
   — post-Phase-E new runs already land canonical; legacy dirs in
-  `scratchpad/` / `data/` stay as historical artifact, not managed
-  by `runs list / prune`. Order continues: C → G → H → B → D.
+  `scratchpad/` / `data/` stay as historical artifact. Phase C
+  (`bffi-pipeline runs prune` CLI with --dry-run default,
+  --apply-requires-filter guard, --keep-tagged / --keep-last
+  preservation, --reset-exporter / --reset-prometheus /
+  --reset-fuseki / --reset-all flag plumbing for Phases G + H + 9
+  unit tests) shipped. Order continues: G → H → B → D.

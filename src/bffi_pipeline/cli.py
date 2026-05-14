@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import atexit as _atexit
+from datetime import timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:
+    from bffi_pipeline.run_manifest import DiscoveredRun
 
 import httpx
 import typer
@@ -223,6 +227,280 @@ def runs_mark_complete_command(
     # ``status`` validated against the literal set above; cast is safe.
     mark_run_complete(data_dir, status=cast("RunStatus", status))
     typer.echo(f"Marked {data_dir.name} as status={status}.")
+
+
+@runs_app.command("prune")
+def runs_prune_command(
+    older_than: Annotated[
+        str | None,
+        typer.Option(
+            "--older-than",
+            help=(
+                "Select runs whose started_at is older than this duration. "
+                "Format: NN<unit>; unit in d/w/mo/y (e.g. 30d, 2w, 6mo, 1y)."
+            ),
+        ),
+    ] = None,
+    status_filter: Annotated[
+        str | None,
+        typer.Option(
+            "--status",
+            help=(
+                "Comma-separated status filter (e.g. 'completed,aborted'). "
+                "Defaults to no status filter."
+            ),
+        ),
+    ] = None,
+    tag: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tag",
+            help="Tag filter; repeatable for AND semantics. Defaults to no tag filter.",
+        ),
+    ] = None,
+    keep_last: Annotated[
+        int | None,
+        typer.Option(
+            "--keep-last",
+            help="Preserve the N most-recent runs (by started_at) regardless of filters.",
+        ),
+    ] = None,
+    keep_tagged: Annotated[
+        bool,
+        typer.Option(
+            "--keep-tagged",
+            help="Preserve runs with at least one tag.",
+        ),
+    ] = False,
+    apply: Annotated[
+        bool,
+        typer.Option(
+            "--apply",
+            help=(
+                "Actually delete the selected dirs. Default is dry-run (preview only). "
+                "Requires at least one filter that excludes some runs."
+            ),
+        ),
+    ] = False,
+    reset_exporter: Annotated[
+        bool,
+        typer.Option(
+            "--reset-exporter",
+            help=(
+                "On --apply, also restart the metrics exporter to drop stale in-memory "
+                "Prometheus series (Phase G — currently logs a warning, no-op)."
+            ),
+        ),
+    ] = False,
+    reset_prometheus: Annotated[
+        bool,
+        typer.Option(
+            "--reset-prometheus",
+            help=(
+                "On --apply, also call the Prometheus admin API to delete the pruned "
+                "run_uuids' series from TSDB (Phase G — currently logs a warning, no-op)."
+            ),
+        ),
+    ] = False,
+    reset_fuseki: Annotated[
+        bool,
+        typer.Option(
+            "--reset-fuseki",
+            help=(
+                "On --apply, also DROP <graph_base>* named graphs from Fuseki "
+                "(Phase H — currently logs a warning, no-op)."
+            ),
+        ),
+    ] = False,
+    reset_all: Annotated[
+        bool,
+        typer.Option(
+            "--reset-all",
+            help="Shorthand for --reset-exporter + --reset-prometheus + --reset-fuseki.",
+        ),
+    ] = False,
+) -> None:
+    """Delete run dirs under ``BFFI_RUNS_ROOT`` matching the filters.
+
+    ``--dry-run`` is the default: the command prints what *would* be
+    deleted with sizes and totals, then exits without touching disk.
+    Pass ``--apply`` to actually delete; at least one filter that
+    excludes some runs (``--older-than``, ``--status``, ``--tag``,
+    ``--keep-last``, ``--keep-tagged``) must be set to refuse the
+    accidental "delete everything" case.
+
+    Reset flags are accepted today as plumbing for Phases G + H; they
+    log warnings and no-op until those phases ship.
+    """
+    from bffi_pipeline.run_manifest import discover_runs, select_for_pruning
+
+    older_than_td, statuses, tags = _parse_prune_filters(older_than, status_filter, tag)
+    has_filter = bool(older_than_td or statuses or tags or keep_last or keep_tagged)
+    if apply and not has_filter:
+        typer.echo(
+            "--apply requires at least one filter that excludes some runs "
+            "(--older-than / --status / --tag / --keep-last / --keep-tagged). "
+            "Refusing to delete every run; "
+            "pass a filter or run without --apply for a dry preview.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    if reset_all:
+        reset_exporter = True
+        reset_prometheus = True
+        reset_fuseki = True
+
+    settings = get_settings()
+    runs = discover_runs(settings.runs_root)
+    if not runs:
+        typer.echo(f"No runs found under {settings.runs_root}.")
+        return
+
+    to_delete, preserved = select_for_pruning(
+        runs,
+        older_than=older_than_td,
+        statuses=statuses,
+        tags=tags,
+        keep_last=keep_last,
+        keep_tagged=keep_tagged,
+    )
+    if not to_delete:
+        typer.echo(f"No runs match the filters. (Discovered {len(runs)} total.)")
+        return
+
+    sized, total_bytes = _render_prune_preflight(to_delete, preserved, runs_root=settings.runs_root)
+
+    if not apply:
+        typer.echo("\n(--dry-run is the default; pass --apply to delete.)")
+        return
+
+    deleted_uuids = _execute_prune(sized, total_bytes)
+    _maybe_invoke_resets(
+        deleted_uuids,
+        reset_exporter=reset_exporter,
+        reset_prometheus=reset_prometheus,
+        reset_fuseki=reset_fuseki,
+    )
+
+
+def _parse_prune_filters(
+    older_than: str | None,
+    status_filter: str | None,
+    tag: list[str] | None,
+) -> tuple[timedelta | None, list[str] | None, list[str] | None]:
+    """Parse the operator-supplied prune filters into typed values."""
+    from bffi_pipeline.run_manifest import parse_duration
+
+    older_than_td = None
+    if older_than:
+        try:
+            older_than_td = parse_duration(older_than)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+
+    statuses = None
+    if status_filter:
+        statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+
+    tags = list(tag) if tag else None
+    return older_than_td, statuses, tags
+
+
+def _render_prune_preflight(
+    to_delete: list[DiscoveredRun],
+    preserved: list[DiscoveredRun],
+    *,
+    runs_root: Path,
+) -> tuple[list[tuple[DiscoveredRun, int]], int]:
+    """Render the dry-run / pre-apply preview; return (sized rows, total bytes)."""
+    from bffi_pipeline.run_manifest import compute_dir_size
+
+    typer.echo(f"Pruning {len(to_delete)} run(s) under {runs_root}:")
+    sized: list[tuple[DiscoveredRun, int]] = []
+    total_bytes = 0
+    for run in to_delete:
+        size = compute_dir_size(run.path)
+        total_bytes += size
+        sized.append((run, size))
+        typer.echo(
+            f"  {run.manifest.run_uuid[:12]}... "
+            f"started={run.manifest.started_at.isoformat()} "
+            f"status={run.manifest.status} "
+            f"size={_human_bytes(size)}  "
+            f"({run.manifest.description or '—'})"
+        )
+    typer.echo(f"Total to free: {_human_bytes(total_bytes)}")
+
+    if preserved:
+        typer.echo(f"\nPreserved by --keep-tagged / --keep-last ({len(preserved)}):")
+        for run in preserved:
+            typer.echo(
+                f"  {run.manifest.run_uuid[:12]}... "
+                f"tags={','.join(run.manifest.tags) or '—'}  "
+                f"({run.manifest.description or '—'})"
+            )
+    return sized, total_bytes
+
+
+def _execute_prune(
+    sized: list[tuple[DiscoveredRun, int]],
+    total_bytes: int,
+) -> list[str]:
+    """Hard-delete the selected run dirs; return the deleted run_uuids."""
+    import shutil
+
+    typer.echo("\nDeleting...")
+    deleted_uuids: list[str] = []
+    for run, _size in sized:
+        shutil.rmtree(run.path)
+        deleted_uuids.append(run.manifest.run_uuid)
+        typer.echo(f"  removed {run.path}")
+    typer.echo(f"Pruned {len(deleted_uuids)} run(s); freed {_human_bytes(total_bytes)}.")
+    return deleted_uuids
+
+
+def _maybe_invoke_resets(
+    deleted_uuids: list[str],
+    *,
+    reset_exporter: bool,
+    reset_prometheus: bool,
+    reset_fuseki: bool,
+) -> None:
+    """Invoke the Phase G / H reset stubs based on the flag set."""
+    from bffi_pipeline.runs_reset import (
+        reset_exporter as _reset_exporter,
+    )
+    from bffi_pipeline.runs_reset import (
+        reset_fuseki as _reset_fuseki,
+    )
+    from bffi_pipeline.runs_reset import (
+        reset_prometheus as _reset_prometheus,
+    )
+
+    if reset_exporter:
+        _reset_exporter()
+    if reset_prometheus:
+        _reset_prometheus(deleted_uuids)
+    if reset_fuseki:
+        _reset_fuseki()
+
+
+_BYTES_PER_KB = 1024
+_BYTES_PER_MB = 1024 * 1024
+_BYTES_PER_GB = 1024 * 1024 * 1024
+
+
+def _human_bytes(n: int) -> str:
+    """Render a byte count as KB / MB / GB for operator-facing output."""
+    if n < _BYTES_PER_KB:
+        return f"{n} B"
+    if n < _BYTES_PER_MB:
+        return f"{n / _BYTES_PER_KB:.1f} KB"
+    if n < _BYTES_PER_GB:
+        return f"{n / _BYTES_PER_MB:.1f} MB"
+    return f"{n / _BYTES_PER_GB:.2f} GB"
 
 
 @app.callback()
