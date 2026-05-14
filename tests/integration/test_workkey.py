@@ -69,11 +69,20 @@ def test_compute_blocks_groups_synthetic_corpus_into_singletons(corpus_path: Pat
 
 
 def test_load_corpus_accepts_single_ttl_file(corpus_path: Path) -> None:
-    """Standalone .ttl path: M4 still loads (creator info will be missing)."""
+    """Standalone .ttl path: M4 loads creator + title even without the
+    bibframe sibling directory.
+
+    Before the M3 SPARQL CONSTRUCT routed ``?primaryAgent rdfs:label
+    ?primaryAgentLabel``, the agent URI was a dangling reference in
+    the BFFI .ttl and the label only existed in the bibframe RDF/XML.
+    Loading a single .ttl in isolation therefore returned ``creator =
+    None``. The fix wires the label into the BFFI itself (so M9 has
+    something to walk on the canonical graph), and as a side benefit
+    standalone-.ttl loaders also see the creator.
+    """
     one_ttl = corpus_path / "bffi" / "10000001.ttl"
     g = load_corpus(one_ttl)
     entries = list(extract_blocking_inputs(g))
     assert len(entries) == 1
-    # No bibframe loaded -> no agent label, so creator falls back to anon.
     assert entries[0].title == "Sota ja rauha"
-    assert entries[0].creator is None
+    assert entries[0].creator == "Tolstoy, Leo, 1828-1910"

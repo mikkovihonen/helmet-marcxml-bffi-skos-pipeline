@@ -32,6 +32,7 @@ CONSTRUCT {
            bf:identifiedBy   ?ident .
   ?otherContrib a bffi:Contribution ;
                 bffi:agent ?otherAgent .
+  ?otherAgent rdfs:label ?otherAgentLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -71,10 +72,16 @@ WHERE {
   # ?otherContrib is BIND'ed inside the OPTIONAL so it stays unbound
   # when no non-primary contribution exists — the same pattern as the
   # primary-contribution OPTIONAL in bf_to_bffi_work.rq.
+  #
+  # ``?otherAgentLabel`` routes marc2bibframe2's ``<Agent> rdfs:label
+  # "..."`` triple through to the BFFI output so M9 can read it on
+  # canonical Expressions for non-primary reconciliation. Inner
+  # OPTIONAL — label is in principle optional on the agent.
   OPTIONAL {
     ?bfWork bf:contribution ?c .
     FILTER NOT EXISTS { ?c a bf:PrimaryContribution }
     ?c bf:agent ?otherAgent .
+    OPTIONAL { ?otherAgent rdfs:label ?otherAgentLabel }
     BIND(BNODE() AS ?otherContrib)
   }
 

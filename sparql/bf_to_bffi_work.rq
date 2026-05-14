@@ -33,6 +33,7 @@ CONSTRUCT {
            bf:identifiedBy     ?ident .
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent .
+  ?primaryAgent rdfs:label ?primaryAgentLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -60,10 +61,17 @@ WHERE {
   # template `[ a … ]` would emit one empty [a bffi:PrimaryContribution]
   # bnode per cross-product solution row from the other OPTIONALs below
   # — that's the bug this BIND fixes.
+  #
+  # ``?primaryAgentLabel`` routes marc2bibframe2's ``<Agent> rdfs:label
+  # "Surname, Forename"`` triple through to the BFFI output so M8's
+  # ``_primary_contribution_targets`` can extract a label-bearing
+  # ContributionTarget and M9 has something to walk. Inner OPTIONAL
+  # (label is optional on the agent in principle).
   OPTIONAL {
     ?bfWork bf:contribution ?c .
     ?c a bf:PrimaryContribution ;
        bf:agent ?primaryAgent .
+    OPTIONAL { ?primaryAgent rdfs:label ?primaryAgentLabel }
     BIND(BNODE() AS ?contrib)
   }
   # P-15: when marc2bibframe2 emits the subject as a bf:Place / bf:Person /
