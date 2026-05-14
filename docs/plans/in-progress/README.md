@@ -26,11 +26,3 @@ If the plan is dropped before completion, `git mv` it to
   with `phase="emit"`) shipped at `5148746` with a unit test
   pinning the event sequence. Phase B (dashboard smoke test on
   the next bench) pending.
-- [`p-19-m8-corpus-load-throughput.md`](p-19-m8-corpus-load-throughput.md)
-  — Phase A (Option A: `bffi-corpus.ttl` concat written at M3
-  finalisation with `@prefix` dedup + atomic rename; M8 fast-path
-  read with mtime-based fallback) shipped at `5148746` with 4 unit
-  tests. Phase B (20 k bench wall-time validation: M8 load drops
-  from ~8 min to <90 s) pending. Phase C (Option C bespoke
-  streaming parser) deferred to "only if Phase B's win isn't
-  enough at full corpus scale".

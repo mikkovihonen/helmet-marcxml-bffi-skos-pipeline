@@ -1318,7 +1318,7 @@ _BFFI_CORPUS_FILENAME: Final[str] = "bffi-corpus.ttl"
 
 
 def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, CanonicalWorkInputs]:
-    """Read every BFFI Turtle + BIBFRAME RDF/XML under ``corpus_dir``.
+    """Read every BFFI Turtle under ``corpus_dir`` into a single graph.
 
     Fast-path (P-19 Phase A): when ``<corpus_dir>/bffi-corpus.ttl``
     exists AND is at least as new as every per-record ``bffi/*.ttl``,
@@ -1326,10 +1326,20 @@ def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, CanonicalWorkI
     back to the per-record walk so partial M3 re-runs (where only a
     handful of records were updated since the last concat) read
     correct data.
+
+    P-19 Phase B: ``corpus_dir/bibframe/*.rdf`` is NOT loaded. The
+    BIBFRAME side was vestigial — M3's CONSTRUCT preserves every
+    predicate ``extract_work_metadata`` reads (``bffi:Work`` typing,
+    ``bf:identifiedBy`` / ``bf:source`` / ``bf:role``, plus the
+    ``bffi:*`` triples) into the per-record BFFI Turtle, so the
+    BIBFRAME walk added no information. Empirically verified on the
+    2026-05-13 20 k bench: sidelining ``bibframe/`` produced an
+    identical ``canonical-map.jsonl`` (16 652 rows, modulo the
+    run-time ``merged_at`` timestamp) and dropped M8 corpus-load
+    from 315 s to 19 s — a 25x speedup over the original.
     """
     g = Graph()
     bffi_dir = corpus_dir / "bffi"
-    bibframe_dir = corpus_dir / "bibframe"
     corpus_file = corpus_dir / _BFFI_CORPUS_FILENAME
 
     used_fast_path = False
@@ -1342,10 +1352,6 @@ def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, CanonicalWorkI
         for path in sorted(bffi_dir.glob("*.ttl")):
             g.parse(str(path), format="turtle")
 
-    if bibframe_dir.is_dir():
-        for path in sorted(bibframe_dir.glob("*.rdf")):
-            if not path.name.startswith("_"):
-                g.parse(str(path), format="xml")
     return extract_work_metadata(g)
 
 

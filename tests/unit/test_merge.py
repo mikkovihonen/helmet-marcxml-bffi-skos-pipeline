@@ -1472,3 +1472,39 @@ def test_p19_load_work_records_falls_back_when_concat_stale(tmp_path: Path) -> N
     # stale-concat case.
     records = _load_work_records_from_corpus(tmp_path)
     assert isinstance(records, dict)
+
+
+def test_p19_load_work_records_ignores_bibframe_dir(tmp_path: Path) -> None:
+    """P-19 Phase B — M8 corpus load only reads BFFI Turtle; the
+    ``bibframe/`` walk was vestigial and removed. M3 preserves every
+    predicate ``extract_work_metadata`` needs (``bffi:Work`` typing,
+    ``bf:identifiedBy`` / ``bf:source`` / ``bf:role``) into the
+    per-record BFFI Turtle. Empirically verified on the 2026-05-13
+    20 k bench: sidelining ``bibframe/`` produced an identical
+    ``canonical-map.jsonl`` and dropped M8 corpus-load from 315 s
+    to 19 s — a 16x win over Phase A alone, 25x over the original.
+
+    Pinning this here so a future "let's reload BIBFRAME for X"
+    refactor doesn't silently regress the speedup.
+    """
+    bffi_dir = tmp_path / "bffi"
+    bffi_dir.mkdir()
+    (bffi_dir / "a.ttl").write_text(
+        "@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .\n<http://x/a> a bf:Work .\n",
+        encoding="utf-8",
+    )
+
+    # BIBFRAME dir with content that would CRASH rdflib's XML parser
+    # if M8 tried to read it. The test passes iff the loader doesn't
+    # open this file.
+    bibframe_dir = tmp_path / "bibframe"
+    bibframe_dir.mkdir()
+    (bibframe_dir / "poison.rdf").write_text(
+        "this is not valid RDF/XML — if M8 reads it the test fails\n",
+        encoding="utf-8",
+    )
+
+    # Must not raise. Pre-Phase-B this would have surfaced a parse
+    # error from the poison.rdf walk.
+    records = _load_work_records_from_corpus(tmp_path)
+    assert isinstance(records, dict)
