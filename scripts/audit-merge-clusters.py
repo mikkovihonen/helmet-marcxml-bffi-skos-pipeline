@@ -54,13 +54,23 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Final
 
-# Volume markers in 245 titles. Order matters — match the longest first.
+# Volume markers in 245 titles + subtitles. Order matters — match the
+# most specific first. Captures the volume number for cross-record
+# comparison; if two records carry different volume numbers, the
+# merge is series_volumes_collapsed (FP).
 _VOLUME_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"\bVol\.\s*(\d+)\b", re.IGNORECASE),
     re.compile(r"\bvolume\s+(\d+)\b", re.IGNORECASE),
     re.compile(r"\bosa\s+(\d+)\b", re.IGNORECASE),  # Finnish "part N"
+    re.compile(r"\btom(?:e)?\s+(\d+)\b", re.IGNORECASE),  # Russian / French "tome/tom N"
+    re.compile(r"\bband\s+([IVXivx]+|\d+)\b", re.IGNORECASE),  # Swedish/German "Band N"
+    re.compile(r"\bES\s+(\d+)\b"),  # Helmet church-archive volumes
+    re.compile(r"\bKK\s+(\d+)\b"),  # Helmet church-archive variant
+    re.compile(r"\bTK\s+(\d+)\b"),  # Helmet church-archive variant
     re.compile(r"\.\s*(\d+)\s*(?::|$|\s*/)"),  # "Title. 3 :" or "Title. 3 /"
+    re.compile(r"\.\s*\[(\d+)\]"),  # "Muumipeikko. [8]"
     re.compile(r"\b(\d{1,3})\s*[:/.]"),  # standalone number at title end
+    re.compile(r"\s(\d{1,2})\s*$"),  # bare trailing number "Bergtagen 1"
 )
 
 # Anthology markers — "complete", "selected", "kaikki", etc.
@@ -200,7 +210,11 @@ def _classify_cluster(
         import unicodedata as _ud
 
         nfkd = _ud.normalize("NFKD", a)
-        return "".join(c for c in nfkd if not _ud.combining(c)).casefold().strip(" ,.")
+        stripped = "".join(c for c in nfkd if not _ud.combining(c)).casefold()
+        # Drop ALL non-alphanumeric so "J. K" / "J.K", "Nikolai" /
+        # "Nikolai Vasiljevitš" (truncated form), "Sosuke" / "Sōsuke"
+        # collapse to the same key.
+        return re.sub(r"[^a-z0-9]+", "", stripped) or None
 
     raw_authors = {m.get("author") for m in cluster_marc if m.get("author")}
     authors = {_norm_author(a) for a in raw_authors}
@@ -215,14 +229,22 @@ def _classify_cluster(
     volume_nums = [_has_volume_marker(t or "") for t in titles]
     has_volumes = [v for v in volume_nums if v is not None]
 
+    # Also scan subtitles for volume markers — Kirkonarkistot's "ES 330"
+    # / "ES 298" volumes live in 245$b, not 245$a.
+    subtitle_volume_nums = [_has_volume_marker(s or "") for s in subtitles]
+    combined_volumes = [
+        v for v in (volume_nums + subtitle_volume_nums) if v is not None
+    ]
+
     # --- Series volumes collapsed (false positive A) ---
     # Two or more records have volume numbers and the volume numbers differ.
-    if len(has_volumes) >= 2 and len(set(has_volumes)) >= 2:
+    if len(combined_volumes) >= 2 and len(set(combined_volumes)) >= 2:
         return (
             "series_volumes_collapsed",
             f"Cluster contains different volumes of the same series. "
-            f"Volume markers detected: {sorted(set(has_volumes))}. "
-            f"Each volume is a distinct Work in FRBR semantics — should not merge.",
+            f"Volume markers detected in title or subtitle: "
+            f"{sorted(set(combined_volumes))}. Each volume is a "
+            f"distinct Work in FRBR — should not merge.",
         )
 
     # --- Anthology vs. single-work (false positive B) ---
@@ -244,18 +266,22 @@ def _classify_cluster(
     if len(authors) == 1:
         author = next(iter(authors))
         # ``_LIKELY_SUBJECT_PERSONS`` is original-case; ``author`` here
-        # is the normalized (case-folded, diacritic-stripped) form, so
-        # compare against the same-normalized whitelist.
+        # is the punctuation-stripped normalized form. Compare against
+        # the same-normalized whitelist.
         _norm_subjects = {_norm_author(p) for p in _LIKELY_SUBJECT_PERSONS}
         _norm_subjects.discard(None)
         if author in _norm_subjects:
-            # Check if the title prefix matches the author name.
-            person_lastname_first = author.split(",")[0].strip()
+            # Use the raw author form (with comma + space) for the title
+            # prefix check — the normalized form has lost the structure.
+            raw_author = next(iter(raw_authors))
+            person_lastname = raw_author.split(",")[0].strip()
             person_firstname = (
-                author.split(",", 1)[1].strip().split()[0] if "," in author else ""
+                raw_author.split(",", 1)[1].strip().split()[0]
+                if "," in raw_author
+                else ""
             )
             title_prefix_match = any(
-                person_lastname_first.lower() in (t or "").lower()
+                (person_lastname and person_lastname.lower() in (t or "").lower())
                 or (
                     person_firstname
                     and person_firstname.lower() in (t or "").lower()
@@ -329,17 +355,75 @@ def _classify_cluster(
             f"Pattern of government / statistical / museum publication.",
         )
 
-    # --- Legitimate re-edition (same author, same title, different years) ---
+    # --- Legitimate re-edition (same / no author, same normalised title) ---
+    # The normalisation strips leading articles ("The Art and beauty" ≡
+    # "Art and beauty") and trailing single-digit volume markers
+    # ("Structural anthropology 1" ≡ "Structural anthropology"). Year
+    # divergence is no longer required: a same-author cluster sharing
+    # the same title is a re-edition cluster (re-prints, paperback re-
+    # issue, audiobook manifestation) regardless of how many distinct
+    # years happen to be captured in MARC 008.
+    _LEADING_ARTICLES = re.compile(
+        r"^(?:the|a|an|le|la|les|el|der|die|das|den|det|en|ett)\s+",
+        re.IGNORECASE,
+    )
+
+    def _norm_title_for_reedition(t: str | None) -> str:
+        if not t:
+            return ""
+        s = t.lower().rstrip(" :/=")
+        s = _LEADING_ARTICLES.sub("", s)
+        s = re.sub(r"\s*[\.,:/]?\s*\d+\s*$", "", s).strip()
+        return s
+
+    reedition_titles = {_norm_title_for_reedition(t) for t in titles}
     if (
-        len(authors) == 1
-        and len(set(t.lower() if t else "" for t in titles)) == 1
-        and len(set(years)) >= 2
+        len(authors) <= 1
+        and len(reedition_titles) == 1
+        and reedition_titles != {""}
     ):
+        if len(authors) == 1:
+            who = f"Same author '{next(iter(raw_authors))}'"
+        else:
+            who = "No MARC-100 author on any record"
+        year_phrase = (
+            f"different publication years {sorted(set(years))}"
+            if len(set(years)) >= 2
+            else f"publication years {sorted(set(years)) or 'absent'}"
+        )
         return (
             "legitimate_reedition",
-            f"Same author '{next(iter(raw_authors))}', identical title across "
-            f"records, different publication years {sorted(set(years))}. "
-            f"Different printings of the same Work — merge is correct.",
+            f"{who}, normalised title identical across records "
+            f"({next(iter(reedition_titles))!r}; leading articles and "
+            f"trailing volume markers stripped), {year_phrase}. "
+            f"Different printings / manifestations of the same Work — "
+            f"merge is correct.",
+        )
+
+    # --- Year-bearing titles with different years ---
+    # Two records' MARC 245 contain DIFFERENT 4-digit years inside the
+    # title text itself. This catches yearly editions (parliamentary
+    # records, statistical yearbooks), dated concert recordings ("Live
+    # at Montreux 1990" vs "...2010"), and similar series where the
+    # year is part of the Work identity rather than just a manifestation
+    # date. Fires before the older annual_series rule (which only
+    # triggered on titles whose year appeared at the trailing position).
+    def _years_in_title(t: str | None) -> frozenset[str]:
+        return frozenset(re.findall(r"\b(?:19|20)\d{2}\b", t or ""))
+
+    title_year_sets = [_years_in_title(t) for t in titles]
+    non_empty_year_sets = [s for s in title_year_sets if s]
+    if (
+        len(non_empty_year_sets) >= 2
+        and len({frozenset(s) for s in non_empty_year_sets}) >= 2
+    ):
+        return (
+            "annual_series_collapsed",
+            f"Titles carry different in-title years "
+            f"({[sorted(s) for s in title_year_sets]}). Year-specific "
+            f"titles — annual reports, dated concert recordings, "
+            f"parliamentary-session yearbooks — are distinct Works "
+            f"year-over-year and should not merge.",
         )
 
     # --- Annual series (statistical yearbooks, road maps, etc.) ---
@@ -376,12 +460,76 @@ def _classify_cluster(
             f"distinct Works in FRBR; this merge is likely a false positive.",
         )
 
+    # --- Same author, different main titles (NEW) ---
+    # Catches the dominant un-classified pattern in the bench: a single
+    # author with a series of distinct books that share only the author
+    # name (children's series, detective series, the author's catalog,
+    # etc.). Distinguishes from translation by requiring divergent main
+    # titles AFTER volume-stripping AND after stop-word-aware token
+    # comparison. Stays a false-positive class regardless of language —
+    # if the titles diverge enough to fail the overlap check, it's
+    # different Works whether or not the languages differ.
+    _STOPWORDS: Final[frozenset[str]] = frozenset({
+        # English
+        "a", "an", "the", "of", "and", "or", "to", "in", "on", "for",
+        "with", "by", "as", "at", "from", "is", "are", "was", "were",
+        # Swedish
+        "och", "en", "ett", "som", "att", "i", "för", "till", "med",
+        "om", "av", "den", "det", "har", "var", "när", "vid", "fran",
+        # Finnish
+        "ja", "tai", "se", "että", "kuin", "kun", "myös", "sekä",
+        # French / Italian / German
+        "et", "ou", "le", "la", "les", "un", "une", "du", "de", "des",
+        "il", "di", "da", "del", "della", "der", "die", "das", "und",
+    })
+
+    def _content_tokens(t: str | None) -> frozenset[str]:
+        if not t:
+            return frozenset()
+        words = re.findall(r"[\wäöåÄÖÅüÜ]+", t.lower())
+        return frozenset(w for w in words if len(w) > 2 and w not in _STOPWORDS)
+
+    main_token_sets = [_content_tokens(t) for t in titles]
+    distinct_main_titles_stripped = {
+        re.sub(r"\s*[\.,:/]?\s*\d+\s*$", "", (t or "").lower()).strip()
+        for t in titles
+    }
+
+    if (
+        len(authors) == 1
+        and len(distinct_main_titles_stripped) >= 2
+    ):
+        # Pairwise content-word overlap, MIN across pairs. The min signal
+        # catches mixed clusters where some titles are identical and
+        # others diverge (e.g. ``Erityisherkkä ihminen ja parisuhde`` ×2
+        # + ``Erityisherkkä vanhempi`` — three records, two share three
+        # tokens, one only shares one; the cluster is still wrong).
+        # Threshold ≥ 3 shared substantive words to call it same Work.
+        min_overlap = float("inf")
+        for i in range(len(main_token_sets)):
+            for j in range(i + 1, len(main_token_sets)):
+                overlap = len(main_token_sets[i] & main_token_sets[j])
+                min_overlap = min(min_overlap, overlap)
+        if min_overlap < 3:
+            return (
+                "different_works_same_author",
+                f"Same author '{next(iter(raw_authors))}' but main titles "
+                f"diverge sharply ({sorted(distinct_main_titles_stripped)[:3]}...). "
+                f"Weakest pair shares only {min_overlap} content word(s). "
+                f"Likely a series of distinct Works (children's series, "
+                f"detective series, author's catalog, etc.). M5/M6 may have "
+                f"merged on shared author + same blocking key.",
+            )
+
     # --- Different authors entirely ---
     if len(authors) >= 2:
         return (
-            "uncertain",
-            f"Cluster spans multiple distinct MARC-100 authors: "
-            f"{sorted(raw_authors)}. Suspicious — would need cataloguer review.",
+            "different_authors_collapsed",
+            f"Cluster spans multiple distinct MARC-100 authors after "
+            f"normalisation: {sorted(raw_authors)}. Distinct authors writing "
+            f"different books should never merge to the same canonical Work "
+            f"(unless one author is a translator or co-creator — check 700 "
+            f"fields). Suspicious unless cataloguer confirms.",
         )
 
     # --- Fallback ---
