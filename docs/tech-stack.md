@@ -144,7 +144,7 @@ Compose file: [`docker-compose.yml`](../docker-compose.yml). Both containers bui
 |---|---|---|
 | `bffi-pipeline` (typer) | `src/bffi_pipeline/cli.py` | Every M-stage CLI: `marc-to-bf`, `bf-to-bffi`, `embed`, `judge`, `merge`, `reconcile`, `skosify`, `load`, `eval`, `grow-gold`, `load-finto`, `embed-benchmark`, `ysa-disambiguation-report`, … |
 | `marcxml-export-sierra` (argparse) | `src/marcxml_export_pipeline/sierra/marcxml.py` | Sierra → MARCXML export, single-CLI sibling package. |
-| Operator scripts | `scripts/` | `start-mlx-lm.sh` (mlx-lm server launcher), `select-overnight-sample.py` (stratified MARCXML sub-sampler), `test-runs-lifecycle.sh` (P-32 runs CLI smoke driver). Pipeline stages run directly via `bffi-pipeline <subcommand>` — no shell driver. |
+| Operator scripts | `scripts/` | `start-mlx-lm.sh` (mlx-lm server launcher), `select-overnight-sample.py` (stratified MARCXML sub-sampler), `test-runs-lifecycle.sh` (P-32 runs CLI smoke driver), `audit-merge-clusters.py` (M5 / M6 same-Work cluster triage). Pipeline stages run directly via `bffi-pipeline <subcommand>` — no shell driver. |
 
 Heavy LLM / ML imports (sentence-transformers, faiss, mlx-lm) are deferred to function bodies so the CLI's `--help` stays fast.
 
