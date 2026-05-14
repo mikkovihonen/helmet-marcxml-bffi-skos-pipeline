@@ -18,8 +18,8 @@ Linear-extrapolation to 800 k: ~80 false merges projected, each
 silently dropping an author from the canonical Work graph.
 
 This proposal is the **cheapest insurance policy** of the four
-overnight-audit-derived proposals (prop-22 / prop-23 / prop-24 /
-prop-25) and the highest qualitative payoff per line of code.
+overnight-audit-derived proposals (P-22 / P-23 / P-24 /
+P-25) and the highest qualitative payoff per line of code.
 
 ### Root cause
 
@@ -55,7 +55,7 @@ shared `src/bffi_pipeline/text/normalize.py` module.
 
 The one-sided case (one record has a creator, the other doesn't) is
 *not* vetoed — that's the anonymous-work merge path covered by
-prop-05.
+P-05.
 
 ### Phases
 
@@ -73,9 +73,9 @@ contribution).
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
 - 2026-05-13 audit baseline.
-- No interaction with prop-20 / prop-22 / prop-23 — the four vetoes
+- No interaction with P-20 / P-22 / P-23 — the four vetoes
   short-circuit on disjoint conditions and can ship independently.
 
 ## Risks

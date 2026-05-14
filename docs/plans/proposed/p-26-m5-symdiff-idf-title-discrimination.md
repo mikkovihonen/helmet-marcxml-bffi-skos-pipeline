@@ -46,16 +46,16 @@ In each case the symdiff *alone* answers the same-Work question more
 reliably than the intersection size does. This proposal lifts that
 insight into M5's auto-merge gate.
 
-### Relationship to prop-22
+### Relationship to P-22
 
-prop-22 proposes an **absolute overlap floor**: same-author pairs
+P-22 proposes an **absolute overlap floor**: same-author pairs
 with fewer than 3 substantive shared tokens demote to `escalate`.
 The Alderton case ("att välja katt" / "att välja hund") has overlap
 = 1 → escalate (correct). But a genuine re-edition of "Att välja
 katt" with overlap = 1 → also escalate (incorrect — false escalation
-for short titles, prop-22's R2 risk).
+for short titles, P-22's R2 risk).
 
-prop-26's IDF-weighted signal handles both cleanly:
+P-26's IDF-weighted signal handles both cleanly:
 - Alderton: symdiff = `{katt, hund}`, mass ≈ 2 × log(N / d_animal-noun)
   → above threshold → escalate.
 - Same-title reedition: symdiff = `{}`, mass = 0 → auto-merge.
@@ -63,12 +63,12 @@ prop-26's IDF-weighted signal handles both cleanly:
   mass ≈ log(N / d_"the") ≈ 0 → auto-merge.
 
 The IDF approach is **strictly more powerful** than absolute overlap,
-extends naturally to anonymous-work clusters where prop-22 can't
+extends naturally to anonymous-work clusters where P-22 can't
 fire (no author precondition), and is self-tuning per language (no
 hand-curated stopword list to maintain across Estonian / Polish /
-Korean as the corpus expands). prop-26 ships as a *replacement* for
-prop-22; my recommendation is to mark prop-22 `rejected (superseded
-by prop-26)` on prop-26 graduation.
+Korean as the corpus expands). P-26 ships as a *replacement* for
+P-22; my recommendation is to mark P-22 `rejected (superseded
+by P-26)` on P-26 graduation.
 
 ### Why M5 doesn't already do this
 
@@ -103,7 +103,7 @@ serialised IDF table:
 ```python
 df: Counter[str] = Counter()
 n_titles = 0
-for title in iter_all_full_titles():  # bffi:fullTitle from prop-20
+for title in iter_all_full_titles():  # bffi:fullTitle from P-20
     n_titles += 1
     df.update(set(_tokenise(title)))  # set() — each title counts once per token
 
@@ -119,7 +119,7 @@ and the IDF builder.
 Persist as `<BFFI_DATA_DIR>/title-token-idf.parquet`. Expected size
 ~5 MB for ~50 k unique tokens on the 800 k corpus. Two columns:
 `token: str`, `idf: float32`. Idempotent rebuild when
-`bffi-corpus.ttl` (per prop-19) is newer than the parquet.
+`bffi-corpus.ttl` (per P-19) is newer than the parquet.
 
 Wire as a new M3 finalisation step in
 `src/bffi_pipeline/stages/bf_to_bffi.py` (or a new
@@ -164,8 +164,8 @@ starting point. The script that fits the threshold lives at
 
 **Cascade integration.** Add a `cascade_decide(a, b, similarity, idf)`
 helper in `embeddings.py` that wraps `classify_band` and chains all
-auto-merge-band vetoes (prop-20 year-distance, prop-23 numeric
-markers, prop-24 distinct authors, prop-25 anthology scope, prop-26
+auto-merge-band vetoes (P-20 year-distance, P-23 numeric
+markers, P-24 distinct authors, P-25 anthology scope, P-26
 IDF discriminator) cheapest-first. Short-circuit on first hit. M5's
 per-pair loop calls `cascade_decide` instead of `classify_band`
 directly.
@@ -183,18 +183,18 @@ fallback is in effect.
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
-- **prop-20 (recommended)** — the IDF table should be built over
-  `bffi:fullTitle` (main title + subtitle, prop-20's output) rather
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
+- **P-20 (recommended)** — the IDF table should be built over
+  `bffi:fullTitle` (main title + subtitle, P-20's output) rather
   than `bf:mainTitle` alone, so that the discriminator mass reflects
-  the full title surface. Phase A can ship before prop-20 by reading
+  the full title surface. Phase A can ship before P-20 by reading
   `skos:prefLabel`, but the threshold will need recalibration when
-  prop-20 lands.
-- **prop-19 (recommended)** — the IDF build needs a corpus-level
-  title iterator. Without prop-19's concat file the build has to
+  P-20 lands.
+- **P-19 (recommended)** — the IDF build needs a corpus-level
+  title iterator. Without P-19's concat file the build has to
   scan the per-record `.ttl` store at ~3-4 hours wall on 800 k; with
-  prop-19's `bffi-corpus.ttl` it's a one-pass parse → ~1 min.
-  Workable without prop-19 if necessary (the build runs at M3
+  P-19's `bffi-corpus.ttl` it's a one-pass parse → ~1 min.
+  Workable without P-19 if necessary (the build runs at M3
   finalisation regardless, just slower).
 - **`scratchpad/merge-cluster-verdicts/verdicts.jsonl`** — the
   2026-05-13 audit baseline is the regression corpus AND the
@@ -234,11 +234,11 @@ fallback is in effect.
   `_norm_author` does this; the title tokeniser must match — fixture
   test: load a Swedish title with combining diacritic + a Finnish
   title with å and assert stable tokens.
-- **R6 — Composability with sibling vetoes.** prop-20 / prop-23 /
-  prop-24 / prop-25 / prop-26 all demote `auto-merge` → `escalate`
+- **R6 — Composability with sibling vetoes.** P-20 / P-23 /
+  P-24 / P-25 / P-26 all demote `auto-merge` → `escalate`
   on disjoint conditions. Implementation: a single `cascade_decide`
-  chains them cheapest-first (prop-24 author-mismatch first → prop-23
-  marker veto → prop-26 IDF mass → prop-20 year-distance → prop-25
+  chains them cheapest-first (P-24 author-mismatch first → P-23
+  marker veto → P-26 IDF mass → P-20 year-distance → P-25
   scope veto). Short-circuit on first hit. Each veto is
   independently testable.
 - **R7 — Audit / production drift.** If the audit script and the
@@ -257,7 +257,7 @@ fallback is in effect.
   shows max-IDF gives a tighter precision-recall curve.
 - **IDF coverage scope.** Only titles, or also authors / publishers /
   years? Only titles for now — the M5 cascade already gates author
-  (prop-24) and year (prop-20) separately. Adding publisher might
+  (P-24) and year (P-20) separately. Adding publisher might
   help on cataloguing-template-driven collisions but is out of scope
   here.
 - **Position-aware variant.** Would Smith-Waterman alignment on
@@ -274,9 +274,9 @@ fallback is in effect.
   IDF table and has IDF above threshold is meaningful). Another:
   consider bigrams. Length-2 fix is simpler; ship that, revisit
   bigrams if titles like the WWI case actually appear in the corpus.
-- **IDF on `bffi:fullTitle` requires prop-20.** Without prop-20, the
+- **IDF on `bffi:fullTitle` requires P-20.** Without P-20, the
   IDF table is built over `skos:prefLabel` (main title only), losing
-  the subtitle. Sequence: ship prop-20 first, then prop-26, so the
+  the subtitle. Sequence: ship P-20 first, then P-26, so the
   IDF table sees the richer surface.
 
 ## Acceptance criteria (drafted; refine on graduation)
@@ -289,19 +289,19 @@ fallback is in effect.
       fixed fixture.
 - [ ] New stage (or M3 finalisation step) writes
       `<BFFI_DATA_DIR>/title-token-idf.parquet` from
-      `bffi:fullTitle` (or `skos:prefLabel` pre-prop-20). Idempotent
+      `bffi:fullTitle` (or `skos:prefLabel` pre-P-20). Idempotent
       rebuild when `bffi-corpus.ttl` is newer than the parquet.
 - [ ] Standard `start` / `end` observability events with counters
       `{n_titles, n_unique_tokens, max_idf, min_idf}`.
 - [ ] Build wall-time on 20 k bench < 30 s; on 800 k corpus < 5 min
-      (given prop-19's concat file).
+      (given P-19's concat file).
 
 **Phase B — M5 IDF-weighted discrimination**
 - [ ] M5 reads the IDF table at startup; falls back to boolean
       symdiff (with an `idf_cold_start` counter) when the table is
       absent.
 - [ ] `cascade_decide` helper chains the five auto-merge-band
-      vetoes (prop-20 / 23 / 24 / 25 / 26) cheapest-first, short-
+      vetoes (P-20 / 23 / 24 / 25 / 26) cheapest-first, short-
       circuiting on first hit.
 - [ ] `AUTO_MERGE_DISCRIMINATOR_MIN` calibrated against the audit
       baseline; the calibration script
@@ -328,34 +328,34 @@ fallback is in effect.
   marginal lift vs IDF, adds an encoder call per pair).
 - Doesn't replace the LLM judge at M6 — symdiff escalates *to* M6,
   not *past* it.
-- Doesn't subsume prop-23 (numeric markers) or prop-24 (distinct
+- Doesn't subsume P-23 (numeric markers) or P-24 (distinct
   authors): those vetoes trip on conditions the symdiff alone
   doesn't see (volume numbers may share IDF with rare words; author
   mismatch is on the `creator:` field, not the title). The five
-  vetoes (prop-20, prop-23, prop-24, prop-25, prop-26) compose
+  vetoes (P-20, P-23, P-24, P-25, P-26) compose
   cleanly.
 
-## Why this supersedes prop-22
+## Why this supersedes P-22
 
-prop-22 ships a same-author absolute-overlap floor (`min_overlap < 3`).
-prop-26's IDF-weighted discrimination dominates it on every axis:
+P-22 ships a same-author absolute-overlap floor (`min_overlap < 3`).
+P-26's IDF-weighted discrimination dominates it on every axis:
 
-- **Same-author false positives** — IDF catches every case prop-22's
+- **Same-author false positives** — IDF catches every case P-22's
   floor catches (same-author pairs whose distinct titles share only
   template prefixes). The discriminator-mass score lights up because
   the distinguishing tokens have high IDF.
-- **Anonymous-work false positives** — prop-22 skips clusters with
-  `len(authors) != 1` (no author or two different authors); prop-26
+- **Anonymous-work false positives** — P-22 skips clusters with
+  `len(authors) != 1` (no author or two different authors); P-26
   fires on title-text alone, catching the Karttakeskus outdoor-map
-  case (`Nuuksio, Luukki` vs `Pallas, Hetta, Olos`) that prop-22 can't
+  case (`Nuuksio, Luukki` vs `Pallas, Hetta, Olos`) that P-22 can't
   see.
-- **Short-title re-edition false escalations** — prop-22's
+- **Short-title re-edition false escalations** — P-22's
   `min_overlap < 3` over-escalates "Tutu" / "Tutu" (overlap = 1).
-  prop-26's symdiff = `{}` → mass = 0 → correctly auto-merges.
-- **Multilingual coverage** — prop-22 depends on a hand-curated
-  multilingual stopword list. prop-26 derives stop-tokens from the
+  P-26's symdiff = `{}` → mass = 0 → correctly auto-merges.
+- **Multilingual coverage** — P-22 depends on a hand-curated
+  multilingual stopword list. P-26 derives stop-tokens from the
   corpus itself; each new language tunes in automatically.
 
-If both ship, prop-22's floor becomes dead code. Cleanest path:
-graduate prop-26 first; mark prop-22 as `rejected (superseded by
-prop-26)` when prop-26 graduates.
+If both ship, P-22's floor becomes dead code. Cleanest path:
+graduate P-26 first; mark P-22 as `rejected (superseded by
+P-26)` when P-26 graduates.

@@ -23,7 +23,7 @@ This script is *unrecognised regression infrastructure*. Today:
   cascade decision can silently change the merge-cluster
   distribution — the audit catches it only if someone re-runs it.
 
-Every veto proposal on the board (prop-20, prop-23 through prop-26)
+Every veto proposal on the board (P-20, P-23 through P-26)
 states a regression criterion of the form *"on the 2026-05-13
 overnight sample, the N audit-flagged FP rows must escalate"*. With
 the audit-as-CI-fixture, those criteria become CI-enforceable.
@@ -34,7 +34,7 @@ shift the audit's verdict distribution. Today there's no way to
 tell whether the shift matches the proposal's prediction or breaks
 something orthogonal. A pinned baseline turns each veto PR into a
 diff: "the audit moved 40 rows from `different_works_same_author` to
-`escalated` — matches prop-22's prediction".
+`escalated` — matches P-22's prediction".
 
 ## Approach
 
@@ -59,11 +59,11 @@ the source MARCXML, copy into the fixture. Document the extraction
 script as `scripts/build-audit-fixture.py` so future re-bench
 operations are reproducible.
 
-The fixture is **immutable per veto proposal**. When prop-22 ships,
-it adds `tests/fixtures/audit-bench-2026-05-13-post-prop-22/` with
+The fixture is **immutable per veto proposal**. When P-22 ships,
+it adds `tests/fixtures/audit-bench-2026-05-13-post-P-22/` with
 the new `expected-verdicts.jsonl` (40 rows moved from
-`different_works_same_author` to `escalated`). The pre-prop-22
-fixture stays in place — it's the regression oracle for the prop-22
+`different_works_same_author` to `escalated`). The pre-P-22
+fixture stays in place — it's the regression oracle for the P-22
 PR itself.
 
 ### Phase B — `make audit-test` target + CI wiring
@@ -151,7 +151,7 @@ add a section): when to re-bench, how to update the fixture.
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; pinning a bench as a CI fixture before verifying its surfaces are non-misleading would freeze the misleading numbers into the regression baseline. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; pinning a bench as a CI fixture before verifying its surfaces are non-misleading would freeze the misleading numbers into the regression baseline. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
 - 2026-05-13 overnight bench data preserved at
   `scratchpad/overnight-sample-2026-05-13/`. Don't delete until the
   fixture is committed.
@@ -185,7 +185,7 @@ add a section): when to re-bench, how to update the fixture.
 - **R5 — Audit-script bugs masked by fixture.** If the audit script
   has a bug that produces a stable-but-wrong verdict, the fixture
   blesses the bug. Mitigation: per-veto-PR re-spot-check by hand,
-  same way prop-26's audit refinement was checked.
+  same way P-26's audit refinement was checked.
 
 ## Open questions
 
@@ -215,7 +215,7 @@ add a section): when to re-bench, how to update the fixture.
       any class-count drift.
 - [ ] CI workflow runs `make audit-test` on PRs touching the path-
       list in Phase B.3.
-- [ ] First veto PR (e.g. prop-23 numeric markers) explicitly
+- [ ] First veto PR (e.g. P-23 numeric markers) explicitly
       updates `expected-verdicts.jsonl` in the same commit, with the
       diff matching the proposal's prediction.
 
@@ -224,8 +224,8 @@ add a section): when to re-bench, how to update the fixture.
 - Doesn't replace `make eval`'s LLM-gold-set evaluation. That's a
   fixed quality bar for prompt / model / judge changes; this is a
   cascade behaviour fixture.
-- Doesn't audit M6 verdicts (prop-27).
-- Doesn't audit recall (prop-29).
+- Doesn't audit M6 verdicts (P-27).
+- Doesn't audit recall (P-29).
 - Doesn't try to be a comprehensive integration test for the
   pipeline. Stage-level integration testing is the spec's
   responsibility; this is *one specific regression surface* (the
@@ -233,11 +233,11 @@ add a section): when to re-bench, how to update the fixture.
 
 ## Composition with sibling proposals
 
-- **Enables every veto proposal.** Without prop-28, the regression
-  criteria in prop-20 / 22 / 23 / 24 / 25 / 26 are aspirational.
-  With prop-28, they're enforceable.
-- **Composes with prop-27.** prop-27 produces an M6 agreement matrix
+- **Enables every veto proposal.** Without P-28, the regression
+  criteria in P-20 / 22 / 23 / 24 / 25 / 26 are aspirational.
+  With P-28, they're enforceable.
+- **Composes with P-27.** P-27 produces an M6 agreement matrix
   as a one-shot writeup. If the M6 sub-audit also turns out to be
-  worth running periodically, a Phase D could extend prop-28's
+  worth running periodically, a Phase D could extend P-28's
   fixture pattern to M6 verdicts (separately, because LLM verdicts
   don't run in CI — the cadence would be local + manual).

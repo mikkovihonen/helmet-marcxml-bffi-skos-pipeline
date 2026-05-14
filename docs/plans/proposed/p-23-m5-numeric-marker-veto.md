@@ -109,10 +109,10 @@ Regression oracle is the 37-row subset of the audit JSONL. Expect:
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
-- prop-20 ships first if `bffi:fullTitle` is going to source the
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
+- P-20 ships first if `bffi:fullTitle` is going to source the
   subtitle text; otherwise the veto reads from `245$b` via a
-  parallel M3 SPARQL extension. Either works — prop-20 is the cleaner
+  parallel M3 SPARQL extension. Either works — P-20 is the cleaner
   path.
 - The 2026-05-13 overnight 20 k sample + audit baseline at
   `scratchpad/merge-cluster-verdicts/`.
@@ -150,10 +150,10 @@ Regression oracle is the 37-row subset of the audit JSONL. Expect:
 - Does this need its own structured-output stage for telemetry, or is
   a "marker veto fired" counter on M5's existing observability sidecar
   enough? Probably the counter is enough.
-- Composes with prop-20 + prop-22: all three demote `auto-merge` →
+- Composes with P-20 + P-22: all three demote `auto-merge` →
   `escalate` on different conditions. Implementation: chain them in
-  the order **prop-23 (markers, cheapest) → prop-22 (token overlap) →
-  prop-20 (year-distance)**, short-circuiting on the first hit.
+  the order **P-23 (markers, cheapest) → P-22 (token overlap) →
+  P-20 (year-distance)**, short-circuiting on the first hit.
 
 ## Acceptance criteria (drafted; refine on graduation)
 

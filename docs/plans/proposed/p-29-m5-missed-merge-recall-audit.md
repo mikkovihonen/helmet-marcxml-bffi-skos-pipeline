@@ -7,7 +7,7 @@
 
 ## Motivation
 
-Every audit we've run looks at **what merged**: prop-22 / 23 / 24 /
+Every audit we've run looks at **what merged**: P-22 / 23 / 24 /
 25 / 26 / 27 all sift through `canonical-map.jsonl` and ask "is this
 merge wrong?" That's the **false-positive surface** — pairs that
 auto-merged when they shouldn't have. We have 96 % audit-classified
@@ -21,8 +21,8 @@ ways:
    The 2026-05-13 bench produced 905 M6 `different_work` verdicts
    (`judge-cache.sqlite`). If even 5 % are wrong, that's ~45 missed
    merges per 20 k → ~1 800 on the 800 k corpus. Some of these
-   would be auditable by the heuristic classifier (prop-27 sub-
-   audit B is a 50-pair spot-check; prop-29 systematises it).
+   would be auditable by the heuristic classifier (P-27 sub-
+   audit B is a 50-pair spot-check; P-29 systematises it).
 
 2. **Never-candidate pairs.** Records that *should* be a same-Work
    pair but landed in different blocking keys (different
@@ -154,12 +154,12 @@ Each phase outputs to `scratchpad/missed-merge-audit-<date>/`.
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; recall audits read bench candidate-pair and decision data, both of which need to be verified non-misleading first. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; recall audits read bench candidate-pair and decision data, both of which need to be verified non-misleading first. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
 - `scratchpad/overnight-sample-2026-05-13/judge-decisions.jsonl` +
   the corresponding M5 candidate-pair file (locate or regenerate).
   The candidate-pair list is what tells us *which* pairs M5 even
   considered — required for the recall@blocker metric.
-- prop-09 (library-agnostic source) — *not* a hard prerequisite, but
+- P-09 (library-agnostic source) — *not* a hard prerequisite, but
   if Phase B's KANTO logic is going to expand to other libraries
   later, the authority-URI extraction should be source-agnostic.
 
@@ -183,16 +183,16 @@ Each phase outputs to `scratchpad/missed-merge-audit-<date>/`.
   Phase A may reveal that, say, 200 / 800 k pairs are missed because
   M5's blocker is too narrow. The *fix* (broaden the blocker,
   add a fuzzy-match pre-pass, etc.) is downstream work — likely a
-  prop-30 motivated by this proposal's findings.
+  P-30 motivated by this proposal's findings.
 - **R5 — Block-key changes risk cascade-FP increases.** Loosening
   the blocker to catch missed merges generates more candidate pairs
   → more auto-merges → more FPs. Any blocker-broadening proposal
-  needs to compose with the FP veto stack (prop-20 through 26).
+  needs to compose with the FP veto stack (P-20 through 26).
 
 ## Open questions
 
 - Should the recall audit run on the full 20 k bench or just the
-  ~400-record FP-cluster subset prop-28 pins? Recommend full 20 k
+  ~400-record FP-cluster subset P-28 pins? Recommend full 20 k
   for Phase A so we get meaningful recall numerators; the FP subset
   is too small.
 - Is "M5 candidate pair" the right baseline for recall@blocker, or
@@ -200,11 +200,11 @@ Each phase outputs to `scratchpad/missed-merge-audit-<date>/`.
   collapses records)? Start with M5 alone — measuring the M5
   blocker in isolation is the first signal; M9's contribution to
   recall is a separate measurement.
-- How does this interact with prop-27's sub-audit B? prop-27 B
+- How does this interact with P-27's sub-audit B? P-27 B
   systematically classifies all 905 M6 `different_work` verdicts.
-  prop-29 expands the scope to *never-candidate* pairs (which
-  prop-27 can't see — they never reached M6 at all). They compose:
-  prop-27 B covers the M6-reached-but-rejected slice; prop-29
+  P-29 expands the scope to *never-candidate* pairs (which
+  P-27 can't see — they never reached M6 at all). They compose:
+  P-27 B covers the M6-reached-but-rejected slice; P-29
   covers the M5-blocker-never-saw-them slice.
 - Should Phase A also pull from M9's reconcile-output's same-Work
   decisions? Same question — start with M5 only.
@@ -219,7 +219,7 @@ Each phase outputs to `scratchpad/missed-merge-audit-<date>/`.
 - [ ] `docs/performance/<date>-missed-merge-audit.md` snapshot
       with: recall@candidate, recall@blocker, top-3 failure modes
       by frequency.
-- [ ] Open follow-up proposal (prop-30) for whichever failure mode
+- [ ] Open follow-up proposal (P-30) for whichever failure mode
       dominates Phase A + B output.
 
 ## What this proposal does NOT do
@@ -230,19 +230,19 @@ Each phase outputs to `scratchpad/missed-merge-audit-<date>/`.
   decision once we know which records are missing each other.
 - Doesn't replace cataloguer feedback. Phase C uses it sparingly
   for cases the bootstrap methods can't resolve.
-- Doesn't touch M6 (prop-27) or production code (prop-28). Pure
+- Doesn't touch M6 (P-27) or production code (P-28). Pure
   offline audit.
 
 ## Composition with sibling proposals
 
-- **Independent of the FP veto stack.** prop-20 / 23 / 24 / 25 / 26
-  tighten precision; prop-29 measures recall. Both can ship
+- **Independent of the FP veto stack.** P-20 / 23 / 24 / 25 / 26
+  tighten precision; P-29 measures recall. Both can ship
   independently. Eventually they trade off: a recall-driven blocker
-  loosening (post-prop-29) increases candidate pairs and stresses
+  loosening (post-P-29) increases candidate pairs and stresses
   the veto stack more.
-- **Composes with prop-27.** prop-27's sub-audit B is a 50-row
-  spot-check of the auto-reject band; prop-29 Phase A scales that
+- **Composes with P-27.** P-27's sub-audit B is a 50-row
+  spot-check of the auto-reject band; P-29 Phase A scales that
   to the full bench plus the never-candidate population.
-- **Feeds prop-28.** Once a missed-merge fixture exists, prop-28's
+- **Feeds P-28.** Once a missed-merge fixture exists, P-28's
   CI pattern can pin it as a recall regression baseline alongside
   the FP regression baseline.

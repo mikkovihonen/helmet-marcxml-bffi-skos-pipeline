@@ -12,7 +12,7 @@ src/bffi_pipeline/stages/bf_to_bffi.py`.
 
 ## Motivation
 
-The 2026-05-13 20 k overnight bench surfaced two distinct M5/M6 false-positive merges, both involving Alvar Aalto. The first (`b1499110x` ↔ `b18086238`) was an M5 auto-merge band failure that **prop-20** addresses. The second is the focus of *this* proposal: the M5 cascade correctly *escalated* a similarity-0.844 pair to M6, and **M6's LLM judge confidently said `same_work` at confidence 0.95** with a hallucinated rationale:
+The 2026-05-13 20 k overnight bench surfaced two distinct M5/M6 false-positive merges, both involving Alvar Aalto. The first (`b1499110x` ↔ `b18086238`) was an M5 auto-merge band failure that **P-20** addresses. The second is the focus of *this* proposal: the M5 cascade correctly *escalated* a similarity-0.844 pair to M6, and **M6's LLM judge confidently said `same_work` at confidence 0.95** with a hallucinated rationale:
 
 - **b23008490** — "Alvar Aalto : **taide ja moderni muoto**" — Ateneum 2017 exhibition catalog about Aalto's art, edited by Sointu Fritze, Finnish, multi-author.
 - **b24731298** — "Alvar Aalto : **Maison Louis Carré**" — Fondation Aalto 2018 catalog about a specific building, by Laaksonen + Ólafsdóttir, French.
@@ -33,7 +33,7 @@ Two separate cognitive failures in one rationale:
 
 **Aalto-as-creator in art/architecture monographs** is a *systemic* cataloguing convention in Helmet, not an isolated quirk. Every Finnish library cataloguer with a substantial art collection follows this pattern for deceased subjects. On the 800 k corpus there are likely **hundreds to low thousands** of similar pairs where the pipeline cluster-matches by Aalto / Sibelius / Mannerheim / Tove Jansson / etc. as "creator", then escalates to M6, then M6 hallucinates a Work relationship.
 
-The Schildt case (prop-20) was a real same-author-different-book pair where the embedding vector itself was the failure. **The Aalto-as-subject case is different**: the source-data shape is misleading, AND the LLM's prompt template makes the misleading shape attractive to a "translation" reading. Two failure layers compounding.
+The Schildt case (P-20) was a real same-author-different-book pair where the embedding vector itself was the failure. **The Aalto-as-subject case is different**: the source-data shape is misleading, AND the LLM's prompt template makes the misleading shape attractive to a "translation" reading. Two failure layers compounding.
 
 ## Approach
 
@@ -54,11 +54,11 @@ Surface: ~20-40 lines in `prompts/picker_v1.txt`, ~5 lines in tests pinning the 
 Detect the pattern at the conversion layer so it never reaches M6:
 
 - At M2 / M3 time, when MARC 100 carries a person AND the bib's 008 publication year is after that person's known death year (from a small Aalto/Sibelius/Mannerheim/etc. lookup, or from cross-referencing KANTO's birth-death dates via the `$0` asteri-id), demote the person from `bffi:contribution` to `bffi:subject` (or to a new `bffi:subjectPerson` if we want to keep the distinction).
-- The canonical-Work mint then doesn't see Aalto as the creator — it falls through to the actual authors in `700`, or fails to find a creator (→ `canonical-conflicts.jsonl` per prop-05's territory).
+- The canonical-Work mint then doesn't see Aalto as the creator — it falls through to the actual authors in `700`, or fails to find a creator (→ `canonical-conflicts.jsonl` per P-05's territory).
 
 **Pros:**
 - Architecturally correct: 100-is-subject becomes a permanent fact in BFFI, not just a M6 prompt-time judgment call.
-- Composes cleanly with prop-15's authority-URI preservation: when `$0 = (FI-ASTERI-N)000068760` is on a 100 carrying a deceased person, the M3 pipeline can look up KANTO's death date and decide.
+- Composes cleanly with P-15's authority-URI preservation: when `$0 = (FI-ASTERI-N)000068760` is on a 100 carrying a deceased person, the M3 pipeline can look up KANTO's death date and decide.
 
 **Cons:**
 - Needs a KANTO date-lookup mechanism. For records without `$0` on the 100, we'd need a small in-repo lookup table for the most common cases (Aalto, Sibelius, Mannerheim, Kalevala-era authors, etc.) — manageable but cataloguer-curated.
@@ -74,7 +74,7 @@ For pairs where the LLM picker returns `same_work` but the title-distance (245$a
 - Same `bf:isbn` (extremely rare to share across distinct works), OR
 - Operator-listed signal from `picker_v1.txt`'s reply structure (the LLM has to cite a specific translation triple from the input)
 
-If none of those are present, **downgrade `same_work` to `uncertain`** post-pick. Tier-3 fallback then either falls back to highest-lexical (still a needs-review bind) or — combined with prop-16 Knob A (raise `BFFI_M9_LEXICAL_FALLBACK_FLOOR`, or Knob C disable_fallback) — returns `no-candidate`.
+If none of those are present, **downgrade `same_work` to `uncertain`** post-pick. Tier-3 fallback then either falls back to highest-lexical (still a needs-review bind) or — combined with P-16 Knob A (raise `BFFI_M9_LEXICAL_FALLBACK_FLOOR`, or Knob C disable_fallback) — returns `no-candidate`.
 
 **Pros:**
 - Catches the residual hallucinated-translation case even if Phase A's prompt update doesn't fully suppress it.
@@ -96,11 +96,11 @@ A + B together would address Aalto-class records permanently; C would also catch
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
-- The 2026-05-13 overnight-bench artefacts at `scratchpad/overnight-sample-2026-05-13/` provide the regression-test fixtures: the b23008490 ↔ b24731298 pair (this proposal's specific case) plus the b1499110x ↔ b18086238 pair (prop-20's case) as a pin for the prompt change.
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
+- The 2026-05-13 overnight-bench artefacts at `scratchpad/overnight-sample-2026-05-13/` provide the regression-test fixtures: the b23008490 ↔ b24731298 pair (this proposal's specific case) plus the b1499110x ↔ b18086238 pair (P-20's case) as a pin for the prompt change.
 - `prompts/picker_v1.txt` exists and is the active prompt template for M6's picker. Phase A's surgery is on that file; the prompt hash automatically propagates into provenance + cache keys.
 - KANTO's bf:dateOfDeath lookup (Phase B) requires a quick check of the loaded Finto dumps — if the dump carries death dates, the lookup is local. If not, an external Finto API call is needed (the pipeline already talks to Finto for tier-0 reconciliation, so the infra is in place).
-- prop-15 is already shipped (M3 preserves `madsrdf:isIdentifiedByAuthority`), so KANTO authority URIs flow through to canonical. Phase B can use them.
+- P-15 is already shipped (M3 preserves `madsrdf:isIdentifiedByAuthority`), so KANTO authority URIs flow through to canonical. Phase B can use them.
 
 ## Risks
 
@@ -112,7 +112,7 @@ A + B together would address Aalto-class records permanently; C would also catch
 ## Open questions
 
 - Should Phase B's deceased-author detection look at MARC 100$d (birth/death date subfield) when present, rather than always going to KANTO? Pros: avoids the KANTO lookup. Cons: many records (including the Aalto cases tonight) don't carry $d. Probably do both — prefer $d when present, fall back to KANTO when not.
-- Does Phase C compose with prop-16's fallback knobs? Yes — demoting `same_work` → `uncertain` is exactly what prop-16's `BFFI_M9_LEXICAL_FALLBACK_FLOOR` and `BFFI_M9_DISABLE_FALLBACK` were designed to handle downstream. They make the resulting bind either `no-candidate` (strict) or `fallback` with `needs-review` (moderate).
+- Does Phase C compose with P-16's fallback knobs? Yes — demoting `same_work` → `uncertain` is exactly what P-16's `BFFI_M9_LEXICAL_FALLBACK_FLOOR` and `BFFI_M9_DISABLE_FALLBACK` were designed to handle downstream. They make the resulting bind either `no-candidate` (strict) or `fallback` with `needs-review` (moderate).
 - Should the few-shot examples in `picker_v1.txt` also include a legitimate-translation case so the LLM doesn't over-correct in the opposite direction (rejecting actual translations)? Yes — a balanced 4-example set: one same_work translation, one same_work re-edition, one different_work series, one different_work subject-vs-creator. Worth lining up with the P-06 gold-set growth backlog.
 
 ## Acceptance criteria
@@ -134,7 +134,7 @@ A + B together would address Aalto-class records permanently; C would also catch
 
 ## What this proposal does NOT do
 
-- Doesn't replace prop-20's M5 auto-merge mitigations. The two proposals compose: prop-20 catches the high-similarity cases at M5, this one catches the M6-LLM-hallucination cases that escape M5.
+- Doesn't replace P-20's M5 auto-merge mitigations. The two proposals compose: P-20 catches the high-similarity cases at M5, this one catches the M6-LLM-hallucination cases that escape M5.
 - Doesn't redesign the M6 cascade (single → fallback model) or the picker's I/O shape. Phase A is a prompt update only; Phase B is at the M2/M3 layer; Phase C is a post-pick validation, not a pre-pick reshape.
 - Doesn't address the broader "MARC cataloguing conventions vary by library" issue. This proposal targets the specific Helmet 100-as-subject pattern; library-agnostic generalisation belongs in P-09 (library-agnostic source).
 - Doesn't add a cataloguer-side annotation workflow for "this 100 is actually a subject". That UX work, if it ever happens, would be a P-06 gold-set-growth follow-up.

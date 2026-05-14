@@ -16,8 +16,8 @@ recurring character name, or simply a shared blocking key — that M5's
 auto-merge band (sim ≥ 0.90) collapses them into one canonical Work.
 
 Examples from the audit (all sit in the 0.90-0.95 auto-merge slice
-*before* prop-20's threshold-tightening, and would survive even after
-prop-20's subtitle-in-vector and year-distance fixes because the
+*before* P-20's threshold-tightening, and would survive even after
+P-20's subtitle-in-vector and year-distance fixes because the
 subtitles match and the publication years are close):
 
 - **b22897847 / b2428466x / b24524566** — Aron, Elaine N.: three
@@ -37,8 +37,8 @@ subtitles match and the publication years are close):
 Forty cases × the linear-extrapolation factor (~40 in 20 k bench →
 **~1 600 false merges projected** on the 800 k corpus) makes this the
 single largest M5 quality issue surfaced by the audit. It is
-disjoint from prop-20 (Schildt-on-Aalto / subtitle-divergence) and
-prop-21 (Aalto-as-subject / LLM hallucinated translation): those
+disjoint from P-20 (Schildt-on-Aalto / subtitle-divergence) and
+P-21 (Aalto-as-subject / LLM hallucinated translation): those
 classes shared a main title; this class has *distinct* main titles
 that nonetheless cosine-cluster.
 
@@ -124,22 +124,22 @@ caller in `merge.py` uses). Default
   least a spot-audit sample of 10).
 - Legitimate same-author re-editions (64 `legitimate_reedition` cases)
   do *not* get over-escalated. The token-overlap floor is anchored on
-  the title text *after* prop-20 ships `bffi:fullTitle`, so re-editions
+  the title text *after* P-20 ships `bffi:fullTitle`, so re-editions
   share their full normalised title and clear the floor trivially.
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
 - The 2026-05-13 overnight 20 k sample at
   `scratchpad/overnight-sample-2026-05-13/`. Treat as the regression
   corpus for the proposal.
 - Audit baseline at `scratchpad/merge-cluster-verdicts/verdicts.jsonl`.
   The 40 `different_works_same_author` rows are the regression
   oracle: each should escalate after the change.
-- Composes with prop-20: prop-20 adds `bffi:fullTitle` to the
+- Composes with P-20: P-20 adds `bffi:fullTitle` to the
   embedding, which strengthens this proposal's title-token signal
   (more tokens to overlap on). Order doesn't strictly matter, but
-  shipping prop-20 first is preferable because it expands the title
+  shipping P-20 first is preferable because it expands the title
   surface that this floor operates on.
 
 ## Risks
@@ -175,13 +175,13 @@ caller in `merge.py` uses). Default
   generalising weakens the precision.
 - Where does the `_STOPWORDS` module live — `src/bffi_pipeline/text/`,
   `src/bffi_pipeline/stages/`, or a top-level utility? Suggest
-  `src/bffi_pipeline/text/` (new package) since prop-23 will want it
+  `src/bffi_pipeline/text/` (new package) since P-23 will want it
   too.
 - Should `AUTO_MERGE_TITLE_OVERLAP_MIN` be a proportion (e.g. ≥ 50 %
   of the smaller title's tokens) instead of an absolute count? The
   audit used absolute count and worked well; revisit if R2 cases
   surface.
-- Compose with prop-16 (fallback-tier gating)? Both share an
+- Compose with P-16 (fallback-tier gating)? Both share an
   "auto-merge → escalate" demote pathway. No direct interaction; they
   trip on disjoint conditions.
 
@@ -204,6 +204,6 @@ caller in `merge.py` uses). Default
 ## What this proposal does NOT do
 
 - Doesn't add a new ML model or embedding step.
-- Doesn't touch M6 prompts (that's prop-21 territory).
+- Doesn't touch M6 prompts (that's P-21 territory).
 - Doesn't change M8 union-find semantics.
-- Doesn't propose an author-disambiguation step (prop-24's territory).
+- Doesn't propose an author-disambiguation step (P-24's territory).

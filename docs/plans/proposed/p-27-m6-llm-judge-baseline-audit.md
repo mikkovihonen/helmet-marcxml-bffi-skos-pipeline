@@ -23,7 +23,7 @@ larger model" — and because the M5 Max can't fit Qwen3-72B (dev
 machine constraint), that fallback is structurally always off.
 Reading the flag as "did the LLM judge run at all" is wrong but
 easy to do; this is the kind of misleading observability surface
-prop-17 was about.
+P-17 was about.
 
 The actual bench distribution:
 
@@ -35,7 +35,7 @@ The actual bench distribution:
 
 M6 cache verdict split: **83 `same_work` + 905 `different_work`**.
 
-This reframes everything the merge-cluster audit (prop-26's source
+This reframes everything the merge-cluster audit (P-26's source
 data) measured:
 
 1. **The 51 % FP rate is M5 + M6 *combined*.** Of the 183 merge
@@ -44,13 +44,13 @@ data) measured:
    M8's canonical map). M6 is already part of the FP surface, not a
    downstream gate to be tested.
 
-2. **prop-21's Aalto hallucination is more representative than n=1.**
+2. **P-21's Aalto hallucination is more representative than n=1.**
    M6 said `same_work` 83 times during this bench. If a non-trivial
-   share follow the prop-21 pattern (subject-of-art-book → same Work
+   share follow the P-21 pattern (subject-of-art-book → same Work
    hallucination), M6 is leaking same-Work calls into the canonical
    map at a rate worth measuring.
 
-3. **The five-veto stack (prop-20/23/24/25/26) doesn't push traffic
+3. **The five-veto stack (P-20/23/24/25/26) doesn't push traffic
    into a dormant gate — it shifts load that's already there.** Each
    veto demotes some auto-merges to escalate; M6 then judges. The
    open question is no longer "will M6 fire?" but "is M6's verdict
@@ -93,7 +93,7 @@ classification. Verdict matrix:
 
 **Output:** `scratchpad/m6-verdict-audit/recall.jsonl`. The
 **M6 FN rate** estimates how many legitimate same-Work pairs M6 is
-splitting apart. Together with prop-29's recall audit, this
+splitting apart. Together with P-29's recall audit, this
 quantifies M6's contribution to the false-negative surface.
 
 ### C — Examine M6 vs M5 disagreement on the escalate band
@@ -123,7 +123,7 @@ sub-audits, both consuming the existing 20 k bench:
 ### A — Force-fire M6 on the audit-flagged FP set
 
 Take the 93 audit-flagged FP clusters (40 + 34 + 11 + 3 + 2 + 2 + 1
-from prop-26's verdict distribution, minus the 64 legitimate-
+from P-26's verdict distribution, minus the 64 legitimate-
 reedition + 20 legitimate-translation true-positives). For each
 cluster, construct the canonical M6 input — work_a + work_b BFFI
 fragments, prompt template, embedding similarity — and invoke the
@@ -158,7 +158,7 @@ for row in fp_rows:
 If the diagonal (`different_work` for audit-FPs) is high — say ≥ 80 % —
 the veto stack is safe to ship. If the off-diagonal `M6: same_work`
 column is dominant, M6 hallucinates same-Work *systematically* on
-the patterns the vetoes escalate (prop-21 generalised). That blocks
+the patterns the vetoes escalate (P-21 generalised). That blocks
 the veto stack until M6's prompt or model is hardened.
 
 ### B — Auto-reject band audit (recall side)
@@ -172,8 +172,8 @@ auto-rejects that look like legitimate same-Work pairs (typical case:
 same author, same normalised title, sim 0.74 — just below the 0.78
 floor), we have a recall failure mode that needs its own attention.
 
-This is a *smaller* version of prop-29 (missed-merge audit), focused
-on the auto-reject band specifically. prop-29 takes a broader gold-
+This is a *smaller* version of P-29 (missed-merge audit), focused
+on the auto-reject band specifically. P-29 takes a broader gold-
 driven approach; B here is opportunistic, reusing the bench.
 
 ### Deliverable
@@ -208,8 +208,8 @@ Markdown snapshot at `docs/performance/<date>-m6-verdict-audit.md`.
 **A.4 Recommendation writeup.** Same snapshot. Either:
 - *Veto stack ships unchanged* — M6 FP rate substantially below
   M5's, M6 FN rate small enough to ignore.
-- *Veto stack ships with prop-21 acceleration* — M6's `same_work`
-  hallucinations cluster on the prop-21 pattern; harden the prompt
+- *Veto stack ships with P-21 acceleration* — M6's `same_work`
+  hallucinations cluster on the P-21 pattern; harden the prompt
   first, then ship the rest of the stack.
 - *Veto stack narrows* — M6 disagrees with the heuristic too often
   on certain audit classes; those vetoes should keep auto-merging
@@ -218,7 +218,7 @@ Markdown snapshot at `docs/performance/<date>-m6-verdict-audit.md`.
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove this very proposal around a false premise; the audit-against-bench-data approach here only works if those bench numbers are themselves trustworthy. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove this very proposal around a false premise; the audit-against-bench-data approach here only works if those bench numbers are themselves trustworthy. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
 - The bench artefacts at `scratchpad/overnight-sample-2026-05-13/`:
   `judge-decisions.jsonl` (1342 rows), `judge-cache.sqlite` (988
   M6 verdicts), `bffi/` (BFFI Turtle for context lookups),
@@ -231,7 +231,7 @@ Markdown snapshot at `docs/performance/<date>-m6-verdict-audit.md`.
 
 - **R1 — Audit heuristics aren't ground truth.** The audit script
   is a deterministic classifier with known limits (96 % agreement
-  with manual inspection in prop-26's run). When audit and M6
+  with manual inspection in P-26's run). When audit and M6
   disagree, sometimes M6 is right. Mitigation: spot-check ≥ 10
   disagreements by hand per audit class before reading the matrix
   as scripture; the matrix is a *signal*, not a verdict.
@@ -246,7 +246,7 @@ Markdown snapshot at `docs/performance/<date>-m6-verdict-audit.md`.
   itself was almost drafted around the wrong premise (`used_cascade`
   misread). Future audits and dashboards should treat the cache row
   count as the authoritative "M6 fired" signal, not the
-  `judge-decisions.jsonl` boolean. Fold this into prop-17 (sidecar
+  `judge-decisions.jsonl` boolean. Fold this into P-17 (sidecar
   / observability surface review) if it isn't already covered.
 - **R4 — Stale audit-class definitions.** The heuristic classifier
   was iterated against the 183 merge clusters; the 988 M6 verdicts
@@ -259,18 +259,18 @@ Markdown snapshot at `docs/performance/<date>-m6-verdict-audit.md`.
 ## Open questions
 
 - Should sub-audit B (auto-reject recall) live in this proposal or
-  fold into prop-29? They're related but answer different questions.
-  Keep here as a small first-pass; prop-29 is the full recall
+  fold into P-29? They're related but answer different questions.
+  Keep here as a small first-pass; P-29 is the full recall
   audit with a gold set.
 - Does M6 need its own confidence calibration before the veto stack
   lands? Currently M6 reports confidence ∈ [0, 1] but we don't know
   if 0.8 means "8 out of 10 such verdicts are correct" or just "the
   model is confident". The force-fire run provides the data to fit
   a confidence-vs-accuracy curve.
-- Does sub-audit A double-serve prop-21? prop-21 was motivated by a
+- Does sub-audit A double-serve P-21? P-21 was motivated by a
   single M6 hallucination; sub-audit A would tell us whether that's
-  systemic or isolated. If isolated, prop-21 can ship as-is. If
-  systemic across the `subtitle_divergence` class, prop-21's prompt-
+  systemic or isolated. If isolated, P-21 can ship as-is. If
+  systemic across the `subtitle_divergence` class, P-21's prompt-
   hardening needs to expand.
 
 ## Acceptance criteria (drafted; refine on graduation)
@@ -288,41 +288,41 @@ Markdown snapshot at `docs/performance/<date>-m6-verdict-audit.md`.
 - [ ] `docs/performance/<date>-m6-verdict-audit.md` snapshot
       committed.
 - [ ] Decision recorded: ship the veto stack as-is / accelerate
-      prop-21 first / narrow specific vetoes.
+      P-21 first / narrow specific vetoes.
 
 ## What this proposal does NOT do
 
 - Doesn't ship any pipeline code changes (it's an audit + decision).
-- Doesn't redesign M6's prompt (that's prop-21's territory, and
-  the audit may motivate expanding prop-21).
+- Doesn't redesign M6's prompt (that's P-21's territory, and
+  the audit may motivate expanding P-21).
 - Doesn't replace `make eval`'s gold-set evaluation — that's a
   fixed-fixture quality bar; this is a corpus-derived calibration.
-- Doesn't establish a recurring audit cadence — prop-28 codifies
+- Doesn't establish a recurring audit cadence — P-28 codifies
   that.
 
 ## Composition with sibling proposals
 
-- **Gates the veto stack.** prop-20 / 23 / 24 / 25 / 26 all assume
+- **Gates the veto stack.** P-20 / 23 / 24 / 25 / 26 all assume
   M6 catches cases they escalate. With M6 already firing 988
-  times/bench, prop-27's matrices turn that assumption from
-  unmeasured into measured. Recommend graduating prop-27 *before*
+  times/bench, P-27's matrices turn that assumption from
+  unmeasured into measured. Recommend graduating P-27 *before*
   the veto stack.
-- **Quantifies prop-21's importance.** prop-21 hardens M6's prompt
-  against a specific hallucination class. prop-27 measures whether
+- **Quantifies P-21's importance.** P-21 hardens M6's prompt
+  against a specific hallucination class. P-27 measures whether
   that class is one stray case or a sizeable share of M6's 83
-  `same_work` verdicts. If the latter, prop-21 must ship before
+  `same_work` verdicts. If the latter, P-21 must ship before
   (or alongside) the veto stack.
-- **Cross-checks prop-26's 51 % FP claim.** prop-26 attributed the
-  FP rate to M5 alone. prop-27 disaggregates: how much of the 51 %
+- **Cross-checks P-26's 51 % FP claim.** P-26 attributed the
+  FP rate to M5 alone. P-27 disaggregates: how much of the 51 %
   came from M5's 354 auto-merges vs M6's 83 `same_work` verdicts?
-  Could reshape prop-26's motivation (and the veto-stack's value
+  Could reshape P-26's motivation (and the veto-stack's value
   proposition).
-- **Feeds prop-28.** Once prop-27 produces an M6 baseline, prop-28
+- **Feeds P-28.** Once P-27 produces an M6 baseline, P-28
   can pin the agreement matrices as a regression target.
-- **Overlaps with prop-29's sub-audit B was**. prop-29 originally
-  proposed sampling auto-rejects for FNs; prop-27 sub-audit B does
-  this for the M6 `different_work` verdicts instead. Adjust prop-29's
-  sub-audit B scope accordingly when prop-29 ships.
-- **Feeds prop-17.** The `used_cascade` misread documented in the
-  Motivation is itself an observability finding — fold into prop-17's
+- **Overlaps with P-29's sub-audit B was**. P-29 originally
+  proposed sampling auto-rejects for FNs; P-27 sub-audit B does
+  this for the M6 `different_work` verdicts instead. Adjust P-29's
+  sub-audit B scope accordingly when P-29 ships.
+- **Feeds P-17.** The `used_cascade` misread documented in the
+  Motivation is itself an observability finding — fold into P-17's
   exporter / sidecar review as a "flag-naming gotcha" data point.

@@ -132,7 +132,7 @@ Default `AUTO_MERGE_YEAR_GAP = 5`; configurable via `BFFI_M5_AUTO_MERGE_YEAR_GAP
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
 - A reproducible 20 k sample exists at `scratchpad/overnight-sample-2026-05-13/` (the bench from tonight). Pin this as the regression-test corpus for the proposal.
 - The pinned-cataloguer-pin records in `gold/cataloguer-feedback-2026-05-13.jsonl` provide hand-verified outcomes for nineteen records (none of them flagged as auto-merge false positives by the cataloguer — they exercise reconcile, not merge); supplemental.
 
@@ -146,7 +146,7 @@ Default `AUTO_MERGE_YEAR_GAP = 5`; configurable via `BFFI_M5_AUTO_MERGE_YEAR_GAP
 ## Open questions
 
 - Should `bffi:fullTitle` live in the BFFI vocabulary as a first-class property, or should `skos:prefLabel` itself be extended to include the subtitle? The former preserves the prefLabel-as-display-label semantic (Skosmos displays prefLabel; bare "Alvar Aalto" is more useful for UI than "Alvar Aalto : mestariteoksia"); the latter is simpler. Probably go with the former.
-- Does B compose with [P-15](prop-15-bilingual-subject-reconciliation.md)? P-15 fixed authority-URI propagation through M3; B extends a different M3 CONSTRUCT clause. No interaction expected — both can ship independently.
+- Does B compose with [P-15](p-15-bilingual-subject-reconciliation.md)? P-15 fixed authority-URI propagation through M3; B extends a different M3 CONSTRUCT clause. No interaction expected — both can ship independently.
 - Should A (tighter threshold) ship at all, or is B+C enough? Initial recommendation: skip A in Phase A. Re-evaluate after Phase A's re-bench surfaces residual false-positive rate.
 
 ## Acceptance criteria (drafted; refine on graduation)

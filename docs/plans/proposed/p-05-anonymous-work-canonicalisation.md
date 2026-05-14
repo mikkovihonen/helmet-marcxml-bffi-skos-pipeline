@@ -210,7 +210,7 @@ is a cataloguer-side decision.
   uniform downstream? Probably yes, but the M9 reconciliation
   step needs to know to skip authority lookups for those.
 - Numbering note: this is the second proposal at index `05`
-  (`prop-05` exists in plans as `p-05-m3-cascade-follow-ups.md`);
+  (`P-05` exists in plans as `p-05-m3-cascade-follow-ups.md`);
   the two are disjoint topic areas — disambiguate by path in prose
   if they ever coexist in the same discussion.
 
