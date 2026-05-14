@@ -126,11 +126,11 @@ Phases B / C / D / G / H can ship in parallel branches if the operator and claud
 
 ### Phase D — `bffi-pipeline runs tag` / `untag` / `info`
 
-- [ ] `bffi-pipeline runs tag <run_uuid> <tag> [<tag>...]` adds tags. `<run_uuid>` resolves as a prefix match against `BFFI_RUNS_ROOT/*`.
-- [ ] `bffi-pipeline runs untag <run_uuid> <tag>` removes a tag (no-op if not present).
-- [ ] `bffi-pipeline runs info <run_uuid>` pretty-prints: full manifest + dir size + artifact-file enumeration (`bibframe/`, `bffi/`, `bffi-corpus.ttl`, `canonical.ttl`, `canonical-map.jsonl`, `canonical-conflicts.jsonl`, cataloguer TSVs from P-31, etc., with row counts / file sizes as appropriate).
-- [ ] Tag operations atomic against the manifest (`update_manifest_field` from Phase A).
-- [ ] Unit tests:
+- [x] `bffi-pipeline runs tag <run_uuid> <tag> [<tag>...]` adds tags. `<run_uuid>` resolves as a prefix match against `BFFI_RUNS_ROOT/*`.
+- [x] `bffi-pipeline runs untag <run_uuid> <tag>` removes a tag (no-op if not present).
+- [x] `bffi-pipeline runs info <run_uuid>` pretty-prints: full manifest + dir size + artifact-file enumeration (`bibframe/`, `bffi/`, `bffi-corpus.ttl`, `canonical.ttl`, `canonical-map.jsonl`, `canonical-conflicts.jsonl`, cataloguer TSVs from P-31, etc., with row counts / file sizes as appropriate).
+- [x] Tag operations atomic against the manifest (`update_manifest_field` from Phase A).
+- [x] Unit tests:
   - `test_runs_tag_adds_and_persists_tag` round-trip.
   - `test_runs_untag_is_noop_on_missing_tag`.
   - `test_runs_info_renders_manifest_and_dir_size`.

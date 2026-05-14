@@ -209,9 +209,7 @@ def test_runs_list_json_output_is_parseable(
     assert row["size_bytes"] > 0
 
 
-def test_runs_list_handles_legacy_dirs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_runs_list_handles_legacy_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Legacy dirs (no manifest) skipped by default; ``--include-legacy`` opts in."""
     monkeypatch.setenv("BFFI_RUNS_ROOT", str(tmp_path))
     monkeypatch.setenv("BFFI_OBSERVABILITY_SIDECAR", "none")
@@ -249,9 +247,7 @@ def test_runs_list_sort_size_orders_biggest_first(
     monkeypatch.setenv("BFFI_OBSERVABILITY_SIDECAR", "none")
 
     now = datetime.now(UTC)
-    _make_run(
-        tmp_path, run_uuid="smallrun0000", started_at=now, payload_bytes=10
-    )
+    _make_run(tmp_path, run_uuid="smallrun0000", started_at=now, payload_bytes=10)
     _make_run(
         tmp_path,
         run_uuid="bigrun000000",
@@ -268,9 +264,7 @@ def test_runs_list_sort_size_orders_biggest_first(
     assert pos_big < pos_small, result.output
 
 
-def test_runs_list_older_than_filter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_runs_list_older_than_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--older-than 30d`` excludes recent runs."""
     monkeypatch.setenv("BFFI_RUNS_ROOT", str(tmp_path))
     monkeypatch.setenv("BFFI_OBSERVABILITY_SIDECAR", "none")

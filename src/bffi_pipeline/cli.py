@@ -346,28 +346,219 @@ def runs_mark_complete_command(
         )
         raise typer.Exit(code=2)
 
-    settings = get_settings()
-    runs_root = settings.runs_root
+    data_dir = _resolve_run_dir_by_prefix(get_settings().runs_root, run_uuid)
+    # ``status`` validated against the literal set above; cast is safe.
+    mark_run_complete(data_dir, status=cast("RunStatus", status))
+    typer.echo(f"Marked {data_dir.name} as status={status}.")
+
+
+def _resolve_run_dir_by_prefix(runs_root: Path, prefix: str) -> Path:
+    """Resolve a uuid prefix to exactly one run dir under ``runs_root``.
+
+    Used by ``runs mark-complete`` / ``tag`` / ``untag`` / ``info``.
+    Raises :class:`typer.Exit` with code ``1`` on no-match or ambiguous
+    prefix; code ``2`` if ``runs_root`` itself is missing (operator-
+    configuration error). The hint on ambiguous prefix lists every
+    candidate dir so the operator can re-issue with a longer prefix.
+    """
     if not runs_root.is_dir():
         typer.echo(f"BFFI_RUNS_ROOT does not exist: {runs_root}", err=True)
         raise typer.Exit(code=2)
-
-    matches = sorted(d for d in runs_root.iterdir() if d.is_dir() and d.name.startswith(run_uuid))
+    matches = sorted(d for d in runs_root.iterdir() if d.is_dir() and d.name.startswith(prefix))
     if not matches:
-        typer.echo(f"No run dir under {runs_root} matches prefix {run_uuid!r}.", err=True)
+        typer.echo(f"No run dir under {runs_root} matches prefix {prefix!r}.", err=True)
         raise typer.Exit(code=1)
     if len(matches) > 1:
         names = ", ".join(d.name for d in matches)
         typer.echo(
-            f"Ambiguous run_uuid prefix {run_uuid!r}; matches: {names}",
+            f"Ambiguous run_uuid prefix {prefix!r}; matches: {names}. "
+            f"Re-issue with a longer prefix.",
             err=True,
         )
         raise typer.Exit(code=1)
+    return matches[0]
 
-    data_dir = matches[0]
-    # ``status`` validated against the literal set above; cast is safe.
-    mark_run_complete(data_dir, status=cast("RunStatus", status))
-    typer.echo(f"Marked {data_dir.name} as status={status}.")
+
+@runs_app.command("tag")
+def runs_tag_command(
+    run_uuid: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The run_uuid (or a unique prefix) of the run to tag. "
+                "Resolved against BFFI_RUNS_ROOT/<run_uuid>/."
+            ),
+        ),
+    ],
+    tags: Annotated[
+        list[str],
+        typer.Argument(
+            help=(
+                "One or more tags to add. Duplicates of existing tags are "
+                "ignored (set semantics; order preserved)."
+            ),
+        ),
+    ],
+) -> None:
+    """Add tag(s) to a run's manifest.
+
+    P-32 Phase D. ``tags`` adds atomically via ``update_manifest_field``
+    (read-modify-write under the manifest lock). Tags already present
+    are no-ops so re-running is safe. Tag order is preserved across
+    invocations (new tags appended).
+    """
+    from bffi_pipeline.run_manifest import (
+        MANIFEST_FILENAME,
+        read_manifest,
+        update_manifest_field,
+    )
+
+    if not tags:
+        typer.echo("At least one tag is required.", err=True)
+        raise typer.Exit(code=2)
+    run_dir = _resolve_run_dir_by_prefix(get_settings().runs_root, run_uuid)
+    manifest_path = run_dir / MANIFEST_FILENAME
+    current = read_manifest(manifest_path).tags
+    merged = list(current)
+    added: list[str] = []
+    for tag in tags:
+        if tag not in merged:
+            merged.append(tag)
+            added.append(tag)
+    if not added:
+        typer.echo(f"{run_dir.name}: no new tags (already had {', '.join(current) or '—'}).")
+        return
+    update_manifest_field(manifest_path, tags=merged)
+    typer.echo(f"{run_dir.name}: added tag(s) {', '.join(added)}. Now: {', '.join(merged)}.")
+
+
+@runs_app.command("untag")
+def runs_untag_command(
+    run_uuid: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The run_uuid (or a unique prefix) of the run to untag. "
+                "Resolved against BFFI_RUNS_ROOT/<run_uuid>/."
+            ),
+        ),
+    ],
+    tag: Annotated[
+        str,
+        typer.Argument(help="The tag to remove. No-op (exit 0) if the tag isn't present."),
+    ],
+) -> None:
+    """Remove a tag from a run's manifest (no-op if not present).
+
+    P-32 Phase D. Atomic via ``update_manifest_field``.
+    """
+    from bffi_pipeline.run_manifest import (
+        MANIFEST_FILENAME,
+        read_manifest,
+        update_manifest_field,
+    )
+
+    run_dir = _resolve_run_dir_by_prefix(get_settings().runs_root, run_uuid)
+    manifest_path = run_dir / MANIFEST_FILENAME
+    current = read_manifest(manifest_path).tags
+    if tag not in current:
+        typer.echo(f"{run_dir.name}: tag {tag!r} not present; no-op.")
+        return
+    remaining = [t for t in current if t != tag]
+    update_manifest_field(manifest_path, tags=remaining)
+    typer.echo(
+        f"{run_dir.name}: removed tag {tag!r}. Now: {', '.join(remaining) if remaining else '—'}."
+    )
+
+
+@runs_app.command("info")
+def runs_info_command(
+    run_uuid: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The run_uuid (or a unique prefix) of the run to describe. "
+                "Resolved against BFFI_RUNS_ROOT/<run_uuid>/."
+            ),
+        ),
+    ],
+) -> None:
+    """Pretty-print a run's manifest + dir size + artifact enumeration.
+
+    P-32 Phase D. Surfaces the same data ``runs list`` shows plus the
+    on-disk layout (top-level entries with sizes; JSONL files with row
+    counts; sub-dirs with file counts + aggregated size). Read-only.
+    """
+    from bffi_pipeline.run_manifest import (
+        MANIFEST_FILENAME,
+        compute_dir_size,
+        read_manifest,
+    )
+
+    run_dir = _resolve_run_dir_by_prefix(get_settings().runs_root, run_uuid)
+    manifest = read_manifest(run_dir / MANIFEST_FILENAME)
+    total_size = compute_dir_size(run_dir)
+
+    typer.echo(f"Run:        {manifest.run_uuid}")
+    typer.echo(f"Path:       {run_dir}")
+    typer.echo(f"Started:    {manifest.started_at.isoformat()}")
+    typer.echo(
+        f"Ended:      {manifest.ended_at.isoformat() if manifest.ended_at else '— (still running)'}"
+    )
+    typer.echo(f"Status:     {manifest.status}")
+    typer.echo(f"Size:       {_human_bytes(total_size)} ({total_size:,} bytes)")
+    typer.echo(f"Tags:       {', '.join(manifest.tags) if manifest.tags else '—'}")
+    typer.echo(f"Description: {manifest.description or '—'}")
+    if manifest.pipeline_git_sha:
+        typer.echo(f"Git SHA:    {manifest.pipeline_git_sha}")
+    if manifest.stages_observed:
+        typer.echo(f"Stages observed:  {', '.join(manifest.stages_observed)}")
+    if manifest.stages_completed:
+        typer.echo(f"Stages completed: {', '.join(manifest.stages_completed)}")
+    if manifest.pre_run_fuseki_clear:
+        clear = manifest.pre_run_fuseki_clear
+        dropped = clear.get("dropped_graphs") or []
+        typer.echo(
+            f"Pre-run Fuseki clear: dropped {len(dropped)} graph(s); "
+            f"surveyed {clear.get('total_triples_before', 0):,} triples."
+        )
+
+    typer.echo("\nArtifacts:")
+    _render_artifact_listing(run_dir)
+
+
+def _render_artifact_listing(run_dir: Path) -> None:
+    """Enumerate top-level entries in ``run_dir`` with size + type-specific hints."""
+    from bffi_pipeline.run_manifest import MANIFEST_FILENAME, compute_dir_size
+
+    entries = sorted(run_dir.iterdir(), key=lambda p: (not p.is_dir(), p.name))
+    if not entries:
+        typer.echo("  (empty)")
+        return
+    for entry in entries:
+        if entry.is_dir():
+            child_files = [p for p in entry.rglob("*") if p.is_file()]
+            size = compute_dir_size(entry)
+            typer.echo(f"  {entry.name}/  ({len(child_files)} file(s), {_human_bytes(size)})")
+        else:
+            size = entry.stat().st_size
+            suffix = entry.suffix.lower()
+            extra = ""
+            if entry.name == MANIFEST_FILENAME:
+                extra = " — manifest"
+            elif suffix == ".jsonl":
+                rows = _count_jsonl_rows(entry)
+                extra = f" — {rows:,} row(s)"
+            typer.echo(f"  {entry.name}  ({_human_bytes(size)}){extra}")
+
+
+def _count_jsonl_rows(path: Path) -> int:
+    """Count non-empty lines in a JSONL file (cheap row-count proxy)."""
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return sum(1 for line in f if line.strip())
+    except OSError:
+        return 0
 
 
 @runs_app.command("clear-fuseki")
