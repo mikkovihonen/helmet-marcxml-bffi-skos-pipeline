@@ -335,6 +335,44 @@ def test_record_without_pref_label_routes_to_mint_failures(tmp_path: Path) -> No
     assert mint_rows[0]["missing_inputs"] == ["pref_label"]
 
 
+def test_mint_failures_tsv_surfaces_title_and_bib_ids(tmp_path: Path) -> None:
+    """The cataloguer-facing TSV at ``canonical-mint-failures.tsv``
+    expands one TSV row per Helmet bib_id, with title + missing_inputs
+    + cluster_size + anchor_work_uri columns. Header is always present;
+    body is empty when there are no mint failures."""
+    work_records = {
+        WORK_A: CanonicalWorkInputs(
+            work_uri=WORK_A,
+            creator_uri=None,
+            pref_label="Karjala :",
+            expression_uris=[EXPR_A],
+            helmet_identifiers=[("http://example.org/ident/a1", "b16106131")],
+        ),
+    }
+    helmet_entries = {WORK_A: HelmetMapEntry(WORK_A, "b16106131", "2026-04-12T08:31:02+00:00")}
+    _run(tmp_path, [], work_records=work_records, helmet_entries=helmet_entries)
+    tsv_path = tmp_path / "canonical-mint-failures.tsv"
+    lines = tsv_path.read_text().splitlines()
+    assert lines[0] == ("helmet_bib_id\ttitle\tmissing_inputs\tcluster_size\tanchor_work_uri")
+    assert len(lines) == 2  # header + one row
+    cols = lines[1].split("\t")
+    assert cols[0] == "b16106131"
+    assert cols[1] == "Karjala :"
+    assert cols[2] == "creator_uri"
+    assert cols[3] == "1"
+    assert cols[4] == WORK_A
+
+
+def test_mint_failures_tsv_is_header_only_when_no_failures(tmp_path: Path) -> None:
+    """Always-emit invariant: even when every record minted cleanly,
+    the TSV is written as a header-only file. Cataloguer workflows
+    wired to the artifact never see a missing-file error."""
+    _run(tmp_path, [])  # _records() default → all records mint cleanly
+    tsv_path = tmp_path / "canonical-mint-failures.tsv"
+    text = tsv_path.read_text()
+    assert text == ("helmet_bib_id\ttitle\tmissing_inputs\tcluster_size\tanchor_work_uri\n")
+
+
 # --- P-34: editor-anchored fallback ----------------------------------------
 
 

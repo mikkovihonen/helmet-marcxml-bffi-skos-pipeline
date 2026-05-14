@@ -64,6 +64,11 @@ CANONICAL_CONFLICTS_FILENAME: Final[str] = "canonical-conflicts.jsonl"
 #: ``canonical-conflicts.jsonl`` stays for real M6 same/different
 #: contradictions only. See the docstring on :class:`MintFailure`.
 CANONICAL_MINT_FAILURES_FILENAME: Final[str] = "canonical-mint-failures.jsonl"
+#: Cataloguer-facing TSV companion to ``canonical-mint-failures.jsonl``.
+#: Same row set, but with title + Helmet bib_id columns surfaced so
+#: cataloguers can open in Excel / Sheets, sort, filter, and trace
+#: each row back to the source MARC without needing a JSON tool.
+CANONICAL_MINT_FAILURES_TSV_FILENAME: Final[str] = "canonical-mint-failures.tsv"
 JUDGE_DECISIONS_FILENAME: Final[str] = "judge-decisions.jsonl"
 HELMET_MAP_FILENAME: Final[str] = "helmet-map.jsonl"
 
@@ -217,6 +222,16 @@ class MintFailure:
     """Which inputs were missing on the anchor. Values: ``creator_uri``,
     ``pref_label``. Both can be present in the same row when the anchor
     has neither."""
+    pref_label: str | None = None
+    """Title from the anchor Work's ``skos:prefLabel`` (MARC 245$a + $b).
+    Surfaced into the cataloguer-facing TSV companion. ``None`` when
+    the failure mode itself is ``"pref_label"`` (no title to render)."""
+    helmet_bib_ids: list[str] = field(default_factory=list)
+    """Helmet ``bib_id`` for each member raw Work that carries one,
+    sorted for stable diffs. Cataloguers use this to locate the
+    source MARC in Helmet. A single MintFailure can cover multiple
+    bib_ids when union-find clustered raw Works before the
+    canonical-mint check refused them."""
 
 
 def _detect_conflicts(
@@ -941,7 +956,10 @@ def _emit_mint_failures(path: Path, mint_failures: Iterable[MintFailure]) -> Non
     """Atomic write of the per-record mint-failure JSONL.
 
     Sorted by ``anchor_work_uri`` for byte-stable diffs across re-runs
-    of the same input.
+    of the same input. Each row includes the title (``pref_label``)
+    and Helmet ``bib_id`` list so the JSONL is self-contained for
+    debugging — the TSV companion at ``_emit_mint_failures_tsv``
+    surfaces the same fields in a cataloguer-friendly shape.
     """
     rows = sorted(mint_failures, key=lambda f: f.anchor_work_uri)
     payload = "\n".join(
@@ -950,6 +968,8 @@ def _emit_mint_failures(path: Path, mint_failures: Iterable[MintFailure]) -> Non
                 "members": list(f.members),
                 "anchor_work_uri": f.anchor_work_uri,
                 "missing_inputs": list(f.missing_inputs),
+                "pref_label": f.pref_label,
+                "helmet_bib_ids": list(f.helmet_bib_ids),
             },
             ensure_ascii=False,
         )
@@ -959,6 +979,63 @@ def _emit_mint_failures(path: Path, mint_failures: Iterable[MintFailure]) -> Non
         payload += "\n"
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _emit_mint_failures_tsv(path: Path, mint_failures: Iterable[MintFailure]) -> None:
+    """Cataloguer-facing TSV companion to :func:`_emit_mint_failures`.
+
+    Same row set as the JSONL, but with the columns a cataloguer can
+    open in a spreadsheet without parsing JSON:
+
+    - ``helmet_bib_id`` — one bib_id per row even when union-find
+      clustered multiple raw Works into a single MintFailure (the
+      TSV expands the cluster across N rows). Easier to filter +
+      sort than a packed list column.
+    - ``title`` — the anchor Work's ``skos:prefLabel`` (MARC 245$a +
+      $b). Empty when ``missing_inputs`` contains ``"pref_label"``.
+    - ``missing_inputs`` — comma-separated; values:
+      ``creator_uri`` and/or ``pref_label``.
+    - ``cluster_size`` — total bib_ids in the same MintFailure
+      cluster (1 for the common case; >1 when union-find folded
+      records before the mint check refused them).
+    - ``anchor_work_uri`` — raw Work URI of the cluster anchor (the
+      one M8 inspected). For debugging cross-reference with the
+      JSONL + ``canonical-map.jsonl``.
+
+    File is always written, even when there are zero failures —
+    a header-only TSV is a useful "we ran, everything minted"
+    signal that won't surprise the cataloguer if they wired the
+    artifact into a workflow.
+
+    Sorted by (``helmet_bib_id``, ``anchor_work_uri``) for stable
+    diffs across re-runs.
+    """
+    header = "helmet_bib_id\ttitle\tmissing_inputs\tcluster_size\tanchor_work_uri\n"
+    rows: list[tuple[str, str, str, int, str]] = []
+    for failure in mint_failures:
+        title = failure.pref_label or ""
+        # Sanitise tab + newline out of title — they'd corrupt TSV column
+        # alignment. Replace with a single space; collapse runs.
+        title_clean = " ".join(title.replace("\t", " ").split())
+        missing = ",".join(failure.missing_inputs)
+        cluster_size = max(len(failure.helmet_bib_ids), 1)
+        if not failure.helmet_bib_ids:
+            # Cluster with no extracted bib_ids (rare — would imply the
+            # raw Work carried no bf:identifiedBy → Helmet bib_id link).
+            # Render one row with an empty bib_id rather than dropping
+            # the cluster entirely.
+            rows.append(("", title_clean, missing, cluster_size, failure.anchor_work_uri))
+            continue
+        for bib_id in failure.helmet_bib_ids:
+            rows.append((bib_id, title_clean, missing, cluster_size, failure.anchor_work_uri))
+    rows.sort(key=lambda r: (r[0], r[4]))
+    body = "".join(
+        f"{bib_id}\t{title}\t{missing}\t{cluster}\t{anchor}\n"
+        for bib_id, title, missing, cluster, anchor in rows
+    )
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(header + body, encoding="utf-8")
     tmp.replace(path)
 
 
@@ -1347,6 +1424,7 @@ class MergeResult:
     map_path: str
     conflicts_path: str
     mint_failures_path: str
+    mint_failures_tsv_path: str
 
     def render(self) -> str:
         """Format the merge result as paste-ready text for the merge CLI."""
@@ -1364,6 +1442,7 @@ class MergeResult:
                 f"  canonical map JSONL:     {self.map_path}",
                 f"  conflicts JSONL:         {self.conflicts_path}",
                 f"  mint-failures JSONL:     {self.mint_failures_path}",
+                f"  mint-failures TSV:       {self.mint_failures_tsv_path}",
             )
         )
 
@@ -1399,6 +1478,7 @@ def apply_merge(
     map_path: Path | None = None,
     conflicts_path: Path | None = None,
     mint_failures_path: Path | None = None,
+    mint_failures_tsv_path: Path | None = None,
     helmet_map_path: Path | None = None,
     variants_sidecar_path: Path | None = None,
     work_records: dict[str, CanonicalWorkInputs] | None = None,
@@ -1419,6 +1499,9 @@ def apply_merge(
     # callers see the same layout as before.
     mint_failures_path = mint_failures_path or (
         output_path.parent / CANONICAL_MINT_FAILURES_FILENAME
+    )
+    mint_failures_tsv_path = mint_failures_tsv_path or (
+        output_path.parent / CANONICAL_MINT_FAILURES_TSV_FILENAME
     )
     helmet_map_path = helmet_map_path or (settings.data_dir / HELMET_MAP_FILENAME)
     variants_sidecar_path = variants_sidecar_path or (settings.data_dir / VARIANTS_SIDECAR_NAME)
@@ -1500,11 +1583,14 @@ def apply_merge(
                 missing.append("creator_uri")
             if not anchor.pref_label:
                 missing.append("pref_label")
+            bib_ids = sorted({bib_id for m in members for _, bib_id in m.helmet_identifiers})
             mint_failures.append(
                 MintFailure(
                     members=member_uris,
                     anchor_work_uri=anchor.work_uri,
                     missing_inputs=missing,
+                    pref_label=anchor.pref_label,
+                    helmet_bib_ids=bib_ids,
                 )
             )
             continue
@@ -1547,6 +1633,7 @@ def apply_merge(
     _emit_canonical_map(map_path, canonical_entries)
     _emit_conflicts(conflicts_path, conflicts)
     _emit_mint_failures(mint_failures_path, mint_failures)
+    _emit_mint_failures_tsv(mint_failures_tsv_path, mint_failures)
     del variants_bound  # value is for future telemetry; not yet exposed
 
     emit_if_active(
@@ -1574,6 +1661,7 @@ def apply_merge(
         map_path=str(map_path),
         conflicts_path=str(conflicts_path),
         mint_failures_path=str(mint_failures_path),
+        mint_failures_tsv_path=str(mint_failures_tsv_path),
     )
 
 
@@ -1693,6 +1781,7 @@ __all__ = [
     "CANONICAL_FILENAME",
     "CANONICAL_MAP_FILENAME",
     "CANONICAL_MINT_FAILURES_FILENAME",
+    "CANONICAL_MINT_FAILURES_TSV_FILENAME",
     "HELMET_MAP_FILENAME",
     "JUDGE_DECISIONS_FILENAME",
     "CanonicalEntry",

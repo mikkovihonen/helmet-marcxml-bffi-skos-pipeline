@@ -195,6 +195,32 @@ SELECT ?w ?label WHERE {
    `missing_inputs=["pref_label"]`. They're not minted. Fix the
    source MARC.
 
+## Cataloguer review artifact
+
+Every pipeline run emits **`<run-dir>/canonical-mint-failures.tsv`** —
+a tab-separated file with one row per Helmet bib_id that fell to the
+mint-failure path (typically zero rows on Helmet data after P-34).
+Open in Excel / Sheets / Numbers; no JSON tools needed.
+
+**Columns:**
+
+| Column | Content |
+|---|---|
+| `helmet_bib_id` | source bib_id in Helmet — locate the record in your system |
+| `title` | the anchor Work's `skos:prefLabel` (MARC 245$a + $b) |
+| `missing_inputs` | comma-separated; values: `creator_uri`, `pref_label` |
+| `cluster_size` | how many bib_ids share this mint-failure cluster (1 in the common case) |
+| `anchor_work_uri` | raw BFFI Work URI of the cluster anchor (for pipeline-team cross-reference) |
+
+The TSV is **always emitted**, even on a fully clean run where no
+record failed to mint. Header-only files are the "we ran, every
+record minted" signal — wire workflows safely to the artifact path
+without missing-file checks.
+
+A companion JSONL (`canonical-mint-failures.jsonl`) carries the same
+data plus the full raw-Work-URI list per cluster for pipeline-team
+debugging.
+
 ## How to report a rule-fired-wrong case
 
 For each record:
