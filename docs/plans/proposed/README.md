@@ -114,12 +114,34 @@ Operational sequence:
    ready to execute. Ships *before* P-30 so the audit catalogues
    the dashboard in its final shape rather than auditing a surface
    about to grow.
-3. **P-30** — critical audit + truth-table sign-off. Audits the
-   P-31 additions as part of its catalogue.
-4. **P-20 through P-29** — unblocked once gate (3) clears.
+3. **P-32** — run lifecycle management (manifest + list + prune +
+   tagging CLI). Surfaced during P-31 review (per-run TSV
+   accumulation is a symptom of the wider run-on-disk problem).
+   Composes with P-31 — operator hygiene for the per-run TSVs lives
+   here. Ships *before* P-30 so the new run-manifest surface is in
+   the audit's truth-table catalogue.
+4. **P-30** — critical audit + truth-table sign-off. Audits the
+   P-31 + P-32 additions as part of its catalogue.
+5. **P-20 through P-29** — unblocked once gate (4) clears.
 
 ### Proposals
 
+- [`p-32-run-lifecycle-management.md`](p-32-run-lifecycle-management.md)
+  — `proposed`. Surfaced during P-31 review (the per-run TSV
+  accumulation R4 framing made clear the underlying issue is wider
+  than just TSVs). Each pipeline run drops 25-50 GB of artifacts at
+  full-corpus scale; today the operator manages run accumulation
+  by hand-tracking which `BFFI_DATA_DIR` belongs to which bench
+  and `rm -rf`ing the rest. Proposes a `bffi-run.json` per-run
+  manifest (run_uuid, started_at, ended_at, stages_completed,
+  tags, status) + a `bffi-pipeline runs` CLI command tree:
+  `list` (table of all known runs with sort / filter), `prune`
+  (`--older-than 30d`, `--keep-last N`, `--keep-tagged`,
+  `--dry-run` default + explicit `--apply`), `tag` / `untag`,
+  `info`, `adopt` (synthesise manifest for legacy run dirs).
+  Composes with P-31 (operator hygiene for the per-run TSVs lives
+  here) and sequences before P-30 so the new manifest surface is
+  in the audit's truth-table catalogue.
 - [`p-30-observability-audit-trail-critical-audit.md`](p-30-observability-audit-trail-critical-audit.md)
   — `proposed`. Triggered by the 2026-05-13 `used_cascade` near-
   miss. Catalogues every observability + audit-trail surface
