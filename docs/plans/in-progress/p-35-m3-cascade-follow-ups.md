@@ -1,6 +1,19 @@
-# P-05 — M3 cascade follow-ups: F1, F2, F3
+# P-35 — M3 cascade follow-ups: F1, F2, F3
 
-**Status**: backlog.
+**Status**: in-progress (Phase F1 shipped pre-renumber; F2 + F3 still backlog).
+
+**Renumbered from P-05 on 2026-05-14** to clear a number collision
+with the (now-abandoned)
+`proposed/p-05-anonymous-work-canonicalisation.md`, which the
+2026-05-14 prefix-unification convention exposed. The two P-05s
+arose because this plan predates the unified prefix and was sitting
+in `backlog/p-05-...` while a separate proposal lived in
+`proposed/p-05-...`. Content is unchanged; only the number + folder
+moved. `git log --follow` traces the prior numbering. Mentions of
+"P-05" in older commits / archived docs (notably
+`docs/archived/BUILD_PLAN.md` L253) refer to this plan; live docs
+were updated in the renumber commit.
+
 **Source**: `docs/archived/BUILD_PLAN.md` M3 unfinished item at L253 (the
 "M3 cascade follow-ups, in dependency order" block). Not graduated
 from a proposal — these are committed M3 follow-up work items that
@@ -13,12 +26,23 @@ src/bffi_pipeline/stages/merge.py src/bffi_pipeline/stages/reconcile.py
 src/bffi_pipeline/contrib_extract_llm.py`.
 **Phase commits**:
 
-- Phase F1 (M8 non-primary propagation): `<unfilled>`
-- Phase F2 (transliteration sidecar + M9 binding): `<unfilled>`
-- Phase F3 (M9 walks non-primary contributions): `<unfilled>`
+- Phase F1 (M8 non-primary propagation): `464247e` (initial —
+  propagate non-primary `bffi:Contribution` blocks onto canonical
+  Expressions), `b56d9c1` (follow-up — propagate role through to
+  canonical too). Verified live at
+  `stages/merge.py:_emit_canonical_work` (the
+  `expression_contributions` iteration block at ~line 1012) and
+  exercised by P-34 Phase A's editor-anchored recovery on the
+  2026-05-14 helmet-5k bench. The plan body's F1 acceptance
+  checklist (below) is met as of these commits; the documentation
+  rot was caught while folding `proposed/P-05` into P-34 and
+  verifying P-34 Phase A's interaction with non-primary
+  contributions.
+- Phase F2 (transliteration sidecar + M9 binding): `<unfilled>`.
+- Phase F3 (M9 walks non-primary contributions): `<unfilled>`.
 
 **Owner**: TBD.
-**Estimated wall-time**: 1.5-2 days for F1; 1-1.5 days for F2;
+**Estimated wall-time**: F1 was ~half-day actual; 1-1.5 days for F2;
 2-3 days for F3 (mostly bench + cataloguer-gating, not code).
 
 ## Goal

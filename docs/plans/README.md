@@ -76,17 +76,25 @@ reference for what shipped.
 - [`backlog/p-04-m5-calibration.md`](backlog/p-04-m5-calibration.md)
   — Lock in M5's embedding model + `efSearch` via one-time benchmark
   runs on the M5 Max. Two independent phases.
-- [`backlog/p-05-m3-cascade-follow-ups.md`](backlog/p-05-m3-cascade-follow-ups.md)
-  — Three sequenced M3 follow-ups (F1, F2, F3) that make
-  cascade-extracted contributions cataloguer-visible on canonical
-  Works and bind them to KANTO. F3 gated on P-06's gold-set growth.
 - [`backlog/p-06-gold-set-growth.md`](backlog/p-06-gold-set-growth.md)
   — Grow `gold/gold.jsonl` from 17 to 50-100 cataloguer-vetted
   cases with proper per-category holdout stratification. Hard
-  prerequisite for P-01, P-04 statistical power, and P-05 F3.
+  prerequisite for P-01, P-04 statistical power, and P-35 F3.
 ### In progress
 
-*(none)*
+- [`in-progress/p-34-m8-mint-anonymous-main-entry-works.md`](in-progress/p-34-m8-mint-anonymous-main-entry-works.md)
+  — Editor-anchored canonical-Work mint for anonymous-main-entry
+  records (no MARC 1XX, contributors in 700). Phase A shipped
+  2026-05-14 at `9261dfd`; recovered 662 / 707 dropped records on
+  the helmet-5k bench. Phases B + C still backlog.
+- [`in-progress/p-35-m3-cascade-follow-ups.md`](in-progress/p-35-m3-cascade-follow-ups.md)
+  — Three sequenced M3 follow-ups (F1, F2, F3) that make
+  cascade-extracted contributions cataloguer-visible on canonical
+  Works and bind them to KANTO. F1 shipped pre-renumber at
+  `464247e` + `b56d9c1`; F2 + F3 still backlog. F3 gated on
+  P-06's gold-set growth. **Renumbered from P-05 on 2026-05-14**
+  to clear collision with the now-abandoned
+  `proposed/p-05-anonymous-work-canonicalisation.md`.
 
 ### Completed
 

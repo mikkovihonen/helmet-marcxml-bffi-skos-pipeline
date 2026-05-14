@@ -30,6 +30,19 @@ If the plan is dropped before completion, `git mv` it to
   84.9%). Phase B (title-only mint + cataloguer rule table for the
   residual 0.9%) backlog; gated on cataloguer-side ask. Phase C
   (mint-key refactor) deferred indefinitely.
+- [`p-35-m3-cascade-follow-ups.md`](p-35-m3-cascade-follow-ups.md)
+  — Renumbered from P-05 + graduated from `backlog/` 2026-05-14 to
+  clear a number collision with the now-abandoned
+  `proposed/p-05-anonymous-work-canonicalisation.md`. Phase F1
+  (M8 propagates non-primary `bffi:Contribution` blocks onto
+  canonical Expressions) was shipped pre-renumber at `464247e`
+  (initial propagation) + `b56d9c1` (role through-propagation);
+  the `<unfilled>` Phase-commits field that the rename caught
+  was pure documentation rot. F2 (transliteration sidecar +
+  M9 binding) and F3 (M9 walks non-primary canonical
+  contributions for KANTO reconciliation) still backlog; F3
+  pre-gated on `gold/contrib.jsonl` reaching 30-50
+  cataloguer-vetted cases (tracked under P-06).
 
 P-32 (Run lifecycle management) graduated to
 [`../completed/`](../completed/) at `fdae706` (Phase D — final phase).

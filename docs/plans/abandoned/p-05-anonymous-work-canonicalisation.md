@@ -268,10 +268,13 @@ is a cataloguer-side decision.
   `bffi:UnspecifiedAgent` resource) so the graph shape stays
   uniform downstream? Probably yes, but the M9 reconciliation
   step needs to know to skip authority lookups for those.
-- Numbering note: this is the second proposal at index `05`
-  (`P-05` exists in plans as `p-05-m3-cascade-follow-ups.md`);
-  the two are disjoint topic areas — disambiguate by path in prose
-  if they ever coexist in the same discussion.
+- Numbering note: at the time this proposal was drafted, another
+  P-05 existed in `backlog/` as `p-05-m3-cascade-follow-ups.md`
+  (disjoint topic — M3 cascade non-primary propagation). The
+  collision was resolved 2026-05-14 by renumbering the cascade
+  plan to P-35 (see
+  [`../in-progress/p-35-m3-cascade-follow-ups.md`](../in-progress/p-35-m3-cascade-follow-ups.md))
+  in the same commit that abandoned this proposal in favour of P-34.
 
 ## Cross-references
 
