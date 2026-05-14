@@ -329,6 +329,13 @@ class ExpressionContribution:
     agent_label: str | None = None
 
 
+#: P-34: which input slot of the canonical-Work mint key produced the
+#: anchor. ``"primary"`` is the standard bffi:PrimaryContribution path;
+#: ``"first-contributor"`` is the sub-option-(1) fallback for
+#: anonymous-main-entry records (no MARC 1XX, editor in MARC 700).
+MintAnchorKind = LiteralType["primary", "first-contributor"]
+
+
 @dataclass
 class CanonicalWorkInputs:
     """Per-Work data the merge step needs to mint a canonical Work URI."""
@@ -339,6 +346,12 @@ class CanonicalWorkInputs:
     """A single prefLabel string used as the deterministic anchor for the
     canonical Work URI mint. The full multi-language set lives in
     :attr:`pref_labels` and is what the canonical Work surfaces to Skosmos."""
+    mint_anchor: MintAnchorKind | None = None
+    """Which input slot of the mint key ``creator_uri`` came from
+    (P-34). ``"primary"`` when the standard bffi:PrimaryContribution
+    path resolved; ``"first-contributor"`` when the P-34 sub-option-(1)
+    fallback picked an editor / non-primary contributor; ``None`` when
+    no anchor was found (the record ends up in mint-failures)."""
     expression_uris: list[str] = field(default_factory=list)
     helmet_identifiers: list[tuple[str, str]] = field(default_factory=list)
     """List of (identifier_uri, helmet_bib_id) pairs as found on bf:identifiedBy."""
@@ -398,6 +411,97 @@ def _primary_agent_uri(graph: Graph, work: URIRef) -> str | None:
             if isinstance(ag, URIRef):
                 return str(ag)
     return None
+
+
+#: Translator-role markers that should NOT anchor a canonical Work
+#: (P-34 R3 mitigation). A translator is intellectually wrong as
+#: anchor — the original author is the right anchor, but they're
+#: missing from these records. Until P-34 sub-option (2) ships a
+#: cataloguer-curated rule table, translator-only records stay in
+#: mint-failures.
+_TRANSLATOR_ROLE_URIS: Final[frozenset[str]] = frozenset(
+    {"http://id.loc.gov/vocabulary/relators/trl"}
+)
+
+#: Free-text role markers ($e subfield) that map to "translator".
+#: Match is case-insensitive on the cataloguer-supplied label.
+#: Covers fi / sv / en / de; extend as Helmet data surfaces other
+#: forms.
+_TRANSLATOR_ROLE_LABELS: Final[frozenset[str]] = frozenset(
+    {"kääntäjä", "translator", "översättare", "übersetzer"}
+)
+
+
+def _is_translator_role(graph: Graph, contrib: URIRef | BNode) -> bool:
+    """True if ``contrib`` carries a translator role (URI or label form)."""
+    for role in graph.objects(contrib, V.BF.role):
+        if isinstance(role, URIRef) and str(role) in _TRANSLATOR_ROLE_URIS:
+            return True
+        for label in graph.objects(role, V.RDFS.label):
+            if str(label).strip().casefold() in _TRANSLATOR_ROLE_LABELS:
+                return True
+    return False
+
+
+def _first_contribution_agent_uri(graph: Graph, work: URIRef) -> str | None:
+    """P-34 sub-option (1) fallback for records with no ``bffi:PrimaryContribution``.
+
+    Walks every contribution agent reachable from ``work``:
+    - ``bffi:Work → bffi:contribution → bffi:agent`` (the rare case
+      where a Work-level non-primary contribution exists).
+    - ``bffi:Work → bffi:hasExpression → bffi:Expression →
+      bffi:contribution → bffi:agent`` (the common Helmet case
+      where 700-fielded contributors are routed to the Expression
+      by ``sparql/bf_to_bffi_expression.rq``).
+
+    Skips translator-only contributors (the intellectually-wrong
+    anchor) and returns the lexicographically-smallest remaining
+    agent URI for a deterministic mint key.
+
+    Returns ``None`` only when the record has zero non-translator
+    contributions — a truly-anonymous record. Those stay in
+    ``canonical-mint-failures.jsonl`` until P-34 sub-option (2)
+    ships a title-only fallback or a cataloguer-curated rule table.
+
+    The lexicographic pick is arbitrary but deterministic;
+    ``bffi-prov:mintAnchor = bib:auth/first-contributor-anchored``
+    is emitted on the canonical so downstream code can distinguish
+    editor-anchored Works from primary-author-anchored ones.
+    """
+    candidates: list[str] = []
+    # Work-level contributions first (rare; covers Work-level non-
+    # primary contributions and test fixtures that build them).
+    candidates.extend(_collect_contribution_agent_uris(graph, work))
+    # Expression-level contributions — the common Helmet case for
+    # MARC 700 editors / contributors routed to ?exprURI by
+    # bf_to_bffi_expression.rq.
+    for expr in graph.objects(work, V.BFFI.hasExpression):
+        if isinstance(expr, URIRef):
+            candidates.extend(_collect_contribution_agent_uris(graph, expr))
+    if not candidates:
+        return None
+    return min(candidates)
+
+
+def _collect_contribution_agent_uris(graph: Graph, subject: URIRef) -> list[str]:
+    """Return non-translator ``bffi:contribution → bffi:agent`` URIs on ``subject``.
+
+    Helper for :func:`_first_contribution_agent_uri`; pulled out so
+    the Work-level + Expression-level walks share the same
+    contribution-iteration + translator-blocklist logic without
+    tripping the branch-count linter.
+    """
+    out: list[str] = []
+    for contrib in graph.objects(subject, V.BFFI.contribution):
+        if not isinstance(contrib, (URIRef, BNode)):
+            continue
+        if _is_translator_role(graph, contrib):
+            continue
+        for ag in graph.objects(contrib, V.BFFI.agent):
+            if isinstance(ag, URIRef):
+                out.append(str(ag))
+                break
+    return out
 
 
 def _primary_contribution_targets(graph: Graph, work: URIRef) -> list[ContributionTarget]:
@@ -624,10 +728,28 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
         subjects = _subject_targets(graph, work, V.BFFI.subject)
         genres = _subject_targets(graph, work, V.BFFI.genreForm)
         contributions = _primary_contribution_targets(graph, work)
+        # P-34: pick the canonical-mint creator anchor. Standard path is
+        # bffi:PrimaryContribution → bffi:agent. When that's empty
+        # (anonymous-main-entry MARC records: no 1XX, contributors only
+        # in 700), fall through to the lexicographically-smallest
+        # non-translator bffi:contribution agent. Track which path
+        # resolved on ``mint_anchor`` so the canonical Turtle can
+        # surface a bffi-prov:mintAnchor predicate distinguishing the
+        # two cases. Records with no contribution at all (or only
+        # translator contributors) keep ``mint_anchor=None`` and end
+        # up in canonical-mint-failures.jsonl.
+        creator_uri = _primary_agent_uri(graph, work)
+        mint_anchor: MintAnchorKind | None = "primary" if creator_uri else None
+        if creator_uri is None:
+            fallback = _first_contribution_agent_uri(graph, work)
+            if fallback is not None:
+                creator_uri = fallback
+                mint_anchor = "first-contributor"
         out[str(work)] = CanonicalWorkInputs(
             work_uri=str(work),
-            creator_uri=_primary_agent_uri(graph, work),
+            creator_uri=creator_uri,
             pref_label=_first_pref_label(graph, work),
+            mint_anchor=mint_anchor,
             expression_uris=sorted(
                 str(expr)
                 for expr in graph.objects(work, V.BFFI.hasExpression)
@@ -974,10 +1096,20 @@ def _emit_canonical_work(
     helmet_entries: dict[str, HelmetMapEntry],
     description_modifier_uri: URIRef,
     description_change_date: datetime,
+    mint_anchor: MintAnchorKind | None = None,
 ) -> tuple[CanonicalEntry, str]:
     """Add the canonical Work + AdminMetadata to ``g``. Returns (map row, merged_at)."""
     g.add((canonical_uri, RDF.type, V.BFFI.Work))
     g.add((canonical_uri, RDF.type, V.SKOS.Concept))
+    # P-34: surface which input slot resolved the canonical-Work mint
+    # key. The anchor URI distinguishes editor-anchored canonical Works
+    # (anonymous-main-entry MARC records, no 1XX) from the standard
+    # primary-author-anchored case. Cataloguer review + dashboard
+    # filters can split on this.
+    if mint_anchor == "primary":
+        g.add((canonical_uri, V.mintAnchor, V.MINT_ANCHOR_PRIMARY_AUTHOR))
+    elif mint_anchor == "first-contributor":
+        g.add((canonical_uri, V.mintAnchor, V.MINT_ANCHOR_FIRST_CONTRIBUTOR))
     union_pref_labels: set[tuple[str, str | None]] = set()
     for member in members:
         union_pref_labels.update(member.pref_labels)
@@ -1295,6 +1427,7 @@ def apply_merge(
             helmet_entries=helmet_entries,
             description_modifier_uri=modifier,
             description_change_date=merged_at,
+            mint_anchor=anchor.mint_anchor,
         )
         canonical_entries.append(entry)
         if processed % _M8_PROGRESS_CADENCE == 0 or processed == len(sorted_roots):
@@ -1478,6 +1611,7 @@ __all__ = [
     "HelmetMapEntry",
     "JudgeDecisionRow",
     "MergeResult",
+    "MintAnchorKind",
     "MintFailure",
     "SubjectTarget",
     "apply_merge",

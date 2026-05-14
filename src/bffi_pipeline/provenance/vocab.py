@@ -65,6 +65,18 @@ sourceVocabulary: URIRef = BFFI_PROV.sourceVocabulary
 lexicalSimilarity: URIRef = BFFI_PROV.lexicalSimilarity
 inputLiteral: URIRef = BFFI_PROV.inputLiteral
 
+# --- bffi-prov predicates emitted by M8 (canonical Work mint) ------------
+
+#: Records which input slot of the canonical-Work mint key was used.
+#: Two values today (P-34): primary-author-anchored (the standard
+#: bffi:PrimaryContribution → bffi:agent path) and first-contributor-
+#: anchored (P-34 sub-option 1 fallback, for anonymous-main-entry
+#: records that lack a MARC 1XX but carry MARC 700 contributors).
+mintAnchor: URIRef = BFFI_PROV.mintAnchor
+
+MINT_ANCHOR_PRIMARY_AUTHOR: URIRef = BIB["auth/primary-author-anchored"]
+MINT_ANCHOR_FIRST_CONTRIBUTOR: URIRef = BIB["auth/first-contributor-anchored"]
+
 # --- BFFI-side AdminMetadata predicates added by M9 ----------------------
 
 sourceConsulted: URIRef = BFFI.sourceConsulted
@@ -124,6 +136,8 @@ __all__ = [
     "GEN_PROCESS_PIPELINE_V0_1_0",
     "HELMET_SOURCE_URI",
     "METADATA_LICENSOR_CC0",
+    "MINT_ANCHOR_FIRST_CONTRIBUTOR",
+    "MINT_ANCHOR_PRIMARY_AUTHOR",
     "PROV",
     "RDF",
     "RDFS",
@@ -160,6 +174,7 @@ __all__ = [
     "lexicalSimilarity",
     "matchingField",
     "metadataLicensor",
+    "mintAnchor",
     "modelId",
     "promptHash",
     "promptSource",

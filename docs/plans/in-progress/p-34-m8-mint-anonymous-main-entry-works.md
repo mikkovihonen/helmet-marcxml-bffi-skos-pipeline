@@ -1,20 +1,28 @@
 # P-34 — M8 canonical-Work mint for anonymous-main-entry records
 
-**Status**: proposed.
-**Scope**: half a day for sub-option (1) (first-contributor anchor); 1-2 days for sub-option (2) (cataloguer rule table) including the cataloguer engagement.
+**Status**: in-progress (Phase A shipped 2026-05-14; Phase B + Phase C remain in backlog).
+**Scope**: Phase A (sub-option 1, editor-anchored fallback): half a day — **done**. Phase B (sub-option 2, title-only / cataloguer rule table): 1-2 days plus cataloguer engagement, gated on P-30. Phase C (sub-option 3, mint-key refactor): deferred; only if Phase A+B prove insufficient.
 
-**Proposal-base commit**: `16a0007`. The "Motivation" reasons about M8 immediately after the mint-failure / conflict split (Bug A fix, commit `16a0007`). If `main` moves before this is acted on, re-verify with:
+**Plan-base commit**: `16a0007` (graduated from proposal at this commit). Phase A measurements + verification ran against this baseline.
+
+**Phase commits**:
+- Phase A (editor-anchored fallback + `bffi-prov:mintAnchor` predicate + translator-role blocklist + 4 unit tests): `<unfilled>` (set on graduation commit).
+- Phase B (truly-anonymous title-only mint + cataloguer-curated rule table): `<unfilled>`.
+- Phase C (mint-key refactor): `<unfilled>`.
+
+If `main` moves before Phase B is acted on, re-verify with:
 
 ```
-git diff 16a0007..HEAD -- \
+git diff <plan-base>..HEAD -- \
     src/bffi_pipeline/stages/merge.py \
     src/bffi_pipeline/uris.py \
+    src/bffi_pipeline/provenance/vocab.py \
     sparql/bf_to_bffi_work.rq \
     sparql/bf_to_bffi_expression.rq
 ```
 
 Cross-references:
-- **Bug A fix at `16a0007`** ("M8: split mint failures from canonical conflicts") — separated the *reporting* of the failure mode. P-34 addresses the underlying *mint capability*. Reading the Bug A commit message first gives the context for why this proposal exists.
+- **Bug A fix at `16a0007`** ("M8: split mint failures from canonical conflicts") — separated the *reporting* of the failure mode. P-34 Phase A addresses the *mint capability*.
 - **P-33** (`p-33-m3-manifestation-and-item-construct.md`) — also touches M3 → BFFI surface but at the Manifestation/Item layer. P-34 stays at the Work layer where the canonical mint key lives.
 
 ## Motivation
@@ -41,23 +49,50 @@ M8's mint key `(creator_uri, pref_label)` (via `bffi_pipeline.uris.mint_work_uri
 
 This is a **legitimate cataloguing pattern producing a routing failure** in the pipeline — not a data-quality bug. The fix is to extend the mint logic to handle the "no primary creator" case.
 
-## Approach
+## Definition of done
 
-Three sub-options at increasing depth. Sub-option (1) is the conservative default; (2) is the cataloguer-curated extension; (3) is the deep refactor that's only worth considering if (1) + (2) prove insufficient.
+Three phases corresponding to the three sub-options from the source proposal.
 
-### Sub-option (1) — Editor-anchored mint (recommended default)
+### Phase A — Editor-anchored mint (shipped 2026-05-14)
 
-When the anchor lacks `creator_uri` BUT has at least one non-primary contribution:
+- [x] `stages/merge.py:_first_contribution_agent_uri()` walks `Work → bffi:contribution → bffi:agent` AND `Work → hasExpression → Expression → bffi:contribution → bffi:agent` when `_primary_agent_uri()` returns None.
+- [x] Translator-role blocklist: `bf:role` matching LoC `relators/trl` URI OR rdfs:label in `{kääntäjä, översättare, translator, übersetzer}` blocks the contribution from anchoring.
+- [x] Lexicographically-smallest non-translator agent URI picked as the deterministic anchor.
+- [x] `CanonicalWorkInputs.mint_anchor: "primary" | "first-contributor" | None` field records which path resolved.
+- [x] Canonical Turtle carries `<canonical_uri> bffi-prov:mintAnchor <bib:auth/{primary-author,first-contributor}-anchored>` so cataloguers + dashboard filters can split on the anchor kind.
+- [x] `provenance/vocab.py` exports `mintAnchor`, `MINT_ANCHOR_PRIMARY_AUTHOR`, `MINT_ANCHOR_FIRST_CONTRIBUTOR`.
+- [x] 4 regression tests in `tests/unit/test_merge.py`:
+  - `test_first_contribution_fallback_picks_lex_min_agent_uri`
+  - `test_first_contribution_fallback_skips_translator_only_records`
+  - `test_first_contribution_fallback_returns_none_for_truly_anonymous`
+  - `test_canonical_carries_mintanchor_predicate_for_editor_anchored`
 
-1. Extend `_primary_agent_uri()` (or a new sibling `_first_contributor_uri()`) to walk `bffi:Work → bffi:contribution` (any type, not just `bffi:PrimaryContribution`) when the primary path returns None. Pick the **first contributor in BIBFRAME order** (preserves M2 ordering, which preserves MARC 700 ordering, which is cataloguer-determined).
+**Measured on the 2026-05-14 helmet-5k bench** (re-run of M8 against the existing M2/M3/M5/M6 outputs at `runs/721f5548680d4c08afd8bbef8d76393e/`):
 
-2. Mint the canonical URI from `(first_contributor_uri, pref_label)`. Tag the resulting canonical Work with a new predicate `bffi:mintAnchor = <bib:auth/editor-anchored>` (or similar) so downstream consumers can distinguish "primary-author-anchored" from "editor-anchored" canonical Works.
+| | Before Phase A | After Phase A |
+|---|---:|---:|
+| Canonical Works minted | 4,163 | **4,825** |
+| ↳ primary-author-anchored | 4,163 | 4,163 |
+| ↳ first-contributor-anchored | 0 | **662** |
+| Mint failures | 707 | **45** |
+| Coverage of M2-succeeded set (4906) | 84.9% | **98.4%** |
 
-3. The 707 records on this sample have at least one MARC 700 contributor each (spot-checked all 5). So sub-option (1) recovers essentially all of them.
+662 / 707 = **93.6% of the previously-dropped records recovered**. The remaining 45 are truly anonymous (zero contributors of any kind) and need Phase B.
 
-**Risk:** two records that are genuinely separate Works but happen to share the same editor + similar title get over-merged. Mitigation: the mint key is already exact-match on `(uri, label)`, so accidental collisions are rare; and M8's same/different M6 decisions still apply on top to fold/split as needed.
+### Phase B — Title-only mint + cataloguer-curated rule table (backlog)
 
-**LOC estimate:** ~30 LOC in `_primary_agent_uri` (or new function) + ~10 LOC in `apply_merge` to detect the case + ~30 LOC in M3 output's `bffi:mintAnchor` typing (one-shot extension to `bf_to_bffi_work.rq` plus the post-processor). Plus 3-4 regression tests.
+- [ ] When `_primary_agent_uri()` AND `_first_contribution_agent_uri()` BOTH return None: mint canonical URI from `(NULL, pref_label)`. Tag with `bffi-prov:mintAnchor = bib:auth/title-only-anchored`.
+- [ ] Optional `config/m8-anonymous-mint-rules.yaml` for Helmet-specific patterns (annual report series, government publications); each rule maps a 245-pattern + cataloguer-tag to a mint strategy.
+- [ ] Risk surface: two truly-anonymous records with identical titles merge into one canonical Work. Mitigation: corpus-wide measurement of `(NULL, title)` collision rate; if material, cataloguer rules disambiguate.
+- [ ] Prerequisites: cataloguer engagement on rule shapes; P-30 (observability-audit gate) clearance.
+
+**Phase B is gated on a real cataloguer-side ask.** At 0.9% (45/4906) on Helmet data, the remaining mint failures may be acceptable forever — Phase B only matters if a downstream consumer (Skosmos browser, NLF hand-off, OPAC integration) actually needs them in the canonical graph.
+
+### Phase C — Mint-key refactor (deferred indefinitely)
+
+- [ ] Replace `(creator_uri, pref_label)` with a richer multi-input hash that gracefully degrades through `(primary, editor, publisher, year, pref_label)`.
+
+**Phase C is deferred unless Phase A+B prove insufficient on full corpus.** Re-mints every existing canonical URI → ~5× M8 wall-time, hours of M9 re-reconcile, full Fuseki replace. Don't open this can without evidence.
 
 ### Sub-option (2) — Cataloguer-curated mint-strategy table
 

@@ -20,8 +20,8 @@ from textwrap import dedent
 from typing import Any
 
 import pytest
-from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import DCTERMS
+from rdflib import BNode, Graph, Literal, URIRef
+from rdflib.namespace import DCTERMS, RDF
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.contrib_variants import (
@@ -38,6 +38,7 @@ from bffi_pipeline.stages.merge import (
     SubjectTarget,
     _apply_contrib_variants,
     _expression_contributions,
+    _first_contribution_agent_uri,
     _load_work_records_from_corpus,
     apply_merge,
 )
@@ -331,6 +332,133 @@ def test_record_without_pref_label_routes_to_mint_failures(tmp_path: Path) -> No
     ]
     assert len(mint_rows) == 1
     assert mint_rows[0]["missing_inputs"] == ["pref_label"]
+
+
+# --- P-34: editor-anchored fallback ----------------------------------------
+
+
+def _build_anonymous_main_entry_graph(
+    work_uri: URIRef,
+    *,
+    title: str,
+    agents: list[tuple[URIRef, str]],
+    translator_only: bool = False,
+) -> Graph:
+    """Build a minimal BFFI graph mirroring the anonymous-main-entry shape.
+
+    No ``bffi:PrimaryContribution`` on the Work; each contribution lives
+    on the Expression with ``bffi:agent`` pointing at a URI and an
+    optional ``bf:role`` blank-node with rdfs:label. ``translator_only``
+    flips every contribution's role label to ``"kääntäjä"`` so the
+    P-34 R3 translator-blocklist exercises.
+    """
+    g = Graph()
+    expr_uri = URIRef(str(work_uri).replace("/work:", "/expression:"))
+    g.add((work_uri, RDF.type, V.BFFI.Work))
+    g.add((work_uri, V.BFFI.hasExpression, expr_uri))
+    g.add((expr_uri, RDF.type, V.BFFI.Expression))
+    g.add((work_uri, V.SKOS.prefLabel, Literal(title)))
+    g.add((expr_uri, V.SKOS.prefLabel, Literal(title)))
+    for agent_uri, label in agents:
+        contrib = BNode()
+        g.add((expr_uri, V.BFFI.contribution, contrib))
+        g.add((contrib, RDF.type, V.BFFI.Contribution))
+        g.add((contrib, V.BFFI.agent, agent_uri))
+        g.add((agent_uri, V.RDFS.label, Literal(label)))
+        role = BNode()
+        g.add((contrib, V.BF.role, role))
+        g.add((role, RDF.type, V.BF.Role))
+        if translator_only:
+            g.add((role, V.RDFS.label, Literal("kääntäjä")))
+        else:
+            g.add((role, V.RDFS.label, Literal("toimittaja")))
+    return g
+
+
+def test_first_contribution_fallback_picks_lex_min_agent_uri() -> None:
+    """The fallback walks ``Work → hasExpression → contribution → agent``
+    and returns the lexicographically-smallest agent URI for a
+    deterministic mint key."""
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/btest#Work")
+    g = _build_anonymous_main_entry_graph(
+        work,
+        title="Hanko toisessa maailmansodassa",
+        agents=[
+            (URIRef("http://urn.fi/URN:NBN:fi:bib:raw/btest#Agent700-41"), "Uitto, Antero"),
+            (URIRef("http://urn.fi/URN:NBN:fi:bib:raw/btest#Agent700-40"), "Geust, Carl-Fredrik"),
+        ],
+    )
+    result = _first_contribution_agent_uri(g, work)
+    # Lex-min between "...#Agent700-40" and "...#Agent700-41" is the 40.
+    assert result == "http://urn.fi/URN:NBN:fi:bib:raw/btest#Agent700-40"
+
+
+def test_first_contribution_fallback_skips_translator_only_records() -> None:
+    """A record where every non-primary contribution is a translator
+    returns None — translators are the wrong intellectual anchor."""
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/btrans#Work")
+    g = _build_anonymous_main_entry_graph(
+        work,
+        title="Sota ja rauha (translated edition)",
+        agents=[
+            (URIRef("http://urn.fi/URN:NBN:fi:bib:raw/btrans#Agent700-7"), "Translator A"),
+        ],
+        translator_only=True,
+    )
+    assert _first_contribution_agent_uri(g, work) is None
+
+
+def test_first_contribution_fallback_returns_none_for_truly_anonymous() -> None:
+    """A record with no contributions at all (no 1XX, no 7XX) returns
+    None — these stay in mint-failures until P-34 sub-option (2)
+    ships a title-only mint."""
+    g = Graph()
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/banon#Work")
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, V.SKOS.prefLabel, Literal("Karjala :")))
+    assert _first_contribution_agent_uri(g, work) is None
+
+
+def test_canonical_carries_mintanchor_predicate_for_editor_anchored(tmp_path: Path) -> None:
+    """When the canonical Work was minted via the P-34 editor-anchored
+    fallback, the canonical.ttl carries ``bffi-prov:mintAnchor =
+    bib:auth/first-contributor-anchored``. Standard primary-author-
+    anchored canonical Works carry
+    ``bib:auth/primary-author-anchored`` instead."""
+    work_records = {
+        WORK_A: CanonicalWorkInputs(
+            work_uri=WORK_A,
+            creator_uri="http://example.org/agent/editor",
+            pref_label="Hanko toisessa maailmansodassa",
+            mint_anchor="first-contributor",
+            expression_uris=[EXPR_A],
+            helmet_identifiers=[("http://example.org/ident/a1", "b1")],
+        ),
+        WORK_B: CanonicalWorkInputs(
+            work_uri=WORK_B,
+            creator_uri=AGENT_TOLSTOY,
+            pref_label="Sota ja rauha",
+            mint_anchor="primary",
+            expression_uris=[EXPR_B],
+            helmet_identifiers=[("http://example.org/ident/b1", "b2")],
+        ),
+    }
+    helmet_entries = {
+        WORK_A: HelmetMapEntry(WORK_A, "b1", "2026-04-12T08:31:02+00:00"),
+        WORK_B: HelmetMapEntry(WORK_B, "b2", "2026-04-12T08:31:02+00:00"),
+    }
+    canonical, _, _ = _run(tmp_path, [], work_records=work_records, helmet_entries=helmet_entries)
+
+    g = Graph()
+    g.parse(source=str(canonical), format="turtle")
+    mint_anchor_pred = URIRef("http://urn.fi/URN:NBN:fi:schema:bffi-prov#mintAnchor")
+    editor_value = URIRef("http://urn.fi/URN:NBN:fi:bib:auth/first-contributor-anchored")
+    primary_value = URIRef("http://urn.fi/URN:NBN:fi:bib:auth/primary-author-anchored")
+
+    editor_anchored = list(g.subjects(mint_anchor_pred, editor_value))
+    primary_anchored = list(g.subjects(mint_anchor_pred, primary_value))
+    assert len(editor_anchored) == 1
+    assert len(primary_anchored) == 1
 
 
 # --- Identifier accumulation ---------------------------------------------
