@@ -48,6 +48,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal
 
+from bffi_pipeline.run_manifest import append_stage_completed, append_stage_observed
+
 StageEvent = Literal[
     "start",
     "progress",
@@ -98,6 +100,12 @@ class StageEventEmitter:
 
     sidecar_path: Path | None
     run_uuid: str
+    #: P-32 Phase A: path to the run's ``bffi-run.json`` manifest. When
+    #: set, each ``start`` / ``end`` event also appends the stage to the
+    #: manifest's ``stages_observed`` / ``stages_completed`` list. None
+    #: in tests that construct emitters directly + don't want manifest
+    #: side-effects.
+    manifest_path: Path | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def emit(
@@ -141,6 +149,18 @@ class StageEventEmitter:
                 self.sidecar_path.parent.mkdir(parents=True, exist_ok=True)
                 with self.sidecar_path.open("a", encoding="utf-8") as fh:
                     fh.write(line + "\n")
+
+        # P-32 Phase A: update the run's manifest with the stage's
+        # lifecycle markers. Idempotent on retries — same stage
+        # emitting ``start`` twice writes one entry. Done outside the
+        # emitter lock because the manifest helpers carry their own
+        # module-level lock (and the JSONL append finished by the
+        # time we get here).
+        if self.manifest_path is not None:
+            if event == "start":
+                append_stage_observed(self.manifest_path, stage)
+            elif event == "end":
+                append_stage_completed(self.manifest_path, stage)
 
 
 #: Module-level singleton slot. ``None`` when no pipeline invocation is

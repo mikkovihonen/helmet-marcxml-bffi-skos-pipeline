@@ -15,5 +15,10 @@ If the plan is dropped before completion, `git mv` it to
 
 ## Current in-progress plans
 
-_(none — the 2026-05-14 observability code stack P-17 / P-18 / P-19
-all graduated to [`../completed/`](../completed/) on the same day.)_
+- [`p-32-run-lifecycle-management.md`](p-32-run-lifecycle-management.md)
+  — Phase A (`bffi-run.json` manifest writer + per-stage emit-site
+  wiring + `runs mark-complete` CLI + Settings additions + 13 unit
+  tests) shipped; the manifest now lands at
+  `<BFFI_DATA_DIR>/bffi-run.json` for every pipeline invocation
+  that has the observability sidecar enabled. Phases B / C / D /
+  E / F / G / H still ahead.

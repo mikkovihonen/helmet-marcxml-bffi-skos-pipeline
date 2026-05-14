@@ -5,6 +5,8 @@
 /eval-runs/
 /marcxml/
 /scratchpad/
+# P-32: canonical runs root (BFFI_RUNS_ROOT, default <repo>/runs/).
+/runs/
 
 # Local environment. Live .env and any operator-side rollback / swap
 # copies (e.g. .env.ollama-baseline, .env.mlx-lm) stay local — they

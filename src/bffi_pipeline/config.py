@@ -244,6 +244,22 @@ class Settings(BaseSettings):
         default="",
         alias="BFFI_RUN_UUID",
     )
+    # P-32 Phase A: human-readable description recorded in
+    # ``<data_dir>/bffi-run.json``. Shows in ``bffi-pipeline runs list``;
+    # operator can edit post-hoc via ``runs tag``. Empty default.
+    run_description: str = Field(
+        default="",
+        alias="BFFI_RUN_DESCRIPTION",
+    )
+    # P-32 Phase E: canonical root for run dirs. Phase A persists the
+    # setting so later phases can read it; Phase E switches
+    # ``data_dir`` resolution to ``runs_root / run_uuid``. Default is
+    # ``<repo>/runs/`` — the parent directory of ``src/bffi_pipeline``
+    # is the repo root in the local-clone case.
+    runs_root: Path = Field(
+        default=Path(__file__).resolve().parents[2] / "runs",
+        alias="BFFI_RUNS_ROOT",
+    )
 
     # Triple store.
     fuseki_url: str = Field(

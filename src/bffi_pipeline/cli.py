@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit as _atexit
 import uuid as _uuid
 from pathlib import Path
 from typing import Annotated
@@ -64,7 +65,38 @@ def _init_observability(settings: Settings) -> StageEventEmitter | None:
         sidecar_path = Path(sidecar_str)
 
     run_uuid = settings.run_uuid.strip() or _uuid.uuid4().hex
-    emitter = StageEventEmitter(sidecar_path=sidecar_path, run_uuid=run_uuid)
+
+    # P-32 Phase A: write the initial bffi-run.json manifest into
+    # ``data_dir``. Skipped when the operator has explicitly disabled
+    # the sidecar (BFFI_OBSERVABILITY_SIDECAR=none) — same opt-out
+    # axis. Tests that need a no-manifest emitter construct one
+    # directly without going through ``_init_observability``.
+    manifest_path: Path | None = None
+    if sidecar_path is not None:
+        from bffi_pipeline.run_manifest import (
+            mark_run_complete as _mark_run_complete,
+        )
+        from bffi_pipeline.run_manifest import (
+            write_initial_manifest,
+        )
+
+        manifest_path = write_initial_manifest(
+            settings.data_dir,
+            run_uuid=run_uuid,
+            description=settings.run_description,
+            pipeline_git_sha=_resolve_git_sha(),
+        )
+        # ``atexit`` stamps ``ended_at`` + ``status="completed"`` when
+        # Python shuts down normally. A crash / SIGKILL leaves the
+        # manifest at ``status="running"``; the operator clears it via
+        # ``bffi-pipeline runs mark-complete <uuid> --status=aborted``.
+        _atexit.register(_mark_run_complete, settings.data_dir, "completed")
+
+    emitter = StageEventEmitter(
+        sidecar_path=sidecar_path,
+        run_uuid=run_uuid,
+        manifest_path=manifest_path,
+    )
     set_active_emitter(emitter)
     # Echo the active run_uuid so operators inspecting a fresh invocation
     # (especially direct ``bffi-pipeline <subcmd>`` calls that bypass the
@@ -75,9 +107,102 @@ def _init_observability(settings: Settings) -> StageEventEmitter | None:
     return emitter
 
 
+def _resolve_git_sha() -> str | None:
+    """Return the current HEAD SHA, or ``None`` if not in a git checkout.
+
+    Best-effort: shells out to ``git rev-parse HEAD``. Used by P-32
+    Phase A to stamp the pipeline-version field on the run manifest.
+    """
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parent.parent
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=2.0,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
 app = typer.Typer(help="BFFI pipeline CLI.", no_args_is_help=True)
 provenance_app = typer.Typer(help="Provenance graph maintenance (M7).", no_args_is_help=True)
 app.add_typer(provenance_app, name="provenance")
+runs_app = typer.Typer(
+    help="Run lifecycle management (P-32). List, prune, tag, migrate runs under BFFI_RUNS_ROOT.",
+    no_args_is_help=True,
+)
+app.add_typer(runs_app, name="runs")
+
+
+@runs_app.command("mark-complete")
+def runs_mark_complete_command(
+    run_uuid: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The run_uuid (or a unique prefix) of the run to stamp. "
+                "Resolved against BFFI_RUNS_ROOT/<run_uuid>/."
+            ),
+        ),
+    ],
+    status: Annotated[
+        str,
+        typer.Option(
+            "--status",
+            help=(
+                "Status to write. One of: completed, aborted. "
+                "Defaults to completed for the manual-completion case."
+            ),
+        ),
+    ] = "completed",
+) -> None:
+    """Stamp ``ended_at`` + ``status`` on a run's manifest manually.
+
+    Use when the pipeline crashed before the atexit hook fired and
+    the manifest is stuck at ``status="running"``. The run dir is
+    looked up under ``BFFI_RUNS_ROOT/<run_uuid>``; a unique prefix
+    resolves to a single match.
+    """
+    from typing import cast
+
+    from bffi_pipeline.run_manifest import RunStatus, mark_run_complete
+
+    if status not in ("completed", "aborted"):
+        typer.echo(
+            f"Invalid --status={status!r}; expected one of: completed, aborted.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    settings = get_settings()
+    runs_root = settings.runs_root
+    if not runs_root.is_dir():
+        typer.echo(f"BFFI_RUNS_ROOT does not exist: {runs_root}", err=True)
+        raise typer.Exit(code=2)
+
+    matches = sorted(d for d in runs_root.iterdir() if d.is_dir() and d.name.startswith(run_uuid))
+    if not matches:
+        typer.echo(f"No run dir under {runs_root} matches prefix {run_uuid!r}.", err=True)
+        raise typer.Exit(code=1)
+    if len(matches) > 1:
+        names = ", ".join(d.name for d in matches)
+        typer.echo(
+            f"Ambiguous run_uuid prefix {run_uuid!r}; matches: {names}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    data_dir = matches[0]
+    # ``status`` validated against the literal set above; cast is safe.
+    mark_run_complete(data_dir, status=cast("RunStatus", status))
+    typer.echo(f"Marked {data_dir.name} as status={status}.")
 
 
 @app.callback()
