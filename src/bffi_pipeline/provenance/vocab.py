@@ -76,6 +76,11 @@ mintAnchor: URIRef = BFFI_PROV.mintAnchor
 
 MINT_ANCHOR_PRIMARY_AUTHOR: URIRef = BIB["auth/primary-author-anchored"]
 MINT_ANCHOR_FIRST_CONTRIBUTOR: URIRef = BIB["auth/first-contributor-anchored"]
+#: P-34 Phase B: truly-anonymous records (no primary creator, no
+#: usable non-primary contribution either) mint a canonical Work
+#: anchored on (title, content-type, language). See P-34 plan's
+#: "Phase B" section for the MARC-input contract.
+MINT_ANCHOR_ANONYMOUS_WORK: URIRef = BIB["auth/anonymous-work-anchored"]
 
 # --- BFFI-side AdminMetadata predicates added by M9 ----------------------
 
@@ -136,6 +141,7 @@ __all__ = [
     "GEN_PROCESS_PIPELINE_V0_1_0",
     "HELMET_SOURCE_URI",
     "METADATA_LICENSOR_CC0",
+    "MINT_ANCHOR_ANONYMOUS_WORK",
     "MINT_ANCHOR_FIRST_CONTRIBUTOR",
     "MINT_ANCHOR_PRIMARY_AUTHOR",
     "PROV",

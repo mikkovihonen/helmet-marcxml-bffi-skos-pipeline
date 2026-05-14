@@ -41,6 +41,7 @@ from rdflib import Literal as RdfLiteral
 from rdflib.namespace import DCTERMS, RDF
 from rdflib.term import Node
 
+from bffi_pipeline.blocking import fold_label
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.contrib_variants import (
     DEFAULT_SIDECAR_NAME as VARIANTS_SIDECAR_NAME,
@@ -331,9 +332,12 @@ class ExpressionContribution:
 
 #: P-34: which input slot of the canonical-Work mint key produced the
 #: anchor. ``"primary"`` is the standard bffi:PrimaryContribution path;
-#: ``"first-contributor"`` is the sub-option-(1) fallback for
-#: anonymous-main-entry records (no MARC 1XX, editor in MARC 700).
-MintAnchorKind = LiteralType["primary", "first-contributor"]
+#: ``"first-contributor"`` is the Phase A fallback for anonymous-main-
+#: entry records (no MARC 1XX, editor in MARC 700);
+#: ``"anonymous-work"`` is the Phase B fallback for truly-anonymous
+#: records (no contributors at all) — keyed on (title, content-type,
+#: language) instead of a creator URI.
+MintAnchorKind = LiteralType["primary", "first-contributor", "anonymous-work"]
 
 
 @dataclass
@@ -481,6 +485,67 @@ def _first_contribution_agent_uri(graph: Graph, work: URIRef) -> str | None:
     if not candidates:
         return None
     return min(candidates)
+
+
+#: URI namespace prefix for the P-34 Phase B anonymous-work
+#: synthetic anchor. Two records that share normalized title +
+#: content-type URI + language URI produce the same anchor and
+#: therefore the same canonical Work URI. The cataloguer-facing
+#: convention is documented in the P-34 plan's "Phase B" section:
+#: see docs/plans/completed/p-34-m8-mint-anonymous-main-entry-works.md.
+_ANONYMOUS_WORK_ANCHOR_PREFIX: Final[str] = "http://urn.fi/URN:NBN:fi:bib:anonymous-work-anchor/"
+
+
+def _anonymous_work_anchor_uri(graph: Graph, work: URIRef) -> str | None:
+    """P-34 Phase B fallback when no creator (primary or non-primary) is found.
+
+    Synthesises a deterministic anchor URI from three BFFI predicates
+    already extracted by M3:
+
+    - **Title** — ``skos:prefLabel`` on the Work (sourced from MARC 245$a
+      + $b). Required; if absent the record stays in mint-failures via
+      Phase A's ``missing_inputs=["pref_label"]`` path. Normalised via
+      :func:`bffi_pipeline.blocking.fold_label` (NFKC + diacritic-fold
+      + casefold + whitespace-collapse + strip-trailing-decoration) so
+      catalographically-equivalent titles converge.
+    - **Content type** — ``bffi:content`` URI on the linked
+      ``bffi:Expression`` (LoC contentTypes vocab; sourced from MARC
+      leader/06 + 336$a$b$2). E.g.
+      ``<http://id.loc.gov/vocabulary/contentTypes/txt>``.
+    - **Language** — ``bffi:language`` URI on the linked
+      ``bffi:Expression`` (LoC languages vocab; sourced from MARC
+      008/35-37 + 041$a). E.g.
+      ``<http://id.loc.gov/vocabulary/languages/fin>``.
+
+    Returns ``None`` when the title is missing (Phase A's existing
+    mint-failure path catches that case). Content-type and language
+    can both be absent — the anchor still produces a deterministic
+    URI, just on a smaller key.
+    """
+    title = _first_pref_label(graph, work)
+    if title is None:
+        return None
+    title_normalised = fold_label(title)
+    content_uri = ""
+    language_uri = ""
+    for expr in graph.objects(work, V.BFFI.hasExpression):
+        if not isinstance(expr, URIRef):
+            continue
+        if not content_uri:
+            for ct in graph.objects(expr, V.BFFI.content):
+                if isinstance(ct, URIRef):
+                    content_uri = str(ct)
+                    break
+        if not language_uri:
+            for lang in graph.objects(expr, V.BFFI.language):
+                if isinstance(lang, URIRef):
+                    language_uri = str(lang)
+                    break
+        if content_uri and language_uri:
+            break
+    key = f"{title_normalised}|{content_uri}|{language_uri}"
+    digest = hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return f"{_ANONYMOUS_WORK_ANCHOR_PREFIX}{digest}"
 
 
 def _collect_contribution_agent_uris(graph: Graph, subject: URIRef) -> list[str]:
@@ -728,16 +793,24 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
         subjects = _subject_targets(graph, work, V.BFFI.subject)
         genres = _subject_targets(graph, work, V.BFFI.genreForm)
         contributions = _primary_contribution_targets(graph, work)
-        # P-34: pick the canonical-mint creator anchor. Standard path is
-        # bffi:PrimaryContribution → bffi:agent. When that's empty
-        # (anonymous-main-entry MARC records: no 1XX, contributors only
-        # in 700), fall through to the lexicographically-smallest
-        # non-translator bffi:contribution agent. Track which path
-        # resolved on ``mint_anchor`` so the canonical Turtle can
-        # surface a bffi-prov:mintAnchor predicate distinguishing the
-        # two cases. Records with no contribution at all (or only
-        # translator contributors) keep ``mint_anchor=None`` and end
-        # up in canonical-mint-failures.jsonl.
+        # P-34: pick the canonical-mint creator anchor via three
+        # fall-through paths. Each successful path writes a different
+        # ``bffi-prov:mintAnchor`` predicate on the canonical so
+        # cataloguer review + dashboard filters can split on the
+        # anchor kind.
+        #
+        # 1. Standard: ``bffi:PrimaryContribution → bffi:agent``
+        #    (records with MARC 1XX → primary author).
+        # 2. Phase A: lex-min non-translator ``bffi:contribution``
+        #    agent on Work or linked Expression (records with MARC
+        #    700 editors but no 1XX — anonymous-main-entry).
+        # 3. Phase B: synthetic ``anonymous-work-anchor:<sha1>`` URI
+        #    keyed on (normalised title, content-type URI, language
+        #    URI). Truly-anonymous records (no contributors at all,
+        #    or only translator-role contributors).
+        #
+        # ``mint_anchor=None`` only when ``pref_label`` is also
+        # missing — those stay in mint-failures.
         creator_uri = _primary_agent_uri(graph, work)
         mint_anchor: MintAnchorKind | None = "primary" if creator_uri else None
         if creator_uri is None:
@@ -745,6 +818,11 @@ def extract_work_metadata(graph: Graph) -> dict[str, CanonicalWorkInputs]:
             if fallback is not None:
                 creator_uri = fallback
                 mint_anchor = "first-contributor"
+        if creator_uri is None:
+            anon = _anonymous_work_anchor_uri(graph, work)
+            if anon is not None:
+                creator_uri = anon
+                mint_anchor = "anonymous-work"
         out[str(work)] = CanonicalWorkInputs(
             work_uri=str(work),
             creator_uri=creator_uri,
@@ -1087,6 +1165,22 @@ def _propagate_primary_contributions(
         g.add((agent, V.RDFS.label, Literal(target.agent_label)))
 
 
+def _emit_mint_anchor(g: Graph, canonical_uri: URIRef, mint_anchor: MintAnchorKind | None) -> None:
+    """Emit ``<canonical_uri> bffi-prov:mintAnchor <kind-uri>`` for a P-34 anchor.
+
+    Mapping (kept here so the kind-name → URI lookup lives next to
+    the emission, not duplicated in :func:`_emit_canonical_work`):
+    """
+    mapping = {
+        "primary": V.MINT_ANCHOR_PRIMARY_AUTHOR,
+        "first-contributor": V.MINT_ANCHOR_FIRST_CONTRIBUTOR,
+        "anonymous-work": V.MINT_ANCHOR_ANONYMOUS_WORK,
+    }
+    if mint_anchor is None:
+        return
+    g.add((canonical_uri, V.mintAnchor, mapping[mint_anchor]))
+
+
 def _emit_canonical_work(
     g: Graph,
     *,
@@ -1106,10 +1200,7 @@ def _emit_canonical_work(
     # (anonymous-main-entry MARC records, no 1XX) from the standard
     # primary-author-anchored case. Cataloguer review + dashboard
     # filters can split on this.
-    if mint_anchor == "primary":
-        g.add((canonical_uri, V.mintAnchor, V.MINT_ANCHOR_PRIMARY_AUTHOR))
-    elif mint_anchor == "first-contributor":
-        g.add((canonical_uri, V.mintAnchor, V.MINT_ANCHOR_FIRST_CONTRIBUTOR))
+    _emit_mint_anchor(g, canonical_uri, mint_anchor)
     union_pref_labels: set[tuple[str, str | None]] = set()
     for member in members:
         union_pref_labels.update(member.pref_labels)

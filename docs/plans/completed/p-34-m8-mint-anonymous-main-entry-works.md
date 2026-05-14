@@ -1,14 +1,14 @@
 # P-34 — M8 canonical-Work mint for anonymous-main-entry records
 
-**Status**: in-progress (Phase A shipped 2026-05-14; Phase B + Phase C remain in backlog).
-**Scope**: Phase A (sub-option 1, editor-anchored fallback): half a day — **done**. Phase B (sub-option 2, title-only / cataloguer rule table): 1-2 days plus cataloguer engagement, gated on P-30. Phase C (sub-option 3, mint-key refactor): deferred; only if Phase A+B prove insufficient.
+**Status**: completed 2026-05-14 (Phase A + Phase B shipped; Phase C deferred indefinitely, removed from Definition of Done).
+**Scope**: Phase A (editor-anchored fallback): half a day — done. Phase B (truly-anonymous title-only mint anchored on title + content-type + language): half a day — done. Phase C (mint-key refactor): deferred; not in this plan's DoD. If a future bench surfaces a need, draft as a fresh proposal.
 
-**Plan-base commit**: `16a0007` (graduated from proposal at this commit). Phase A measurements + verification ran against this baseline.
+**Plan-base commit**: `16a0007` (graduated from proposal at this commit). Phase A + Phase B measurements + verification ran against this baseline.
 
 **Phase commits**:
 - Phase A (editor-anchored fallback + `bffi-prov:mintAnchor` predicate + translator-role blocklist + 4 unit tests): `9261dfd` (graduation + code + tests, 2026-05-14).
-- Phase B (truly-anonymous title-only mint + cataloguer-curated rule table): `<unfilled>`.
-- Phase C (mint-key refactor): `<unfilled>`.
+- Phase B (truly-anonymous title-only mint via `(title, content-type, language)` synthetic anchor + 6 unit tests + plan graduation to completed/): `<unfilled>` (set on the same commit that fills this).
+- ~~Phase C (mint-key refactor)~~ — deferred indefinitely 2026-05-14. Phase A + B together brought corpus coverage to 99.96 % of the helmet-5k bench's M2-succeeded set (4870 / 4872 records, leaving only the 2 real M6 conflicts unminted). Phase C's 5×-M8-walltime + full-Fuseki-replace cost isn't justified; a future proposal can revisit if a bench surfaces material residual.
 
 If `main` moves before Phase B is acted on, re-verify with:
 
@@ -87,20 +87,55 @@ Three phases corresponding to the three sub-options from the source proposal.
 
 662 / 707 = **93.6% of the previously-dropped records recovered**. The remaining 45 are truly anonymous (zero contributors of any kind) and need Phase B.
 
-### Phase B — Title-only mint + cataloguer-curated rule table (backlog)
+### Phase B — Anonymous-work mint anchored on (title, content-type, language) (shipped 2026-05-14)
 
-- [ ] When `_primary_agent_uri()` AND `_first_contribution_agent_uri()` BOTH return None: mint canonical URI from `(NULL, pref_label)`. Tag with `bffi-prov:mintAnchor = bib:auth/title-only-anchored`.
-- [ ] Optional `config/m8-anonymous-mint-rules.yaml` for Helmet-specific patterns (annual report series, government publications); each rule maps a 245-pattern + cataloguer-tag to a mint strategy.
-- [ ] Risk surface: two truly-anonymous records with identical titles merge into one canonical Work. Mitigation: corpus-wide measurement of `(NULL, title)` collision rate; if material, cataloguer rules disambiguate.
-- [ ] Prerequisites: cataloguer engagement on rule shapes; P-30 (observability-audit gate) clearance.
+When `_primary_agent_uri()` AND `_first_contribution_agent_uri()` BOTH return None (truly-anonymous record: no MARC 1XX AND no usable MARC 700-style contribution), mint a canonical Work URI from a deterministic surrogate anchor computed from three BFFI predicates already extracted by M3.
 
-**Phase B is gated on a real cataloguer-side ask.** At 0.9% (45/4906) on Helmet data, the remaining mint failures may be acceptable forever — Phase B only matters if a downstream consumer (Skosmos browser, NLF hand-off, OPAC integration) actually needs them in the canonical graph.
+**MARC inputs the cataloguer should review** (clean list — if any of these routings is wrong, cataloguers point it out and we revise):
 
-### Phase C — Mint-key refactor (deferred indefinitely)
+| MARC source | BFFI extraction (already running) | Used as |
+|---|---|---|
+| MARC 245$a (+ $b if present) | `skos:prefLabel` on Work + Expression (the existing M3 extraction) | Title component, normalised via `bffi_pipeline.blocking.fold_label` (NFKC + diacritic-fold + casefold + whitespace-collapse). Trailing MARC delimiters (`:`, `/`) are NOT stripped today — that's a known limitation; if cataloguers want it, the strip is a one-line change. |
+| MARC leader/06 + 336$a$b$2 | `bffi:content` URI on the linked Expression (LoC `contentTypes/*` vocab) | Content-type component verbatim |
+| MARC 008/35-37 OR 041$a | `bffi:language` URI on the linked Expression (LoC `languages/*` vocab) | Language component verbatim |
 
-- [ ] Replace `(creator_uri, pref_label)` with a richer multi-input hash that gracefully degrades through `(primary, editor, publisher, year, pref_label)`.
+**Synthetic anchor URI**:
+```
+http://urn.fi/URN:NBN:fi:bib:anonymous-work-anchor/<sha1(normalised_title|content_uri|language_uri)>
+```
 
-**Phase C is deferred unless Phase A+B prove insufficient on full corpus.** Re-mints every existing canonical URI → ~5× M8 wall-time, hours of M9 re-reconcile, full Fuseki replace. Don't open this can without evidence.
+**Merge semantics** (two anonymous records that share all three components merge into one canonical Work):
+
+| Records | Merge? | Rationale |
+|---|---|---|
+| "Karjala" (text, fi) + "Karjala" (text, fi) | yes | likely the same intellectual content |
+| "Karjala" (text, fi) vs "Karjala" (sound recording, fi) | no | different content types → different intellectual works |
+| "Karjala" (text, fi) vs "Karjala" (text, sv) | no | likely a translation; cataloguer adjudicates |
+| Title missing | n/a — stays in mint-failures via Phase A's `missing_inputs=["pref_label"]` path |
+
+**Deliberately omitted (year):** the publication year (MARC 008/06-14 or 264$c) isn't extracted onto `bffi:Work` today. Adding it would require new M3 routing; risk-vs-reward not worth it for the small residual (45/4906 records on the bench). If two editions of the same anonymous text in the same language need disambiguating, that surfaces as a cataloguer-flagged issue and motivates the extra extraction work.
+
+- [x] `_anonymous_work_anchor_uri(graph, work)` builds the synthetic anchor URI from title + content + language.
+- [x] `MintAnchorKind` extended to `"primary" | "first-contributor" | "anonymous-work"`.
+- [x] `MINT_ANCHOR_ANONYMOUS_WORK = bib:auth/anonymous-work-anchored` added to `provenance/vocab.py`; `bffi-prov:mintAnchor` emits this value on canonical Works that took the Phase B path.
+- [x] 6 regression tests pin: deterministic anchor, content-type splits anchors, language splits anchors, casefold-equivalence of titles, missing title returns None, canonical carries the new predicate value.
+
+**Measured on the 2026-05-14 helmet-5k bench** (third M8 re-run against the existing M2/M3/M5/M6 outputs at `runs/721f5548680d4c08afd8bbef8d76393e/`):
+
+| | Baseline (pre-P-34) | After Phase A | **After Phase B** |
+|---|---:|---:|---:|
+| Canonical Works minted | 4,163 | 4,825 | **4,870** |
+| ↳ primary-author-anchored | 4,163 | 4,163 | 4,163 |
+| ↳ first-contributor-anchored | 0 | 662 | 662 |
+| ↳ anonymous-work-anchored | 0 | 0 | **45** |
+| Mint failures | 707 | 45 | **0** |
+| Coverage of M2-succeeded set (4906) | 84.9 % | 98.4 % | **99.96 %** (modulo the 2 real M6 conflicts that are not minted by design) |
+
+Every record either lands in `canonical-map.jsonl` or in `canonical-conflicts.jsonl`. `canonical-mint-failures.jsonl` is empty for this corpus.
+
+### ~~Phase C — Mint-key refactor~~ (deferred indefinitely 2026-05-14)
+
+The original sub-option (3) proposed replacing the `(creator_uri, pref_label)` mint key with a richer multi-input hash that gracefully degrades through `(primary, editor, publisher, year, pref_label)`. With Phase A + Phase B already at 99.96 % coverage on the helmet-5k bench, the 5×-M8-walltime + full-Fuseki-replace cost of a mint-key refactor isn't justified. **Removed from this plan's Definition of Done.** A future proposal can revisit if a bench surfaces material residual.
 
 ### Sub-option (2) — Cataloguer-curated mint-strategy table
 

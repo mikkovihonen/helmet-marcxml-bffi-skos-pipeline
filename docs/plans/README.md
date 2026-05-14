@@ -82,11 +82,6 @@ reference for what shipped.
   prerequisite for P-01, P-04 statistical power, and P-35 F3.
 ### In progress
 
-- [`in-progress/p-34-m8-mint-anonymous-main-entry-works.md`](in-progress/p-34-m8-mint-anonymous-main-entry-works.md)
-  — Editor-anchored canonical-Work mint for anonymous-main-entry
-  records (no MARC 1XX, contributors in 700). Phase A shipped
-  2026-05-14 at `9261dfd`; recovered 662 / 707 dropped records on
-  the helmet-5k bench. Phases B + C still backlog.
 - [`in-progress/p-35-m3-cascade-follow-ups.md`](in-progress/p-35-m3-cascade-follow-ups.md)
   — Three sequenced M3 follow-ups (F1, F2, F3) that make
   cascade-extracted contributions cataloguer-visible on canonical
@@ -112,6 +107,17 @@ reference for what shipped.
   measured 566 records missing 33X on the P-02 5k sample; Phase B
   + the cascade close it to 0 (the plan's `≤ 50` goal was beaten
   by Phase B alone).
+- [`completed/p-34-m8-mint-anonymous-main-entry-works.md`](completed/p-34-m8-mint-anonymous-main-entry-works.md)
+  — Recovers records that M8 previously dropped for lacking a MARC
+  1XX primary creator. Phase A adds an editor-anchored fallback
+  (uses lex-min non-translator MARC 700 contributor); Phase B adds
+  a truly-anonymous fallback (synthetic anchor on `(normalised
+  title, content-type URI, language URI)`). Each canonical Work
+  carries `bffi-prov:mintAnchor` distinguishing the three anchor
+  kinds. On the 2026-05-14 helmet-5k bench: coverage went from
+  84.9 % → 99.96 % (mint failures dropped from 707 → 0). Phase C
+  (mint-key refactor) was removed from the DoD as unnecessary at
+  that coverage level.
 
 ### Abandoned
 

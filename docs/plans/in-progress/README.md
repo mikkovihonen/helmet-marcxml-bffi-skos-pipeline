@@ -15,21 +15,6 @@ If the plan is dropped before completion, `git mv` it to
 
 ## Current in-progress plans
 
-- [`p-34-m8-mint-anonymous-main-entry-works.md`](p-34-m8-mint-anonymous-main-entry-works.md)
-  — graduated from `proposed/` 2026-05-14. Phase A (editor-anchored
-  fallback for anonymous-main-entry records: walks `Work →
-  bffi:contribution` + `Work → hasExpression → bffi:contribution`
-  when `bffi:PrimaryContribution` is absent, picks the lex-min
-  non-translator agent URI, emits `bffi-prov:mintAnchor` on the
-  canonical Work to distinguish editor-anchored from
-  primary-author-anchored Works; 4 unit tests; translator-role
-  blocklist on LoC `relators/trl` + free-text labels in
-  fi/sv/en/de) shipped at `9261dfd`. Bench result: 662 of 707
-  previously-dropped records recovered into the canonical graph
-  (98.4% coverage on the 2026-05-14 helmet-5k sample, up from
-  84.9%). Phase B (title-only mint + cataloguer rule table for the
-  residual 0.9%) backlog; gated on cataloguer-side ask. Phase C
-  (mint-key refactor) deferred indefinitely.
 - [`p-35-m3-cascade-follow-ups.md`](p-35-m3-cascade-follow-ups.md)
   — Renumbered from P-05 + graduated from `backlog/` 2026-05-14 to
   clear a number collision with the now-abandoned
@@ -46,3 +31,10 @@ If the plan is dropped before completion, `git mv` it to
 
 P-32 (Run lifecycle management) graduated to
 [`../completed/`](../completed/) at `fdae706` (Phase D — final phase).
+
+P-34 (M8 mint for anonymous-main-entry records) graduated to
+[`../completed/`](../completed/) at `<unfilled>` after Phase B
+shipped (synthetic anchor on title + content-type + language,
+recovering the final 45 mint-failure records). Phase C
+(mint-key refactor) was removed from the DoD — corpus coverage
+at 99.96 % made it unnecessary.

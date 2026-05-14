@@ -36,6 +36,7 @@ from bffi_pipeline.stages.merge import (
     ExpressionContribution,
     HelmetMapEntry,
     SubjectTarget,
+    _anonymous_work_anchor_uri,
     _apply_contrib_variants,
     _expression_contributions,
     _first_contribution_agent_uri,
@@ -459,6 +460,151 @@ def test_canonical_carries_mintanchor_predicate_for_editor_anchored(tmp_path: Pa
     primary_anchored = list(g.subjects(mint_anchor_pred, primary_value))
     assert len(editor_anchored) == 1
     assert len(primary_anchored) == 1
+
+
+# --- P-34 Phase B: anonymous-work mint -------------------------------------
+
+
+def _build_truly_anonymous_graph(
+    work_uri: URIRef, *, title: str, content_uri: str, language_uri: str
+) -> Graph:
+    """Build a minimal BFFI graph for a truly-anonymous record.
+
+    No contributions of any kind on the Work or Expression; only
+    pref_label + content + language. Matches the BFFI shape M3 emits
+    for MARC records that lack 1XX/110/111 AND 700/710/711 (e.g. the
+    "Karjala :" pattern surfaced by the 2026-05-14 helmet-5k bench).
+    """
+    g = Graph()
+    expr_uri = URIRef(str(work_uri).replace("/work:", "/expression:"))
+    g.add((work_uri, RDF.type, V.BFFI.Work))
+    g.add((work_uri, V.SKOS.prefLabel, Literal(title)))
+    g.add((work_uri, V.BFFI.hasExpression, expr_uri))
+    g.add((expr_uri, RDF.type, V.BFFI.Expression))
+    g.add((expr_uri, V.BFFI.content, URIRef(content_uri)))
+    g.add((expr_uri, V.BFFI.language, URIRef(language_uri)))
+    return g
+
+
+def test_anonymous_work_anchor_uri_is_deterministic() -> None:
+    """Two truly-anonymous records with identical (title, content, language)
+    produce the same anchor URI."""
+    work_1 = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/banon1#Work")
+    work_2 = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/banon2#Work")
+    g1 = _build_truly_anonymous_graph(
+        work_1,
+        title="Karjala :",
+        content_uri="http://id.loc.gov/vocabulary/contentTypes/txt",
+        language_uri="http://id.loc.gov/vocabulary/languages/fin",
+    )
+    g2 = _build_truly_anonymous_graph(
+        work_2,
+        title="Karjala :",
+        content_uri="http://id.loc.gov/vocabulary/contentTypes/txt",
+        language_uri="http://id.loc.gov/vocabulary/languages/fin",
+    )
+    assert _anonymous_work_anchor_uri(g1, work_1) == _anonymous_work_anchor_uri(g2, work_2)
+
+
+def test_anonymous_work_anchor_uri_splits_on_content_type() -> None:
+    """Two records with same title + language but different content types
+    (text vs sound recording) get different anchor URIs — they're
+    different intellectual works."""
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/banon#Work")
+    g_text = _build_truly_anonymous_graph(
+        work,
+        title="Karjala",
+        content_uri="http://id.loc.gov/vocabulary/contentTypes/txt",
+        language_uri="http://id.loc.gov/vocabulary/languages/fin",
+    )
+    g_sound = _build_truly_anonymous_graph(
+        work,
+        title="Karjala",
+        content_uri="http://id.loc.gov/vocabulary/contentTypes/prm",
+        language_uri="http://id.loc.gov/vocabulary/languages/fin",
+    )
+    assert _anonymous_work_anchor_uri(g_text, work) != _anonymous_work_anchor_uri(g_sound, work)
+
+
+def test_anonymous_work_anchor_uri_splits_on_language() -> None:
+    """Two records with same title + content but different languages
+    (Finnish vs Swedish) get different anchor URIs — the cataloguer
+    can adjudicate whether they're translations of the same work."""
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/banon#Work")
+    g_fi = _build_truly_anonymous_graph(
+        work,
+        title="Karjala",
+        content_uri="http://id.loc.gov/vocabulary/contentTypes/txt",
+        language_uri="http://id.loc.gov/vocabulary/languages/fin",
+    )
+    g_sv = _build_truly_anonymous_graph(
+        work,
+        title="Karjala",
+        content_uri="http://id.loc.gov/vocabulary/contentTypes/txt",
+        language_uri="http://id.loc.gov/vocabulary/languages/swe",
+    )
+    assert _anonymous_work_anchor_uri(g_fi, work) != _anonymous_work_anchor_uri(g_sv, work)
+
+
+def test_anonymous_work_anchor_uri_casefolds_title() -> None:
+    """Title-side normalisation via ``fold_label``: case + diacritic
+    differences collapse so catalographically-equivalent titles
+    produce the same anchor URI. MARC subfield-delimiter punctuation
+    (trailing ``:`` / ``/``) is NOT stripped — ``fold_label``'s
+    ``strip_label_decoration`` only handles MARC date / role markers.
+    Two records with different trailing punctuation in 245$a produce
+    different anchors; the ``bffi-prov:mintAnchor`` predicate lets
+    cataloguers spot the pattern + decide if a stronger normalisation
+    is worth shipping later."""
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/banon#Work")
+    g_a = _build_truly_anonymous_graph(
+        work,
+        title="Karjala",
+        content_uri="http://id.loc.gov/vocabulary/contentTypes/txt",
+        language_uri="http://id.loc.gov/vocabulary/languages/fin",
+    )
+    g_b = _build_truly_anonymous_graph(
+        work,
+        title="karjala",
+        content_uri="http://id.loc.gov/vocabulary/contentTypes/txt",
+        language_uri="http://id.loc.gov/vocabulary/languages/fin",
+    )
+    assert _anonymous_work_anchor_uri(g_a, work) == _anonymous_work_anchor_uri(g_b, work)
+
+
+def test_anonymous_work_anchor_uri_returns_none_when_title_missing() -> None:
+    """Without ``skos:prefLabel`` the anchor can't be built — Phase A's
+    ``missing_inputs=["pref_label"]`` mint-failure path catches this case."""
+    g = Graph()
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bnotitle#Work")
+    g.add((work, RDF.type, V.BFFI.Work))
+    # No prefLabel emitted.
+    assert _anonymous_work_anchor_uri(g, work) is None
+
+
+def test_canonical_carries_mintanchor_predicate_for_anonymous_work(tmp_path: Path) -> None:
+    """When canonical was minted via the P-34 Phase B anonymous-work
+    fallback, the canonical.ttl carries ``bffi-prov:mintAnchor =
+    bib:auth/anonymous-work-anchored``."""
+    anchor_uri = "http://urn.fi/URN:NBN:fi:bib:anonymous-work-anchor/deadbeef"
+    work_records = {
+        WORK_A: CanonicalWorkInputs(
+            work_uri=WORK_A,
+            creator_uri=anchor_uri,
+            pref_label="Karjala",
+            mint_anchor="anonymous-work",
+            expression_uris=[EXPR_A],
+            helmet_identifiers=[("http://example.org/ident/a1", "b1")],
+        ),
+    }
+    helmet_entries = {WORK_A: HelmetMapEntry(WORK_A, "b1", "2026-04-12T08:31:02+00:00")}
+    canonical, _, _ = _run(tmp_path, [], work_records=work_records, helmet_entries=helmet_entries)
+    g = Graph()
+    g.parse(source=str(canonical), format="turtle")
+    mint_anchor_pred = URIRef("http://urn.fi/URN:NBN:fi:schema:bffi-prov#mintAnchor")
+    anonymous_value = URIRef("http://urn.fi/URN:NBN:fi:bib:auth/anonymous-work-anchored")
+    anonymous_anchored = list(g.subjects(mint_anchor_pred, anonymous_value))
+    assert len(anonymous_anchored) == 1
 
 
 # --- Identifier accumulation ---------------------------------------------
