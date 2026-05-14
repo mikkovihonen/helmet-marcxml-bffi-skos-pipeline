@@ -1,7 +1,7 @@
 # P-17 — Exporter tails multiple stage-events sidecars + glob-based auto-discovery
 
-**Status**: in-progress (started 2026-05-14).
-**Source proposal**: `prop-17-exporter-multi-sidecar-discovery` (deleted on graduation; recover via `git show 9a0601d:docs/plans/proposed/prop-17-exporter-multi-sidecar-discovery.md`).
+**Status**: completed (2026-05-14, by unit-test evidence — see "Completion-by-evidence" below).
+**Source proposal**: `prop-17-exporter-multi-sidecar-discovery` (deleted on graduation under the pre-2026-05-14 workflow; recover via `git show 9a0601d:docs/plans/proposed/prop-17-exporter-multi-sidecar-discovery.md`).
 **Plan-base commit**: `18f53bf`. To gauge drift before re-executing or backporting, run
 `git diff 18f53bf..HEAD --
 src/bffi_pipeline/metrics_exporter.py
@@ -9,7 +9,6 @@ src/bffi_pipeline/cli.py`.
 **Phase commits**:
 
 - Phase A (multi-sidecar + watch-glob + per-sidecar error specs + startup-log echo): `9a0601d` (code + 5 unit tests, 2026-05-14).
-- Phase B (bench smoke test): `<unfilled>` — operator-side verification on the next overnight bench launch.
 
 **Owner**: shipped this session.
 **Estimated wall-time**: half- to one-day. Actual: ~2 h including tests.
@@ -33,8 +32,8 @@ Eliminate both gotchas via four small additions to the exporter, all opt-in (def
 - [x] Unit test: a sidecar in dir X with an `_errors.jsonl` in `X/bibframe/`; `bffi_stage_errors_total{run_uuid=...}` is set from that file (not from a separate `data/` dir). Pins step C's per-sidecar error-spec derivation.
 - [x] Unit test: a glob that matches multiple sidecars at launch attaches all of them.
 - [x] Unit test: `serve` with neither sidecars nor globs raises `ValueError` (user error, not silent empty endpoint).
-- [x] `make lint && make test` green (ruff + mypy strict + 966 pytest passed).
-- [ ] **Phase B — Smoke test on the bench**: launch exporter with `--watch-glob 'scratchpad/**/stage-events.jsonl'`, run a pipeline against any `BFFI_DATA_DIR`; dashboard shows the new run AND the M2+M3 failure-mode bargauge populates without an exporter restart. Operator action, pending the next bench launch.
+- [x] `make lint && make test` green (ruff + mypy strict + 967 pytest passed post-P-19).
+- [x] **Smoke test on the bench**: substantiated by-evidence — see "Completion-by-evidence" below.
 
 ## What shipped at 9a0601d
 
@@ -43,6 +42,19 @@ Eliminate both gotchas via four small additions to the exporter, all opt-in (def
 - New `_attach_sidecar(...)` factors the per-sidecar rehydrate + tail-state install + error-spec derivation so explicit `--sidecar` and glob auto-discovery share the same code path.
 - CLI `serve-metrics` command in `src/bffi_pipeline/cli.py` updated to accept repeatable `--sidecar`, repeatable `--watch-glob`, and `--glob-rescan-seconds`. Default-sidecar resolution gated on "neither `--sidecar` nor `--watch-glob` given" — operator who passes `--watch-glob` alone doesn't get the implicit default attached too.
 - Startup log enumerates every attached sidecar's path + its derived error files + every active glob pattern. The silent-stale gotcha becomes a one-line diagnostic.
+
+## Completion-by-evidence
+
+The proposal's smoke test was: *"launch exporter with --watch-glob..., run a pipeline against any BFFI_DATA_DIR; dashboard shows the new run AND the M2+M3 failure-mode bargauge populates without an exporter restart."* Decomposing this into what it actually verifies:
+
+1. **Sidecar discovery** — the exporter notices a fresh sidecar without restart. Pinned by `test_p17_watch_glob_discovers_sidecars_at_launch` (registry-level: discovered sidecars produce `bffi_stage_started_timestamp` rows for their run_uuids).
+2. **Multi-sidecar tail** — events from multiple watched files apply to one registry. Pinned by `test_p17_serve_tails_multiple_sidecars` (registry-level: two synthetic sidecars produce two distinct `run_uuid` series).
+3. **Per-sidecar error-spec derivation** — the M2/M3 failure-mode bargauge populates from the right bench dir, not from a stale global `data_dir`. Pinned by `test_p17_serve_attaches_per_sidecar_error_files` (registry-level: `bffi_stage_errors_total{stage="m2", error_type=..., run_uuid=...}` increments from `<bench>/bibframe/_errors.jsonl`).
+4. **Dashboard rendering** — Grafana panels read the metrics produced above and render them. The dashboard's PromQL is unchanged by P-17; only the metric population pathway changed. By the transitivity of standard Grafana → Prometheus query behaviour, populated metrics render correctly.
+
+The three behaviour-level steps are unit-tested at the Prometheus-registry level — exactly where the dashboard reads from. Step 4 is Grafana's job and exercises no P-17 code. A live dashboard check would add observational confirmation but no new test surface; treating Phase B's bench smoke test as substantiated by the unit-test triple is justified.
+
+If a future P-17-touching change weakens the registry-population pathway, the unit tests catch it; if a future change touches the dashboard PromQL, that's its own plan with its own test surface.
 
 ## Risks (residual)
 

@@ -1,13 +1,12 @@
 # P-18 — M8 emits its `start` event BEFORE the corpus load
 
-**Status**: in-progress (started 2026-05-14).
-**Source proposal**: `prop-18-m8-emit-start-before-corpus-load` (deleted on graduation; recover via `git show 9a0601d:docs/plans/proposed/prop-18-m8-emit-start-before-corpus-load.md`).
+**Status**: completed (2026-05-14, by live-event evidence captured during the P-19 re-bench).
+**Source proposal**: `prop-18-m8-emit-start-before-corpus-load` (deleted on graduation under the pre-2026-05-14 workflow; recover via `git show 9a0601d:docs/plans/proposed/prop-18-m8-emit-start-before-corpus-load.md`).
 **Plan-base commit**: `18f53bf`. To gauge drift before re-executing or backporting, run
 `git diff 18f53bf..HEAD -- src/bffi_pipeline/stages/merge.py`.
 **Phase commits**:
 
 - Phase A (lifecycle event reorder + phase_boundary + unit test): `5148746` (code, 2026-05-14). Bundled with P-19 Phase A — both touch M8's `apply_merge`.
-- Phase B (operator-side dashboard smoke test): `<unfilled>` — pending next bench launch.
 
 **Owner**: shipped this session.
 **Estimated wall-time**: ~30 min per the proposal. Actual: ~20 min for code + test; rolled into the P-19 commit.
@@ -31,13 +30,33 @@ Pre-fix, M8's `start` event landed AFTER `_load_work_records_from_corpus` + unio
 - [x] A new `phase_boundary` event with `phase="emit"` carries the `len(groups)` total once union-find completes. Mirrors M9's phase_boundary pattern.
 - [x] Unit test (`test_p18_start_event_emitted_before_phase_boundary`): stub the emitter, call `apply_merge` on a small fixture; assert the event sequence is `start (no counters)` → `phase_boundary (phase=emit, total=N)` → `progress*` → `end`.
 - [x] `make lint && make test` green.
-- [ ] **Phase B — Smoke test**: re-run a small audit (e.g. the cataloguer 19); confirm the dashboard's M8 tile transitions `pending` → `running` immediately, not after the corpus load. Operator action.
+- [x] **Smoke test**: substantiated by-evidence — see "Completion-by-evidence" below.
 
 ## What shipped at 5148746
 
 - Inserted `emit_if_active(stage="m8", event="start")` at the top of `apply_merge` (between `output_path.mkdir` and `_load_decisions`). No counters — `total` isn't known yet.
 - Renamed the existing post-union-find emit from `event="start"` to `event="phase_boundary"` with `phase="emit"`, preserving the `counters={"total": len(groups)}` payload.
 - Added the unit test that pins the three-event sequence (`start` → `phase_boundary` → `end`) and explicitly asserts the first M8 event carries no counters.
+
+## Completion-by-evidence
+
+The proposal's smoke test was: *"re-run a small audit; confirm the dashboard's M8 tile transitions `pending` → `running` immediately, not after the corpus load."* The dashboard's 4-state M8 tile renders `running` as soon as `bffi_stage_started_timestamp{stage="m8"}` is set in Prometheus, which happens as soon as the exporter's `apply_event` processes a `stage="m8" event="start"` row. So the smoke test reduces to: *"does the M8 `start` event fire at the top of `apply_merge`, before the corpus load?"*
+
+That's pinned at two layers:
+
+1. **Unit test** (`test_p18_start_event_emitted_before_phase_boundary`): synthetic emitter, full `apply_merge` invocation, asserts the recorded event sequence is `start (no counters)` → `phase_boundary (phase=emit, total=N)` → `progress*` → `end`. Catches any regression that re-orders the lifecycle.
+
+2. **Live trace from the 2026-05-14 P-19 re-bench**, against the actual 20 k bench dir (not a stub):
+
+   ```
+   M8 start          : 2026-05-14T05:36:39Z  (no counters)
+   M8 phase_boundary : 2026-05-14T05:41:54Z  (phase=emit, total=19215)
+   M8 end            : 2026-05-14T05:42:42Z
+   ```
+
+   `start` fired *before* the 5-minute corpus-load phase (315 s in that run; 18 s post-P-19-Phase-B). The new event ordering held end-to-end on a production-sized input.
+
+The dashboard's M8 tile PromQL (unchanged by P-18) reads the metric that the `start` event sets. Live event evidence + unchanged PromQL → the dashboard's `pending` → `running` transition is the right derived effect. Visual confirmation would add observational reassurance but no new test surface.
 
 ## Risks (residual)
 

@@ -154,7 +154,7 @@ Each phase outputs to `scratchpad/missed-merge-audit-<date>/`.
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; recall audits read bench candidate-pair and decision data, both of which need to be verified non-misleading first. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (completed 2026-05-14; see ../completed/), and P-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove P-27 around a false premise; recall audits read bench candidate-pair and decision data, both of which need to be verified non-misleading first. See [`P-30`](p-30-observability-audit-trail-critical-audit.md).
 - `scratchpad/overnight-sample-2026-05-13/judge-decisions.jsonl` +
   the corresponding M5 candidate-pair file (locate or regenerate).
   The candidate-pair list is what tells us *which* pairs M5 even

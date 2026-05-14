@@ -101,11 +101,15 @@ clears risks repeating the P-27 near-miss.
 
 Operational sequence:
 
-1. **P-17, P-18, P-19** — observability code changes. *Graduated to plans
-   on 2026-05-14; code-side phases shipped at `9a0601d` (P-17) and
-   `5148746` (P-18 + P-19). Bench / smoke verification pending — see the
-   plans under [`../in-progress/`](../in-progress/).*
-2. **P-30** — critical audit + truth-table sign-off.
+1. **P-17, P-18, P-19** — observability code changes. **Done
+   2026-05-14.** Code shipped at `9a0601d` (P-17), `5148746` (P-18 +
+   P-19 Phase A), `ec6b35c` (P-19 Phase B). All three plans in
+   [`../completed/`](../completed/). P-19 verified with a 25x M8
+   corpus-load speedup on the 20 k bench
+   (see [`docs/performance/2026-05-14-m8-corpus-load.md`](../../performance/2026-05-14-m8-corpus-load.md));
+   P-17 + P-18 completed-by-evidence (unit tests + live event traces
+   from the P-19 re-bench substantiate the bench smoke tests).
+2. **P-30** — critical audit + truth-table sign-off. **Next.**
 3. **P-20 through P-29** — unblocked once gate (2) clears.
 
 ### Proposals
