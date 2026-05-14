@@ -331,7 +331,6 @@ class Settings(BaseSettings):
     # the fallback when neither path resolves — kept for shape, never
     # observed in practice.
     data_dir: Path = Field(default=Path("./data"), alias="BFFI_DATA_DIR")
-    logs_dir: Path = Field(default=Path("./logs"), alias="BFFI_LOGS_DIR")
     eval_dir: Path = Field(default=Path("./eval-runs"), alias="BFFI_EVAL_DIR")
     config_dir: Path = Field(default=Path("./config"), alias="BFFI_CONFIG_DIR")
 

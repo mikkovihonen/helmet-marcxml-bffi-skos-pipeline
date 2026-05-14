@@ -1,12 +1,12 @@
 # Generated / runtime data (configurable via BFFI_*_DIR env vars).
 # Anchor with a leading slash so test fixtures under tests/data/ are tracked.
-/data/
-/logs/
-/eval-runs/
 /marcxml/
 /scratchpad/
 # P-32: canonical runs root (BFFI_RUNS_ROOT, default <repo>/runs/).
 /runs/
+# Eval JSON summaries (BFFI_EVAL_DIR, default <repo>/eval-runs/).
+# bffi-pipeline eval writes one ``<run-label>.json`` per invocation.
+/eval-runs/
 # Shared Finto authority-vocab cache (BFFI_FINTO_DUMP_DIR,
 # default <repo>/finto-dumps/). ~850 MB of SKOS Turtle dumps;
 # regeneratable via `bffi-pipeline load-finto` but slow + depends
