@@ -18,13 +18,22 @@ See also:
 
 ```
 pipeline stages ─emit→ stage-events.jsonl ─tail→ serve-metrics ─scrape→ Prometheus ─query→ Grafana
-   (Phase A)          (sidecar)          (Phase D.1, port 9100) (port 9091)  (port 3001)
+   (Phase A)          (sidecar)          (host:9100)          (container)   (container)
+                                                                  │            │
+                                                                  └────────────┴──→ Caddy reverse-proxy
+                                                                                    127.0.0.1:8080
+                                                                                    /prometheus/   /grafana/
+                                                                                    /files/ → runs/
 ```
 
 All local; no outbound telemetry. The exporter runs on the host
 alongside the pipeline (it shares the `BFFI_DATA_DIR` mount without
-volume mapping); Prometheus and Grafana run as Docker Compose
-services under the `observability` profile.
+volume mapping); Prometheus, Grafana, and Caddy run as Docker Compose
+services under the `observability` profile. Operators reach the
+stack through a single URL (`http://localhost:8080`); Caddy routes
+paths to the right backend and serves `runs/` directly as static
+files so cataloguer-TSV panel links resolve clickably from the
+dashboard.
 
 ### Exporter lifecycle
 

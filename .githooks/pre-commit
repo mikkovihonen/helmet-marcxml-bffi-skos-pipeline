@@ -1,0 +1,20 @@
+#!/bin/sh
+# pre-commit hook: run `make lint && make test` when any *.py file is staged.
+#
+# Installed automatically by `make help` (or any other Make target) via the
+# auto-`git config core.hooksPath .githooks` block at the top of the Makefile.
+# To bypass for an emergency commit: `git commit --no-verify`.
+#
+# Filter: --diff-filter=ACMR matches Added, Copied, Modified, Renamed files.
+# Deletions don't need lint/test (the file is gone). The grep gates on the
+# .py suffix so doc-only commits (README, plans, CLAUDE.md, dashboards)
+# don't pay the ~25 s lint + test toll.
+
+set -e
+
+if git diff --cached --name-only --diff-filter=ACMR | grep -q '\.py$'; then
+    echo "[pre-commit] *.py staged → make lint && make test"
+    make lint && make test
+else
+    echo "[pre-commit] no *.py staged — skipping lint + test"
+fi

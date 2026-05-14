@@ -267,13 +267,13 @@ class Settings(BaseSettings):
         alias="FUSEKI_URL",
     )
     # Prometheus admin API endpoint (P-32 Phase G). The local
-    # docker-compose maps container 9090 → host 9091 to avoid the
-    # Skosmos port collision; the Prometheus container is started
-    # with ``--web.enable-admin-api`` so ``reset_prometheus`` can
-    # delete a pruned run_uuid's series via
-    # ``/api/v1/admin/tsdb/delete_series``.
+    # observability stack reaches Prometheus via the Caddy reverse
+    # proxy at /prometheus/; the Prometheus container is started
+    # with ``--web.enable-admin-api`` + ``--web.route-prefix=/prometheus/``
+    # so ``reset_prometheus`` can delete a pruned run_uuid's series via
+    # ``/api/v1/admin/tsdb/delete_series`` through the proxy.
     prometheus_url: str = Field(
-        default="http://localhost:9091",
+        default="http://localhost:8080/prometheus",
         alias="BFFI_PROMETHEUS_URL",
     )
     # P-32 Phase H: pre-run Fuseki clear.

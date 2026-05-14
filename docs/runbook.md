@@ -498,12 +498,16 @@ make observability-up                # docker compose up -d prometheus grafana
 uv run bffi-pipeline serve-metrics   # exporter on :9100 (tails the sidecar)
 ```
 
-Then point a browser at:
+Then point a browser at the consolidated entry point at
+**http://localhost:8080** — Caddy reverse-proxies the whole stack:
 
-- **Grafana**: http://localhost:3001 — anonymous Viewer; bundled
-  `bffi-pipeline` dashboard auto-loaded. Read-only by design (clone
-  in the UI if you want a custom view).
-- **Prometheus**: http://localhost:9091 — for ad-hoc PromQL.
+- **`/grafana/`** — anonymous Viewer; bundled `bffi-pipeline`
+  dashboard auto-loaded. Read-only by design (clone in the UI if you
+  want a custom view).
+- **`/prometheus/`** — for ad-hoc PromQL.
+- **`/files/`** — browse `runs/` directly from the dashboard; the
+  cataloguer-TSV panel links resolve here.
+- **`/`** — redirects to `/grafana/`.
 
 Stop the stack with `make observability-down` (the exporter is a
 foreground process; Ctrl-C stops it).
