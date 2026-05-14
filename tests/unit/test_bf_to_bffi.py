@@ -25,7 +25,9 @@ from bffi_pipeline.contrib_variants import load_variant_claims
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import (
     BFFI_CORPUS_FILENAME,
+    ValidationRow,
     _convert_one,
+    _emit_validation_tsv,
     _is_parseable_date,
     _sanitize_date_literals,
     _sanitize_uri,
@@ -1078,3 +1080,70 @@ def test_p19_write_bffi_corpus_is_idempotent_when_fresh(tmp_path: Path) -> None:
     # The bumped mtime survives — the helper short-circuited and
     # never rewrote.
     assert corpus.stat().st_mtime == bumped_mtime
+
+
+# --- _emit_validation_tsv ---------------------------------------------------
+
+
+def test_validation_tsv_surfaces_bib_id_output_file_and_report(tmp_path: Path) -> None:
+    """One TSV row per failed-shape record: ``helmet_bib_id``,
+    ``output_file``, ``report_text``. Sorted by bib_id for stable diffs."""
+    rows = [
+        ValidationRow(
+            helmet_bib_id="b9999",
+            output_file="b9999.ttl",
+            conforms=False,
+            report_text="Constraint Violation in MinCountConstraintComponent\n"
+            "Source Shape: bffi:PrimaryContributionShape\n"
+            "Focus Node: <…work:abc>\n"
+            "Result Path: bffi:agent",
+            run_uuid="r1",
+        ),
+        ValidationRow(
+            helmet_bib_id="b1234",
+            output_file="b1234.ttl",
+            conforms=False,
+            report_text="Constraint Violation: bffi:contentTypeShape failed",
+            run_uuid="r1",
+        ),
+    ]
+    path = tmp_path / "_validation.tsv"
+    _emit_validation_tsv(path, rows)
+    lines = path.read_text().splitlines()
+    assert lines[0] == "helmet_bib_id\toutput_file\treport_text"
+    # Two data rows sorted alphabetically by bib_id: b1234 < b9999.
+    assert lines[1].startswith("b1234\tb1234.ttl\t")
+    assert lines[2].startswith("b9999\tb9999.ttl\t")
+    # Multi-line SHACL reports get collapsed to single TSV line.
+    assert len(lines) == 3
+    # No raw newlines made it through.
+    assert "\n" not in lines[2].split("\t")[2]
+
+
+def test_validation_tsv_truncates_long_report(tmp_path: Path) -> None:
+    """A 1000-char SHACL report gets truncated with an ellipsis in the
+    TSV; the full report stays in the JSONL."""
+    long_report = "Constraint Violation: " + "x" * 2000
+    rows = [
+        ValidationRow(
+            helmet_bib_id="b1",
+            output_file="b1.ttl",
+            conforms=False,
+            report_text=long_report,
+            run_uuid="r",
+        )
+    ]
+    path = tmp_path / "_validation.tsv"
+    _emit_validation_tsv(path, rows)
+    report_col = path.read_text().splitlines()[1].split("\t")[2]
+    assert len(report_col) < len(long_report)
+    assert report_col.endswith("…")
+
+
+def test_validation_tsv_is_header_only_when_no_failures(tmp_path: Path) -> None:
+    """Always-emit invariant: even when every record passed shape
+    validation, the TSV is written with just the header. Cataloguer
+    workflows wired to the artifact path never see a missing file."""
+    path = tmp_path / "_validation.tsv"
+    _emit_validation_tsv(path, [])
+    assert path.read_text() == "helmet_bib_id\toutput_file\treport_text\n"

@@ -136,6 +136,54 @@ class ValidationRow:
     run_uuid: str = ""
 
 
+#: Truncate over-long SHACL reports in the validation TSV so a
+#: spreadsheet stays readable. The full multi-line report lives in
+#: the JSONL for forensic lookup; the TSV is for cataloguer triage.
+_VALIDATION_TSV_REPORT_MAX: Final[int] = 240
+
+
+def _emit_validation_tsv(path: Path, rows: list[ValidationRow]) -> None:
+    """Cataloguer-facing TSV companion to ``bffi/_validation.jsonl``.
+
+    Three columns the cataloguer can open in Excel / Sheets / Numbers
+    and act on without parsing JSON:
+
+    - ``helmet_bib_id`` — lookup key in Helmet / Sierra.
+    - ``output_file`` — the BFFI Turtle file the failed shape was
+      validated against (e.g. ``b1234.ttl``); useful for follow-up
+      pipeline-team debugging.
+    - ``report_text`` — single-line, tab + newline + control-char
+      sanitised; truncated to 240 chars with an ellipsis. Full
+      multi-line rdflib SHACL report stays in the JSONL.
+
+    Always emitted — even when every record passed Boundary-3, a
+    header-only TSV is written so cataloguer workflows wired to the
+    artifact path don't need a missing-file guard.
+
+    Sorted by ``helmet_bib_id`` for stable diffs across re-runs.
+    Atomic write via ``.tmp`` + ``replace``.
+
+    Mirrors the M2 ``bibframe/_errors.tsv`` + the M8
+    ``canonical-mint-failures.tsv`` conventions so cataloguers see a
+    consistent artifact shape across stages.
+    """
+    header = "helmet_bib_id\toutput_file\treport_text\n"
+    out_rows: list[tuple[str, str, str]] = []
+    for row in rows:
+        report_clean = " ".join(row.report_text.replace("\t", " ").split())
+        if len(report_clean) > _VALIDATION_TSV_REPORT_MAX:
+            report_clean = report_clean[: _VALIDATION_TSV_REPORT_MAX - 1] + "…"
+        out_rows.append((row.helmet_bib_id, row.output_file, report_clean))
+    out_rows.sort()
+    body = "".join(
+        f"{bib_id}\t{output_file}\t{report}\n" for bib_id, output_file, report in out_rows
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(header + body, encoding="utf-8")
+    tmp.replace(path)
+
+
 @dataclass
 class BffiSummary:
     """Aggregate counts for an end-of-run report."""
@@ -920,6 +968,12 @@ def run(
     run_uuid = emitter.run_uuid if emitter is not None else ""
 
     rdf_files = list(_iter_bibframe_files(bibframe_dir))
+    # Accumulate the full ValidationRow per failing record so the
+    # cataloguer-facing TSV at run end can re-emit them in a
+    # spreadsheet-shaped form. The JSONL writer below still appends
+    # row-by-row (established M3 pattern); the in-memory list is the
+    # source of truth for the TSV emit only.
+    validation_rows: list[ValidationRow] = []
     emit_if_active(
         stage="m3",
         event="start",
@@ -961,24 +1015,29 @@ def run(
         report = validate_graph(graph)
         if not report.conforms:
             summary.failed_shape.append(bib_id)
-            _append_jsonl(
-                validation_path,
-                asdict(
-                    ValidationRow(
-                        helmet_bib_id=bib_id,
-                        output_file=str(out_path.name),
-                        conforms=False,
-                        report_text=report.text,
-                        run_uuid=run_uuid,
-                    )
-                ),
+            row = ValidationRow(
+                helmet_bib_id=bib_id,
+                output_file=str(out_path.name),
+                conforms=False,
+                report_text=report.text,
+                run_uuid=run_uuid,
             )
+            validation_rows.append(row)
+            _append_jsonl(validation_path, asdict(row))
         summary.converted.append(bib_id)
 
     # P-19 Phase A: write the concatenated BFFI corpus so M8's load
     # phase doesn't open every per-record file individually. Skips
     # when the existing concat is already fresh.
     _write_bffi_corpus(base / "bffi", base / BFFI_CORPUS_FILENAME)
+
+    # Cataloguer-facing TSV companion to ``bffi/_validation.jsonl``.
+    # Always written (header-only on clean runs) so cataloguer
+    # workflows wired to the artifact path don't need a missing-file
+    # guard. Mirrors the M2 ``bibframe/_errors.tsv`` + M8
+    # ``canonical-mint-failures.tsv`` conventions.
+    validation_tsv_path = base / "bffi" / "_validation.tsv"
+    _emit_validation_tsv(validation_tsv_path, validation_rows)
 
     emit_if_active(
         stage="m3",
