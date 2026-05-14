@@ -96,6 +96,8 @@ class PipelineMetrics:
     watchdog_events_total: Counter = field(init=False)
     stage_errors_total: Counter = field(init=False)
     stage_planned: Gauge = field(init=False)
+    stage_phase_planned: Gauge = field(init=False)
+    stage_failed: Gauge = field(init=False)
 
     def __post_init__(self) -> None:
         self.stage_started_ts = Gauge(
@@ -199,6 +201,35 @@ class PipelineMetrics:
             labelnames=("stage", "run_uuid"),
             registry=self.registry,
         )
+        # Runner-side phase declaration (``runner.STAGE_PHASES``). Set to
+        # 1 for every ``(stage, phase)`` the runner says the run will
+        # touch. Dashboard panels query this as a fallback denominator
+        # so a planned-but-not-started phase renders as a 0% pending
+        # bar instead of a "—" no-data tile. Once the stage actually
+        # starts and emits real ``entities_total``, panels prefer the
+        # real series; this gauge stays for the planned/started
+        # distinction.
+        self.stage_phase_planned = Gauge(
+            "bffi_stage_phase_planned",
+            "1 if the runner declared this (stage, phase) as part of the planned run; else absent.",
+            labelnames=("stage", "phase", "run_uuid"),
+            registry=self.registry,
+        )
+        # Runner-emitted ``failed`` event. Set to 1 when a stage's
+        # dispatcher raised (caught by the runner before re-raise) or
+        # when a stage itself emits a phase-level ``failed`` event from
+        # its own try/finally. ``phase="_"`` is the placeholder when
+        # the runner doesn't track per-phase state. ``error_type`` is
+        # the exception class name so the dashboard can split the
+        # tile colour by class (TimeoutError vs RuntimeError vs
+        # SubprocessError etc.). Cardinality is bounded by the set of
+        # exception classes the pipeline raises — small + stable.
+        self.stage_failed = Gauge(
+            "bffi_stage_failed",
+            "1 if the stage (or specific phase) terminated with a failure; else absent.",
+            labelnames=("stage", "phase", "error_type", "run_uuid"),
+            registry=self.registry,
+        )
         # Free-text run description set via ``bffi-pipeline plan
         # --description "..."`` (forwarded to ``emit_plan(..., description=)``).
         # Stored as a label so the dashboard's templating layer can
@@ -298,7 +329,7 @@ def _update_throughput(
         metrics.stage_eta_seconds.labels(stage=stage, phase=phase, run_uuid=run_uuid).set(0.0)
 
 
-def apply_event(  # noqa: PLR0912 — dispatch table over the StageEvent enum; flattening it into helpers fragments the row-context state needed for throughput / dependency labels.
+def apply_event(  # noqa: PLR0912, PLR0915 — dispatch table over the StageEvent enum; flattening it into helpers fragments the row-context state needed for throughput / dependency labels.
     metrics: PipelineMetrics,
     row: StageEventRow,
 ) -> None:
@@ -388,6 +419,16 @@ def apply_event(  # noqa: PLR0912 — dispatch table over the StageEvent enum; f
     elif row.event == "watchdog":
         inner_event = row.extra.get("event") or "unknown"
         metrics.watchdog_events_total.labels(stage=row.stage, event=inner_event, run_uuid=run).inc()
+    elif row.event == "failed":
+        # Runner-emitted (or stage-emitted) terminal failure. ``phase``
+        # routes to ``"_"`` when the runner didn't know which phase
+        # failed; ``error_type`` defaults to ``"unknown"`` for safety.
+        phase = row.phase or "_"
+        error_type = row.extra.get("error_type") or "unknown"
+        if isinstance(error_type, str):
+            metrics.stage_failed.labels(
+                stage=row.stage, phase=phase, error_type=error_type, run_uuid=run
+            ).set(1)
     elif row.event == "plan":
         # Runner-script "plan" event: extra.stages lists every stage the
         # invocation intends to run. Set bffi_stage_planned=1 for each
@@ -399,6 +440,20 @@ def apply_event(  # noqa: PLR0912 — dispatch table over the StageEvent enum; f
             for stage in planned_stages:
                 if isinstance(stage, str):
                     metrics.stage_planned.labels(stage=stage, run_uuid=run).set(1)
+        # Runner ships per-stage phase declarations alongside the stage
+        # list so the dashboard can render 0% pending bars for stages
+        # that haven't started yet. Shape: ``{"m9": ["phase1", "phase2",
+        # "phase3"], "m3": ["_"], ...}``.
+        stage_phases = row.extra.get("stage_phases") or {}
+        if isinstance(stage_phases, dict):
+            for stage, phases in stage_phases.items():
+                if not isinstance(stage, str) or not isinstance(phases, list):
+                    continue
+                for phase in phases:
+                    if isinstance(phase, str):
+                        metrics.stage_phase_planned.labels(
+                            stage=stage, phase=phase, run_uuid=run
+                        ).set(1)
         description = row.extra.get("description") or ""
         if isinstance(description, str) and description:
             metrics.run_description.labels(run_uuid=run, description=description).set(1)

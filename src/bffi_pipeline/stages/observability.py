@@ -58,6 +58,8 @@ StageEvent = Literal[
     "health",
     "watchdog",
     "plan",
+    "skipped",
+    "failed",
 ]
 
 #: stderr prefix; mirror of :data:`bffi_pipeline.stages.watchdog.WATCHDOG_STDERR_PREFIX`.
@@ -65,6 +67,13 @@ StageEvent = Literal[
 #: ``^(STAGE_|PIPELINE_|WATCHDOG_EVENT|STAGE_EVENT)`` to surface these
 #: alongside the existing markers.
 STAGE_EVENT_STDERR_PREFIX: Final[str] = "STAGE_EVENT "
+
+#: Max length for the truncated ``message`` field on ``failed`` events.
+#: Picked to keep stage-events.jsonl rows under ~1 KB even with a long
+#: error message and the surrounding payload. Operator can dig into the
+#: original exception via the captured run log when the truncation
+#: matters.
+_FAILED_MESSAGE_MAX_LEN: Final[int] = 240
 
 #: Default progress-emission cadence per stage. Picked to balance
 #: ``stage-events.jsonl`` density against ``bffi-pipeline status`` tail
@@ -224,7 +233,11 @@ def emit_if_active(
         )
 
 
-def emit_plan(stages: list[str], description: str = "") -> None:
+def emit_plan(
+    stages: list[str],
+    description: str = "",
+    stage_phases: dict[str, list[str]] | None = None,
+) -> None:
     """Emit a single ``plan`` event listing every stage the active run
     intends to execute.
 
@@ -240,6 +253,13 @@ def emit_plan(stages: list[str], description: str = "") -> None:
     header tile. Stored as a label on the ``bffi_run_description``
     gauge so Grafana's templating layer can interpolate it.
 
+    Optional ``stage_phases`` maps each planned stage to its phase
+    sequence (e.g. ``{"m9": ["phase1", "phase2", "phase3"]}``). The
+    metrics exporter pre-creates ``bffi_stage_phase_planned{stage,
+    phase}=1`` gauges from this so the dashboard can render 0%-valued
+    pending bars for not-yet-started phases instead of "—" no-data
+    tiles. Stages with only an implicit phase pass ``["_"]``.
+
     No-op when no emitter is active (test fixtures that bypass the
     CLI bootstrap).
     """
@@ -248,6 +268,8 @@ def emit_plan(stages: list[str], description: str = "") -> None:
         extra: dict[str, Any] = {"stages": list(stages)}
         if description:
             extra["description"] = description
+        if stage_phases:
+            extra["stage_phases"] = {stage: list(phases) for stage, phases in stage_phases.items()}
         emitter.emit(
             stage="pipeline",
             event="plan",
@@ -255,13 +277,81 @@ def emit_plan(stages: list[str], description: str = "") -> None:
         )
 
 
+def emit_failed(
+    stage: str,
+    *,
+    phase: str | None = None,
+    error_type: str = "",
+    message: str = "",
+) -> None:
+    """Emit a ``failed`` event marking the stage (or a specific phase
+    within it) as terminally failed for this run.
+
+    The runner calls this when a dispatched stage raises an exception
+    before re-raising; stages themselves can call it from a
+    try/finally if they want phase-level failure granularity (e.g.
+    M9 phase 2 watchdog-abort). ``error_type`` is the exception class
+    name; ``message`` is the truncated str(exc) — the dashboard reads
+    both as labels on ``bffi_stage_failed`` so the operator can
+    tell apart a ``TimeoutError`` from a ``RuntimeError`` without
+    leaving the dashboard.
+
+    ``phase`` is optional. The runner sets it to ``None`` because it
+    doesn't track per-phase state — the exporter routes that case to
+    ``phase="_"`` to align with the existing phase-less metric label
+    convention.
+
+    No-op when no emitter is active (parity with :func:`emit_plan`).
+    """
+    emitter = _active_emitter
+    if emitter is None:
+        return
+    extra: dict[str, Any] = {}
+    if error_type:
+        extra["error_type"] = error_type
+    if message:
+        truncated = message[:_FAILED_MESSAGE_MAX_LEN]
+        if len(message) > _FAILED_MESSAGE_MAX_LEN:
+            truncated += "…"
+        extra["message"] = truncated
+    emitter.emit(
+        stage=stage,
+        event="failed",
+        phase=phase,
+        extra=extra or None,
+    )
+
+
+def emit_skipped(stage: str, reason: str = "") -> None:
+    """Emit a ``skipped`` event for a stage the runner decided not to run.
+
+    Layered on top of :func:`emit_plan`: the plan declares which stages
+    *intended* to run; ``skipped`` records that the runner explicitly
+    chose not to dispatch one of them (operator passed ``--skip``,
+    ``--from-stage`` cut it off the chain, output-fresh idempotency
+    elided it, etc.). The reason string is the load-bearing audit
+    detail — the dashboard's tile tooltip surfaces it so the operator
+    can tell "intentionally skipped" apart from "failed before this
+    stage could start".
+
+    No-op when no emitter is active (parity with :func:`emit_plan`).
+    """
+    emitter = _active_emitter
+    if emitter is None:
+        return
+    extra: dict[str, Any] | None = {"reason": reason} if reason else None
+    emitter.emit(stage=stage, event="skipped", extra=extra)
+
+
 __all__ = [
     "DEFAULT_PROGRESS_CADENCE",
     "STAGE_EVENT_STDERR_PREFIX",
     "StageEvent",
     "StageEventEmitter",
+    "emit_failed",
     "emit_if_active",
     "emit_plan",
+    "emit_skipped",
     "get_active_emitter",
     "set_active_emitter",
 ]

@@ -33,6 +33,9 @@ from bffi_pipeline.stages import (
     workkey,
     ysa_disambiguation_report,
 )
+from bffi_pipeline.stages import (
+    export as export_stage,
+)
 from bffi_pipeline.stages.observability import (
     StageEventEmitter,
     set_active_emitter,
@@ -1589,6 +1592,117 @@ def plan_command(
         typer.echo(f"Declared plan: {rendered}", err=True)
 
 
+@app.command("run")
+def run_command(
+    input_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--input-dir",
+            "-i",
+            help=(
+                "Directory of MARCXML files for M2. Required unless m2 is "
+                "skipped via --skip or --from-stage."
+            ),
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    stages: Annotated[
+        str | None,
+        typer.Option(
+            "--stages",
+            help=(
+                "Comma-separated stage list, in order. Defaults to the "
+                "canonical chain (m2,m3,m5,m6,m8,m9,skosify,load)."
+            ),
+        ),
+    ] = None,
+    skip: Annotated[
+        str | None,
+        typer.Option(
+            "--skip",
+            help=(
+                "Comma-separated stages to skip (emit a 'skipped' event + "
+                "continue). Use this when an upstream artifact is already "
+                "fresh from a previous run."
+            ),
+        ),
+    ] = None,
+    from_stage: Annotated[
+        str | None,
+        typer.Option(
+            "--from-stage",
+            help=(
+                "Resume the chain from this stage; every preceding stage "
+                "in --stages emits 'skipped' with reason 'resume-from-stage'."
+            ),
+        ),
+    ] = None,
+    force_stages: Annotated[
+        str | None,
+        typer.Option(
+            "--force-stages",
+            help=(
+                "Comma-separated stages to invoke with --force (or its "
+                "equivalent, e.g. --restart for m6). Stages that have no "
+                "force-like flag (m8, m9, load) ignore this hint."
+            ),
+        ),
+    ] = None,
+    description: Annotated[
+        str,
+        typer.Option(
+            "--description",
+            "-d",
+            help=(
+                "Free-text description of the run, surfaced via "
+                "bffi_run_description in Grafana's header tile."
+            ),
+        ),
+    ] = "",
+) -> None:
+    """Run the canonical pipeline chain (M2 → M3 → M5 → M6 → M8 → M9 → Skosify → Load).
+
+    One Python process, one ``pipeline.plan`` event, one continuous
+    ``stage-events.jsonl`` timeline for the dashboard. Each stage's
+    underlying ``bffi-pipeline <stage>`` command is invoked in-process
+    with sensible defaults; per-stage options that aren't exposed here
+    stay available via the individual stage CLIs.
+
+    The Prometheus metrics exporter is **not** spawned by this command —
+    it's a long-lived background process managed by
+    ``make observability-up`` / ``make observability-down``. Start the
+    observability stack once per machine; the exporter discovers fresh
+    runs automatically via its ``--watch-glob`` plumbing.
+    """
+    # Import inside the command body so ``bffi_pipeline.runner`` can
+    # import from this module at top-level without a circular import at
+    # interpreter startup.
+    from bffi_pipeline.runner import CANONICAL_STAGES, run_pipeline
+
+    def _split(raw: str | None) -> tuple[str, ...]:
+        if raw is None or not raw.strip():
+            return ()
+        return tuple(token.strip() for token in raw.split(",") if token.strip())
+
+    stage_list = _split(stages) or CANONICAL_STAGES
+    skip_set = frozenset(_split(skip))
+    force_set = frozenset(_split(force_stages))
+
+    summary = run_pipeline(
+        input_dir=input_dir,
+        stages=stage_list,
+        skip_stages=skip_set,
+        force_stages=force_set,
+        description=description,
+        from_stage=from_stage,
+    )
+    typer.echo(summary.render())
+
+
 @app.command("workkey-stats")
 def workkey_stats_command(
     path: Annotated[
@@ -2632,6 +2746,52 @@ def load_command(
             client=client,
         )
     typer.echo(result.render())
+
+
+@app.command("export")
+def export_command(
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-path",
+            "-o",
+            help=(
+                "Where to write the export archive. Defaults to "
+                "<BFFI_DATA_DIR>/bffi-export-<run_uuid>.tar.gz."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    include_per_record: Annotated[
+        bool,
+        typer.Option(
+            "--include-per-record",
+            help=(
+                "Bundle every <BFFI_DATA_DIR>/bffi/*.ttl per-record Turtle "
+                "as a nested per-record-ttls.tar.gz inside the outer "
+                "archive. Off by default — adds ~5000 small files to the "
+                "tarball at corpus scale; only useful for recipients who "
+                "want to re-process the raw BFFI."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Bundle the M9-finalised BFFI as a CC0 release artifact (tarball).
+
+    Auto-includes ``canonical.ttl``, ``provenance.ttl``,
+    ``helmet-map.jsonl``, ``canonical-mint-failures.tsv``, plus a
+    generated ``manifest.json`` + ``README.md`` declaring the CC0
+    license and the pipeline commit. Missing companion files are
+    silently skipped + listed in the manifest so partial exports are
+    obvious to the receiver.
+    """
+    summary = export_stage.run(
+        output_path=output_path,
+        include_per_record=include_per_record,
+    )
+    typer.echo(summary.render())
 
 
 def _maybe_clear_fuseki_before_load(

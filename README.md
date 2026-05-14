@@ -141,6 +141,8 @@ pinned versions, and the cataloguer smoke checklist, is in
 off a full corpus pass — multi-night LLM batches are easier to
 plan than to interrupt.
 
+`bffi-pipeline export` bundles the M9-finalised `canonical.ttl` plus its companion provenance / helmet-map / mint-failures / manifest / README into a single CC0 `.tar.gz` artifact (`--include-per-record` adds the per-record BFFI Turtles as a nested archive) for handoff to NLF or any other downstream consumer that doesn't speak the Fuseki+Skosmos stack.
+
 ## Repository layout
 
 ```

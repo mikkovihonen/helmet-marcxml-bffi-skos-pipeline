@@ -1023,6 +1023,124 @@ def test_plan_event_ignores_malformed_extra() -> None:
     assert "bffi_stage_planned{" not in text
 
 
+def test_plan_event_with_stage_phases_pre_creates_phase_planned_gauges() -> None:
+    """A ``plan`` event carrying ``extra.stage_phases`` sets
+    ``bffi_stage_phase_planned{stage, phase, run_uuid}=1`` for each
+    declared (stage, phase) pair. Dashboard panels query this to
+    render 0% pending bars before the stage emits its first
+    real ``phase_boundary``."""
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="plan",
+            stage="pipeline",
+            run_uuid="run-A",
+            extra={
+                "stages": ["m9", "skosify"],
+                "stage_phases": {
+                    "m9": ["phase1", "phase2", "phase3"],
+                    "skosify": ["_"],
+                },
+            },
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    for phase in ("phase1", "phase2", "phase3"):
+        assert (
+            f'bffi_stage_phase_planned{{phase="{phase}",run_uuid="run-A",stage="m9"}} 1.0' in text
+        ), f"Expected m9/{phase} pre-flagged as planned."
+    assert 'bffi_stage_phase_planned{phase="_",run_uuid="run-A",stage="skosify"} 1.0' in text
+
+
+def test_failed_event_sets_stage_failed_gauge_with_error_type_label() -> None:
+    """A runner-emitted ``failed`` event sets
+    ``bffi_stage_failed{stage, phase, error_type, run_uuid}=1`` so the
+    dashboard's state-tile expression can flip the tile to 'failed' /
+    red. ``phase`` defaults to ``"_"`` because the runner doesn't
+    track per-phase state."""
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="failed",
+            stage="m6",
+            run_uuid="run-A",
+            extra={"error_type": "TimeoutError", "message": "judge stalled"},
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    assert (
+        'bffi_stage_failed{error_type="TimeoutError",phase="_",run_uuid="run-A",stage="m6"} 1.0'
+        in text
+    )
+
+
+def test_failed_event_with_phase_routes_to_correct_phase_label() -> None:
+    """When a stage itself emits a phase-level ``failed`` event (e.g.
+    M9 phase 2 watchdog abort), the metric carries the specific phase."""
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="failed",
+            stage="m9",
+            phase="phase2",
+            run_uuid="run-A",
+            extra={"error_type": "WatchdogAbortError"},
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    expected = (
+        'bffi_stage_failed{error_type="WatchdogAbortError",phase="phase2",'
+        'run_uuid="run-A",stage="m9"} 1.0'
+    )
+    assert expected in text
+
+
+def test_failed_event_without_error_type_falls_back_to_unknown() -> None:
+    """A ``failed`` event with an empty extra still records a row;
+    the dashboard sees error_type='unknown' which is still actionable
+    ('something failed, dig into the logs')."""
+    metrics = PipelineMetrics()
+    apply_event(metrics, _row(event="failed", stage="m3", run_uuid="run-A"))
+    text = generate_latest(metrics.registry).decode("utf-8")
+    assert 'bffi_stage_failed{error_type="unknown"' in text
+
+
+def test_plan_event_stage_phases_malformed_does_not_crash() -> None:
+    """Lenient handling: non-dict ``stage_phases`` or non-list phase
+    values are silently ignored. ``apply_event`` must never raise on
+    malformed runner output."""
+    metrics = PipelineMetrics()
+    apply_event(
+        metrics,
+        _row(
+            event="plan",
+            stage="pipeline",
+            extra={"stages": ["m9"], "stage_phases": "not-a-dict"},
+        ),
+    )
+    apply_event(
+        metrics,
+        _row(
+            event="plan",
+            stage="pipeline",
+            extra={"stages": ["m9"], "stage_phases": {"m9": "not-a-list"}},
+        ),
+    )
+    apply_event(
+        metrics,
+        _row(
+            event="plan",
+            stage="pipeline",
+            extra={"stages": ["m9"], "stage_phases": {"m9": [1, 2]}},
+        ),
+    )
+    text = generate_latest(metrics.registry).decode("utf-8")
+    assert "bffi_stage_phase_planned{" not in text
+
+
 def test_rehydrate_error_files_returns_states_with_post_rehydrate_positions(
     tmp_path: Path,
 ) -> None:
