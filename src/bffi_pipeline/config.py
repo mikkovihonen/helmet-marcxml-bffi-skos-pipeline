@@ -262,6 +262,16 @@ class Settings(BaseSettings):
         alias="BFFI_RUNS_ROOT",
     )
 
+    # Shared (NOT per-run) authority-vocabulary cache. ``load-finto``
+    # writes the SKOS Turtle dumps here; M9 reconcile reads them for
+    # tier-0 prefLabel lookup. Decoupled from ``data_dir`` so the
+    # ~850 MB vocab cache survives ``data_dir`` cleanup and isn't
+    # duplicated across per-run dirs under ``runs_root``.
+    finto_dump_dir: Path = Field(
+        default=Path(__file__).resolve().parents[2] / "finto-dumps",
+        alias="BFFI_FINTO_DUMP_DIR",
+    )
+
     # Triple store.
     fuseki_url: str = Field(
         default="http://localhost:3030/bffi",

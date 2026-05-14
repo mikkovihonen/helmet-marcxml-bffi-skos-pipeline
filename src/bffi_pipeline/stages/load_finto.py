@@ -5,7 +5,7 @@ authority sources M9 reconciles against. Surfacing the URIs as
 labelled, clickable links in the bffi-works Skosmos UI requires the
 vocab data to live in the same Fuseki Skosmos talks to. This stage
 fetches the canonical Turtle dumps from ``api.finto.fi``, caches them
-under ``BFFI_DATA_DIR/finto-dumps/``, and PUTs each into its
+under ``BFFI_FINTO_DUMP_DIR/`` (default ``<repo>/finto-dumps/``), and PUTs each into its
 canonical concept-scheme named graph in Fuseki via the SPARQL Graph
 Store Protocol — same plumbing the M10 ``upload_graph`` helper uses.
 
@@ -388,9 +388,12 @@ def run(
     reconcile time.
     """
     settings = get_settings()
-    base = output_dir or settings.data_dir
     fuseki = fuseki_url or settings.fuseki_url
-    dumps_dir = base / "finto-dumps"
+    # ``output_dir`` (when passed) keeps the legacy ``<output_dir>/finto-dumps``
+    # layout for tests + ad-hoc operator runs. Default resolves through
+    # the new ``BFFI_FINTO_DUMP_DIR`` setting (the shared vocab cache,
+    # decoupled from per-run ``data_dir``).
+    dumps_dir = (output_dir / "finto-dumps") if output_dir is not None else settings.finto_dump_dir
     dumps_dir.mkdir(parents=True, exist_ok=True)
     summary = FintoLoadSummary(fuseki_url=fuseki)
     timestamp = now or datetime.now(UTC)

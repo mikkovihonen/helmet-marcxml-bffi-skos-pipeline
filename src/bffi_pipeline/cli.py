@@ -2712,8 +2712,10 @@ def load_finto_command(
         typer.Option(
             "--output-dir",
             help=(
-                "Where Finto dump TTLs are cached; defaults to <BFFI_DATA_DIR>. "
-                "The actual files land under <output-dir>/finto-dumps/."
+                "Override the cache location for Finto SKOS dump TTLs. "
+                "Default is BFFI_FINTO_DUMP_DIR (<repo>/finto-dumps/ out "
+                "of the box); when --output-dir is passed, the dumps land "
+                "under <output-dir>/finto-dumps/ instead."
             ),
             file_okay=False,
             dir_okay=True,

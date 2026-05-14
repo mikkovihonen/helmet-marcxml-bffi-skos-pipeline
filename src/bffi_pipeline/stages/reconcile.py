@@ -2399,8 +2399,9 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     the picker entirely and write a provenance Activity with
     ``prov:wasInfluencedBy <cached-activity>``. Cache misses run the
     picker as before, then write the verdict back so a re-run hits.
-    ``finto_dumps_dir`` (defaults to ``<data_dir>/finto-dumps``)
-    locates the per-vocab dumps whose SHA-256 anchors cache validity —
+    ``finto_dumps_dir`` (defaults to ``settings.finto_dump_dir`` —
+    ``<repo>/finto-dumps`` out of the box, overridable via
+    ``BFFI_FINTO_DUMP_DIR``) locates the per-vocab dumps whose SHA-256 anchors cache validity —
     a refresh of one ``<vocab>-skos.ttl`` invalidates that vocab's
     cached entries on the next lookup.
 
@@ -2596,9 +2597,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     prompt_hash_value = picker_prompt_hash() if picker_cache is not None else ""
     finto_shas: dict[str, str] = {}
     if picker_cache is not None:
-        dumps_dir = (
-            finto_dumps_dir if finto_dumps_dir is not None else (settings.data_dir / "finto-dumps")
-        )
+        dumps_dir = finto_dumps_dir if finto_dumps_dir is not None else settings.finto_dump_dir
         finto_shas = compute_finto_shas(dumps_dir)
     cache_lookup_keys: dict[int, tuple[str, str, str]] = {}
     deferred_misses: list[tuple[int, EntityRequest, list[AuthorityCandidate]]] = []
