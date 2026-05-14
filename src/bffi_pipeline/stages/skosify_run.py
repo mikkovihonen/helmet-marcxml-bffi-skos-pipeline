@@ -138,7 +138,18 @@ def run(
     config_path = config_path or DEFAULT_CONFIG_PATH
     output_path = output_path or (settings.data_dir / SKOSIFIED_FILENAME)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    emit_if_active(stage="skosify", event="start", extra={"input": str(canonical_path)})
+    # Total for the dashboard's row-2 ``${skosify_total}`` tile —
+    # sourced from M8's ``canonical-map.jsonl`` (one row per canonical
+    # Work; M9 / Skosify / Load don't add or remove Works so the count
+    # is stable across all post-M8 stages).
+    canonical_map = settings.data_dir / "canonical-map.jsonl"
+    total = sum(1 for _ in canonical_map.open(encoding="utf-8")) if canonical_map.is_file() else 0
+    emit_if_active(
+        stage="skosify",
+        event="start",
+        counters={"total": total},
+        extra={"input": str(canonical_path)},
+    )
 
     if not canonical_path.is_file():
         raise FileNotFoundError(

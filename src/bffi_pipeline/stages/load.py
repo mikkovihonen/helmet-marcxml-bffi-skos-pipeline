@@ -331,7 +331,19 @@ def run(
         bffi_works_graph=bffi_works_graph,
         provenance_graph=provenance_graph,
     )
-    emit_if_active(stage="load", event="start", extra={"fuseki_url": fuseki_url})
+    # Total for the dashboard's row-2 ``${load_total}`` tile — sourced
+    # from M8's ``canonical-map.jsonl`` (one row per canonical Work);
+    # the Load stage uploads them as a single SPARQL graph but the
+    # tile renders the canonical-Work count, not the per-graph count,
+    # so it composes with the M2 / M3 / M5 / M6 / M8 / M9 record counts.
+    canonical_map = settings.data_dir / "canonical-map.jsonl"
+    total = sum(1 for _ in canonical_map.open(encoding="utf-8")) if canonical_map.is_file() else 0
+    emit_if_active(
+        stage="load",
+        event="start",
+        counters={"total": total},
+        extra={"fuseki_url": fuseki_url},
+    )
     # P-11 Phase C: probe Fuseki at entry — the load stage's whole job
     # is talking to Fuseki, so an unreachable Fuseki should surface on
     # the dashboard the moment the stage starts.
