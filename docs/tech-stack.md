@@ -101,8 +101,7 @@ The transition contract between each pair of stages is one of the five Boundary 
 | `pymarc` | ≥ 5.1 | MARCXML field-level parsing inside `marcxml_export_pipeline.sierra`. |
 | `SQLAlchemy[asyncio]` | ≥ 2.0 | Streaming SELECT against Sierra's Postgres replica. |
 | `asyncpg` | ≥ 0.29 | Underlying async Postgres driver. |
-| `marcxml-export-sierra` CLI | This repo | Synthesises MARC 001/003/005/907 when source rows lack them — the contract M2 needs to keep work-key minting stable. |
-| Sierra export driver | `scripts/run-sierra-export.sh` | Three-phase smoke → validate → full driver. |
+| `marcxml-export-sierra` CLI | This repo | Synthesises MARC 001/003/005/907 when source rows lack them — the contract M2 needs to keep work-key minting stable. Smoke → validate → full sequence documented in `docs/runbook.md` § "Sierra export". |
 
 Architectural decision recorded in commit `e194e6d`: the exporter ships as a sibling Python package `marcxml_export_pipeline.sierra` (not nested under `bffi_pipeline`) so future ILS sources (Koha, Alma, …) can grow without entangling the BFFI conversion code.
 
@@ -145,7 +144,7 @@ Compose file: [`docker-compose.yml`](../docker-compose.yml). Both containers bui
 |---|---|---|
 | `bffi-pipeline` (typer) | `src/bffi_pipeline/cli.py` | Every M-stage CLI: `marc-to-bf`, `bf-to-bffi`, `embed`, `judge`, `merge`, `reconcile`, `skosify`, `load`, `eval`, `grow-gold`, `load-finto`, `embed-benchmark`, `ysa-disambiguation-report`, … |
 | `marcxml-export-sierra` (argparse) | `src/marcxml_export_pipeline/sierra/marcxml.py` | Sierra → MARCXML export, single-CLI sibling package. |
-| Driver scripts | `scripts/` | `run-full-pipeline.sh` (M2→load), `run-fast-export.sh`, `republish.sh`, `run-sierra-export.sh`, `p02-parity-bench.sh`, plus the in-tree `scratchpad/cataloguer_reports/` reports. |
+| Operator scripts | `scripts/` | `start-mlx-lm.sh` (mlx-lm server launcher), `select-overnight-sample.py` (stratified MARCXML sub-sampler), `test-runs-lifecycle.sh` (P-32 runs CLI smoke driver). Pipeline stages run directly via `bffi-pipeline <subcommand>` — no shell driver. |
 
 Heavy LLM / ML imports (sentence-transformers, faiss, mlx-lm) are deferred to function bodies so the CLI's `--help` stays fast.
 

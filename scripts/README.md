@@ -1,122 +1,38 @@
-# Pipeline driver scripts
+# Operator scripts
 
-End-to-end runners that chain the BFFI pipeline stages together with
-per-stage progress logging. Each emits `STAGE_<NAME>_START` and
-`STAGE_<NAME>_DONE <elapsed>s` lines to stdout + a per-run log so a
-`tail -F | grep STAGE_` streams progress without polling. Per-stage
-stdout/stderr (rdflib warnings, summary tables) goes only to the log
-file — the stage-event stream stays uncluttered.
+A small set of convenience wrappers. The pipeline itself is driven via
+`bffi-pipeline <subcommand>` (typer CLI) and `make` targets; these
+scripts cover cases that don't fit cleanly in either.
 
-## When to use which
-
-| Script | Stages run | Typical use | LLM calls |
-|---|---|---|---|
-| [`run-full-pipeline.sh`](run-full-pipeline.sh) | M2 → M3 → M5 → M6 → M8 → M9 → skosify → load | Bootstrap a fresh corpus → publish to Skosmos. | M6 judge + M9 picker against mlx-lm. Tens of hours on the full corpus at the P-02 § A6 / Phase B operational defaults. |
-| [`run-fast-export.sh`](run-fast-export.sh) | M2 → M3 → M8 (empty decisions) → skosify → load → `ysa-disambiguation-report` | Surface cataloguer-side data-quality residue (YSA disambiguation worklist; source-tag distribution; no-candidate counts) without LLM cost. **Not for production publish** — no merge consolidation. | None. |
-| [`republish.sh`](republish.sh) | M5 → M6 → M8 → M9 → skosify → load (subsettable via `--from-stage`) | Re-run downstream half after a stage's logic changed (e.g. an M6 auto-merge wiring fix). M2 + M3 outputs are assumed up to date. | Subset of M6 + M9 depending on entry point. |
-
-## Required input
-
-All three scripts read from a `MARCXML_DIR` (input) and write to
-`BFFI_DATA_DIR` (output). Defaults:
-
-- `MARCXML_DIR` — **required** for `run-full-pipeline.sh` and
-  `run-fast-export.sh`; `republish.sh` doesn't need it (M2 already
-  ran on a previous invocation).
-- `BFFI_DATA_DIR` — defaults to `./data` for all three.
-- `PIPELINE_LOG` — defaults to `<BFFI_DATA_DIR>/pipeline.log`.
-
-## Examples
-
-**Bootstrap the dev sample end-to-end** (the 13 curated records under
-`tests/data/sample-marcxml/curated/`):
-
-```bash
-MARCXML_DIR=tests/data/sample-marcxml/curated \
-BFFI_DATA_DIR=./data \
-    scripts/run-full-pipeline.sh
-```
-
-**Fast pattern-mining on a random 200-record sample**:
-
-```bash
-MARCXML_DIR=/tmp/bffi-200-smoke/marcxml \
-BFFI_DATA_DIR=/tmp/bffi-200-smoke/data \
-    scripts/run-fast-export.sh
-# → tail /tmp/bffi-200-smoke/data/pipeline.log
-# → open /tmp/bffi-200-smoke/data/ysa-disambiguation-report.csv
-```
-
-**Re-publish after an M6 logic change** (e.g. tweaking the auto-merge
-band threshold). M2 + M3 outputs from the previous run are kept:
-
-```bash
-BFFI_DATA_DIR=/tmp/bffi-200-smoke/data \
-    scripts/republish.sh --from-stage m6
-```
-
-**Skosmos-only update** (canonical-reconciled.ttl is current; just
-re-skosify and reload):
-
-```bash
-BFFI_DATA_DIR=./data \
-    scripts/republish.sh --from-stage skosify
-```
-
-## Production-scale env overrides
-
-For the full 800k Helmet corpus the LLM stages dominate. Sensible
-overrides for `run-full-pipeline.sh`:
-
-```bash
-MARCXML_DIR=/path/to/helmet-marcxml \
-BFFI_DATA_DIR=/path/to/production-out \
-LLM_BASE_URL=http://localhost:8000/v1 \
-M6_CONCURRENCY=16 \
-    scripts/run-full-pipeline.sh
-```
-
-`LLM_BASE_URL` points at mlx-lm (per `docs/runbook.md`);
-`M6_CONCURRENCY` should match the value you locked in via the
-runbook's `--concurrency` tuning sweep on your hardware.
-
-## Skipping LLM-bound stages
-
-Both `run-full-pipeline.sh` and `republish.sh` accept env-level
-overrides to drop LLM work when not needed:
-
-- `SKIP_M5_M6=1` — writes an empty `judge-decisions.jsonl` so M8 still
-  has its expected input but no merging happens. Birds-of-fire-style
-  duplicates will stay as separate canonical Works.
-- `SKIP_RECONCILE=1` — copies `canonical.ttl` to
-  `canonical-reconciled.ttl` unchanged so M10 has its expected
-  input. Cataloguer literals stay as unresolved labels.
-
-`run-fast-export.sh` always sets both.
-
-## Idempotency + recovery
-
-Each underlying CLI subcommand is idempotent:
-
-- M2 / M3 skip records whose output is newer than the input unless
-  `--force`.
-- M5 skips its index rebuild when both faiss+idmap are newer than the
-  BFFI corpus.
-- M6 has crash-safe `--resume` (default) keyed on a sibling
-  `judge-decisions.jsonl.checkpoint`.
-- M8 / M9 / skosify / load run fully every time but at modest cost.
-
-If a stage fails midway, fix the underlying issue and re-run the
-script — completed stages are skipped where idempotent, partial work
-is recovered where checkpointed.
-
-## Operator helpers (not pipeline drivers)
-
-One-shot wrappers that exist for operator-side convenience and don't
-emit `STAGE_*` events:
+## Scripts
 
 | Script | Purpose |
 |---|---|
-| [`llm-pull.sh`](llm-pull.sh) | Convert a Hugging Face checkpoint to MLX 4-bit and write it under `~/.mlx_models/` — the parity move for `ollama pull` in the mlx-lm setup. Activate `~/.venvs/mlx-lm` first. P-02 § D2. |
-| [`start-mlx-lm.sh`](start-mlx-lm.sh) | Start `mlx_lm.server` with port + model resolved from `.env` (`LLM_BASE_URL_PRIMARY`, `LLM_MODEL_PRIMARY`). Defaults match `docs/local-inference.md` with `--prompt-cache-size 100` (the M2 Max 64 GB safe budget per the P-10 Phase C bench attempt). Extra args pass through to mlx-lm. |
-| [`p02-parity-bench.sh`](p02-parity-bench.sh) | Run the gold-set eval twice (Ollama baseline vs. mlx-lm candidate) and diff the verdicts to gate P-02 Phase A on regression. |
+| [`start-mlx-lm.sh`](start-mlx-lm.sh) | Start `mlx_lm.server` with port + model resolved from `.env` (`LLM_BASE_URL_PRIMARY`, `LLM_MODEL_PRIMARY`). Foreground by default; background with `... &`. Extra args pass through to mlx-lm. Defaults match `docs/local-inference.md` with `--prompt-cache-size 100` (the M2 Max 64 GB safe budget per P-10 Phase C). |
+| [`select-overnight-sample.py`](select-overnight-sample.py) | Build a stratified MARCXML sub-sample under `scratchpad/overnight-sample-<date>/` for full-pipeline benchmarking. Strata + rationale documented in the module docstring. |
+| [`test-runs-lifecycle.sh`](test-runs-lifecycle.sh) | Manual smoke driver for the P-32 run lifecycle CLI (`bffi-pipeline runs list / info / tag / untag / prune / mark-complete / clear-fuseki`). Uses a throwaway `BFFI_RUNS_ROOT` under `/tmp/` so the operator's real runs root is untouched. Set `KEEP=1` to leave the test dir in place for inspection. |
+
+## Driving the pipeline itself
+
+Use the typer CLI directly — there is no shell wrapper:
+
+```bash
+uv run bffi-pipeline marc-to-bf <input-dir>     # M2: MARCXML → BIBFRAME
+uv run bffi-pipeline bf-to-bffi                 # M3: BIBFRAME → BFFI
+uv run bffi-pipeline embed                      # M5: FAISS index + candidates
+uv run bffi-pipeline judge --concurrency 4      # M6: cascade judge
+uv run bffi-pipeline merge                      # M8: canonical Works
+uv run bffi-pipeline reconcile                  # M9: authority reconciliation
+uv run bffi-pipeline skosify                    # M10: SKOS output
+uv run bffi-pipeline load                       # M11: load into Fuseki
+uv run bffi-pipeline runs list                  # P-32: enumerate runs
+```
+
+`make lint` and `make test` cover the dev-loop targets; see the
+project Makefile for the full set.
+
+## Sierra export
+
+`uv run marcxml-export-sierra` is the entry point; see
+`docs/runbook.md` § "Sierra export" for the smoke → validate → full
+sequence. No shell wrapper.

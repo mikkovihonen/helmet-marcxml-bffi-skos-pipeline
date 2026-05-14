@@ -64,15 +64,18 @@ MODEL_PATH="${MODEL/#\~/$HOME}"
 
 if [[ ! -d "$MODEL_PATH" ]]; then
     echo "ERROR: model directory not found at $MODEL_PATH" >&2
-    echo "       Pull it with scripts/llm-pull.sh <hf-org/name>." >&2
+    echo "       Convert from a HF checkpoint with:" >&2
+    echo "         python -m mlx_lm convert -q --q-bits 4 \\" >&2
+    echo "             --hf-path <hf-org>/<hf-name> \\" >&2
+    echo "             --mlx-path \"$MODEL_PATH\"" >&2
+    echo "       See docs/local-inference.md for the full pull / convert flow." >&2
     exit 1
 fi
 
 # Resolve a python interpreter that has ``mlx_lm`` available. Order:
 # 1. MLX_LM_PYTHON env override (operator escape hatch).
 # 2. The conventional venv at ~/.venvs/mlx-lm/bin/python — matches
-#    docs/local-inference.md § Installation and the path
-#    scripts/llm-pull.sh expects.
+#    docs/local-inference.md § Installation.
 # 3. The active ``python`` on PATH, if it can import mlx_lm.
 # Otherwise abort with a clear hint instead of letting mlx-lm fail
 # inside a wrong-venv exec.

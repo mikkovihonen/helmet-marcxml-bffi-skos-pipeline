@@ -71,10 +71,9 @@ incident).
 
 The export and the rest of the pipeline are decoupled — the
 exporter writes MARCXML to disk and the downstream stages read
-from disk. The driver script
-[`scripts/run-sierra-export.sh`](../scripts/run-sierra-export.sh)
-gates the full corpus run behind a smoke-export and a local
-validation pass:
+from disk. The recommended flow is a smoke export → local
+BIBFRAME validation → gated full export, driven directly via
+the `marcxml-export-sierra` CLI:
 
 ```bash
 # .env should carry: DB_HOST / DB_PORT / DB_USER / DB_PASSWORD /
@@ -87,17 +86,26 @@ uv run bffi-pipeline load-finto
 curl -s http://127.0.0.1:8001/v1/models | jq   # expect LLM_MODEL_PRIMARY
 curl -s http://127.0.0.1:8002/v1/models | jq   # expect LLM_MODEL_FALLBACK
 
-# 2. Smoke export + local validation, no full export yet.
-scripts/run-sierra-export.sh
-# → /tmp/sierra-smoke/<bib_id>.xml (500 rows)
-# → /tmp/sierra-smoke-validated/bibframe/*.rdf via marc2bibframe2
-# → stops with "STOP" banner unless --confirm-full is passed.
+# 2. Smoke export — 500 rows into a throwaway dir.
+uv run marcxml-export-sierra \
+    --output-dir /tmp/sierra-smoke \
+    --limit 500
 
-# 3. If smoke + validate are green, gated full export:
-scripts/run-sierra-export.sh --confirm-full
-# → ./marcxml/sierra/<bib_id>.xml for every non-suppressed bib
-#   (~800 k rows; 1-2 h on a healthy replica).
+# 3. Local BIBFRAME validation on the smoke output (uses the
+#    vendored marc2bibframe2 submodule).
+uv run bffi-pipeline marc-to-bf /tmp/sierra-smoke \
+    --output-dir /tmp/sierra-smoke-validated/bibframe
+# → spot-check <output-dir>/bibframe/*.rdf and
+#   <output-dir>/bibframe/_errors.jsonl before proceeding.
+
+# 4. If smoke + validate are green, full export (~800 k rows;
+#    1-2 h on a healthy replica).
+uv run marcxml-export-sierra --output-dir ./marcxml/sierra
 ```
+
+The `marcxml-export-sierra --help` flags cover row limits,
+agency-code overrides, and resume-from-cursor semantics for
+re-running a partial export.
 
 The exporter is shipped as a sibling Python package
 (`marcxml_export_pipeline.sierra`) rather than nested under
@@ -327,9 +335,8 @@ findings — P-02 § A6". Operational defaults for the M2 Max dev box:
 | `mlx_lm.server --prompt-cache-bytes` | 1073741824 |
 | End-to-end throughput ceiling | ~31 pairs/min |
 
-**Before the M5 Max production batch**, re-run the bench
-([`scripts/p02-a6-concurrency-bench.py`](../scripts/p02-a6-concurrency-bench.py))
-on the target hardware and update both this section and
+**Before the M5 Max production batch**, re-run the concurrency
+sweep on the target hardware and update both this section and
 local-inference.md if the knee shifts. The M5 Max has more memory
 bandwidth than the M2 Max and is likely to support a higher
 `--decode-concurrency` cleanly; the 32 GB working-set headroom
@@ -353,10 +360,12 @@ for c in 4 8 16 32; do
 done
 ```
 
-The script-based bench at `scripts/p02-a6-concurrency-bench.py` is
-the recommended path when no real escalate band is available — it
-constructs 200 synthetic pairs from `gold/gold.jsonl` and produces a
-JSON summary at `eval-runs/p02-a6-concurrency-sweep.json`.
+P-02 § A6's original bench script (which constructed 200 synthetic
+pairs from `gold/gold.jsonl`) shipped its sweep data in the completed
+plan at `docs/plans/completed/p-02-inference-stack-tuning.md` and was
+retired with the rest of the plan-scoped scripts; re-run the sweep
+above directly against real escalate-band data on the target
+hardware.
 
 ## Expected reconciliation residue from the YSA → YSO vocabulary merge
 

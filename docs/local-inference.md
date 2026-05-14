@@ -49,13 +49,19 @@ hf download mlx-community/Qwen3-1.7B-4bit --local-dir ~/.mlx_models/Qwen3-1.7B-4
 
 Disk: ~4 GB / ~17 GB / ~1 GB respectively after 4-bit quantisation.
 
-**Convert from source instead** if you need a different quantisation, a non-`mlx-community` variant, or pinned reproducibility. The one-shot wrapper [`scripts/llm-pull.sh`](../scripts/llm-pull.sh) (P-02 § D2) calls `python -m mlx_lm convert -q --q-bits 4` and writes to `~/.mlx_models/<name>-4bit/`:
+**Convert from source instead** if you need a different quantisation, a non-`mlx-community` variant, or pinned reproducibility. `python -m mlx_lm convert -q --q-bits 4` is the upstream tool; point it at the HF repo and the local MLX path you want to land at:
 
 ```bash
 source ~/.venvs/mlx-lm/bin/activate
-scripts/llm-pull.sh Qwen/Qwen3-8B
-scripts/llm-pull.sh Qwen/Qwen3-32B
-scripts/llm-pull.sh Qwen/Qwen3-1.7B
+python -m mlx_lm convert -q --q-bits 4 \
+    --hf-path Qwen/Qwen3-8B \
+    --mlx-path ~/.mlx_models/Qwen3-8B-4bit
+python -m mlx_lm convert -q --q-bits 4 \
+    --hf-path Qwen/Qwen3-32B \
+    --mlx-path ~/.mlx_models/Qwen3-32B-4bit
+python -m mlx_lm convert -q --q-bits 4 \
+    --hf-path Qwen/Qwen3-1.7B \
+    --mlx-path ~/.mlx_models/Qwen3-1.7B-4bit
 ```
 
 Times on the M5 Max: ~30-45 min for the 8B, ~1-2 h for the 32B, ~10 min for the 1.7B.
@@ -146,8 +152,10 @@ qualifier — these numbers are a floor, not a contract.
 
 Synthetic 32-pair slice constructed from `gold/gold.jsonl` (real
 M6 prompt template + `_build_chain` from `src/bffi_pipeline/stages/judge.py`,
-unique `(record_a, record_b)` per call). Bench script:
-[`scripts/p02-a6-concurrency-bench.py`](../scripts/p02-a6-concurrency-bench.py).
+unique `(record_a, record_b)` per call). The original P-02 § A6 bench
+script that produced this table has been retired with the rest of the
+plan-scoped scripts; the underlying construction is documented in the
+completed plan at `docs/plans/completed/p-02-inference-stack-tuning.md`.
 
 | Configuration | c=1 | c=4 | c=8 | c=16 |
 |---|---|---|---|---|
@@ -205,11 +213,13 @@ bench script and update this section. Specifically check whether:
 
 Phase B's acceptance criterion is *≥ 3× TTFT speedup* (time-to-
 first-token) from prefix caching, not 3× end-to-end throughput.
-Bench: [`scripts/p02-b-ttft-bench.py`](../scripts/p02-b-ttft-bench.py)
-streams 8 sequential chat completions against the byte-stable
-``_M6_PROMPT_PREFIX_FULL`` (~875 tokens) on a freshly-restarted 8B
-server with the cache flags above. Call 0 is the cold-cache
-reference; calls 1-7 hit the warm prefix.
+The original P-02 § B4 bench (8 sequential chat completions against the
+byte-stable ``_M6_PROMPT_PREFIX_FULL`` ~875-token prefix on a
+freshly-restarted 8B server with the cache flags above; call 0 is the
+cold-cache reference, calls 1-7 hit the warm prefix) has been retired
+with the rest of the plan-scoped scripts. Reconstruct from the completed
+plan at `docs/plans/completed/p-02-inference-stack-tuning.md` if a fresh
+M5 Max measurement is needed.
 
 Measured (M2 Max 64 GB):
 
