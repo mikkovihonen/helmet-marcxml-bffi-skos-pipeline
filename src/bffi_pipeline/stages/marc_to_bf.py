@@ -548,6 +548,52 @@ def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
         fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _emit_errors_tsv(path: Path, errors: list[ConversionErrorRow]) -> None:
+    """Cataloguer-facing TSV companion to ``bibframe/_errors.jsonl``.
+
+    Three columns the cataloguer can open in Excel / Sheets / Numbers
+    and act on without parsing JSON:
+
+    - ``helmet_bib_id`` — derived from the source filename's stem so
+      it's populated even when the XSD parse failed before we could
+      extract the 001 control field (the JSONL leaves
+      ``helmet_bib_id=null`` in that case).
+    - ``error_type`` — one of ``marcxml-xsd-validation``,
+      ``marcxml-content-minimum``, ``bibframe-shape``,
+      ``bibframe-conversion``. Filterable.
+    - ``message`` — single-line, tab + newline + control char
+      sanitised; truncated to keep the spreadsheet readable.
+
+    Always emitted — even on a clean run a header-only TSV is
+    written. Workflows wired to the artifact path don't need a
+    missing-file guard.
+
+    Sorted by (``helmet_bib_id``, ``error_type``) for stable diffs
+    across re-runs. Atomic write via ``.tmp`` + ``replace``.
+    """
+    header = "helmet_bib_id\terror_type\tmessage\n"
+    rows: list[tuple[str, str, str]] = []
+    for row in errors:
+        bib_id = row.helmet_bib_id or Path(row.filename).stem
+        message_clean = " ".join(row.message.replace("\t", " ").split())
+        if len(message_clean) > _ERRORS_TSV_MESSAGE_MAX:
+            message_clean = message_clean[: _ERRORS_TSV_MESSAGE_MAX - 1] + "…"
+        rows.append((bib_id, row.error_type, message_clean))
+    rows.sort()
+    body = "".join(f"{bib_id}\t{etype}\t{msg}\n" for bib_id, etype, msg in rows)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(header + body, encoding="utf-8")
+    tmp.replace(path)
+
+
+#: Truncate over-long error messages in the TSV so a spreadsheet
+#: stays readable. XSD validation errors carry the offending value
+#: and a regex pattern — easily 400+ chars. The full message lives
+#: in the JSONL for forensic lookup; the TSV is for triage.
+_ERRORS_TSV_MESSAGE_MAX: Final[int] = 240
+
+
 def _dedupe_helmet_map(path: Path) -> None:
     """Last-write-wins dedup on ``helmet_bib_id``. Rewrites atomically."""
     if not path.exists():
@@ -648,6 +694,12 @@ def run(
         _append_jsonl(helmet_map_path, asdict(map_row))
 
     _dedupe_helmet_map(helmet_map_path)
+    # Cataloguer-facing TSV companion to ``bibframe/_errors.jsonl``.
+    # Always written (even header-only on a clean run) so cataloguer
+    # workflows wired to the artifact path don't need a missing-file
+    # guard. Mirrors the M8 mint-failures TSV pattern.
+    errors_tsv_path = output_dir / "bibframe" / "_errors.tsv"
+    _emit_errors_tsv(errors_tsv_path, summary.failed)
     emit_if_active(
         stage="m2",
         event="end",
