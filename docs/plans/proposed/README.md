@@ -115,6 +115,19 @@ plan documents *when the execution was scheduled*.
   BFFI corpus the whole time. Move the M8 ``start`` event to the
   top of ``merge.run()`` and add a ``phase_boundary`` once
   ``len(groups)`` is known. ~5 lines.
+- [`prop-20-auto-merge-false-positive-mitigation.md`](prop-20-auto-merge-false-positive-mitigation.md)
+  — `proposed`. M5's auto-merge band (sim ≥ 0.90 → ``same_work``
+  without M6 LLM verification) caught a false positive on the
+  2026-05-13 overnight run: b1499110x ("Alvar Aalto :
+  mestariteoksia" 1998) and b18086238 ("Alvar Aalto : his life"
+  2007) — distinct books in Schildt's Aalto bibliography — merged
+  as one canonical Work at similarity 0.9061. Root cause: M3 drops
+  the 245$b subtitle from ``skos:prefLabel``, so the embedding
+  input string has identical title fields. Proposes B + C: include
+  subtitle in a new ``bffi:fullTitle`` for the embedding vector,
+  plus a year-distance veto (≥ 5 yr → escalate to M6) as a
+  belt-and-braces safety net. A (tighten 0.90 → 0.95 threshold)
+  and D (disable auto-merge) stay as future rollback knobs.
 - [`prop-19-m8-corpus-load-throughput.md`](prop-19-m8-corpus-load-throughput.md)
   — `proposed`. M8's corpus-load phase reads 19 570 individual
   BFFI Turtle files via rdflib at ~8 min wall on 20 k records;
