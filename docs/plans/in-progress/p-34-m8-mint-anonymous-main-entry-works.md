@@ -23,6 +23,14 @@ git diff <plan-base>..HEAD -- \
 
 Cross-references:
 - **Bug A fix at `16a0007`** ("M8: split mint failures from canonical conflicts") — separated the *reporting* of the failure mode. P-34 Phase A addresses the *mint capability*.
+- **P-05 (abandoned 2026-05-14)** —
+  [`docs/plans/abandoned/p-05-anonymous-work-canonicalisation.md`](../abandoned/p-05-anonymous-work-canonicalisation.md).
+  Same root issue, drafted earlier against the preview-373 incident.
+  P-05's three options (A: title-only fallback / B: title + content
+  + date / C: cataloguer-tagged anonymous mint) are absorbed into
+  P-34's Phase B (backlog). P-05's preview-373 conflict-shape
+  evidence is preserved there as the early signal that surfaced
+  this class of failure.
 - **P-33** (`p-33-m3-manifestation-and-item-construct.md`) — also touches M3 → BFFI surface but at the Manifestation/Item layer. P-34 stays at the Work layer where the canonical mint key lives.
 
 ## Motivation

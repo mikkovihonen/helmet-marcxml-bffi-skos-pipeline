@@ -1,5 +1,64 @@
 # P-05 — Canonicalising anonymous + secondary-creator-only Works at M8
 
+**Status**: abandoned 2026-05-14 — **superseded by P-34**
+([`../in-progress/p-34-m8-mint-anonymous-main-entry-works.md`](../in-progress/p-34-m8-mint-anonymous-main-entry-works.md)).
+
+## Abandonment reason
+
+P-05 and P-34 are about the same underlying issue: M8's canonical-
+Work mint at `src/bffi_pipeline/stages/merge.py` filters out every
+record that lacks a primary creator (`creator_uri = None`). On the
+preview-373 sample this dropped ~98 % of records; on the
+2026-05-14 helmet-5k bench it dropped 14 % (707 / 4906 records).
+
+The two documents arrived at the issue from different starting
+points:
+
+- **P-05** (this file, drafted ~`d1fbd32` against the
+  preview-373 incident) — outlined three options for handling
+  anonymous-main-entry records: Option A (title-only fallback
+  mint), Option B (title + content-type + date), Option C
+  (cataloguer-tagged anonymous-Work mint key).
+- **P-34** (drafted 2026-05-14 against the helmet-5k bench's
+  more-conservative 14 % loss + the M8 Bug A conflict-routing
+  fix at commit `16a0007`) — Phase A ships **editor-anchored
+  mint** (use the first non-translator non-primary contribution
+  as the anchor when no PrimaryContribution exists). On the 5k
+  bench this recovered 662 of 707 dropped records (93.6 %)
+  without needing the title-only fallback at all.
+
+P-34's editor-anchored approach is closer to a cataloguer-
+intuitive answer than P-05's options for the records that *do*
+carry an editor / compiler / contributor in MARC 700. P-05's
+title-only options (A and B) become the natural Phase B of P-34
+(handling the residual 45 records that have neither 1XX nor 7XX).
+
+**What this commit does:**
+
+- `git mv` P-05 to `abandoned/`.
+- Adds this Abandonment-reason section at the top.
+- Leaves the original body intact below as the historical record.
+  P-05's "Empirical evidence: preview-373 conflict shape" section
+  in particular is data still worth referencing — it's the early
+  signal that surfaced this class of failure.
+
+**What P-34 covers (mapping P-05's options to P-34's phases):**
+
+| P-05 option | P-34 home | Status |
+|---|---|---|
+| A — Title-only fallback | Phase B (title-only mint) | backlog |
+| B — Title + content + date fallback | Phase B (subsumed under "title-only" with optional content-type tie-breaker) | backlog |
+| C — Cataloguer-tagged anonymous-Work mint | Phase B's `config/m8-anonymous-mint-rules.yaml` | backlog |
+| Conflicts-file shape split ("real conflicts" vs "missing-anchor") | **Shipped 2026-05-14** at `16a0007` — separate `canonical-mint-failures.jsonl` | done |
+| Editor-anchored mint (not originally in P-05) | **Phase A shipped 2026-05-14** at `9261dfd` | done |
+
+**Reading P-34 first** is the right move; P-05 stays as the
+preview-373 incident record + the option-space exploration.
+
+---
+
+(Original P-05 proposal preserved below.)
+
 **Status**: proposed.
 **Scope**: medium. ~3–5 days for the MVP described under Approach,
 plus cataloguer review on the URI-minting policy. Not a blocker for

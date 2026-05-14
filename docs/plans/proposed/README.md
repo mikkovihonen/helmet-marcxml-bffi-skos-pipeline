@@ -148,12 +148,14 @@ Operational sequence:
   — `proposed`. Distil M6's structured LLM verdicts into a cheap
   classifier that short-circuits the obvious pairs on subsequent
   batches.
-- [`p-05-anonymous-work-canonicalisation.md`](p-05-anonymous-work-canonicalisation.md)
-  — `proposed`. M8 currently mints canonical Works only when a MARC
-  100/110 → URI agent → prefLabel chain exists, sending the rest to
-  `canonical-conflicts.jsonl`. Proposes a fallback URI-minting policy
-  for anonymous / secondary-creator-only records, with three options
-  of increasing ambition.
+- ~~`p-05-anonymous-work-canonicalisation.md`~~ — superseded by
+  P-34 on 2026-05-14, moved to
+  [`../abandoned/`](../abandoned/p-05-anonymous-work-canonicalisation.md).
+  P-05's options space (title-only fallback / title+content+date /
+  cataloguer-tagged anonymous mint) is absorbed into P-34's Phase B
+  (backlog) for the residual truly-anonymous records; P-34 Phase A
+  (editor-anchored mint, shipped at `9261dfd`) covered the bulk
+  before any of P-05's options were strictly needed.
 - [`p-06-structured-output-backend.md`](p-06-structured-output-backend.md)
   — `proposed`. P-02 A5 found mlx-lm 0.31 has no constrained decoding
   for `response_format: json_schema`; the fix landed at the prompt
