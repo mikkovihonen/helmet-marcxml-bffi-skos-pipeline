@@ -96,6 +96,7 @@ A + B together would address Aalto-class records permanently; C would also catch
 
 ## Prerequisites
 
+- **Gating prerequisite — observability trustworthiness.** prop-17, prop-18, and prop-19 must be implemented, and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
 - The 2026-05-13 overnight-bench artefacts at `scratchpad/overnight-sample-2026-05-13/` provide the regression-test fixtures: the b23008490 ↔ b24731298 pair (this proposal's specific case) plus the b1499110x ↔ b18086238 pair (prop-20's case) as a pin for the prompt change.
 - `prompts/picker_v1.txt` exists and is the active prompt template for M6's picker. Phase A's surgery is on that file; the prompt hash automatically propagates into provenance + cache keys.
 - KANTO's bf:dateOfDeath lookup (Phase B) requires a quick check of the loaded Finto dumps — if the dump carries death dates, the lookup is local. If not, an external Finto API call is needed (the pipeline already talks to Finto for tier-0 reconciliation, so the infra is in place).

@@ -76,6 +76,36 @@ plan documents *when the execution was scheduled*.
 
 ## Current proposals
 
+### Gating sequence (2026-05-14)
+
+After the 2026-05-13 overnight bench's `used_cascade` near-miss
+(see prop-27 Motivation), proposals 20-29 are **gated on observability
+trustworthiness**: prop-17 + prop-18 + prop-19 implemented AND prop-30
+(critical audit of observability + audit-trail practices) complete
+and signed off. The merge-cluster audit's numbers may all be
+load-bearing on observability surfaces that haven't been verified
+non-misleading; shipping audit-driven changes before the gate
+clears risks repeating the prop-27 near-miss.
+
+Operational sequence:
+
+1. **prop-17, prop-18, prop-19** — observability code changes.
+2. **prop-30** — critical audit + truth-table sign-off.
+3. **prop-20 through prop-29** — unblocked once gate (2) clears.
+
+### Proposals
+
+- [`prop-30-observability-audit-trail-critical-audit.md`](prop-30-observability-audit-trail-critical-audit.md)
+  — `proposed`. Triggered by the 2026-05-13 `used_cascade` near-
+  miss. Catalogues every observability + audit-trail surface
+  (stage-events, judge-decisions, judge-cache, PROV-O graph,
+  `bffi:adminMetadata`, Grafana panels, CLI counters), specs ground-
+  truth meaning per surface, runs drift checks, produces
+  `docs/observability-truth-table.md` as authoritative consumer-
+  facing reference. **Gates proposals 20-29.** Sequenced after
+  prop-17/18/19 (auditing surfaces about to be reshaped is wasted
+  work). Out-of-scope: fixing every drift it surfaces — fixes
+  become prop-31+ remediation work.
 - [`prop-01-llm-distillation-pre-screener-for-M6.md`](prop-01-llm-distillation-pre-screener-for-M6.md)
   — `proposed`. Distil M6's structured LLM verdicts into a cheap
   classifier that short-circuits the obvious pairs on subsequent
@@ -143,6 +173,113 @@ plan documents *when the execution was scheduled*.
   plus a year-distance veto (≥ 5 yr → escalate to M6) as a
   belt-and-braces safety net. A (tighten 0.90 → 0.95 threshold)
   and D (disable auto-merge) stay as future rollback knobs.
+- [`prop-22-m5-same-author-title-overlap-floor.md`](prop-22-m5-same-author-title-overlap-floor.md)
+  — `proposed` *(likely superseded by prop-26 — see prop-26's "Why
+  this might supersede prop-22")*. Largest false-positive class on
+  the 2026-05-13 overnight bench: **40 / 183 (21.9 %)** merges
+  collapsed distinct Works by the same author (children's series,
+  detective series, catalogs). Author dominates the embedding;
+  series prefix carries the rest. Proposes a stopword-filtered
+  substantive-token *overlap floor* at the M5 auto-merge band:
+  same-author pairs sharing < 3 substantive title tokens demote from
+  `auto-merge` to `escalate`. Lifts the audit script's
+  `_substantive_tokens` into a shared module so production and audit
+  stay aligned. Composes with prop-20 / prop-23 / prop-24 (disjoint
+  vetoes that all demote to M6). Kept on the record while prop-26 is
+  under consideration; mark `rejected (superseded by prop-26)` on
+  prop-26 graduation.
+- [`prop-27-m6-llm-judge-baseline-audit.md`](prop-27-m6-llm-judge-baseline-audit.md)
+  — `proposed`. The 2026-05-13 overnight bench fired **988 M6 LLM
+  judge calls** (verified against `judge-cache.sqlite`, not the
+  misleading `used_cascade: false` flag in
+  `judge-decisions.jsonl`). Bench distribution: 354 M5 auto-merges
+  + 988 M6-judged escalations (83 `same_work` + 905
+  `different_work`). M6 is already a major contributor to the 51 %
+  FP rate the merge-cluster audit measured — the audit was measuring
+  M5 + M6 combined, not M5 alone. Proposes auditing the existing
+  988 verdicts (no LLM re-firing needed) against the heuristic
+  classifier: precision matrix on the 83 `same_work` rows,
+  recall matrix on the 905 `different_work` rows, M6-vs-M5
+  similarity scatter on all 988. Decides whether the veto stack
+  ships as-is, accelerates prop-21 first, or narrows specific
+  vetoes whose escalation targets M6 can't reliably catch.
+  **Gates the veto stack.** Also surfaces a `used_cascade` flag-
+  naming gotcha for prop-17 to absorb.
+- [`prop-28-audit-as-ci-regression-fixture.md`](prop-28-audit-as-ci-regression-fixture.md)
+  — `proposed`. `scripts/audit-merge-clusters.py` is unrecognised
+  regression infrastructure: 96 % verdict coverage, deterministic,
+  no LLM / network dependency — exactly what CI wants. Today it
+  runs by hand and its verdict distribution isn't asserted anywhere.
+  Proposes pinning the 20 k bench's merge-cluster slice as
+  `tests/fixtures/audit-bench-2026-05-13/` (MARCXML + canonical-map
+  + expected-verdicts, ~1.2 MB), adding a `make audit-test` target
+  that compares actual vs expected verdicts, and CI-triggering on
+  PRs that touch M5 / M6 / M8 / SPARQL / `text/`. Turns every veto
+  PR's "audit-FP rows must escalate" criterion from aspirational
+  markdown into an enforceable CI gate. Periodic full-corpus
+  re-bench stays manual (5 h wall, not in CI). **Enables every
+  veto proposal's regression criteria.**
+- [`prop-29-m5-missed-merge-recall-audit.md`](prop-29-m5-missed-merge-recall-audit.md)
+  — `proposed`. Every audit on the board (prop-22 / 23 / 24 / 25 /
+  26 / 27) measures the false-positive surface (what merged that
+  shouldn't have). The **false-negative surface** is invisible:
+  pairs that *should* have merged but didn't — auto-rejected, never
+  even candidate-generated, or cross-block-missed. Estimated low
+  thousands of missed merges on the 800 k corpus, of comparable
+  magnitude to the FP surface but unmeasured. Proposes a three-
+  phase recall audit: A bootstrap a gold set from existing same-
+  work groups' transitivity (zero cataloguer time), B authority-
+  driven gold pairs from KANTO/VIAF URIs, C cataloguer-pinned
+  residual cases. Output: recall@candidate and recall@blocker
+  metrics + a top-3 failure-mode breakdown. Pure measurement
+  proposal — fixes (e.g. blocker broadening) are downstream work.
+- [`prop-26-m5-symdiff-idf-title-discrimination.md`](prop-26-m5-symdiff-idf-title-discrimination.md)
+  — `proposed`. Information-theoretic refinement that supersedes
+  prop-22. In two near-identical titles, the shared words
+  discriminate nothing; the *symmetric difference*, weighted by
+  corpus-derived IDF, carries essentially all of the same-Work
+  signal. Phase A builds a one-time IDF table at M3 finalisation
+  from `bffi:fullTitle` and persists it as
+  `<BFFI_DATA_DIR>/title-token-idf.parquet` (~5 MB, ~1 min on 800 k
+  given prop-19's concat file). Phase B reads the table at M5
+  startup and demotes auto-merge → escalate when the discriminator
+  mass `sum(idf[t] for t in title_a ⊕ title_b)` exceeds a calibrated
+  threshold. Self-tuning per language: a Swedish common word ("att")
+  naturally lands in the bottom IDF tier of the Swedish title
+  sub-corpus — no hand-curated stopword list to maintain across
+  Estonian / Polish / Korean as the corpus expands. Cold-start
+  fallback is a boolean symdiff check (over-escalates short
+  re-editions, but never under-escalates). Strictly dominates
+  prop-22 on same-author FPs, anonymous-work FPs, short-title FEs,
+  and multilingual coverage; prop-22 marked `rejected (superseded
+  by prop-26)` on prop-26 graduation.
+- [`prop-23-m5-numeric-marker-veto.md`](prop-23-m5-numeric-marker-veto.md)
+  — `proposed`. Second-largest false-positive class: **37 / 183
+  (20.2 %)** merges flatten records that differ on a numeric marker
+  embedded in the title — volume numbers (Vol. 2 vs Vol. 11, ES 284 vs
+  ES 295, Bach Kantatenwerk 21/26/30) or in-title years (Live at
+  Montreux 1990 vs 2010, Vuoden 1992 vs 2003 valtiopäivät). Proposes
+  lifting the audit's `_VOLUME_PATTERNS` + `_years_in_title` into
+  `src/bffi_pipeline/text/markers.py` and adding a veto at the M5
+  auto-merge band: pair with mismatching volume or in-title years
+  escalates to M6.
+- [`prop-24-m5-distinct-author-veto.md`](prop-24-m5-distinct-author-veto.md)
+  — `proposed`. Smallest count but qualitatively worst-case: **2 / 183
+  (1.1 %)** merges span distinct MARC-100 authors. Proposes a single-
+  line veto at the M5 auto-merge band — same-band pairs with both
+  records carrying non-empty `creator:` AND `norm_author(a) !=
+  norm_author(b)` demote to `escalate`. NFKD-strip + casefold +
+  alphanumeric-only normaliser handles diacritic variants. Lifts
+  `_norm_author` to a shared `text/normalize.py` module.
+- [`prop-25-m5-anthology-scope-veto.md`](prop-25-m5-anthology-scope-veto.md)
+  — `proposed`. **2 / 183 (1.1 %)** merges mixed anthology /
+  collected-works titles with specific component works (FRBR scope
+  mismatch — an anthology is a distinct Work from its components).
+  Proposes lifting `_is_anthology_title` + the marker set into
+  `src/bffi_pipeline/text/scope.py` and adding an asymmetric-pattern
+  veto: when exactly one record's title contains an anthology marker
+  ("complete", "selected", "kootut", "samlade", "œuvres"), demote
+  from `auto-merge` to `escalate`.
 - [`prop-19-m8-corpus-load-throughput.md`](prop-19-m8-corpus-load-throughput.md)
   — `proposed`. M8's corpus-load phase reads 19 570 individual
   BFFI Turtle files via rdflib at ~8 min wall on 20 k records;
