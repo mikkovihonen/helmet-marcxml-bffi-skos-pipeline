@@ -132,7 +132,7 @@ Default `AUTO_MERGE_YEAR_GAP = 5`; configurable via `BFFI_M5_AUTO_MERGE_YEAR_GAP
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** prop-17, prop-18, and prop-19 must be implemented, and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; until the observability surfaces are verified non-misleading, downstream work that consumes bench numbers is faith-based. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
 - A reproducible 20 k sample exists at `scratchpad/overnight-sample-2026-05-13/` (the bench from tonight). Pin this as the regression-test corpus for the proposal.
 - The pinned-cataloguer-pin records in `gold/cataloguer-feedback-2026-05-13.jsonl` provide hand-verified outcomes for nineteen records (none of them flagged as auto-merge false positives by the cataloguer — they exercise reconcile, not merge); supplemental.
 

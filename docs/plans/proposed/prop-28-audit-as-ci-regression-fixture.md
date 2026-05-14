@@ -151,7 +151,7 @@ add a section): when to re-bench, how to update the fixture.
 
 ## Prerequisites
 
-- **Gating prerequisite — observability trustworthiness.** prop-17, prop-18, and prop-19 must be implemented, and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; pinning a bench as a CI fixture before verifying its surfaces are non-misleading would freeze the misleading numbers into the regression baseline. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
+- **Gating prerequisite — observability trustworthiness.** P-17, P-18, and P-19 must be implemented (graduated 2026-05-14; see ../in-progress/), and prop-30 (critical audit of observability + audit-trail practices) must be complete and signed off. The 2026-05-13 bench surfaced a `used_cascade` field misread that nearly drove prop-27 around a false premise; pinning a bench as a CI fixture before verifying its surfaces are non-misleading would freeze the misleading numbers into the regression baseline. See [`prop-30`](prop-30-observability-audit-trail-critical-audit.md).
 - 2026-05-13 overnight bench data preserved at
   `scratchpad/overnight-sample-2026-05-13/`. Don't delete until the
   fixture is committed.

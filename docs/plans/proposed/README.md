@@ -80,7 +80,7 @@ plan documents *when the execution was scheduled*.
 
 After the 2026-05-13 overnight bench's `used_cascade` near-miss
 (see prop-27 Motivation), proposals 20-29 are **gated on observability
-trustworthiness**: prop-17 + prop-18 + prop-19 implemented AND prop-30
+trustworthiness**: P-17 + P-18 + P-19 implemented AND prop-30
 (critical audit of observability + audit-trail practices) complete
 and signed off. The merge-cluster audit's numbers may all be
 load-bearing on observability surfaces that haven't been verified
@@ -89,7 +89,10 @@ clears risks repeating the prop-27 near-miss.
 
 Operational sequence:
 
-1. **prop-17, prop-18, prop-19** — observability code changes.
+1. **P-17, P-18, P-19** — observability code changes. *Graduated to plans
+   on 2026-05-14; code-side phases shipped at `9a0601d` (P-17) and
+   `5148746` (P-18 + P-19). Bench / smoke verification pending — see the
+   plans under [`../in-progress/`](../in-progress/).*
 2. **prop-30** — critical audit + truth-table sign-off.
 3. **prop-20 through prop-29** — unblocked once gate (2) clears.
 
@@ -139,12 +142,6 @@ Operational sequence:
   `bib_id` from MARC 001 instead of the filename stem; Phase B pulls
   the nine-site FI-HELME URI cluster into a config-driven
   `LibrarySource` registry keyed on MARC 003.
-- [`prop-18-m8-emit-start-before-corpus-load.md`](prop-18-m8-emit-start-before-corpus-load.md)
-  — `proposed`. The dashboard shows M8 as `pending` for ~8 minutes
-  after M6 ends, despite M8's Python process actively loading the
-  BFFI corpus the whole time. Move the M8 ``start`` event to the
-  top of ``merge.run()`` and add a ``phase_boundary`` once
-  ``len(groups)`` is known. ~5 lines.
 - [`prop-21-m6-translation-hallucination-mitigation.md`](prop-21-m6-translation-hallucination-mitigation.md)
   — `proposed`. Sibling of prop-20. A SECOND false-positive merge
   on the 2026-05-13 overnight run — b23008490 ("Alvar Aalto :
@@ -280,33 +277,15 @@ Operational sequence:
   veto: when exactly one record's title contains an anthology marker
   ("complete", "selected", "kootut", "samlade", "œuvres"), demote
   from `auto-merge` to `escalate`.
-- [`prop-19-m8-corpus-load-throughput.md`](prop-19-m8-corpus-load-throughput.md)
-  — `proposed`. M8's corpus-load phase reads 19 570 individual
-  BFFI Turtle files via rdflib at ~8 min wall on 20 k records;
-  linearly extrapolating to ~5.5 h on the 800 k corpus. Proposes
-  layering a single ``bffi-corpus.ttl`` stream over the
-  per-record `.ttl` store. Trade-offs across four options
-  (concat file, multi-proc pool, bespoke streaming parser,
-  status quo); recommendation is Option A (concat file written
-  at M3 finalisation) as the smallest-surface largest-win
-  first step.
-- [`prop-17-exporter-multi-sidecar-discovery.md`](prop-17-exporter-multi-sidecar-discovery.md)
-  — `proposed`. The metrics exporter resolves its sidecar path AND
-  its error-spec paths at process startup from `BFFI_DATA_DIR` /
-  `BFFI_OBSERVABILITY_SIDECAR` — both as separate gotchas. A
-  pipeline run against a different `BFFI_DATA_DIR` silently writes
-  events + error rows to files the exporter doesn't watch. Surfaced
-  by the 2026-05-13 overnight bench launch (5-hour observability
-  blackout for the stage events; the M2+M3 failure-mode bargauge
-  silently empty for another ~30 min after the sidecar fix).
-  Proposes a repeatable `--sidecar`, a `--watch-glob` for
-  auto-discovery, per-sidecar error-spec derivation from the
-  sidecar's parent dir, and a startup echo of the resolved set.
-  No default-behaviour change.
-
 _(prop-15 and prop-16 graduated to plans on 2026-05-13 and shipped
 in the same session; see [`../completed/p-15-preserve-authority-uris-at-m3.md`](../completed/p-15-preserve-authority-uris-at-m3.md)
-and [`../completed/p-16-fallback-tier-confidence-gating.md`](../completed/p-16-fallback-tier-confidence-gating.md).)_
+and [`../completed/p-16-fallback-tier-confidence-gating.md`](../completed/p-16-fallback-tier-confidence-gating.md).
+prop-17, prop-18, and prop-19 graduated to plans on 2026-05-14
+and their code-side phases shipped in the same session; see
+[`../in-progress/p-17-exporter-multi-sidecar-discovery.md`](../in-progress/p-17-exporter-multi-sidecar-discovery.md),
+[`../in-progress/p-18-m8-emit-start-before-corpus-load.md`](../in-progress/p-18-m8-emit-start-before-corpus-load.md),
+[`../in-progress/p-19-m8-corpus-load-throughput.md`](../in-progress/p-19-m8-corpus-load-throughput.md).
+Each has an operator-side bench / smoke-test phase still pending.)_
 
 ## Graduated / completed / abandoned
 
