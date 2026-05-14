@@ -1085,59 +1085,105 @@ def test_p19_write_bffi_corpus_is_idempotent_when_fresh(tmp_path: Path) -> None:
 # --- _emit_validation_tsv ---------------------------------------------------
 
 
-def test_validation_tsv_surfaces_bib_id_output_file_and_report(tmp_path: Path) -> None:
-    """One TSV row per failed-shape record: ``helmet_bib_id``,
-    ``output_file``, ``report_text``. Sorted by bib_id for stable diffs."""
+def test_validation_tsv_extracts_sh_message_from_report(tmp_path: Path) -> None:
+    """The TSV's middle column carries the human-readable ``sh:message``
+    text extracted from rdflib's SHACL report — not the verbose
+    rdflib boilerplate. Cataloguers can sort + filter on the actual
+    violation cause."""
+    rdflib_report = (
+        "Validation Report\n"
+        "Conforms: False\n"
+        "Results (1):\n"
+        "Constraint Violation in MinCountConstraintComponent "
+        "(http://www.w3.org/ns/shacl#MinCountConstraintComponent):\n"
+        "\tSeverity: sh:Violation\n"
+        '\tSource Shape: [ sh:message Literal("bffi:Work must have '
+        'skos:prefLabel in fi/sv/en.") ; sh:minCount Literal("1") ]\n'
+        "\tFocus Node: <http://urn.fi/URN:NBN:fi:bib:work:abc>\n"
+        "\tResult Path: skos:prefLabel"
+    )
     rows = [
-        ValidationRow(
-            helmet_bib_id="b9999",
-            output_file="b9999.ttl",
-            conforms=False,
-            report_text="Constraint Violation in MinCountConstraintComponent\n"
-            "Source Shape: bffi:PrimaryContributionShape\n"
-            "Focus Node: <…work:abc>\n"
-            "Result Path: bffi:agent",
-            run_uuid="r1",
-        ),
         ValidationRow(
             helmet_bib_id="b1234",
             output_file="b1234.ttl",
             conforms=False,
-            report_text="Constraint Violation: bffi:contentTypeShape failed",
+            report_text=rdflib_report,
             run_uuid="r1",
-        ),
+        )
     ]
     path = tmp_path / "_validation.tsv"
     _emit_validation_tsv(path, rows)
     lines = path.read_text().splitlines()
-    assert lines[0] == "helmet_bib_id\toutput_file\treport_text"
-    # Two data rows sorted alphabetically by bib_id: b1234 < b9999.
-    assert lines[1].startswith("b1234\tb1234.ttl\t")
-    assert lines[2].startswith("b9999\tb9999.ttl\t")
-    # Multi-line SHACL reports get collapsed to single TSV line.
-    assert len(lines) == 3
-    # No raw newlines made it through.
-    assert "\n" not in lines[2].split("\t")[2]
+    assert lines[0] == "helmet_bib_id\tshape_message\toutput_file"
+    bib_id, message, output_file = lines[1].split("\t")
+    assert bib_id == "b1234"
+    assert message == "bffi:Work must have skos:prefLabel in fi/sv/en."
+    assert output_file == "b1234.ttl"
 
 
-def test_validation_tsv_truncates_long_report(tmp_path: Path) -> None:
-    """A 1000-char SHACL report gets truncated with an ellipsis in the
-    TSV; the full report stays in the JSONL."""
-    long_report = "Constraint Violation: " + "x" * 2000
+def test_validation_tsv_joins_multiple_violations_per_record(tmp_path: Path) -> None:
+    """Two violations on one record produce one TSV row with both
+    messages joined by ``" | "``."""
+    rdflib_report = (
+        "Validation Report\nConforms: False\nResults (2):\n"
+        'Source Shape: [ sh:message Literal("violation A") ]\n'
+        'Source Shape: [ sh:message Literal("violation B") ]\n'
+    )
     rows = [
         ValidationRow(
             helmet_bib_id="b1",
             output_file="b1.ttl",
             conforms=False,
-            report_text=long_report,
+            report_text=rdflib_report,
             run_uuid="r",
         )
     ]
     path = tmp_path / "_validation.tsv"
     _emit_validation_tsv(path, rows)
-    report_col = path.read_text().splitlines()[1].split("\t")[2]
-    assert len(report_col) < len(long_report)
-    assert report_col.endswith("…")
+    message_col = path.read_text().splitlines()[1].split("\t")[1]
+    assert message_col == "violation A | violation B"
+
+
+def test_validation_tsv_truncates_long_extracted_message(tmp_path: Path) -> None:
+    """A 1000-char ``sh:message`` gets truncated with an ellipsis;
+    full report stays in the JSONL companion."""
+    rdflib_report = f'Source Shape: [ sh:message Literal("{"x" * 1000}") ]'
+    rows = [
+        ValidationRow(
+            helmet_bib_id="b1",
+            output_file="b1.ttl",
+            conforms=False,
+            report_text=rdflib_report,
+            run_uuid="r",
+        )
+    ]
+    path = tmp_path / "_validation.tsv"
+    _emit_validation_tsv(path, rows)
+    message_col = path.read_text().splitlines()[1].split("\t")[1]
+    assert len(message_col) < 1000
+    assert message_col.endswith("…")
+
+
+def test_validation_tsv_falls_back_to_full_report_when_no_sh_message(tmp_path: Path) -> None:
+    """When the SHACL report has no ``sh:message Literal("…")`` clause
+    (rare but possible with constraint components that don't carry
+    one), the TSV falls back to the truncated full report rather
+    than emitting an empty middle column."""
+    rdflib_report = "Validation Report\nConforms: False\nResults (1):\nSome obscure failure"
+    rows = [
+        ValidationRow(
+            helmet_bib_id="b1",
+            output_file="b1.ttl",
+            conforms=False,
+            report_text=rdflib_report,
+            run_uuid="r",
+        )
+    ]
+    path = tmp_path / "_validation.tsv"
+    _emit_validation_tsv(path, rows)
+    message_col = path.read_text().splitlines()[1].split("\t")[1]
+    assert message_col != ""
+    assert "Some obscure failure" in message_col
 
 
 def test_validation_tsv_is_header_only_when_no_failures(tmp_path: Path) -> None:
@@ -1146,4 +1192,4 @@ def test_validation_tsv_is_header_only_when_no_failures(tmp_path: Path) -> None:
     workflows wired to the artifact path never see a missing file."""
     path = tmp_path / "_validation.tsv"
     _emit_validation_tsv(path, [])
-    assert path.read_text() == "helmet_bib_id\toutput_file\treport_text\n"
+    assert path.read_text() == "helmet_bib_id\tshape_message\toutput_file\n"

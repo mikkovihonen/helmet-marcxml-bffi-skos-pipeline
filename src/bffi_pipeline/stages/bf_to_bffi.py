@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -136,10 +137,33 @@ class ValidationRow:
     run_uuid: str = ""
 
 
-#: Truncate over-long SHACL reports in the validation TSV so a
+#: Truncate over-long rendered messages in the validation TSV so a
 #: spreadsheet stays readable. The full multi-line report lives in
 #: the JSONL for forensic lookup; the TSV is for cataloguer triage.
-_VALIDATION_TSV_REPORT_MAX: Final[int] = 240
+_VALIDATION_TSV_MESSAGE_MAX: Final[int] = 240
+
+#: Regex to extract every ``sh:message Literal("…")`` clause from
+#: rdflib's SHACL report serialization. The message text is the
+#: cataloguer-actionable bit; the rest of the report is rdflib
+#: boilerplate (severity, source shape, focus node etc.) that's only
+#: useful for pipeline-team debugging.
+_SH_MESSAGE_RE: Final[re.Pattern[str]] = re.compile(
+    r'sh:message\s+Literal\(\s*"([^"\\]*(?:\\.[^"\\]*)*)"', re.DOTALL
+)
+
+
+def _extract_shape_messages(report_text: str) -> str:
+    """Pull every ``sh:message Literal("…")`` out of a SHACL report.
+
+    Joined with ``" | "`` when a single record has multiple
+    violations. Falls back to the full report (with control chars
+    collapsed) when no messages can be extracted — better to surface
+    the rdflib boilerplate than an empty cell.
+    """
+    matches = _SH_MESSAGE_RE.findall(report_text)
+    if not matches:
+        return " ".join(report_text.replace("\t", " ").split())
+    return " | ".join(m.strip() for m in matches)
 
 
 def _emit_validation_tsv(path: Path, rows: list[ValidationRow]) -> None:
@@ -149,12 +173,18 @@ def _emit_validation_tsv(path: Path, rows: list[ValidationRow]) -> None:
     and act on without parsing JSON:
 
     - ``helmet_bib_id`` — lookup key in Helmet / Sierra.
+    - ``shape_message`` — the human-readable ``sh:message`` text
+      extracted from the SHACL report (e.g. ``"bffi:Work must have
+      skos:prefLabel in fi/sv/en."``). Multiple violations on one
+      record are joined with ``" | "``. This is the
+      cataloguer-actionable column.
     - ``output_file`` — the BFFI Turtle file the failed shape was
-      validated against (e.g. ``b1234.ttl``); useful for follow-up
-      pipeline-team debugging.
-    - ``report_text`` — single-line, tab + newline + control-char
-      sanitised; truncated to 240 chars with an ellipsis. Full
-      multi-line rdflib SHACL report stays in the JSONL.
+      validated against (e.g. ``b1234.ttl``); pipeline-team
+      cross-reference. The full multi-line rdflib SHACL report
+      stays in the JSONL companion.
+
+    Messages over 240 chars are truncated with an ellipsis to keep
+    spreadsheet rendering readable. Full report stays in JSONL.
 
     Always emitted — even when every record passed Boundary-3, a
     header-only TSV is written so cataloguer workflows wired to the
@@ -167,17 +197,16 @@ def _emit_validation_tsv(path: Path, rows: list[ValidationRow]) -> None:
     ``canonical-mint-failures.tsv`` conventions so cataloguers see a
     consistent artifact shape across stages.
     """
-    header = "helmet_bib_id\toutput_file\treport_text\n"
+    header = "helmet_bib_id\tshape_message\toutput_file\n"
     out_rows: list[tuple[str, str, str]] = []
     for row in rows:
-        report_clean = " ".join(row.report_text.replace("\t", " ").split())
-        if len(report_clean) > _VALIDATION_TSV_REPORT_MAX:
-            report_clean = report_clean[: _VALIDATION_TSV_REPORT_MAX - 1] + "…"
-        out_rows.append((row.helmet_bib_id, row.output_file, report_clean))
+        message = _extract_shape_messages(row.report_text)
+        message_clean = " ".join(message.replace("\t", " ").split())
+        if len(message_clean) > _VALIDATION_TSV_MESSAGE_MAX:
+            message_clean = message_clean[: _VALIDATION_TSV_MESSAGE_MAX - 1] + "…"
+        out_rows.append((row.helmet_bib_id, message_clean, row.output_file))
     out_rows.sort()
-    body = "".join(
-        f"{bib_id}\t{output_file}\t{report}\n" for bib_id, output_file, report in out_rows
-    )
+    body = "".join(f"{bib_id}\t{msg}\t{output_file}\n" for bib_id, msg, output_file in out_rows)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(header + body, encoding="utf-8")
