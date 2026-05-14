@@ -17,16 +17,13 @@ from pathlib import Path
 
 import httpx
 import pytest
-from rdflib import Graph, URIRef
 
 from bffi_pipeline.stages.load_finto import (
-    BFFI_FOLDED_LABEL_URI,
     FINTO_VOCABS,
     FintoVocab,
     VocabResult,
     _is_dump_fresh,
     graph_uri_for_uri,
-    materialise_folded_labels,
     run,
 )
 
@@ -98,10 +95,6 @@ def test_run_downloads_and_uploads_each_vocab_on_cold_cache(tmp_path: Path) -> N
             fuseki_url="http://localhost:3030/bffi",
             vocabs=(SLM,),
             http_client=c,
-            # Phase C.1 added in-place dump rewriting on download. Disable
-            # it here so this test still asserts byte-equality between the
-            # download payload and the upload body.
-            fold_pref_labels=False,
         )
     methods = [r.method for r in rec.requests]
     assert methods == ["GET", "PUT"]
@@ -157,7 +150,6 @@ def test_run_force_redownloads_even_when_cache_is_fresh(tmp_path: Path) -> None:
             vocabs=(SLM,),
             force=True,
             http_client=c,
-            fold_pref_labels=False,
         )
     methods = [r.method for r in rec.requests]
     assert methods == ["GET", "PUT"]
@@ -180,7 +172,6 @@ def test_run_stale_cache_triggers_redownload(tmp_path: Path) -> None:
             vocabs=(SLM,),
             max_age_days=30,
             http_client=c,
-            fold_pref_labels=False,
         )
     methods = [r.method for r in rec.requests]
     assert methods == ["GET", "PUT"]
@@ -447,74 +438,9 @@ def test_run_decompresses_gzipped_turtle_dumps(tmp_path: Path) -> None:
             fuseki_url="http://localhost:3030/bffi",
             vocabs=(lcgft,),
             http_client=c,
-            fold_pref_labels=False,
         )
     put = next(r for r in rec.requests if r.method == "PUT")
     # The body Fuseki receives must be the decompressed Turtle, not
     # gzip bytes — Fuseki's Graph Store Protocol can't parse gzip.
     assert put.body == turtle_body
     assert b"\x1f\x8b" not in put.body  # gzip magic bytes
-
-
-# --- P-10 Phase C.1: bffi:foldedLabel materialisation ---------------------
-
-
-def test_materialise_folded_labels_emits_one_triple_per_label(tmp_path: Path) -> None:
-    """For each ``skos:prefLabel`` and ``skos:altLabel`` literal on a
-    concept, ``materialise_folded_labels`` writes a paired
-    ``bffi:foldedLabel`` literal carrying the fold."""
-    dump_path = tmp_path / "tiny-skos.ttl"
-    dump_path.write_text(
-        """\
-@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
-@prefix : <http://example.org/v/> .
-
-:c1 a skos:Concept ;
-    skos:prefLabel "Müller"@fi ;
-    skos:altLabel "Muller"@en .
-
-:c2 a skos:Concept ;
-    skos:prefLabel "Tolkien, J. R. R. (1892-1973)"@en .
-""",
-        encoding="utf-8",
-    )
-
-    added = materialise_folded_labels(dump_path)
-    # c1 has two labels (Müller, Muller) but both fold to "muller" —
-    # rdflib's graph is a set, so duplicate (s, p, o) triples collapse
-    # to one. c2 contributes one. Total unique adds = 2.
-    assert added == 2
-
-    g = Graph()
-    g.parse(source=str(dump_path), format="turtle")
-    folded = {
-        (str(s), str(o)) for s, _, o in g.triples((None, URIRef(BFFI_FOLDED_LABEL_URI), None))
-    }
-    # ``Müller`` and ``Muller`` fold to the SAME value — exactly the
-    # cross-orthography alignment Phase C is buying. One unique triple
-    # on c1 covers both label forms.
-    assert ("http://example.org/v/c1", "muller") in folded
-    # Decoration strip applies to authority side too so the cataloguer
-    # literal "Tolkien, J. R. R." (no date) folds-match the prefLabel.
-    assert ("http://example.org/v/c2", "tolkien, j. r. r.") in folded
-
-
-def test_materialise_folded_labels_is_idempotent(tmp_path: Path) -> None:
-    """Re-running materialise on an already-folded dump must not
-    accumulate duplicates — graph.add is a set operation, and the fold
-    function is deterministic."""
-    dump_path = tmp_path / "idempotent-skos.ttl"
-    dump_path.write_text(
-        """\
-@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
-@prefix : <http://example.org/v/> .
-
-:c1 a skos:Concept ;
-    skos:prefLabel "Helsinki"@fi .
-""",
-        encoding="utf-8",
-    )
-    first = materialise_folded_labels(dump_path)
-    second = materialise_folded_labels(dump_path)
-    assert first == 1
-    assert second == 0  # no new triples on the second pass

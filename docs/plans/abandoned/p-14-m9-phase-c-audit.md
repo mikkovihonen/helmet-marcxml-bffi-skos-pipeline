@@ -1,7 +1,70 @@
 # P-14 — M9 Phase C tier-0 expansion: cataloguer audit + M5 Max re-bench
 
-**Status**: backlog.
-**Source**: spun out of P-10 [`docs/plans/completed/p-10-m9-reconcile-throughput.md`](../completed/p-10-m9-reconcile-throughput.md) Phase C (commit `8e47a69`, feature-flagged **off**). P-10's Phase C shipped code but its validation gate — a 200-row cataloguer audit + a clean wall-time bench — remains open. P-10 graduated to `completed/` with Phase C left flag-off; this plan tracks the work needed to flip `BFFI_M9_TIER0_EXPANSION` to `True` by default.
+**Status**: abandoned 2026-05-14.
+
+## Abandonment reason
+
+P-10 Phase C shipped the dual-path resolver and the
+`load-finto --fold-pref-labels` materialiser feature-flagged **off**
+(commit `8e47a69`) pending the validation gate this plan was supposed
+to clear: a 200-sample cataloguer audit + a clean M5 Max re-bench
+to confirm tier-0 expansion buys back enough tier-2 LLM-picker calls
+to pay for the doubled SPARQL traffic the 2026-05-13 attempt
+surfaced.
+
+Neither gate ever cleared. The 2026-05-13 M2 Max bench attempt
+(see [`docs/performance/2026-05-13-5k-m2-max-phase-c-attempt.md`](../../performance/2026-05-13-5k-m2-max-phase-c-attempt.md))
+crashed on mlx-lm GPU OOM mid-run with the *partial* observation
+that tier-0 expansion appeared to **increase** SPARQL traffic
+without an offsetting reduction in tier-2 picker calls on the
+heterogeneous cataloguer-curated 5 k corpus. That's a Phase A2
+baseline regression, not a win — and the cataloguer-audit half of
+the gate would only have mattered if Phase B's wall-time numbers
+had come back convincingly green.
+
+Sitting on flag-off shipped code past the original P-10 ship date
+became the rot pattern: a dead code path in production runs, with
+no driver pushing the audit forward. Closing P-14 by yanking the
+dual-path code is cleaner than keeping the surface around for an
+audit nobody's queued.
+
+**What gets yanked in the closing commit:**
+
+- `Settings.m9_tier0_expansion` field + the `BFFI_M9_TIER0_EXPANSION` env alias (`src/bffi_pipeline/config.py`).
+- `tier0_expansion_enabled` field + `_folded_match` method + `_build_folded_query` helper + `_BFFI_FOLDED_LABEL_URI` constant on `FusekiConceptResolver` (`src/bffi_pipeline/stages/local_concept_resolver.py`).
+- `fold_pref_labels` parameter + the materialise branch + `BFFI_FOLDED_LABEL_URI` constant on `load_finto.run()` (`src/bffi_pipeline/stages/load_finto.py`).
+- `--tier0-expansion/--no-tier0-expansion` flag on `bffi-pipeline reconcile` + `--fold-pref-labels/--no-fold-pref-labels` on `bffi-pipeline load-finto` (`src/bffi_pipeline/cli.py`).
+- `tier0_expansion_enabled` key in the M9 start-event observability emit (`src/bffi_pipeline/stages/reconcile.py`).
+- The five tier-0-folded test cases in `tests/unit/test_local_concept_resolver.py` + the `fold_pref_labels=False` kwargs in `tests/unit/test_load_finto.py`.
+
+**What stays:**
+
+- `fold_label` / `fold_diacritics` / `strip_label_decoration` in
+  `src/bffi_pipeline/blocking.py` — used independently of tier-0
+  expansion as the picker-cache key composition in `reconcile.py`
+  (so diacritic-equivalent literals hit the same cached decision).
+  `tests/unit/test_blocking_fold.py` stays.
+- `LocalConceptHit.is_fuzzy_match` (always `False` after the yank).
+  Kept as a forward-compat field so a future fuzzy-resolver can
+  reintroduce the needs-review flag path in `reconcile.py:1466`
+  without re-adding the field.
+
+**What would resurrect this work:**
+
+- A cataloguer-driven audit window opens for the 200-sample review
+  (P-06 territory).
+- The picker-call ratio on the heterogeneous corpus shifts (e.g.
+  P-22-29 land and reduce tier-2 traffic enough that tier-0's
+  SPARQL-traffic cost becomes the dominant term — at which point
+  the trade-off is worth re-measuring).
+- A different lexical-matching technique (BM25 over a Finto-side
+  inverted index, embeddings on prefLabels, …) supersedes the
+  fold-prefLabel approach. In that case P-14 is the wrong shape
+  and a new proposal under `proposed/` is the right venue.
+
+## Original plan (preserved for the historical record below)
+
+**Source**: spun out of P-10 [`docs/plans/completed/p-10-m9-reconcile-throughput.md`](../completed/p-10-m9-reconcile-throughput.md) Phase C (commit `8e47a69`, feature-flagged **off**). P-10's Phase C shipped code but its validation gate — a 200-row cataloguer audit + a clean wall-time bench — remained open. P-10 graduated to `completed/` with Phase C left flag-off; this plan tracked the work needed to flip `BFFI_M9_TIER0_EXPANSION` to `True` by default.
 **Plan-base commit**: `<unfilled>` (set on the first phase commit). To gauge drift before executing, run:
 `git diff <plan-base>..HEAD --
 src/bffi_pipeline/stages/local_concept_resolver.py

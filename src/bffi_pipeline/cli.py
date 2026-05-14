@@ -2283,22 +2283,6 @@ def reconcile_command(
             ),
         ),
     ] = -1,
-    tier0_expansion: Annotated[
-        bool | None,
-        typer.Option(
-            "--tier0-expansion/--no-tier0-expansion",
-            help=(
-                "P-10 Phase C: enable the folded-lookup tier-0 path "
-                "(matches bffi:foldedLabel materialised by load-finto). "
-                "Bindings that required the fold are flagged "
-                "bffi:descriptionAuthentication=needs-review for cataloguer "
-                "audit. Defaults to BFFI_M9_TIER0_EXPANSION from the env "
-                "(off until the 200-sample audit confirms zero false "
-                "positives on this corpus). See "
-                "docs/plans/in-progress/p-10-m9-reconcile-throughput.md Phase C."
-            ),
-        ),
-    ] = None,
     cache: Annotated[
         bool | None,
         typer.Option(
@@ -2330,9 +2314,6 @@ def reconcile_command(
     )
     effective_phase1_concurrency = (
         settings.m9_phase1_concurrency if phase1_concurrency < 0 else phase1_concurrency
-    )
-    effective_tier0_expansion = (
-        settings.m9_tier0_expansion if tier0_expansion is None else tier0_expansion
     )
     # P-10 Phase E: validated string → typed Literal for apply_reconciliation.
     # Env-var only (no CLI flag); see plan § E.2.
@@ -2377,7 +2358,6 @@ def reconcile_command(
             local_concept_resolver.FusekiConceptResolver(
                 http_client=http_client,
                 fuseki_url=settings.fuseki_url,
-                tier0_expansion_enabled=effective_tier0_expansion,
             )
             if local_resolver
             else None
@@ -2743,24 +2723,6 @@ def load_finto_command(
             help="Re-download every dump regardless of cache freshness.",
         ),
     ] = False,
-    fold_pref_labels: Annotated[
-        bool,
-        typer.Option(
-            "--fold-pref-labels/--no-fold-pref-labels",
-            help=(
-                "Materialise bffi:foldedLabel triples on every "
-                "skos:prefLabel and skos:altLabel of every concept in the "
-                "downloaded dump (P-10 Phase C.1). Default OFF — the "
-                "2026-05-13 Phase C bench attempt found this doubled "
-                "Phase 1 SPARQL traffic without an offsetting reduction "
-                "in tier-2 picker calls on the May 12 corpus. Using the "
-                "tier-0 expansion path requires BOTH this flag and the "
-                "resolver-side BFFI_M9_TIER0_EXPANSION=1; the materialised "
-                "triples are inert otherwise. See "
-                "docs/performance/2026-05-13-5k-m2-max-phase-c-attempt.md."
-            ),
-        ),
-    ] = False,
 ) -> None:
     """Refresh the KANTO/YSO/KAUNO/MUSO/SLM named graphs in Fuseki.
 
@@ -2787,7 +2749,6 @@ def load_finto_command(
             max_age_days=max_age_days,
             force=force,
             http_client=client,
-            fold_pref_labels=fold_pref_labels,
         )
     typer.echo(summary.render())
 

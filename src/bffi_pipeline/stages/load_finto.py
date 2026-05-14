@@ -28,17 +28,8 @@ from urllib.parse import quote
 
 import httpx
 
-from bffi_pipeline.blocking import fold_label
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.stages.load import upload_graph
-
-#: Predicate used to surface the canonical-fold of every concept's
-#: ``skos:prefLabel`` and ``skos:altLabel``. Materialised at load time
-#: per P-10 Phase C.1 so the resolver's tier-0 SPARQL can match against
-#: a pre-folded literal — Fuseki has no ``fold_diacritics`` builtin, so
-#: the alternative is folding every authority label per query, which is
-#: orders of magnitude more expensive.
-BFFI_FOLDED_LABEL_URI: Final[str] = "http://urn.fi/URN:NBN:fi:schema:bffi:foldedLabel"
 
 DEFAULT_USER_AGENT: Final[str] = (
     "bffi-pipeline/0.1 (+https://github.com/mikkovihonen/helmet-marcxml-bffi-skos-pipeline)"
@@ -257,46 +248,6 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-def materialise_folded_labels(dump_path: Path) -> int:
-    """Parse ``dump_path``, add ``bffi:foldedLabel`` triples for every
-    ``skos:prefLabel`` and ``skos:altLabel``, re-serialise atomically.
-
-    Returns the number of new triples added (zero on a no-op re-run
-    against an already-materialised dump). Idempotent — rdflib's
-    ``Graph.add`` is a set operation, so re-materialising adds nothing
-    new for labels that already carry a folded form.
-
-    The fold composes :func:`bffi_pipeline.blocking.fold_label` (NFKC
-    + diacritic-fold + casefold + whitespace-collapse + strip-trailing-
-    date / role-marker). Same fold runs on the cataloguer literal in
-    :class:`bffi_pipeline.stages.local_concept_resolver.FusekiConceptResolver`
-    so the folded forms align byte-for-byte across load and lookup.
-    """
-    from rdflib import Graph, Literal, URIRef
-    from rdflib.namespace import SKOS
-
-    graph = Graph()
-    graph.parse(source=str(dump_path), format="turtle")
-    folded_pred = URIRef(BFFI_FOLDED_LABEL_URI)
-
-    before = len(graph)
-    for label_pred in (SKOS.prefLabel, SKOS.altLabel):
-        # Snapshot the iterable; modifying the graph mid-iteration is
-        # not guaranteed safe in rdflib's store backends.
-        for subject, _, label in list(graph.triples((None, label_pred, None))):
-            if not isinstance(label, Literal):
-                continue
-            folded_value = fold_label(str(label))
-            if not folded_value:
-                continue
-            graph.add((subject, folded_pred, Literal(folded_value)))
-    added = len(graph) - before
-
-    payload = graph.serialize(format="turtle").encode("utf-8")
-    _atomic_write_bytes(dump_path, payload)
-    return added
-
-
 _RDFXML_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
     {"application/rdf+xml", "text/xml", "application/xml"}
 )
@@ -359,7 +310,6 @@ def run(
     vocabs: tuple[FintoVocab, ...] = FINTO_VOCABS,
     http_client: httpx.Client | None = None,
     now: datetime | None = None,
-    fold_pref_labels: bool = False,
 ) -> FintoLoadSummary:
     """Refresh the Finto-vocab named graphs in Fuseki.
 
@@ -368,24 +318,6 @@ def run(
     named graph via Graph Store Protocol. The PUT replaces the graph
     so a re-run produces a clean graph rather than accumulating stale
     triples from old dumps.
-
-    ``fold_pref_labels=True`` post-processes each downloaded dump by
-    adding ``bffi:foldedLabel`` triples for every ``skos:prefLabel``
-    and ``skos:altLabel`` (P-10 Phase C.1). The materialised triples
-    are inert until the **resolver-side** feature flag
-    ``BFFI_M9_TIER0_EXPANSION`` is also enabled — using the tier-0
-    expansion path therefore needs **both** flags flipped on.
-
-    **Default is False** because the 2026-05-13 Phase C bench attempt
-    (see `docs/performance/2026-05-13-5k-m2-max-phase-c-attempt.md`)
-    found Phase 1 SPARQL traffic ~doubled with the materialised
-    predicate present, *without* an offsetting reduction in tier-2
-    picker calls on the May 12 corpus. Until a clean re-bench
-    demonstrates a net win, both flags stay default-off so
-    ``load-finto`` runs and Fuseki query times match the post-Phase-A2
-    baseline. Operators opting into tier-0 expansion flip
-    ``--fold-pref-labels`` here AND ``BFFI_M9_TIER0_EXPANSION=1`` at
-    reconcile time.
     """
     settings = get_settings()
     fuseki = fuseki_url or settings.fuseki_url
@@ -426,13 +358,6 @@ def run(
                 dump_path, max_age_days=max_age_days, now=timestamp
             )
             bytes_downloaded = 0 if cache_hit else _download_dump(http_client, vocab, dump_path)
-            if fold_pref_labels and bytes_downloaded > 0:
-                # Materialise bffi:foldedLabel on freshly-downloaded dumps.
-                # Cached dumps are skipped to avoid re-parsing multi-hundred-
-                # MB Turtle on every load. Operators flipping the flag for
-                # the first time after Phase C ships should pass --force to
-                # rebuild the cache.
-                materialise_folded_labels(dump_path)
             per_vocab_state.append((vocab, dump_path, bytes_downloaded, cache_hit))
 
         groups: dict[str, list[Path]] = {}

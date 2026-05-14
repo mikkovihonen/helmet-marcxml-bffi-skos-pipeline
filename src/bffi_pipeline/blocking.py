@@ -188,11 +188,12 @@ def fold_label(s: str) -> str:
     4. ``str.casefold`` — lower-case for case-insensitive match.
     5. Whitespace collapse — ``" ".join(s.split())``.
 
-    The same function is used by ``load-finto`` to materialise
-    ``bffi:foldedLabel`` triples on every concept's ``skos:prefLabel``
-    and ``skos:altLabel``, and by ``FusekiConceptResolver`` to fold
-    the cataloguer literal before querying. Both sides go through
-    *exactly* the same composition so the folded forms align.
+    Used by the M9 reconcile picker-cache key composition
+    (:mod:`bffi_pipeline.stages.reconcile`) so diacritic-equivalent
+    cataloguer literals hit the same cached LLM verdict. Previously
+    also drove the P-10 Phase C tier-0 expansion path (yanked when
+    P-14 was abandoned 2026-05-14 — see
+    ``docs/plans/abandoned/p-14-m9-phase-c-audit.md``).
     """
     stripped = strip_label_decoration(s)
     nfkc = unicodedata.normalize("NFKC", stripped)

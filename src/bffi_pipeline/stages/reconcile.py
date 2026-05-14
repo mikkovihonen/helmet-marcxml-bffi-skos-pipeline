@@ -2460,10 +2460,6 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             "concurrency": concurrency,
             "phase1_concurrency": phase1_concurrency,
             "field_timeout_seconds": field_timeout_seconds,
-            "tier0_expansion_enabled": (
-                local_resolver is not None
-                and getattr(local_resolver, "tier0_expansion_enabled", False)
-            ),
             "picker_ordering": picker_ordering,
         },
     )
