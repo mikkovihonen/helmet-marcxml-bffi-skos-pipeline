@@ -4,6 +4,8 @@
 /scratchpad/
 # P-32: canonical runs root (BFFI_RUNS_ROOT, default <repo>/runs/).
 /runs/
+# Runtime logs (exporter, pipeline drivers) — operator-side artifacts.
+/logs/
 # Eval JSON summaries (BFFI_EVAL_DIR, default <repo>/eval-runs/).
 # bffi-pipeline eval writes one ``<run-label>.json`` per invocation.
 /eval-runs/

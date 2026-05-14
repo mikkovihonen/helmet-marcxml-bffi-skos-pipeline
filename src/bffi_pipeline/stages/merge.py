@@ -58,6 +58,11 @@ from bffi_pipeline.uris import mint_work_uri
 CANONICAL_FILENAME: Final[str] = "canonical.ttl"
 CANONICAL_MAP_FILENAME: Final[str] = "canonical-map.jsonl"
 CANONICAL_CONFLICTS_FILENAME: Final[str] = "canonical-conflicts.jsonl"
+#: Records that can't be minted because they lack the canonical-key
+#: inputs (creator URI + pref_label). Distinct from conflicts —
+#: ``canonical-conflicts.jsonl`` stays for real M6 same/different
+#: contradictions only. See the docstring on :class:`MintFailure`.
+CANONICAL_MINT_FAILURES_FILENAME: Final[str] = "canonical-mint-failures.jsonl"
 JUDGE_DECISIONS_FILENAME: Final[str] = "judge-decisions.jsonl"
 HELMET_MAP_FILENAME: Final[str] = "helmet-map.jsonl"
 
@@ -161,11 +166,56 @@ def _load_decisions(path: Path) -> list[JudgeDecisionRow]:
 
 @dataclass(frozen=True)
 class GroupConflict:
-    """One contradictory group flagged for human review."""
+    """One contradictory group flagged for human review.
+
+    Produced by :func:`_detect_conflicts` when union-find membership
+    contradicts an M6 ``different_work`` edge — i.e. the judge said
+    A=B *and* A≠B (transitively, via some same/different cycle).
+    Cataloguer adjudicates which decision was wrong.
+
+    NOT used for records that simply lack canonical-mint inputs (no
+    primary creator, no title). Those go through :class:`MintFailure`
+    and land in a separate file so the conflicts review queue stays
+    free of noise. See :func:`apply_merge` below.
+    """
 
     members: list[str]
     conflicting_pair: tuple[str, str]
     same_work_path: list[tuple[str, str]]
+
+
+@dataclass(frozen=True)
+class MintFailure:
+    """One raw Work that can't be minted as a canonical Work.
+
+    The canonical Work URI is keyed on ``(creator_uri, pref_label)``
+    via :func:`bffi_pipeline.uris.mint_work_uri`. When either input
+    is missing on the anchor of a union-find group, M8 emits one
+    of these instead of folding the group into the canonical graph.
+
+    Lives in a separate file (``canonical-mint-failures.jsonl``)
+    rather than ``canonical-conflicts.jsonl`` because the two
+    failure modes mean different things to cataloguer review: a
+    conflict is "M6 contradicted itself; pick which verdict was
+    right"; a mint failure is "the record lacks a primary creator
+    and/or a title; either fix the source data or accept that it
+    won't merge with anything."
+
+    The dominant cause of mint failures is the *anonymous-main-entry*
+    cataloguing pattern (MARC 245 ind1=0, no 1XX, contributors in
+    700) — edited compilations, anonymous works, anthologies. A
+    cataloguer-driven proposal could lift those into the canonical
+    graph via an editor-anchored mint key; see P-NN proposed.
+    """
+
+    members: list[str]
+    """All raw Work URIs that union-find clustered together."""
+    anchor_work_uri: str
+    """The first member's raw Work URI — the one M8 inspected."""
+    missing_inputs: list[str]
+    """Which inputs were missing on the anchor. Values: ``creator_uri``,
+    ``pref_label``. Both can be present in the same row when the anchor
+    has neither."""
 
 
 def _detect_conflicts(
@@ -687,6 +737,31 @@ def _emit_conflicts(path: Path, conflicts: Iterable[GroupConflict]) -> None:
     tmp.replace(path)
 
 
+def _emit_mint_failures(path: Path, mint_failures: Iterable[MintFailure]) -> None:
+    """Atomic write of the per-record mint-failure JSONL.
+
+    Sorted by ``anchor_work_uri`` for byte-stable diffs across re-runs
+    of the same input.
+    """
+    rows = sorted(mint_failures, key=lambda f: f.anchor_work_uri)
+    payload = "\n".join(
+        json.dumps(
+            {
+                "members": list(f.members),
+                "anchor_work_uri": f.anchor_work_uri,
+                "missing_inputs": list(f.missing_inputs),
+            },
+            ensure_ascii=False,
+        )
+        for f in rows
+    )
+    if payload:
+        payload += "\n"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(path)
+
+
 # --- Canonical Turtle emission -------------------------------------------
 
 
@@ -1044,9 +1119,11 @@ class MergeResult:
     uncertain_decisions: int
     canonical_works: int
     conflict_groups: int
+    mint_failures: int
     canonical_path: str
     map_path: str
     conflicts_path: str
+    mint_failures_path: str
 
     def render(self) -> str:
         """Format the merge result as paste-ready text for the merge CLI."""
@@ -1059,9 +1136,11 @@ class MergeResult:
                 f"  uncertain decisions:     {self.uncertain_decisions:,}",
                 f"  canonical Works:         {self.canonical_works:,}",
                 f"  conflict groups:         {self.conflict_groups:,}",
+                f"  mint failures:           {self.mint_failures:,}",
                 f"  canonical Turtle:        {self.canonical_path}",
                 f"  canonical map JSONL:     {self.map_path}",
                 f"  conflicts JSONL:         {self.conflicts_path}",
+                f"  mint-failures JSONL:     {self.mint_failures_path}",
             )
         )
 
@@ -1096,6 +1175,7 @@ def apply_merge(
     output_path: Path | None = None,
     map_path: Path | None = None,
     conflicts_path: Path | None = None,
+    mint_failures_path: Path | None = None,
     helmet_map_path: Path | None = None,
     variants_sidecar_path: Path | None = None,
     work_records: dict[str, CanonicalWorkInputs] | None = None,
@@ -1109,6 +1189,14 @@ def apply_merge(
     output_path = output_path or (settings.data_dir / CANONICAL_FILENAME)
     map_path = map_path or (settings.data_dir / CANONICAL_MAP_FILENAME)
     conflicts_path = conflicts_path or (settings.data_dir / CANONICAL_CONFLICTS_FILENAME)
+    # Default mint-failures alongside ``output_path`` (not via
+    # ``settings.data_dir``) so tests passing only ``output_path`` find
+    # an mkdir'd parent. ``output_path.parent`` always equals
+    # ``settings.data_dir`` in the no-override case, so production
+    # callers see the same layout as before.
+    mint_failures_path = mint_failures_path or (
+        output_path.parent / CANONICAL_MINT_FAILURES_FILENAME
+    )
     helmet_map_path = helmet_map_path or (settings.data_dir / HELMET_MAP_FILENAME)
     variants_sidecar_path = variants_sidecar_path or (settings.data_dir / VARIANTS_SIDECAR_NAME)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1167,6 +1255,7 @@ def apply_merge(
     canonical_entries: list[CanonicalEntry] = []
 
     sorted_roots = sorted(groups)
+    mint_failures: list[MintFailure] = []
     for processed, root in enumerate(sorted_roots, start=1):
         member_uris = groups[root]
         if member_uris[0] in conflict_roots:
@@ -1176,14 +1265,23 @@ def apply_merge(
             continue
         anchor = members[0]
         if not anchor.creator_uri or not anchor.pref_label:
-            # Without a stable (creator_uri, pref_label) pair we can't mint a
-            # canonical URI — flag the group as a one-off conflict so M9 / human
-            # review surfaces it.
-            conflicts.append(
-                GroupConflict(
+            # Anchor lacks the canonical-key inputs. Most often this is
+            # the anonymous-main-entry cataloguing pattern (no MARC 1XX
+            # primary creator on edited compilations). Route to
+            # ``canonical-mint-failures.jsonl`` — a SEPARATE file from
+            # ``canonical-conflicts.jsonl`` so cataloguer review of real
+            # M6 same/different contradictions isn't drowned in noise.
+            # See the docstring on :class:`MintFailure`.
+            missing: list[str] = []
+            if not anchor.creator_uri:
+                missing.append("creator_uri")
+            if not anchor.pref_label:
+                missing.append("pref_label")
+            mint_failures.append(
+                MintFailure(
                     members=member_uris,
-                    conflicting_pair=(anchor.work_uri, anchor.work_uri),
-                    same_work_path=[],
+                    anchor_work_uri=anchor.work_uri,
+                    missing_inputs=missing,
                 )
             )
             continue
@@ -1224,6 +1322,7 @@ def apply_merge(
     tmp_ttl.replace(output_path)
     _emit_canonical_map(map_path, canonical_entries)
     _emit_conflicts(conflicts_path, conflicts)
+    _emit_mint_failures(mint_failures_path, mint_failures)
     del variants_bound  # value is for future telemetry; not yet exposed
 
     emit_if_active(
@@ -1233,6 +1332,7 @@ def apply_merge(
             "total_works": len(work_records),
             "canonical_works": len(canonical_entries),
             "conflict_groups": len(conflicts),
+            "mint_failures": len(mint_failures),
             "same_work_decisions": len(same_work_edges),
             "different_work_decisions": len(different_work_edges),
             "uncertain_decisions": uncertain_count,
@@ -1245,9 +1345,11 @@ def apply_merge(
         uncertain_decisions=uncertain_count,
         canonical_works=len(canonical_entries),
         conflict_groups=len(conflicts),
+        mint_failures=len(mint_failures),
         canonical_path=str(output_path),
         map_path=str(map_path),
         conflicts_path=str(conflicts_path),
+        mint_failures_path=str(mint_failures_path),
     )
 
 
@@ -1366,6 +1468,7 @@ __all__ = [
     "CANONICAL_CONFLICTS_FILENAME",
     "CANONICAL_FILENAME",
     "CANONICAL_MAP_FILENAME",
+    "CANONICAL_MINT_FAILURES_FILENAME",
     "HELMET_MAP_FILENAME",
     "JUDGE_DECISIONS_FILENAME",
     "CanonicalEntry",
@@ -1375,6 +1478,7 @@ __all__ = [
     "HelmetMapEntry",
     "JudgeDecisionRow",
     "MergeResult",
+    "MintFailure",
     "SubjectTarget",
     "apply_merge",
     "extract_work_metadata",

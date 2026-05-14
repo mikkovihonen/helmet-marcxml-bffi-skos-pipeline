@@ -258,6 +258,79 @@ def test_conflict_a_eq_b_a_neq_c_b_eq_c_is_flagged(tmp_path: Path) -> None:
     assert len(conflict_rows) == 1
     assert sorted(conflict_rows[0]["members"]) == sorted([WORK_A, WORK_B, WORK_C])
     assert sorted(conflict_rows[0]["conflicting_pair"]) == sorted([WORK_A, WORK_C])
+    # Mint-failures file is empty — this WAS a real M6 contradiction,
+    # not a missing-canonical-key case.
+    mint_failures_path = tmp_path / "canonical-mint-failures.jsonl"
+    assert mint_failures_path.read_text() == ""
+
+
+def test_anonymous_main_entry_routes_to_mint_failures_not_conflicts(tmp_path: Path) -> None:
+    """A record without ``creator_uri`` (the anonymous-main-entry MARC pattern —
+    no 1XX, just 245 + 700 contributors) lands in ``canonical-mint-failures.jsonl``,
+    NOT in ``canonical-conflicts.jsonl``.
+
+    Bug observed on the 2026-05-14 helmet-5k-full bench:
+    707 of 709 ``canonical-conflicts.jsonl`` rows were anonymous-main-entry
+    records (edited compilations / anonymous works) misclassified as
+    "conflicts" with empty ``same_work_path`` and a ``conflicting_pair`` of
+    ``(URI, URI)``. The fix separates the two failure modes into two files
+    so cataloguer review of real M6 contradictions stays unpolluted.
+    """
+    work_records = {
+        WORK_A: CanonicalWorkInputs(
+            work_uri=WORK_A,
+            creator_uri=None,  # anonymous main entry — no MARC 1XX in source
+            pref_label="Hanko toisessa maailmansodassa",
+            expression_uris=[EXPR_A],
+            helmet_identifiers=[("http://example.org/ident/a1", "b20363308")],
+        ),
+    }
+    helmet_entries = {WORK_A: HelmetMapEntry(WORK_A, "b20363308", "2026-04-12T08:31:02+00:00")}
+    _canonical, map_path, conflicts = _run(
+        tmp_path, [], work_records=work_records, helmet_entries=helmet_entries
+    )
+
+    # Conflicts file stays empty — this is NOT an M6 contradiction.
+    assert conflicts.read_text() == ""
+    # Canonical map stays empty — nothing gets minted without creator_uri.
+    map_rows = [json.loads(line) for line in map_path.read_text().splitlines() if line.strip()]
+    assert map_rows == []
+
+    # Mint-failures file carries the record with ``creator_uri`` flagged.
+    mint_failures_path = tmp_path / "canonical-mint-failures.jsonl"
+    mint_rows = [
+        json.loads(line) for line in mint_failures_path.read_text().splitlines() if line.strip()
+    ]
+    assert len(mint_rows) == 1
+    assert mint_rows[0]["anchor_work_uri"] == WORK_A
+    assert mint_rows[0]["members"] == [WORK_A]
+    assert mint_rows[0]["missing_inputs"] == ["creator_uri"]
+
+
+def test_record_without_pref_label_routes_to_mint_failures(tmp_path: Path) -> None:
+    """A record with creator but no ``pref_label`` (e.g. MARC 100 present but
+    245$a missing or empty) also lands in mint-failures, with both inputs
+    or just ``pref_label`` flagged."""
+    work_records = {
+        WORK_A: CanonicalWorkInputs(
+            work_uri=WORK_A,
+            creator_uri=AGENT_TOLSTOY,
+            pref_label=None,
+            expression_uris=[EXPR_A],
+            helmet_identifiers=[("http://example.org/ident/a1", "b999")],
+        ),
+    }
+    helmet_entries = {WORK_A: HelmetMapEntry(WORK_A, "b999", "2026-04-12T08:31:02+00:00")}
+    _canonical, _map_path, _conflicts = _run(
+        tmp_path, [], work_records=work_records, helmet_entries=helmet_entries
+    )
+
+    mint_failures_path = tmp_path / "canonical-mint-failures.jsonl"
+    mint_rows = [
+        json.loads(line) for line in mint_failures_path.read_text().splitlines() if line.strip()
+    ]
+    assert len(mint_rows) == 1
+    assert mint_rows[0]["missing_inputs"] == ["pref_label"]
 
 
 # --- Identifier accumulation ---------------------------------------------
