@@ -7,7 +7,7 @@
 
 **Phase commits**:
 - Phase A (editor-anchored fallback + `bffi-prov:mintAnchor` predicate + translator-role blocklist + 4 unit tests): `9261dfd` (graduation + code + tests, 2026-05-14).
-- Phase B (truly-anonymous title-only mint via `(title, content-type, language)` synthetic anchor + 6 unit tests + plan graduation to completed/): `<unfilled>` (set on the same commit that fills this).
+- Phase B (truly-anonymous title-only mint via `(title, content-type, language)` synthetic anchor + 6 unit tests + plan graduation to completed/): `c2d5b2b` (code + tests + graduation, 2026-05-14).
 - ~~Phase C (mint-key refactor)~~ — deferred indefinitely 2026-05-14. Phase A + B together brought corpus coverage to 99.96 % of the helmet-5k bench's M2-succeeded set (4870 / 4872 records, leaving only the 2 real M6 conflicts unminted). Phase C's 5×-M8-walltime + full-Fuseki-replace cost isn't justified; a future proposal can revisit if a bench surfaces material residual.
 
 If `main` moves before Phase B is acted on, re-verify with:

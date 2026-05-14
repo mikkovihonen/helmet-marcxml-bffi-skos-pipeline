@@ -33,7 +33,7 @@ P-32 (Run lifecycle management) graduated to
 [`../completed/`](../completed/) at `fdae706` (Phase D — final phase).
 
 P-34 (M8 mint for anonymous-main-entry records) graduated to
-[`../completed/`](../completed/) at `<unfilled>` after Phase B
+[`../completed/`](../completed/) at `c2d5b2b` after Phase B
 shipped (synthetic anchor on title + content-type + language,
 recovering the final 45 mint-failure records). Phase C
 (mint-key refactor) was removed from the DoD — corpus coverage
