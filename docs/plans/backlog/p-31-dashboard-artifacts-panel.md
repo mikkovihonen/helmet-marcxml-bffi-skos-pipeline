@@ -42,6 +42,16 @@ The proposal called for CSV. **Switched to TSV** based on operator input during 
 
 UTF-8 without BOM (Excel handles UTF-8 TSV correctly; the BOM was a CSV-Excel quirk that doesn't carry over).
 
+### One TSV per run, identified by `run_uuid` in the filename
+
+The two TSV files are **strictly per-run** — the `run_uuid` is in the filename, never in a "growing file across runs" pattern. This is a load-bearing requirement of the cataloguer workflow, not a hygiene preference:
+
+- The cataloguer fills in `reviewed_by` / `reviewed_at` / `notes` columns directly in the file. A cumulative TSV would interleave reviewed rows from earlier runs with un-reviewed rows from the current run, and the cataloguer would lose track of which findings have been acted on. Per-run isolation makes "this file = this run's review queue" unambiguous.
+- The dashboard's "Run artifacts" panel filters by `$active_run`; the file the operator clicks through to is the one for the run on screen, no mental mapping required.
+- When the cataloguer hands a reviewed TSV back, the receiving operator knows exactly which run it pertains to — no merge-with-cumulative-file step that could lose annotations.
+
+The cost (more files on disk) is genuinely small and handled by the hygiene step in R4. The benefit (clean per-run review state) is what the workflow needs to work at all.
+
 ## Definition of done
 
 ### Phase A.1 — Path gauge + emit-site wiring (solo)
@@ -153,7 +163,7 @@ UTF-8 without BOM (Excel handles UTF-8 TSV correctly; the BOM was a CSV-Excel qu
 - **R1 — TSV escaping edge cases.** Bibliographic data can carry tabs (rare), quotes (`"`), and newlines (multi-line subjects). Mitigated by `csv.writer(delimiter='\t', quoting=csv.QUOTE_MINIMAL)`; unit test pins the round-trip on a worst-case fixture. Never hand-roll.
 - **R2 — Concurrent appends.** Stages run sequentially today (M2 → M3 → … → M9 → M8); within a stage there's no parallel writer. If a future plan parallelises within a stage (e.g., multi-process M3), `append_*_row` needs file-locking. Phase B + C document the single-process assumption in the helper's docstring; revisit if/when parallelism lands.
 - **R3 — File size at 800 k scale.** Source TSV: at 10 % failure rate, ~80 k rows × ~250 B = ~20 MB. Excel handles 1 M rows. Target TSV: smaller (~5 % of records reach the review band). No mitigation needed.
-- **R4 — Per-run TSV proliferation.** Each run produces two TSVs under `BFFI_DATA_DIR`. After 100 runs in a bench-heavy week that's 200 files. Operator hygiene: `find <BFFI_DATA_DIR> -name 'cataloguer-*.tsv' -mtime +30 -delete`. Flag in the runbook.
+- **R4 — Per-run TSV accumulation is expected; hygiene is the operator's job.** Per-run files are a load-bearing feature, not a risk (see "One TSV per run" in Goal). Each run produces two TSVs under `BFFI_DATA_DIR`; after 100 runs in a bench-heavy week that's 200 files. The real risk is the operator *forgetting to archive or clean up* reviewed TSVs after the cataloguer hands them back, which leaves the `BFFI_DATA_DIR` cluttered and obscures which runs still have outstanding review work. Mitigation: document the cleanup pattern in the operator runbook (e.g. `find <BFFI_DATA_DIR> -name 'cataloguer-*.tsv' -mtime +30 -delete` after the operator has confirmed the rows are archived in the cataloguer-handback location), and surface "TSVs awaiting cleanup" as a Phase A.1 follow-up gauge if it becomes a real problem in practice.
 - **R5 — `skosmos_url` is empty in v1.** Cataloguer copies the `canonical_work_uri` into Skosmos search or a Fuseki SPARQL query manually. Acceptable v1; populate the column when Skosmos has a stable URL pattern.
 - **R6 — Path-gauge cardinality drift.** Adding a `kind` value should remain a deliberate act (the `Literal[...]` type forces a code change with review). At 12 kinds × active runs × 2 states the budget is comfortable; at 30+ kinds revisit. Documented inline.
 - **R7 — Phase ordering temptation.** A.1 plus a synthetic-test of the gauge can land before the paired A.2 session; this is fine. Resist the urge to write a "preview" version of the Grafana panel JSON solo — that violates the pair-programming constraint and creates two iterations where one would have served.
