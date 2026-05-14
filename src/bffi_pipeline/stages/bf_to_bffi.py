@@ -48,6 +48,12 @@ _SPARQL_DIR: Final[Path] = _BFFI_PIPELINE_REPO_ROOT / "sparql"
 #: P-11 Phase A progress cadence for M3 bf-to-bffi.
 _M3_PROGRESS_CADENCE: Final[int] = 100
 
+#: P-19 Phase A — concatenated BFFI corpus written next to the per-
+#: record ``bffi/`` dir so M8's load phase reads one stream instead of
+#: 800 k individual files. M8 keeps the same filename constant —
+#: stages don't import each other per CLAUDE.md "Stage isolation".
+BFFI_CORPUS_FILENAME: Final[str] = "bffi-corpus.ttl"
+
 _LANG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
 # 3-letter MARC language code -> BCP-47 2-letter. The first three —
 # fi/sv/en — are the *primary* display languages per CLAUDE.md and the
@@ -770,6 +776,66 @@ def _iter_bibframe_files(bibframe_dir: Path) -> Iterator[Path]:
     yield from sorted(p for p in bibframe_dir.glob("*.rdf") if not p.name.startswith("_"))
 
 
+def _write_bffi_corpus(bffi_dir: Path, corpus_path: Path) -> int:
+    """Concatenate every per-record BFFI Turtle into a single corpus file.
+
+    M8's load (~8 min on 20 k bench, projected ~5.5 h on the 800 k
+    corpus) is dominated by per-file ``open`` + parser-init overhead,
+    not by graph size. Layering one ``bffi-corpus.ttl`` stream over
+    the per-record store collapses ``len(bffi/*.ttl)`` opens into one
+    on M8's side. P-19 Phase A.
+
+    Idempotent: skip when the existing concat is at least as new as
+    every per-record ``.ttl``. The per-record layout stays canonical
+    — the concat is a derived view.
+
+    ``@prefix`` declarations are deduplicated (single block at the
+    top, per-record headers stripped) to avoid a multi-millionfold
+    redeclaration that rdflib's parser would walk on a full-corpus
+    parse. Returns the number of per-record files concatenated, or
+    ``0`` when the concat was skipped or no input files existed.
+    """
+    if not bffi_dir.is_dir():
+        return 0
+    per_record = sorted(bffi_dir.glob("*.ttl"))
+    if not per_record:
+        return 0
+    if corpus_path.is_file():
+        corpus_mtime = corpus_path.stat().st_mtime
+        if all(p.stat().st_mtime <= corpus_mtime for p in per_record):
+            return 0
+
+    seen_prefixes: set[str] = set()
+    prefix_lines: list[str] = []
+    body_chunks: list[str] = []
+    for path in per_record:
+        with path.open("r", encoding="utf-8") as fh:
+            body_lines: list[str] = []
+            for line in fh:
+                stripped = line.strip()
+                if stripped.startswith("@prefix") or stripped.startswith("@base"):
+                    if stripped not in seen_prefixes:
+                        seen_prefixes.add(stripped)
+                        prefix_lines.append(line.rstrip("\n"))
+                    continue
+                body_lines.append(line)
+            body_chunks.append("".join(body_lines).rstrip("\n"))
+
+    tmp = corpus_path.with_suffix(corpus_path.suffix + ".tmp")
+    corpus_path.parent.mkdir(parents=True, exist_ok=True)
+    with tmp.open("w", encoding="utf-8") as fh:
+        for line in prefix_lines:
+            fh.write(line + "\n")
+        fh.write("\n")
+        for chunk in body_chunks:
+            if not chunk.strip():
+                continue
+            fh.write(chunk)
+            fh.write("\n\n")
+    os.replace(tmp, corpus_path)
+    return len(per_record)
+
+
 def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
@@ -909,6 +975,11 @@ def run(
             )
         summary.converted.append(bib_id)
 
+    # P-19 Phase A: write the concatenated BFFI corpus so M8's load
+    # phase doesn't open every per-record file individually. Skips
+    # when the existing concat is already fresh.
+    _write_bffi_corpus(base / "bffi", base / BFFI_CORPUS_FILENAME)
+
     emit_if_active(
         stage="m3",
         event="end",
@@ -924,6 +995,7 @@ def run(
 
 
 __all__ = [
+    "BFFI_CORPUS_FILENAME",
     "BffiSummary",
     "ValidationRow",
     "construct_bffi",

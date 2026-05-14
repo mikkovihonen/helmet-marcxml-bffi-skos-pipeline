@@ -1113,6 +1113,15 @@ def apply_merge(
     variants_sidecar_path = variants_sidecar_path or (settings.data_dir / VARIANTS_SIDECAR_NAME)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     merged_at = (now or datetime.now(UTC)).replace(microsecond=0)
+
+    # P-18: emit ``start`` immediately so the dashboard shows M8 as
+    # running during the BFFI-corpus load. On the 20 k bench the load
+    # is ~8 min wall before any other M8 work; without the early
+    # ``start`` the dashboard reports M8 as ``pending`` the whole
+    # time. The canonical-group count isn't known yet — it lands in
+    # the ``phase_boundary`` event below, once union-find completes.
+    emit_if_active(stage="m8", event="start")
+
     decisions = _load_decisions(decisions_path)
     same_work_edges = [(d.work_a, d.work_b) for d in decisions if d.decision == "same_work"]
     different_work_edges = [
@@ -1141,9 +1150,17 @@ def apply_merge(
         frozenset({d.work_a, d.work_b}): d for d in decisions
     }
 
-    # Now that ``groups`` is known we can emit ``start`` with the
-    # canonical-group count as the ETA denominator. P-12 follow-up.
-    emit_if_active(stage="m8", event="start", counters={"total": len(groups)})
+    # P-18: ``start`` already emitted at the top of the function;
+    # this event marks the load + union-find phase boundary and
+    # carries the canonical-group count as the ETA denominator for
+    # the emit loop below. Pattern mirrors M9's phase_boundary
+    # events between Phase 1 / 1.5 / 2 / 3.
+    emit_if_active(
+        stage="m8",
+        event="phase_boundary",
+        phase="emit",
+        counters={"total": len(groups)},
+    )
 
     g = Graph()
     _bind_prefixes(g)
@@ -1293,14 +1310,38 @@ def _apply_contrib_variants(
     return added
 
 
+#: P-19 Phase A — matches ``BFFI_CORPUS_FILENAME`` in
+#: ``stages/bf_to_bffi.py``. Stages don't import each other per
+#: CLAUDE.md "Stage isolation", so the filename is duplicated as a
+#: string constant on each side.
+_BFFI_CORPUS_FILENAME: Final[str] = "bffi-corpus.ttl"
+
+
 def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, CanonicalWorkInputs]:
-    """Read every BFFI Turtle + BIBFRAME RDF/XML under ``corpus_dir``."""
+    """Read every BFFI Turtle + BIBFRAME RDF/XML under ``corpus_dir``.
+
+    Fast-path (P-19 Phase A): when ``<corpus_dir>/bffi-corpus.ttl``
+    exists AND is at least as new as every per-record ``bffi/*.ttl``,
+    parse the concat in one ``Graph().parse()`` call. Otherwise fall
+    back to the per-record walk so partial M3 re-runs (where only a
+    handful of records were updated since the last concat) read
+    correct data.
+    """
     g = Graph()
     bffi_dir = corpus_dir / "bffi"
     bibframe_dir = corpus_dir / "bibframe"
-    if bffi_dir.is_dir():
+    corpus_file = corpus_dir / _BFFI_CORPUS_FILENAME
+
+    used_fast_path = False
+    if corpus_file.is_file() and bffi_dir.is_dir():
+        corpus_mtime = corpus_file.stat().st_mtime
+        if all(p.stat().st_mtime <= corpus_mtime for p in bffi_dir.glob("*.ttl")):
+            g.parse(str(corpus_file), format="turtle")
+            used_fast_path = True
+    if not used_fast_path and bffi_dir.is_dir():
         for path in sorted(bffi_dir.glob("*.ttl")):
             g.parse(str(path), format="turtle")
+
     if bibframe_dir.is_dir():
         for path in sorted(bibframe_dir.glob("*.rdf")):
             if not path.name.startswith("_"):

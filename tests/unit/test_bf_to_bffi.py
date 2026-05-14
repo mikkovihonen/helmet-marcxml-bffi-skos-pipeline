@@ -8,7 +8,9 @@ the language-tag retag on skos:prefLabel.
 
 from __future__ import annotations
 
+import os
 import textwrap
+import time
 from pathlib import Path
 
 from rdflib import Graph, Literal, URIRef
@@ -22,11 +24,13 @@ from bffi_pipeline.contrib_extract_llm import (
 from bffi_pipeline.contrib_variants import load_variant_claims
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import (
+    BFFI_CORPUS_FILENAME,
     _convert_one,
     _is_parseable_date,
     _sanitize_date_literals,
     _sanitize_uri,
     _sanitize_uri_whitespace,
+    _write_bffi_corpus,
     construct_bffi,
     post_process,
 )
@@ -998,3 +1002,79 @@ def test_convert_one_survives_record_with_malformed_date(tmp_path: Path) -> None
     # rdflib re-coerced the bad lexical form to datetime).
     reloaded = Graph()
     reloaded.parse(str(output_path), format="turtle")
+
+
+# --- P-19 corpus concat ---------------------------------------------------
+
+
+def test_p19_write_bffi_corpus_concatenates_with_deduped_prefixes(tmp_path: Path) -> None:
+    """P-19 Phase A — _write_bffi_corpus collapses N per-record Turtle
+    files into one stream with prefix declarations deduplicated.
+    Without dedup, an 800 k-record concat would carry N copies of the
+    same ``@prefix`` lines and slow rdflib's parser on M8's load.
+    """
+    bffi_dir = tmp_path / "bffi"
+    bffi_dir.mkdir()
+    (bffi_dir / "a.ttl").write_text(
+        "@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .\n"
+        "@prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi#> .\n"
+        "\n"
+        "<http://example.invalid/a> a bffi:Work .\n",
+        encoding="utf-8",
+    )
+    (bffi_dir / "b.ttl").write_text(
+        "@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .\n"
+        "@prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi#> .\n"
+        "\n"
+        "<http://example.invalid/b> a bffi:Work .\n",
+        encoding="utf-8",
+    )
+
+    corpus = tmp_path / BFFI_CORPUS_FILENAME
+    written = _write_bffi_corpus(bffi_dir, corpus)
+    assert written == 2
+
+    body = corpus.read_text(encoding="utf-8")
+    # Each prefix appears exactly once at the top.
+    assert body.count("@prefix bf:") == 1
+    assert body.count("@prefix bffi:") == 1
+    # Both record bodies survive into the concat.
+    assert "<http://example.invalid/a>" in body
+    assert "<http://example.invalid/b>" in body
+    # The concat parses as valid Turtle.
+    g = Graph()
+    g.parse(str(corpus), format="turtle")
+    subjects = {str(s) for s in g.subjects()}
+    assert "http://example.invalid/a" in subjects
+    assert "http://example.invalid/b" in subjects
+
+
+def test_p19_write_bffi_corpus_is_idempotent_when_fresh(tmp_path: Path) -> None:
+    """P-19 Phase A — re-running the concat after a no-op M3 run
+    (everything idempotent-skipped) is a fast no-op: when the
+    existing concat is at least as new as every per-record .ttl, the
+    helper returns 0 without rewriting.
+    """
+    bffi_dir = tmp_path / "bffi"
+    bffi_dir.mkdir()
+    (bffi_dir / "a.ttl").write_text(
+        "@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .\n<http://x/a> a bf:Work .\n",
+        encoding="utf-8",
+    )
+    corpus = tmp_path / "bffi-corpus.ttl"
+
+    first = _write_bffi_corpus(bffi_dir, corpus)
+    assert first == 1
+
+    # Bump concat mtime past every per-record .ttl so the freshness
+    # check unambiguously declines the second rewrite even on a
+    # filesystem with coarse mtime resolution.
+    later = time.time() + 5
+    os.utime(corpus, (later, later))
+    bumped_mtime = corpus.stat().st_mtime
+
+    second = _write_bffi_corpus(bffi_dir, corpus)
+    assert second == 0
+    # The bumped mtime survives — the helper short-circuited and
+    # never rewrote.
+    assert corpus.stat().st_mtime == bumped_mtime
