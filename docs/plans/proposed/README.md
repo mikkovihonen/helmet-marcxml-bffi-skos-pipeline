@@ -115,6 +115,21 @@ plan documents *when the execution was scheduled*.
   BFFI corpus the whole time. Move the M8 ``start`` event to the
   top of ``merge.run()`` and add a ``phase_boundary`` once
   ``len(groups)`` is known. ~5 lines.
+- [`prop-21-m6-translation-hallucination-mitigation.md`](prop-21-m6-translation-hallucination-mitigation.md)
+  — `proposed`. Sibling of prop-20. A SECOND false-positive merge
+  on the 2026-05-13 overnight run — b23008490 ("Alvar Aalto :
+  taide ja moderni muoto" 2017, fin) and b24731298 ("Alvar Aalto :
+  Maison Louis Carré" 2018, fre) — escalated correctly out of
+  M5 (sim 0.844 < 0.90) but **M6's LLM judge said `same_work`
+  at conf 0.95**, hallucinating an RDA translation relationship.
+  Two compounding layers: the LLM over-applied translation
+  inference, AND both records put deceased Aalto in MARC 100
+  (Helmet's subject-of-art-book cataloguing convention).
+  Proposes three phases — A: prompt hardening (~half day);
+  B: M2/M3 100-as-subject demotion via deceased-person + posthumous
+  -publication-window detection (1-2 days); C: post-pick
+  corroborating-signal validation at M6 (1 day). Composes with
+  prop-20 (M5 layer) and prop-16 (fallback gating).
 - [`prop-20-auto-merge-false-positive-mitigation.md`](prop-20-auto-merge-false-positive-mitigation.md)
   — `proposed`. M5's auto-merge band (sim ≥ 0.90 → ``same_work``
   without M6 LLM verification) caught a false positive on the
