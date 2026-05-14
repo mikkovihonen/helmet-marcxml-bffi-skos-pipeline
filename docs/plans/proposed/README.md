@@ -115,49 +115,24 @@ Operational sequence:
    the dashboard in its final shape rather than auditing a surface
    about to grow.
 3. **P-32** — run lifecycle management (manifest + list + prune +
-   tagging CLI). Surfaced during P-31 review (per-run TSV
-   accumulation is a symptom of the wider run-on-disk problem).
-   Composes with P-31 — operator hygiene for the per-run TSVs lives
-   here. Ships *before* P-30 so the new run-manifest surface is in
-   the audit's truth-table catalogue.
+   tagging CLI + canonical root + migration + Prometheus reset +
+   pre-run Fuseki clear). Graduated to
+   [`../backlog/p-32-run-lifecycle-management.md`](../backlog/p-32-run-lifecycle-management.md)
+   on 2026-05-14 with the proposal's open questions resolved
+   (hard-delete v1 with `--dry-run` default, single
+   `BFFI_RUNS_ROOT`, repo-local default `<repo>/runs/`, exporter
+   PID at `<BFFI_RUNS_ROOT>/.exporter.pid`, Prometheus admin API
+   on by default in `docker-compose.yml`, Phase H opt-out via
+   `--no-clear-fuseki`, prune adds matching `--reset-fuseki` flag).
+   Eight phases, ready to execute. Ships before P-30 so the new
+   run-manifest surface + canonical layout + Fuseki clear semantics
+   are in the audit's truth-table catalogue.
 4. **P-30** — critical audit + truth-table sign-off. Audits the
    P-31 + P-32 additions as part of its catalogue.
 5. **P-20 through P-29** — unblocked once gate (4) clears.
 
 ### Proposals
 
-- [`p-32-run-lifecycle-management.md`](p-32-run-lifecycle-management.md)
-  — `proposed`. Surfaced during P-31 review (the per-run TSV
-  accumulation R4 framing made clear the underlying issue is wider
-  than just TSVs). Each pipeline run drops 25-50 GB of artifacts at
-  full-corpus scale; today the operator manages run accumulation
-  by hand-tracking which `BFFI_DATA_DIR` belongs to which bench
-  and `rm -rf`ing the rest. **Six failure modes**: no registry of
-  what runs exist, no "delete older than X" pattern, no
-  tag-protection concept, no canonical location, no way to keep
-  Prometheus + the dashboard in sync with on-disk reality after
-  prune, **and Fuseki accumulates triples across runs (two runs
-  layer canonical Works + provenance triples on top of each other,
-  breaking reproducibility)**. **Eight phases**: A `bffi-run.json`
-  per-run manifest, B `runs list`, C `runs prune` (--dry-run default,
-  --apply required, refuses to delete without a filter that excludes
-  some runs), D `runs tag` / `untag` / `info`, E canonical
-  `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs (deprecates
-  operator-picked `BFFI_DATA_DIR`), F one-time `runs migrate`
-  command that sweeps legacy run-shaped dirs out of `scratchpad/`
-  / `data/` into the canonical root with synthesised manifests,
-  G `prune --reset-exporter --reset-prometheus` that restarts the
-  metrics exporter and calls Prometheus's TSDB admin API to delete
-  the pruned run's series, **H pre-run Fuseki clear** that drops
-  every named graph under `settings.graph_base` (run output:
-  `<graph_base>bffi-works`, `<graph_base>provenance`) at pipeline
-  init, leaving vocabulary graphs (Finto, YSO, KANTO, allars,
-  SLM, MUSO at their own URI namespaces) untouched. The
-  preserve-vs-wipe boundary is encoded in the URI prefix; no
-  whitelist to maintain. Triple-count safety threshold catches
-  misconfigured `graph_base`. Sequences before P-30 so all new
-  surfaces (manifest, CLI, canonical-root invariant, reset
-  machinery, pre-run clear semantics) are in the audit truth-table.
 - [`p-30-observability-audit-trail-critical-audit.md`](p-30-observability-audit-trail-critical-audit.md)
   — `proposed`. Triggered by the 2026-05-13 `used_cascade` near-
   miss. Catalogues every observability + audit-trail surface
@@ -345,10 +320,15 @@ P-17, P-18, and P-19 graduated and shipped on 2026-05-14; see
 [`../completed/p-17-exporter-multi-sidecar-discovery.md`](../completed/p-17-exporter-multi-sidecar-discovery.md),
 [`../completed/p-18-m8-emit-start-before-corpus-load.md`](../completed/p-18-m8-emit-start-before-corpus-load.md),
 [`../completed/p-19-m8-corpus-load-throughput.md`](../completed/p-19-m8-corpus-load-throughput.md).
-P-31 graduated to backlog on 2026-05-14, ready to execute; see
-[`../backlog/p-31-dashboard-artifacts-panel.md`](../backlog/p-31-dashboard-artifacts-panel.md).
-First graduation under the unified `p-NN-` naming, done as a
-single `git mv` + content rewrite per the new convention.)_
+P-31 and P-32 graduated to backlog on 2026-05-14, ready to
+execute; see
+[`../backlog/p-31-dashboard-artifacts-panel.md`](../backlog/p-31-dashboard-artifacts-panel.md)
+and
+[`../backlog/p-32-run-lifecycle-management.md`](../backlog/p-32-run-lifecycle-management.md).
+First graduations under the unified `p-NN-` naming; both done as a
+`git mv` rename commit followed by a content-rewrite commit so
+`git log --follow` cleanly traces the lineage without operators
+having to pass `-M20` at log time.)_
 
 ## Graduated / completed / abandoned
 
