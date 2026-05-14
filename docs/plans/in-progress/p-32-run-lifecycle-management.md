@@ -20,7 +20,7 @@ docker-compose.yml`.
 - Phase E (canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs): `1b9f1f0` (code + 5 unit tests + `.env.example` migration note, 2026-05-14).
 - ~~Phase F (one-time `bffi-pipeline runs migrate` for legacy run dirs)~~ — **dropped 2026-05-14**, see "What this plan does NOT do". Post-Phase-E new runs already land canonical; legacy data in `scratchpad/`, `data/` etc. stays where it is as historical artifact. A future `runs adopt` command can pull individual legacy dirs into the canonical root if/when a concrete need surfaces.
 - Phase G (Prometheus + exporter reset on prune): `bcf803a` (code + 8 unit tests + docker-compose admin-API + --no-relaunch-exporter flag, 2026-05-14).
-- Phase H (pre-run Fuseki clear + manual `runs clear-fuseki` CLI): `<unfilled>`
+- Phase H (pre-run Fuseki clear + manual `runs clear-fuseki` CLI): `b7a2a87` (code + 8 unit tests + runs_reset.reset_fuseki wired through, 2026-05-14).
 
 **Owner**: operator (Mikko) + claude pair on backend implementation. No paired-Grafana phase — all backend / CLI / SPARQL.
 **Estimated wall-time**: 2-3 days end-to-end if executed in one push. Per-phase: A ~half-day, B ~half-day, C ~half-day, D ~quarter-day, E ~quarter-day, F ~half-day (mostly cautious migration runs), G ~half-day, H ~half-day.
