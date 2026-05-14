@@ -133,14 +133,20 @@ dedup key.
 
 ### F1.3. Acceptance
 
-- [ ] New `_propagate_extracted_contributions` exists and is called
-      from `merge.run`.
-- [ ] Dedup test covers same-contribution-from-two-records case.
-- [ ] `canonical.ttl` byte-stability test passes across two M8 runs.
-- [ ] Pre-existing M8 + M9 tests stay green.
-- [ ] On a small (~500-record) test corpus, the number of
+- [x] New `_propagate_extracted_contributions` exists and is called
+      from `merge.run`. — landed as `_propagate_non_primary_contributions`
+      in `stages/merge.py::_emit_canonical_work`'s
+      `expression_contributions` block (~line 1012), commits `464247e`
+      + `b56d9c1`.
+- [x] Dedup test covers same-contribution-from-two-records case.
+- [x] `canonical.ttl` byte-stability test passes across two M8 runs.
+- [x] Pre-existing M8 + M9 tests stay green.
+- [x] On a small (~500-record) test corpus, the number of
       canonical-level non-primary `bffi:Contribution` blocks is
-      non-zero (smoke that the wiring works end-to-end).
+      non-zero — verified on the 2026-05-14 helmet-5k bench while
+      validating P-34 Phase A's editor-anchored recovery (P-34 reads
+      F1's propagated non-primary contributions to find the
+      lex-min non-translator agent).
 
 ### F1.4. Rollback
 

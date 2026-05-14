@@ -1,21 +1,23 @@
 # P-31 — Dashboard artifacts panel + per-run cataloguer review TSVs
 
-**Status**: backlog.
+**Status**: in-progress (Phase A.2 shipped via an alternate mechanism on 2026-05-14; Phase A.1 superseded by the same alternate mechanism; Phases B + C re-scoped from "build new TSVs" to "consolidate the existing per-stage TSVs into the unified review format").
 **Source proposal**: this file at commit `338a7a3` (proposal-shape; recover via `git show 338a7a3:docs/plans/proposed/p-31-dashboard-artifacts-panel.md`).
 **Plan-base commit**: `338a7a3`. To gauge drift before executing, run
 `git diff 338a7a3..HEAD --
 src/bffi_pipeline/stages/
 src/bffi_pipeline/metrics_exporter.py
-config/observability/grafana/`.
+config/grafana/
+config/Caddyfile
+docker-compose.yml`.
 **Phase commits**:
 
-- Phase A.1 (path-gauge metric + per-stage emit-site wiring, **solo**): `<unfilled>`
-- Phase A.2 (Grafana "Run artifacts" panel, **paired**): `<unfilled>`
-- Phase B (source-review TSV + M2/M3/M9 wiring, **solo**): `<unfilled>`
-- Phase C (target-review TSV + M8/M9 wiring, **solo**): `<unfilled>`
+- Phase A.1 (path-gauge metric + per-stage emit-site wiring, **solo**): **superseded** by the Caddy reverse-proxy + Markdown-interpolation alternate (see Phase A.2 entry). No gauge added; the operator-facing outcome is achieved without one. If a future phase needs the gauge (e.g. P-30's truth-table audit wants a machine-readable artifact inventory), re-open as a new phase.
+- Phase A.2 (Grafana "Run artifacts" panel, **paired**): **shipped via alternate mechanism on 2026-05-14**. Implementation in the Caddy reverse-proxy commit chain (`docker-compose.yml` + `config/Caddyfile`) + the dashboard panel id 28 ("Cataloguer review TSVs") update in `config/grafana/dashboards/bffi-pipeline.json`. Operator outcome — clickable links from the dashboard to per-run TSVs — fully delivered; the mechanism is Markdown links to `/files/${active_run}/...` served by Caddy's `file_server browse`, **not** the path-gauge + table-panel design originally specced.
+- Phase B (source-review TSV + M2/M3/M9 wiring, **solo**): `<unfilled>` — re-scoped (see DOD below).
+- Phase C (target-review TSV + M8/M9 wiring, **solo**): `<unfilled>` — re-scoped (see DOD below).
 
-**Owner**: operator (Mikko) + claude pair. Backend phases (A.1, B, C) ship via solo-then-commit with unit tests; Phase A.2 ships via paired session — see "Pair-programming constraint" below.
-**Estimated wall-time**: 1-2 days end-to-end. Phase A.1: ~2 h. Phase A.2: ~1 h paired. Phase B: ~3 h. Phase C: ~3 h.
+**Owner**: operator (Mikko) + claude pair. Phase A.2's paired-session constraint was waived in practice because the Markdown-link alternative is structurally simpler than the original table-panel design; Phases B + C remain solo-then-commit work.
+**Estimated wall-time** (remaining): ~3 h. Phase B: ~2 h (mostly consolidation of three existing per-stage TSVs into one unified file + adding the cataloguer-fill-in columns). Phase C: ~1 h (the M8 mint-failures TSV already covers most of the target-review surface; this phase adds the M9 fallback-band rows).
 
 ## Pair-programming constraint
 
@@ -54,31 +56,52 @@ The cost (more files on disk) is genuinely small and handled by the hygiene step
 
 ## Definition of done
 
-### Phase A.1 — Path gauge + emit-site wiring (solo)
+### Phase A.1 — Path gauge + emit-site wiring (solo) — SUPERSEDED
 
-- [ ] New gauge `bffi_artifact_path{kind, run_uuid, path, state} 1` in `src/bffi_pipeline/metrics_exporter.py`.
-- [ ] `kind` enum (initial set): `bibframe_dir`, `bffi_dir`, `bffi_corpus`, `canonical_ttl`, `canonical_map`, `canonical_conflicts`, `cataloguer_source_tsv`, `cataloguer_target_tsv`, `provenance_ttl`, `judge_decisions`, `manifest`. Documented as a `Literal[...]` type in the helper module; future additions go through type-check.
-- [ ] `state` enum: `expected` | `present`. `expected` emitted at the stage's `start` event for artifacts the stage will produce; `present` emitted at the stage's `end` event once the file exists.
-- [ ] New helper `emit_artifact_path(kind, path, state)` (placement TBD between `stages/observability.py` and a new `stages/artifact_paths.py` — A.1 picks the cleaner location).
-- [ ] Emit sites wired in M2, M3, M8, M9 — each stage emits `expected` for its outputs at `start` + `present` at `end`. Pipeline init emits `expected | present` for inputs (`bibframe_dir`) since they're available from t=0.
-- [ ] Cardinality budget documented inline (~12 kinds × active runs × 2 states ≈ 240 series at ten concurrent runs).
-- [ ] Unit tests:
-  - `test_artifact_path_gauge_emits_expected_then_present` — per-stage emit-pair lands in the registry with the right `kind` + `state` transition.
-  - `test_artifact_path_gauge_cardinality_bounded` — assert no `kind` value outside the documented enum (regression guard for the cardinality budget).
-  - `test_emit_artifact_path_handles_missing_run_uuid` — defensive; emit silently no-ops if no emitter is active (matches existing `emit_if_active` behaviour).
-- [ ] `make lint && make test` green.
+**Not implemented.** The path-gauge design was preempted by the simpler Caddy file-server + Markdown-interpolation alternate that delivers Phase A.2's operator-facing outcome without needing a machine-readable artifact inventory in Prometheus. If a later phase (e.g. P-30 truth-table audit, or a future "what files exist in every active run" query) needs the gauge, re-open as a new phase rather than mining this checklist.
 
-### Phase A.2 — Grafana "Run artifacts" panel (paired)
+Original DOD preserved as documentation of the path **not** taken:
 
-- [ ] New table panel "Run artifacts" added to `config/observability/grafana/<dashboard>.json`.
-- [ ] Query: `bffi_artifact_path{run_uuid="$active_run"}`.
-- [ ] Columns: `kind`, `state`, `path` (column order, alignment, width — decided in the paired session).
-- [ ] `path` column rendered as operator-clickable link. Rendering mechanism (Grafana data link vs Markdown override vs custom value mapping) chosen in the paired session based on what the installed Grafana version supports.
-- [ ] `state=expected` rows visually distinguished from `present` (greyed text, italic, leading icon — paired choice).
-- [ ] Panel placement on the dashboard chosen during the paired session (likely below the M8/M9 progress row, above the failure-mode bargauge).
-- [ ] Operator confirms the panel renders the artifact set correctly against a live bench (the existing `scratchpad/overnight-sample-2026-05-13/` data is sufficient).
+- [ ] ~~New gauge `bffi_artifact_path{kind, run_uuid, path, state} 1` in `src/bffi_pipeline/metrics_exporter.py`.~~
+- [ ] ~~`kind` enum: `bibframe_dir`, `bffi_dir`, ..., documented as a `Literal[...]` type.~~
+- [ ] ~~`state` enum: `expected` | `present`.~~
+- [ ] ~~Emit sites in M2/M3/M8/M9 + cardinality budget.~~
+- [ ] ~~Three unit tests.~~
 
-### Phase B — Source-review TSV + M2/M3/M9 wiring (solo)
+### Phase A.2 — Grafana panel for cataloguer review TSVs (shipped via alternate mechanism)
+
+**Shipped 2026-05-14**, but via a different mechanism than the original DOD specced. The trade-off (in retrospect):
+
+- **Original design**: stage-emit `bffi_artifact_path` gauges → Prometheus → Grafana table panel with data-link rendering, distinguishing `expected` (pending) from `present` (file exists). Mechanism: PromQL query feeding a table panel.
+- **What actually shipped**: Caddy reverse-proxy serving `./runs/` at `/files/*` + a Grafana **text** panel with Markdown links interpolating `${active_run}`. Mechanism: hardcoded link list + dashboard variable.
+
+Where the alternate is **better**:
+- No Prometheus cardinality cost (the gauge would have added ~240 series at ten concurrent runs; the text panel adds zero).
+- Directory listing for free (Caddy's `file_server browse` lets the operator drill down without enumerating files in the dashboard).
+- Reverse-proxy consolidation (same Caddy that serves files also routes Grafana + Prometheus behind one URL).
+
+Where the alternate is **worse**:
+- The panel can't distinguish "file present" from "stage hasn't started yet" — broken links 404. Acceptable because the four-state stage tiles (P-37's STAGE_PHASES work) already convey stage-pending state separately; the operator clicks the file link only after a stage has emitted its `end` event.
+- The set of linked files is hardcoded in the panel Markdown (M2 errors, M3 SHACL fails, M8 mint failures, "browse all"). Adding a new TSV requires a panel edit, not just a stage emission. Acceptable for v1 since the file set is small + stable.
+
+Acceptance — completed:
+
+- [x] Caddy service in `docker-compose.yml` serving `./runs:/srv:ro` on `127.0.0.1:8080` with `file_server browse` enabled.
+- [x] Panel id 28 ("Cataloguer review TSVs") in `config/grafana/dashboards/bffi-pipeline.json` rendering clickable Markdown links: M2 errors, M3 SHACL fails, M8 mint failures, plus a "Browse all run artifacts" entry that hits `/files/${active_run}/`.
+- [x] Sized `h: 12, w: 6` to match the sibling progress bargauges on row y=10.
+- [x] Smoke-tested end-to-end against an actual run (helmet-5k-clean-full bench, run `02924cb38191`).
+
+### Phase B — Consolidate per-stage source-review TSVs into a unified file (solo)
+
+**Re-scoped 2026-05-14**: the per-stage TSVs already exist on disk — `bibframe/_errors.tsv` (M2), `bffi/_validation.tsv` (M3), `canonical-mint-failures.tsv` (M8/P-34, source-side because mint-failures are bib_ids that didn't make it through). What's missing relative to the original Phase B is (a) consolidation into one cataloguer-handoff file with a unified row format, (b) the cataloguer-fill-in workflow columns (`reviewed_by`, `reviewed_at`, `notes`), (c) M9 source-side rows (`no-candidate` / `fictional` / `watchdog-aborted`). Two execution options:
+
+**Option B1 — Consolidate in code (recommended)**: build the `append_source_row` helper as originally specced, retrofit M2/M3/M8/M9 call sites to also write to the unified TSV alongside their existing per-stage outputs. Per-stage TSVs stay (the dashboard panel links to them, P-30 audit references them); the unified file is the cataloguer-handoff superset.
+
+**Option B2 — Consolidate at view time**: leave the three per-stage TSVs alone, build a small `bffi-pipeline cataloguer-source-review` typer command that reads them and emits the unified format on demand. Less code, but the cataloguer-fill-in columns can't be persisted in-place — the workflow would round-trip through a separate review file.
+
+Recommend **B1** because the cataloguer-fill-in columns are the load-bearing UX feature (the original P-31 framing in "## Goal" calls this out as why TSV-per-run beats CSV). B2 loses that.
+
+Updated DOD (under B1):
 
 - [ ] New module `src/bffi_pipeline/cataloguer_review.py` exposing `append_source_row(...)`:
 
@@ -107,7 +130,7 @@ The cost (more files on disk) is genuinely small and handled by the hygiene step
 - [ ] **M2 wire-in** in `src/bffi_pipeline/stages/marc_to_bf.py` — wherever the existing `_errors.jsonl` row is appended, also call `append_source_row` with the same data. `category` = the `error_type` field; `severity` = `blocking` for hard errors, `warning` for partial-failure tolerated rows; `details` = the existing error message; `marcxml_path` = the per-record MARCXML path.
 - [ ] **M3 wire-in** in `src/bffi_pipeline/stages/bf_to_bffi.py` — wherever the existing `_validation.jsonl` row is appended, also call `append_source_row`. `category` = `boundary-3`; `severity` = `warning` (Boundary 3 failures don't block, per spec); `details` = the SHACL report text; `marcxml_path` = the BIBFRAME-side `.rdf` parent of the BFFI record.
 - [ ] **M9 wire-in** in `src/bffi_pipeline/stages/reconcile.py` (or wherever M9's outcome bookkeeping lives) — emit on `no-candidate`, `fictional`, `watchdog-aborted` outcomes. `severity` = `info` for `no-candidate` and `fictional` (these are observations, not errors); `blocking` for `watchdog-aborted` (the LLM hung).
-- [ ] Source TSV path surfaced via Phase A.1 gauge: emit `expected` at pipeline init, `present` after the first `append_source_row` call.
+- [ ] ~~Source TSV path surfaced via Phase A.1 gauge.~~ Superseded — the dashboard's panel id 28 ("Cataloguer review TSVs") will gain a Markdown link `[Unified source review](/files/${active_run}/cataloguer-source-review-${active_run}.tsv)` once the file exists. Edit the panel JSON when Phase B ships.
 - [ ] Unit tests:
   - `test_append_source_row_writes_header_once` — repeated calls produce exactly one header line.
   - `test_append_source_row_escapes_tab_quote_newline` — fixture with title `"She said,\t\"yes\""\n` survives round-trip (read back via `csv.reader(delimiter='\t')`).
@@ -117,6 +140,8 @@ The cost (more files on disk) is genuinely small and handled by the hygiene step
 - [ ] `make lint && make test` green.
 
 ### Phase C — Target-review TSV + M8/M9 wiring (solo)
+
+**Re-scoped 2026-05-14**: the M8 mint-failures TSV (`canonical-mint-failures.tsv` from P-34) already covers the conflict subset of the target-review surface for records that didn't mint. What's missing: rows for canonical Works that DID mint but landed on the M9 fallback band or in a conflict group, plus the FP-class wiring once P-22..26 ship. Implementation stays as originally specced — a new `append_target_row` helper alongside `append_source_row` in `cataloguer_review.py`.
 
 - [ ] `append_target_row(...)` added to the same module:
 
@@ -144,7 +169,7 @@ The cost (more files on disk) is genuinely small and handled by the hygiene step
 - [ ] De-duplication on `(canonical_work_uri, reason)` within a run.
 - [ ] **M8 wire-in** in `src/bffi_pipeline/stages/merge.py`'s conflict-emission path — every row written to `canonical-conflicts.jsonl` also calls `append_target_row` with `reason="m8-conflict"`, `confidence=None`.
 - [ ] **M9 wire-in** in the reconcile-stage's fallback-band branch — picks below the configured review threshold emit `reason="m9-fallback"` rows; `no-candidate` outcomes that escaped M9 entirely emit `reason="m9-no-candidate"`.
-- [ ] Target TSV path surfaced via Phase A.1 gauge.
+- [ ] ~~Target TSV path surfaced via Phase A.1 gauge.~~ Superseded — add a Markdown link `[Unified target review](/files/${active_run}/cataloguer-target-review-${active_run}.tsv)` to panel id 28 when Phase C ships.
 - [ ] Unit tests:
   - `test_append_target_row_writes_header_once`.
   - `test_append_target_row_serialises_list_columns_with_pipe`.
@@ -154,9 +179,9 @@ The cost (more files on disk) is genuinely small and handled by the hygiene step
 
 ### Cross-phase
 
-- [ ] On graduation to `in-progress/` (first phase merged), `git mv` the plan from `backlog/` to `in-progress/`.
+- [x] On graduation to `in-progress/` (first phase merged), `git mv` the plan from `backlog/` to `in-progress/`. — completed 2026-05-14 alongside the Phase A.2-via-alternate ship.
 - [ ] On final phase merge with all DOD boxes checked, `git mv` to `completed/`.
-- [ ] A short snapshot at `docs/performance/<date>-p-31-artifacts-panel.md` summarising the operator-facing change (screenshot or panel JSON excerpt + sample TSV row) — written when Phase A.2 lands, paired session output.
+- [ ] A short snapshot at `docs/performance/<date>-p-31-artifacts-panel.md` summarising the operator-facing change (screenshot or panel JSON excerpt + sample TSV row) — write when Phase B or C lands.
 
 ## Risks
 
