@@ -17,20 +17,22 @@ git diff 47477cd..HEAD -- \
     sparql/bf_to_bffi_work.rq \
     sparql/bf_to_bffi_expression.rq \
     src/bffi_pipeline/stages/bf_to_bffi.py \
+    src/bffi_pipeline/stages/marc_to_bf.py \
     src/marcxml_export_pipeline/sierra/marcxml.py \
+    config/shapes/bibframe-conversion.shape.ttl \
     docs/lkd.rdf
 ```
 
 Cross-references:
-- **P-07** (`p-07-bibframe-856-as-item.md`) — proposed to reclassify
-  marc2bibframe2's MARC-856-lifted `bf:Instance` nodes as `bf:Item`.
-  P-33 subsumes P-07's resolution: if P-33 ships, the 856 instances
-  flow into the Manifestation CONSTRUCT pass naturally, and the
-  "856 is really an Item" decision becomes a filter inside the
-  Manifestation rq rather than an M2 post-processor patch. Either
-  P-07 graduates first (and P-33 follows the established
-  856-secondary handling) or P-33 graduates first (and P-07 is
-  closed as superseded).
+- **P-07 (folded in 2026-05-14)** — the prior
+  `p-07-bibframe-856-as-item.md` proposal argued that
+  marc2bibframe2's MARC-856-lifted `bf:Instance` nodes are really
+  access-point Items, not separate manifestations. Its content lives
+  in this proposal's "MARC 856 (Electronic Location and Access) —
+  special case" section below; the standalone P-07 file was removed
+  in the same commit. Use `git log --follow
+  docs/plans/proposed/p-33-m3-manifestation-and-item-construct.md`
+  to recover the original P-07 reasoning if needed.
 - **`docs/archived/marcxml-to-bffi-skosmos-pipeline.md` § 3** — the
   archived spec sketches Work + Expression CONSTRUCT but only
   mentions Manifestation/Item as out-of-scope-for-MVP. P-33 is the
@@ -159,6 +161,93 @@ Holdings Statement, Textual Holdings" fields) because the
 exporter has to emit one 876 datafield per item row (with $a =
 Sierra item-record-id, $h = call number, $p = barcode, $l =
 branch-code, etc.), AND the rq needs to fire on those datafields.
+
+### MARC 856 (Electronic Location and Access) — special case
+
+marc2bibframe2's XSLT lifts every MARC 856 (Electronic Location and
+Access) field into a separate `bf:Instance` IRI of the form
+`<base>#Instance856-<idx>`, attached to the main Work via a sibling
+`bf:hasInstance` triple. The P-02 5 000-record production-style run
+turned up 10 records (0.2 %) where this caused the Boundary-2 SHACL
+shape to fire on the secondary Instance for missing Helmet identifier
++ AdminMetadata; a follow-up trace also exposed a non-deterministic-
+ordering bug in `_find_root_resources` (`src/bffi_pipeline/stages/
+marc_to_bf.py`) that sometimes stamped the Helmet identifier on the
+secondary Instance instead of the main one.
+
+The workaround at `549baa0` papered over the symptom at two layers:
+the M2 post-processor now picks the main Instance deterministically
+by URI convention, and the SHACL shape excludes secondaries by URI
+regex. The records convert successfully. But the semantic question
+the workaround dodged is exactly what P-33 has to answer:
+
+**Is a MARC 856 URL really a separate manifestation (`bf:Instance` =
+`bffi:Manifestation`), or is it an access point to an existing
+manifestation (`bf:Item` = `bffi:Item`, or just a literal
+`bf:electronicLocator`)?**
+
+MARC 856 content in Helmet is typically:
+
+- A publisher / library website URL pointing at the book's PDF or
+  web copy (same intellectual content as the print volume).
+- A vendor link to buy / borrow.
+- A landing page describing the title.
+
+In RDA + BIBFRAME 2 terms, **most of these are item-level (holding-
+level) access points, not separate manifestations.** A separate
+manifestation would be a record with its own ISBN / publisher /
+pub-date — when that's present, MARC 776 (Additional Physical Form)
+is the cataloguer's tool, not 856. marc2bibframe2's "always lift
+856 to Instance" policy is therefore an over-classification for the
+typical Helmet 856 use case.
+
+Concretely on the P-02 failing sample:
+
+| Bib | 856 content | Looks like… |
+|---|---|---|
+| 1936313 | `virtuaaliviipuri.tamk.fi` project landing | landing page, not manifestation |
+| 1987967 | `kansanmusiikki-instituutti.fi/.../KIJ68web.pdf` | same content as print, web-served |
+| 2030816 | `kansanmusiikki-instituutti.fi/…` | landing |
+| (etc.) | … | mostly access points |
+
+All 10 are access-point / web-copy style, not separate-manifestation
+style.
+
+**Sub-options (in increasing depth):**
+
+1. **M2-stage rewrite (default for P-33 Phase B).** Walk the
+   marc2bibframe2 graph after the XSLT runs, find every
+   `#Instance<tag>-<idx>` resource of `bf:Instance` type derived
+   from MARC 856, and rewrite it as `bf:Item`. Adjust the
+   surrounding `bf:hasInstance` triple from the main Work to a
+   `bf:hasItem` triple on the main Instance (item-of-instance, not
+   item-of-work). The Boundary-2 shape's URI-regex exclusion can
+   then be deleted — items aren't checked by the bf:Instance
+   shape. Local change, no `third_party/` touch.
+2. **Configurable case-by-case rewrite.** Extend (1) with a
+   cataloguer-supplied rule that maps the 856 content ($u URL + $3
+   materials-specified) to a verdict — "this 856 is a separate
+   ebook manifestation, keep as Instance" vs "this is just a
+   publisher landing page, demote to Item". Allows genuine separate
+   ebook editions (with their own ISBN) to remain Instances.
+   Configuration likely under `config/shapes/` or
+   `config/bf-rewrites.yaml`.
+3. **Upstream PR to marc2bibframe2.** Change the XSLT to emit 856 as
+   `bf:Item` by default, with a stylesheet parameter to opt back to
+   "always Instance". Cleanest long-term answer, but `CLAUDE.md`'s
+   "wrap, don't fork" rule on `third_party/marc2bibframe2/` makes
+   this either a Library-of-Congress contribution (months) or a
+   soft fork (drift management overhead).
+
+Default plan: **(1)** in Phase B (after the Manifestation MVP
+stabilises), with **(2)** deferred until a corpus-wide
+`bffi-pipeline 856-audit` shows that demoting indiscriminately
+swallows a meaningful number of genuine separate-ebook editions.
+
+The 549baa0 workaround code path stays for one cycle after the
+856 demotion lands so a feature-flag rollback works without
+re-stamping the SHACL shape; the URI-regex exclusion gets removed
+in the cycle after that, once the demotion is corpus-validated.
 
 ### Stage wiring (`stages/bf_to_bffi.py`)
 
@@ -337,14 +426,25 @@ the Finto dumps.
   needs a `COALESCE(?carrierIRI, ?carrierLabel)` fallback (mirroring
   the P-15 fix on subjects) so unauthored carrier text doesn't drop
   on the floor.
-- **R5 — 856-as-Item collision with P-07.** Both proposals touch
-  the bf:Instance → bffi mapping. If P-07 graduates first, P-33's
-  Item rq has to filter out the 856-derived Instances (otherwise
-  they double-count: once as Item via 856 reclassification, once as
-  Item via 876). If P-33 graduates first, P-07 closes as
-  superseded. Either way, the proposals can't ship independently
-  without a coordination note.
-- **R6 — Validation explosion.** SHACL boundary-2 shape additions
+- **R5 — 856-demotion swallows genuine separate-ebook editions.**
+  Sub-option (1) demotes every 856-derived `bf:Instance` to
+  `bf:Item` indiscriminately. If a Helmet record has both a print
+  edition and a *separate* ebook with its own ISBN and publisher,
+  the ebook collapses into an Item of the print Manifestation
+  instead of staying as its own Manifestation. Recoverable by
+  re-running the pipeline once sub-option (2) lands or once the
+  cataloguer flags the case, but the canonical Works graph would
+  carry the wrong shape for the duration. Mitigation: ship a
+  one-shot `bffi-pipeline 856-audit` against the full corpus
+  *before* Phase B's demotion lands to estimate the genuine-ebook
+  fraction; if material (> ~1 %), gate Phase B on sub-option (2).
+- **R6 — Skosmos display drift on existing 856 records.** Skosmos
+  renders Items differently from Instances; cataloguers reviewing
+  existing browser pages will see e-link reshuffles even when the
+  underlying access pattern hasn't changed. Heads-up belongs in
+  the cataloguer-engagement note alongside R1 (translation-record
+  Manifestation/Expression ambiguity).
+- **R7 — Validation explosion.** SHACL boundary-2 shape additions
   for Manifestation + Item will roughly double the shape count.
   rdflib's SHACL validator at the existing per-record loop is
   already a noticeable fraction of M3 wall-time. Pre-validate the
@@ -352,11 +452,26 @@ the Finto dumps.
 
 ## Open questions
 
-- **Should 856 graduate to Item now (P-07 path) or stay as
-  Manifestation (`bf:Instance`) until P-33 takes it over?** The
-  proposals are coupled but the resolution isn't obvious without
-  cataloguer input. Default: P-33 graduates first; P-07 closes
-  superseded.
+- **What fraction of Helmet 856s are access points vs separate
+  manifestations?** The 10-record P-02 sample is too small to
+  decide whether sub-option (1) — indiscriminate 856→Item demotion
+  in Phase B — is safe or whether (2)'s cataloguer-rule layer is
+  needed up front. A `bffi-pipeline 856-audit` CLI (or a one-shot
+  SPARQL classification against the post-P-33-Phase-A BFFI graph)
+  partitions every 856 by content shape (has-ISBN? has-`$3`
+  materials-specified? URL matches a vendor regex?) and produces
+  the call-it-or-don't number. Counterpoint to dropping (2)
+  entirely: the workaround at `549baa0` is already sufficient for
+  the pipeline to run; if no downstream consumer cares about the
+  Instance-vs-Item distinction on 856-derived nodes, the demotion
+  is cosmetic and can stay deferred.
+- **Lighter-touch alternative to 856→Item demotion?** Keep 856 as
+  `bf:Instance` but mark it with a `bffi:secondaryInstance` typing
+  predicate so downstream code can filter consistently. Lighter
+  than the full Instance → Item rewrite but a bad fit for the
+  BIBFRAME-purist view of the model — only worth considering if
+  the empirical audit shows the access-point assumption is wrong
+  on a large minority of records.
 - **`bf:tableOfContents` routing — Expression or Manifestation?**
   The BFFI ontology has `rdfs:domain bffi:Manifestation` (per
   `docs/lkd.rdf` line 3995, cited in the existing

@@ -162,14 +162,13 @@ Operational sequence:
   fork mlx-lm) for the case where the prompt-layer approach proves
   insufficient. Stays `proposed` unless a concrete incident motivates
   action.
-- [`p-07-bibframe-856-as-item.md`](p-07-bibframe-856-as-item.md)
-  — `proposed`. marc2bibframe2 lifts MARC 856 (Electronic Location
-  and Access) as a separate `bf:Instance`, which is semantically
-  closer to `bf:Item` for the typical Helmet usage. This proposal
-  sketches three depth levels for the semantic fix — local M2
-  rewrite, configurable per-856 classifier, or an upstream PR to
-  marc2bibframe2 — and documents what would have to be true for it
-  to be worth shipping.
+- ~~`p-07-bibframe-856-as-item.md`~~ — folded into P-33 on
+  2026-05-14. The 856-as-Item semantic question lives in
+  P-33's "MARC 856 (Electronic Location and Access) — special
+  case" section because the demotion decision is part of the
+  Manifestation/Item routing surface P-33 introduces. The
+  original P-07 reasoning is recoverable via `git log --follow
+  docs/plans/proposed/p-33-m3-manifestation-and-item-construct.md`.
 - [`p-09-library-agnostic-source.md`](p-09-library-agnostic-source.md)
   — `proposed`. Decouple `bffi_pipeline` from FI-HELME so the
   downstream stages can serve any Finnish library whose export tool
