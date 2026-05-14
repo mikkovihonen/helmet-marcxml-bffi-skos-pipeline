@@ -13,7 +13,7 @@ src/bffi_pipeline/stages/load_finto.py
 docker-compose.yml`.
 **Phase commits**:
 
-- Phase A (`bffi-run.json` manifest writer + emit-site wiring): `<unfilled>`
+- Phase A (`bffi-run.json` manifest writer + emit-site wiring): `ff83135` (code + 13 unit tests + plan graduation, 2026-05-14).
 - Phase B (`bffi-pipeline runs list` CLI): `<unfilled>`
 - Phase C (`bffi-pipeline runs prune` CLI with `--reset-*` flags): `<unfilled>`
 - Phase D (`bffi-pipeline runs tag` / `untag` / `info`): `<unfilled>`
