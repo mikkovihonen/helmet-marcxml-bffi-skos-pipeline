@@ -9,7 +9,7 @@ src/bffi_pipeline/stages/bf_to_bffi.py`.
 **Phase commits**:
 
 - Phase A (Option A — `bffi-corpus.ttl` concat at M3 finalisation + M8 fast-path read + mtime-based fallback + 3 unit tests): `5148746` (code, 2026-05-14). Bundled with P-18 Phase A.
-- Phase B (remove vestigial BIBFRAME walk from `_load_work_records_from_corpus` + new unit test + bench writeup): `<pending merge>` (this session's commit).
+- Phase B (remove vestigial BIBFRAME walk from `_load_work_records_from_corpus` + new unit test + bench writeup + plan graduation): `ec6b35c` (code, 2026-05-14).
 - Phase C (Option C — bespoke streaming parser): **not needed**. Phase A+B together reach 18 s corpus-load on the 20 k bench (decisively under the < 90 s AC); there's no remaining engineering budget to recover.
 
 **Owner**: shipped this session.
@@ -46,7 +46,7 @@ Phase A+B together: M8 corpus-load **18 s** on the 20 k bench → **~25x** speed
 - Wire-in at the end of M3's `run()`, before the `end` event emit.
 - M8's `_load_work_records_from_corpus` branches on `bffi-corpus.ttl` mtime: fast-path reads the concat once; slow-path walks per-record .ttl files (partial-rerun safety).
 
-**Phase B** at `<pending merge>`:
+**Phase B** at `ec6b35c`:
 - Deletes the `for path in bibframe_dir.glob("*.rdf"): g.parse(...)` loop in `_load_work_records_from_corpus`. M3's CONSTRUCT preserves every predicate `extract_work_metadata` reads (`bffi:Work` typing, `bf:identifiedBy`, `bf:source`, `bf:role`, plus the `bffi:*` triples) into the per-record BFFI Turtle, so the BIBFRAME walk was vestigial.
 - New unit test pins the no-walk behaviour by placing a poison `bibframe/poison.rdf` containing invalid RDF/XML in the fixture; the loader must ignore it.
 - Perf snapshot `docs/performance/2026-05-14-m8-corpus-load.md` records the 18 s corpus-load + the diagnostic experiment that proved output equivalence (16 652 / 437 / 905 / 2 563 counts match modulo `merged_at`).
