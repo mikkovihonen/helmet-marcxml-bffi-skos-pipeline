@@ -8,10 +8,11 @@ production publish.
 
 from __future__ import annotations
 
+import uuid as _uuid
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -275,10 +276,55 @@ class Settings(BaseSettings):
     fuseki_password: str = Field(default="", alias="FUSEKI_PASSWORD")
 
     # Filesystem layout.
+    # P-32 Phase E: ``data_dir`` resolution rule:
+    #   1. If ``BFFI_DATA_DIR`` is explicitly set (env var or ``.env`` row),
+    #      use it (operator-side escape hatch — e.g. reproducing a legacy
+    #      run's exact paths).
+    #   2. Otherwise, derive ``data_dir = runs_root / run_uuid`` so every
+    #      new run lands at a canonical, uuid-keyed location.
+    # The model-validator below implements (2) by detecting whether
+    # ``data_dir`` is in ``model_fields_set`` (pydantic's signal for "the
+    # operator explicitly provided this"). The literal default below is
+    # the fallback when neither path resolves — kept for shape, never
+    # observed in practice.
     data_dir: Path = Field(default=Path("./data"), alias="BFFI_DATA_DIR")
     logs_dir: Path = Field(default=Path("./logs"), alias="BFFI_LOGS_DIR")
     eval_dir: Path = Field(default=Path("./eval-runs"), alias="BFFI_EVAL_DIR")
     config_dir: Path = Field(default=Path("./config"), alias="BFFI_CONFIG_DIR")
+
+    @model_validator(mode="after")
+    def _resolve_run_identity(self) -> Settings:
+        """P-32 Phase E: derive ``data_dir`` from ``runs_root / run_uuid`` by default.
+
+        Order of operations:
+        1. Snapshot ``model_fields_set`` membership BEFORE any writes
+           below — Pydantic v2's ``self.data_dir = ...`` direct
+           attribute assignment in an ``after`` validator DOES add the
+           field name to ``model_fields_set``, which would flip the
+           "operator-supplied?" signal on subsequent inspection. The
+           snapshot is what the CLI's startup-log echo reads to mark
+           the canonical-vs-override case.
+        2. If ``run_uuid`` is empty (not set via env), generate fresh
+           ``uuid4().hex``. The CLI's ``_init_observability`` previously
+           did this; moving it here means the value is available before
+           the ``data_dir`` resolution runs.
+        3. If ``data_dir`` wasn't explicitly provided, derive it as
+           ``runs_root / run_uuid``.
+
+        Writes go through ``self.__dict__`` to bypass Pydantic's
+        field-set tracking — we don't want internally-derived values
+        to look operator-supplied to downstream inspection.
+        """
+        data_dir_was_explicit = "data_dir" in self.model_fields_set
+        run_uuid_was_explicit = bool(self.run_uuid.strip())
+
+        if not run_uuid_was_explicit:
+            self.__dict__["run_uuid"] = _uuid.uuid4().hex
+            self.model_fields_set.discard("run_uuid")
+        if not data_dir_was_explicit:
+            self.__dict__["data_dir"] = self.runs_root / self.run_uuid
+            self.model_fields_set.discard("data_dir")
+        return self
 
 
 @lru_cache(maxsize=1)
