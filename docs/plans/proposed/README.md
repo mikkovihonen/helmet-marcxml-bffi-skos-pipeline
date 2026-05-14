@@ -109,9 +109,10 @@ Operational sequence:
    (see [`docs/performance/2026-05-14-m8-corpus-load.md`](../../performance/2026-05-14-m8-corpus-load.md));
    P-17 + P-18 completed-by-evidence (unit tests + live event traces
    from the P-19 re-bench substantiate the bench smoke tests).
-2. **P-31** — dashboard artifacts panel + cataloguer-review CSVs.
-   Recommended to ship *before* P-30 so the audit catalogues the
-   dashboard in its final shape rather than auditing a surface
+2. **P-31** — dashboard artifacts panel + per-run cataloguer-review
+   TSVs. Graduated to [`../backlog/p-31-dashboard-artifacts-panel.md`](../backlog/p-31-dashboard-artifacts-panel.md) on 2026-05-14;
+   ready to execute. Ships *before* P-30 so the audit catalogues
+   the dashboard in its final shape rather than auditing a surface
    about to grow.
 3. **P-30** — critical audit + truth-table sign-off. Audits the
    P-31 additions as part of its catalogue.
@@ -119,23 +120,6 @@ Operational sequence:
 
 ### Proposals
 
-- [`p-31-dashboard-artifacts-panel.md`](p-31-dashboard-artifacts-panel.md)
-  — `proposed`. Surface pipeline artifacts on the dashboard so the
-  operator (a) knows where the BIBFRAME / BFFI files live each run
-  and (b) hands cataloguers a CSV they can actually work from.
-  Phase A — `bffi_artifact_path{kind, run_uuid, path, state}`
-  low-cardinality gauges + a Grafana "Run artifacts" table panel
-  that renders paths as clickable Markdown links; `state` flips
-  `expected → present` as files land. Phase B — per-stage append
-  to `<BFFI_DATA_DIR>/cataloguer-source-review-<run_uuid>.csv`
-  (bib_ids the cataloguer fixes in Sierra; M2 + M3 + M9 sources).
-  Phase C — same shape for `cataloguer-target-review-<run_uuid>.csv`
-  (canonical Work URIs the cataloguer reviews in Skosmos; M8 + M9
-  sources, plus the P-22..26 FP classes when those ship). CSVs
-  carry `reviewed_by` / `reviewed_at` / `notes` columns the
-  cataloguer fills in during their pass and hands back as audit
-  trail. Recommended to ship before P-30 (so P-30 audits the new
-  surfaces).
 - [`p-30-observability-audit-trail-critical-audit.md`](p-30-observability-audit-trail-critical-audit.md)
   — `proposed`. Triggered by the 2026-05-13 `used_cascade` near-
   miss. Catalogues every observability + audit-trail surface
@@ -316,14 +300,17 @@ Operational sequence:
   ("complete", "selected", "kootut", "samlade", "œuvres"), demote
   from `auto-merge` to `escalate`.
 _(P-15 and P-16 graduated to plans on 2026-05-13 and shipped
-in the same session; see [`../completed/p-15-preserve-authority-uris-at-m3.md`](../completed/p-15-preserve-authority-uris-at-m3.md)
+in the same session; see
+[`../completed/p-15-preserve-authority-uris-at-m3.md`](../completed/p-15-preserve-authority-uris-at-m3.md)
 and [`../completed/p-16-fallback-tier-confidence-gating.md`](../completed/p-16-fallback-tier-confidence-gating.md).
-P-17, P-18, and P-19 graduated to plans on 2026-05-14
-and their code-side phases shipped in the same session; see
-[`../in-progress/p-17-exporter-multi-sidecar-discovery.md`](../in-progress/p-17-exporter-multi-sidecar-discovery.md),
-[`../in-progress/p-18-m8-emit-start-before-corpus-load.md`](../in-progress/p-18-m8-emit-start-before-corpus-load.md),
-[`../in-progress/p-19-m8-corpus-load-throughput.md`](../in-progress/p-19-m8-corpus-load-throughput.md).
-Each has an operator-side bench / smoke-test phase still pending.)_
+P-17, P-18, and P-19 graduated and shipped on 2026-05-14; see
+[`../completed/p-17-exporter-multi-sidecar-discovery.md`](../completed/p-17-exporter-multi-sidecar-discovery.md),
+[`../completed/p-18-m8-emit-start-before-corpus-load.md`](../completed/p-18-m8-emit-start-before-corpus-load.md),
+[`../completed/p-19-m8-corpus-load-throughput.md`](../completed/p-19-m8-corpus-load-throughput.md).
+P-31 graduated to backlog on 2026-05-14, ready to execute; see
+[`../backlog/p-31-dashboard-artifacts-panel.md`](../backlog/p-31-dashboard-artifacts-panel.md).
+First graduation under the unified `p-NN-` naming, done as a
+single `git mv` + content rewrite per the new convention.)_
 
 ## Graduated / completed / abandoned
 
