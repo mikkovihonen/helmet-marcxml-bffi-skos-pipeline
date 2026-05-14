@@ -69,6 +69,16 @@ services:
     container_name: bffi-prometheus
     ports:
       - "9091:9090"  # 9090 already taken by bffi-skosmos
+    # P-32 Phase G: --web.enable-admin-api unlocks the
+    # /api/v1/admin/tsdb/delete_series endpoint that
+    # ``bffi-pipeline runs prune --apply --reset-prometheus`` calls
+    # to drop a pruned run_uuid's TSDB series. Safe in this stack
+    # because Prometheus is bound to localhost from the operator's
+    # machine; not exposed externally.
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-admin-api"
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus

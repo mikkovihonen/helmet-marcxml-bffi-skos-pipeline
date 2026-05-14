@@ -1,0 +1,87 @@
+{
+  "run_label": "p02-phase-a-ollama-baseline",
+  "gold_set_path": "/Users/mikkovihonen/Workspace/helmet-marcxml-bffi-skos-pipeline/gold/gold.jsonl",
+  "gold_set_size": 17,
+  "holdout_size": 6,
+  "prompt_hash": "sha256:7f0986ce4b4d3d29",
+  "accuracy": 0.9412,
+  "decided_accuracy": 0.9412,
+  "holdout_accuracy": 0.8333,
+  "holdout_decided_accuracy": 0.8333,
+  "uncertain_rate": 0.0,
+  "high_confidence_accuracy": 0.9333,
+  "high_confidence_n": 15,
+  "median_latency_ms": 18660,
+  "per_category": {
+    "abridgement": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "adaptation": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "cross-genre-different-work": {
+      "n": 4,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "edition-revision": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "music-recording-vs-notated": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "same-author-different-titles": {
+      "n": 2,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "subject-as-name-discrimination": {
+      "n": 2,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "translation": {
+      "n": 4,
+      "accuracy": 0.75,
+      "uncertain_rate": 0.0
+    },
+    "transliteration": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    }
+  },
+  "confusion_matrix": {
+    "same_work": {
+      "same_work": 5,
+      "different_work": 1,
+      "uncertain": 0
+    },
+    "different_work": {
+      "same_work": 0,
+      "different_work": 11,
+      "uncertain": 0
+    }
+  },
+  "failures": [
+    {
+      "id": "gs-0002",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "different_work",
+      "confidence": 0.95,
+      "correct": false,
+      "rationale": "Both records share the same creator, variant_titles, and uniform title, but differ in original_language (eng vs. fre) and expression_language (swe vs. fin). This indicates distinct original works translated into different languages, making them different Works under RDA rules.",
+      "latency_ms": 20760,
+      "holdout": true
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "run_label": "p02-phase-b-mlx-lm",
+  "gold_set_path": "/Users/mikkovihonen/Workspace/helmet-marcxml-bffi-skos-pipeline/gold/gold.jsonl",
+  "gold_set_size": 17,
+  "holdout_size": 6,
+  "prompt_hash": "sha256:7f0986ce4b4d3d29",
+  "accuracy": 0.8824,
+  "decided_accuracy": 0.8824,
+  "holdout_accuracy": 0.8333,
+  "holdout_decided_accuracy": 0.8333,
+  "uncertain_rate": 0.0,
+  "high_confidence_accuracy": 0.9286,
+  "high_confidence_n": 14,
+  "median_latency_ms": 0,
+  "per_category": {
+    "abridgement": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "adaptation": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "cross-genre-different-work": {
+      "n": 4,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "edition-revision": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "music-recording-vs-notated": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "same-author-different-titles": {
+      "n": 2,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "subject-as-name-discrimination": {
+      "n": 2,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    },
+    "translation": {
+      "n": 4,
+      "accuracy": 0.5,
+      "uncertain_rate": 0.0
+    },
+    "transliteration": {
+      "n": 1,
+      "accuracy": 1.0,
+      "uncertain_rate": 0.0
+    }
+  },
+  "confusion_matrix": {
+    "same_work": {
+      "same_work": 4,
+      "different_work": 2,
+      "uncertain": 0
+    },
+    "different_work": {
+      "same_work": 0,
+      "different_work": 11,
+      "uncertain": 0
+    }
+  },
+  "failures": [
+    {
+      "id": "gs-0001",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "different_work",
+      "confidence": 0.85,
+      "correct": false,
+      "rationale": "Both records share the same creator and content_type, but the preferred_titles and expression_language differ significantly. Record A's preferred_title is 'Jevgeni Onegin ; Proza' with expression_language 'rus', while Record B's preferred_title is 'Aatelisrosvo Dubrovskij' with expression_language 'fin'. These differences suggest different works, possibly translations or different editions, but the titles and languages do not align with a clear translation or edition relationship.",
+      "latency_ms": 3537,
+      "holdout": false
+    },
+    {
+      "id": "gs-0002",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "different_work",
+      "confidence": 0.95,
+      "correct": false,
+      "rationale": "Both records share the same creator and variant_titles, but differ in original_language (eng vs fre) and expression_language (swe vs fin). These differences indicate different original languages and expressions, suggesting different Works. The preferred_title and content_type are consistent, but the original_language and expression_language fields are diverging.",
+      "latency_ms": 0,
+      "holdout": true
+    }
+  ]
+}

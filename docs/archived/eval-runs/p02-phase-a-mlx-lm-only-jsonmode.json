@@ -1,0 +1,263 @@
+{
+  "run_label": "p02-phase-a-mlx-lm-only-jsonmode",
+  "gold_set_path": "/Users/mikkovihonen/Workspace/helmet-marcxml-bffi-skos-pipeline/gold/gold.jsonl",
+  "gold_set_size": 17,
+  "holdout_size": 6,
+  "prompt_hash": "sha256:7f0986ce4b4d3d29",
+  "accuracy": 0.0,
+  "decided_accuracy": 0.0,
+  "holdout_accuracy": 0.0,
+  "holdout_decided_accuracy": null,
+  "uncertain_rate": 1.0,
+  "high_confidence_accuracy": null,
+  "high_confidence_n": 0,
+  "median_latency_ms": 1975,
+  "per_category": {
+    "abridgement": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "adaptation": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "cross-genre-different-work": {
+      "n": 4,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "edition-revision": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "music-recording-vs-notated": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "same-author-different-titles": {
+      "n": 2,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "subject-as-name-discrimination": {
+      "n": 2,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "translation": {
+      "n": 4,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "transliteration": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    }
+  },
+  "confusion_matrix": {
+    "same_work": {
+      "same_work": 0,
+      "different_work": 0,
+      "uncertain": 6
+    },
+    "different_work": {
+      "same_work": 0,
+      "different_work": 0,
+      "uncertain": 11
+    }
+  },
+  "failures": [
+    {
+      "id": "gs-0001",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Both records have the same creator, but the preferred_titles are different (\"Jevgeni Onegin ; Proza\" vs. \"Aatelisrosvo Dubrovskij\"), and the content_type is the same (\"txt\"), but the expression_language differs (\"rus\" vs. \"fin\"), indicating a translation. However, the preferred_titles are not matching, and the titles are not clearly translations of each other. The original_language for Record B is \"rus\", which matches the expression_language of Record A, but the preferred_title of Record B does not match the preferred_title of Record A. The titles are not clearly translations of each other, and the preferred_titles are not matching. Therefore, they are different Works.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 5828,
+      "holdout": false
+    },
+    {
+      "id": "gs-0002",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: same_work, confidence 0.85.  \nRationale: Both records share the same creator, the same variant title \"The secret keeper\", and the same content_type \"txt\". The original_language and expression_language differ, but this is consistent with translations of the same original work. Record A is a Swedish expression of an English original, and Record B is a Finnish expression of a French original. However, the variant title \"The secret keeper\" suggests they are translations of the same original work, even though the original languages differ. The presence of the same variant title and creator supports the same Work, though the original languages and expression languages differ, which may indicate different translations of the same original work.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 2746,
+      "holdout": true
+    },
+    {
+      "id": "gs-0003",
+      "category": "transliteration",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: same_work, confidence 0.95.\nRationale: same creator under transliteration variants, same preferred_title in different languages (one is Cyrillic, the other Latin), same content_type and expression_language. Matching fields: creator, preferred_title, content_type, expression_language. Diverging field: preferred_title language (one is Cyrillic, the other Latin — consistent with translation).\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1675,
+      "holdout": false
+    },
+    {
+      "id": "gs-0004",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: same_work, confidence 0.95.  \nRationale: Both records have the same creator, and the preferred_title of Record B matches the preferred_title of Record A. Record B's variant_titles include \"The clockmaker's daughter,\" which is the preferred_title of Record A. The original_language of Record B is \"eng,\" indicating the original work was in English, and the expression_language is \"fin,\" indicating a Finnish Expression of the English original. This matches the criteria for translations of one creation being the same Work. Matching fields: creator, preferred_title, variant_titles, content_type. Diverging field: expression_language and original_language, but these are consistent with a translation.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 2715,
+      "holdout": true
+    },
+    {
+      "id": "gs-0005",
+      "category": "adaptation",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Different creators (Závada, Pál vs. Nagy, Dénes), different content_type (txt vs. tdi), and different preferred_title (Természetes fény vs. Natural light). The notes in Record A reference Record B, but this does not indicate a direct relationship between the two works. The content_type difference suggests an adaptation or a different format, which is not considered the same Work.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 2133,
+      "holdout": false
+    },
+    {
+      "id": "gs-0006",
+      "category": "abridgement",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Different creators (Jansson, Tove vs. Haridi, Alex), different preferred titles (\"Trollkarlens hatt\" vs. \"Sagor från Mumindalen\"), and no corroborating evidence of a relationship between the works. Diverging fields: creator, preferred_title. No matching fields that would indicate the same Work.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1903,
+      "holdout": false
+    },
+    {
+      "id": "gs-0007",
+      "category": "music-recording-vs-notated",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.98.  \nRationale: Different creators (Wilson vs. Mozart), different content_type (snm vs. ntm), different expression_language (eng vs. zxx), and different preferred_title. These differences indicate different Works. No corroborating evidence of same Work.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1520,
+      "holdout": false
+    },
+    {
+      "id": "gs-0008",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.98.  \nRationale: Different creators, different preferred titles, different content types, and different expression languages. No matching fields that would indicate the same Work.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1194,
+      "holdout": false
+    },
+    {
+      "id": "gs-0009",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Different creators, different preferred titles, different content types, and different expression languages. No evidence of translation, adaptation, or reprints. Matching fields: none. Diverging fields: creator, preferred_title, content_type, expression_language.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1515,
+      "holdout": true
+    },
+    {
+      "id": "gs-0010",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.98.  \nRationale: Different creators, different preferred titles, different content types, different expression languages, and different publication years. No fields match that would indicate the same Work.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1255,
+      "holdout": false
+    },
+    {
+      "id": "gs-0011",
+      "category": "same-author-different-titles",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Both records have the same creator and content_type, and the same expression_language. However, the preferred_titles are different: \"Jevgeni Onegin ; Proza\" versus \"Po stranitsam Puškina\". These are distinct titles, and there is no evidence of translation or adaptation. The titles suggest different works: one is a novel (\"Jevgeni Onegin\") and the other is a collection of works (\"Po stranitsam Puškina\"). Without additional evidence of content overlap or being a compilation, they are considered different Works.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 2276,
+      "holdout": false
+    },
+    {
+      "id": "gs-0012",
+      "category": "same-author-different-titles",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Both records have the same creator and content_type, and the same expression_language. However, the preferred_titles are different: \"Jevgeni Onegin ; Proza\" versus \"Skazki Puškina\". These are distinct works by the same author. \"Jevgeni Onegin\" is a novel, while \"Skazki Puškina\" refers to a collection of fairy tales. The titles are not generic, and there is no corroborating evidence (date, content scope, opus number) to suggest they are the same work. Therefore, they are different works.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 2360,
+      "holdout": true
+    },
+    {
+      "id": "gs-0013",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Different creators (Dickens vs. Puškin) and different preferred titles (\"Kävelyretkiä Lontoon kaduilla\" vs. \"Aatelisrosvo Dubrovskij\") indicate different works. Diverging fields: creator, preferred_title. Matching fields: expression_language, content_type.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1767,
+      "holdout": false
+    },
+    {
+      "id": "gs-0014",
+      "category": "subject-as-name-discrimination",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Different creators (Louhela, Liisa vs. Mäkelä, Veikko) and different preferred titles (\"Mies joka kantoi aurinkoa sylissään\" vs. \"Aseeton sotilas: Arndt Pekurisen elämä ja perintö\"), even though both are about Arndt Pekurinen. The content_type and expression_language are the same, but the titles and creators differ, indicating different works. The notes also clarify that these are two different biographies by different authors.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 2575,
+      "holdout": false
+    },
+    {
+      "id": "gs-0015",
+      "category": "subject-as-name-discrimination",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: different_work, confidence 0.95.  \nRationale: Both records have the same creator and expression language, but they describe different compilations. Record A is a compilation of \"Onegin + prose works,\" while Record B is a biographical-compilation work combining pages from Pushkin's life and works. The preferred titles, content scope, and notes indicate different compilations. Diverging fields: preferred_title, notes, and implied content scope.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1975,
+      "holdout": true
+    },
+    {
+      "id": "gs-0016",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: same_work, confidence 0.85.  \nRationale: Both records share the same creator (\"Kunnas, Mauri\") and content_type (\"txt\"). The preferred_title differs (\"Koirien Kalevala\" vs. \"Hundarnas Kalevala\"), but these are likely translations of the same work, as the expression_language of Record B is \"swe\" (Swedish) and the original_language is \"fin\" (Finnish). This suggests Record B is a Swedish Expression of the Finnish original, which is a translation. The preferred_title difference is consistent with translation, as the titles are in different languages but refer to the same work. Matching fields: creator, content_type, original_language (for Record B). Diverging field: preferred_title, expression_language.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 2993,
+      "holdout": false
+    },
+    {
+      "id": "gs-0017",
+      "category": "edition-revision",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: Invalid json output: same_work, confidence 0.95.  \nRationale: Both records have the same creator, same preferred title, same content type, and same expression language. There is no evidence of differing content, edition, or format. Since all matching fields are identical, they describe the same RDA Work.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE",
+      "latency_ms": 1438,
+      "holdout": true
+    }
+  ]
+}

@@ -287,8 +287,20 @@ def runs_prune_command(
         typer.Option(
             "--reset-exporter",
             help=(
-                "On --apply, also restart the metrics exporter to drop stale in-memory "
-                "Prometheus series (Phase G — currently logs a warning, no-op)."
+                "On --apply, also SIGTERM and relaunch the metrics exporter to drop "
+                "stale in-memory Prometheus series. Reads PID from "
+                "<BFFI_RUNS_ROOT>/.exporter.pid."
+            ),
+        ),
+    ] = False,
+    no_relaunch_exporter: Annotated[
+        bool,
+        typer.Option(
+            "--no-relaunch-exporter",
+            help=(
+                "Pair with --reset-exporter to SIGTERM-without-relaunch; operator "
+                "restarts `bffi-pipeline serve-metrics` themselves. Default is "
+                "relaunch from the recorded argv."
             ),
         ),
     ] = False,
@@ -381,6 +393,7 @@ def runs_prune_command(
         reset_exporter=reset_exporter,
         reset_prometheus=reset_prometheus,
         reset_fuseki=reset_fuseki,
+        relaunch_exporter=not no_relaunch_exporter,
     )
 
 
@@ -467,8 +480,9 @@ def _maybe_invoke_resets(
     reset_exporter: bool,
     reset_prometheus: bool,
     reset_fuseki: bool,
+    relaunch_exporter: bool = True,
 ) -> None:
-    """Invoke the Phase G / H reset stubs based on the flag set."""
+    """Invoke the Phase G / H reset helpers based on the flag set."""
     from bffi_pipeline.runs_reset import (
         reset_exporter as _reset_exporter,
     )
@@ -480,7 +494,7 @@ def _maybe_invoke_resets(
     )
 
     if reset_exporter:
-        _reset_exporter()
+        _reset_exporter(relaunch=relaunch_exporter)
     if reset_prometheus:
         _reset_prometheus(deleted_uuids)
     if reset_fuseki:
@@ -867,7 +881,30 @@ def serve_metrics_command(
         for g in watch_globs:
             typer.echo(f"  {g!r}", err=True)
 
+    # P-32 Phase G: record this exporter's PID + launch argv so
+    # `bffi-pipeline runs prune --apply --reset-exporter` can SIGTERM
+    # + relaunch us with the same args. The pid file lives at
+    # <BFFI_RUNS_ROOT>/.exporter.pid; cleaned up on graceful exit
+    # via the exporter's atexit hook.
+    import sys as _sys
+
     from bffi_pipeline.metrics_exporter import serve
+    from bffi_pipeline.runs_reset import exporter_pid_file
+
+    pid_path = exporter_pid_file(settings.runs_root)
+    argv = [
+        _sys.executable,
+        "-m",
+        "bffi_pipeline",
+        "serve-metrics",
+        *_reconstruct_serve_argv(
+            port=port,
+            sidecar_paths=sidecar_paths,
+            watch_globs=watch_globs,
+            glob_rescan_seconds=glob_rescan_seconds,
+            poll_seconds=poll_seconds,
+        ),
+    ]
 
     try:
         serve(
@@ -876,9 +913,40 @@ def serve_metrics_command(
             poll_seconds=poll_seconds,
             watch_globs=watch_globs or None,
             glob_rescan_seconds=glob_rescan_seconds,
+            pid_file=pid_path,
+            argv=argv,
         )
     except KeyboardInterrupt:
         typer.echo("\nExporter stopped.", err=True)
+
+
+def _reconstruct_serve_argv(
+    *,
+    port: int,
+    sidecar_paths: list[Path],
+    watch_globs: list[str],
+    glob_rescan_seconds: float,
+    poll_seconds: float,
+) -> list[str]:
+    """Build the argv that ``--reset-exporter`` would relaunch with.
+
+    Mirrors the operator's original ``bffi-pipeline serve-metrics``
+    invocation as faithfully as we can reconstruct from the resolved
+    options. Doesn't recover state that was supplied via env (e.g.
+    BFFI_PROMETHEUS_URL) — the relaunched process inherits the
+    parent's environment via ``subprocess.Popen`` default, so env
+    vars survive.
+    """
+    args: list[str] = ["--port", str(port)]
+    for sp in sidecar_paths:
+        args += ["--sidecar", str(sp)]
+    for g in watch_globs:
+        args += ["--watch-glob", g]
+    if glob_rescan_seconds != 30.0:  # noqa: PLR2004 — match the CLI default
+        args += ["--glob-rescan-seconds", str(glob_rescan_seconds)]
+    if poll_seconds != 1.0:
+        args += ["--poll-seconds", str(poll_seconds)]
+    return args
 
 
 @app.command("plan")

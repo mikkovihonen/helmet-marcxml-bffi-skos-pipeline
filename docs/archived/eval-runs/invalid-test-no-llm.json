@@ -1,0 +1,209 @@
+{
+  "run_label": "invalid-test-no-llm",
+  "gold_set_path": "/Users/mikkovihonen/Workspace/helmet-marcxml-bffi-skos-pipeline/gold/gold.jsonl",
+  "gold_set_size": 13,
+  "holdout_size": 4,
+  "prompt_hash": "sha256:7f0986ce4b4d3d29",
+  "accuracy": 0.0,
+  "decided_accuracy": 0.0,
+  "holdout_accuracy": 0.0,
+  "holdout_decided_accuracy": null,
+  "uncertain_rate": 1.0,
+  "high_confidence_accuracy": null,
+  "high_confidence_n": 0,
+  "median_latency_ms": 160325,
+  "per_category": {
+    "abridgement": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "adaptation": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "cross-genre-different-work": {
+      "n": 4,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "music-recording-vs-notated": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "same-author-different-titles": {
+      "n": 2,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "translation": {
+      "n": 3,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "transliteration": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    }
+  },
+  "confusion_matrix": {
+    "same_work": {
+      "same_work": 0,
+      "different_work": 0,
+      "uncertain": 4
+    },
+    "different_work": {
+      "same_work": 0,
+      "different_work": 0,
+      "uncertain": 9
+    }
+  },
+  "failures": [
+    {
+      "id": "gs-0001",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 177812,
+      "holdout": false
+    },
+    {
+      "id": "gs-0002",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160395,
+      "holdout": true
+    },
+    {
+      "id": "gs-0003",
+      "category": "transliteration",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160214,
+      "holdout": false
+    },
+    {
+      "id": "gs-0004",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160340,
+      "holdout": true
+    },
+    {
+      "id": "gs-0005",
+      "category": "adaptation",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160241,
+      "holdout": false
+    },
+    {
+      "id": "gs-0006",
+      "category": "abridgement",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160450,
+      "holdout": false
+    },
+    {
+      "id": "gs-0007",
+      "category": "music-recording-vs-notated",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160036,
+      "holdout": false
+    },
+    {
+      "id": "gs-0008",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160566,
+      "holdout": false
+    },
+    {
+      "id": "gs-0009",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160321,
+      "holdout": true
+    },
+    {
+      "id": "gs-0010",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160315,
+      "holdout": false
+    },
+    {
+      "id": "gs-0011",
+      "category": "same-author-different-titles",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160121,
+      "holdout": false
+    },
+    {
+      "id": "gs-0012",
+      "category": "same-author-different-titles",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160511,
+      "holdout": true
+    },
+    {
+      "id": "gs-0013",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: connection error after 3 retries exhausted: Connection error.",
+      "latency_ms": 160325,
+      "holdout": false
+    }
+  ]
+}

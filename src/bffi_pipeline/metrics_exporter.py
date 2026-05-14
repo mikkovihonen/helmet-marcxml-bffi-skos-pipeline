@@ -33,9 +33,12 @@ synthetic events; the production CLI wires it up to a tail loop.
 
 from __future__ import annotations
 
+import atexit as _atexit
+import contextlib
 import glob as _glob
 import io
 import json as _json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -643,6 +646,36 @@ def _attach_sidecar(
         error_states[str(spec.path)] = st
 
 
+def _write_exporter_pid_files(pid_file: Path | None, argv: list[str] | None) -> None:
+    """P-32 Phase G: write ``.exporter.pid`` + (optional) ``.exporter.argv``.
+
+    ``bffi-pipeline runs prune --apply --reset-exporter`` reads the
+    PID file to SIGTERM this process and the argv file to optionally
+    relaunch with the same args. Atexit cleanup removes both files
+    on graceful exit.
+    """
+    if pid_file is None:
+        return
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    if argv is not None:
+        argv_file = pid_file.with_name(".exporter.argv")
+        argv_file.write_text("\n".join(argv) + "\n", encoding="utf-8")
+    _atexit.register(_cleanup_exporter_pid_files, pid_file)
+
+
+def _cleanup_exporter_pid_files(pid_file: Path) -> None:
+    """P-32 Phase G: atexit hook to remove ``.exporter.pid`` + ``.exporter.argv``.
+
+    Best-effort: silently swallows OSError so a missing-file race
+    (operator deleted them; we re-init from scratch) doesn't pollute
+    the shutdown path.
+    """
+    for path in (pid_file, pid_file.with_name(".exporter.argv")):
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+
 def serve(
     sidecar_paths: list[Path],
     *,
@@ -652,6 +685,8 @@ def serve(
     metrics: PipelineMetrics | None = None,
     watch_globs: list[str] | None = None,
     glob_rescan_seconds: float = 30.0,
+    pid_file: Path | None = None,
+    argv: list[str] | None = None,
 ) -> None:
     """Run the exporter: rehydrate, then tail forever serving ``/metrics``.
 
@@ -709,6 +744,8 @@ def serve(
     # host via ``host.docker.internal``.
     server, server_thread = start_http_server(port, registry=metrics.registry)
     _ = server_thread  # we don't manage the daemon thread; it dies with the process
+
+    _write_exporter_pid_files(pid_file, argv)
 
     last_glob_rescan = time.monotonic()
     try:

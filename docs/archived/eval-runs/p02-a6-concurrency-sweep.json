@@ -1,0 +1,57 @@
+{
+  "n_pairs": 200,
+  "server_url": "http://127.0.0.1:8001/v1",
+  "model": "/Users/mikkovihonen/.mlx_models/Qwen3-8B-4bit",
+  "runs": [
+    {
+      "concurrency": 1,
+      "wall_seconds": 469.79,
+      "ok": 200,
+      "total": 200,
+      "pairs_per_min": 25.5,
+      "median_latency_s": 2.248,
+      "p95_latency_s": 3.116,
+      "peak_server_mb": 4740
+    },
+    {
+      "concurrency": 4,
+      "wall_seconds": 463.91,
+      "ok": 200,
+      "total": 200,
+      "pairs_per_min": 25.9,
+      "median_latency_s": 9.275,
+      "p95_latency_s": 10.592,
+      "peak_server_mb": 4740
+    },
+    {
+      "concurrency": 8,
+      "wall_seconds": 463.38,
+      "ok": 200,
+      "total": 200,
+      "pairs_per_min": 25.9,
+      "median_latency_s": 18.517,
+      "p95_latency_s": 20.049,
+      "peak_server_mb": 4741
+    },
+    {
+      "concurrency": 16,
+      "wall_seconds": 461.09,
+      "ok": 200,
+      "total": 200,
+      "pairs_per_min": 26.0,
+      "median_latency_s": 36.753,
+      "p95_latency_s": 39.019,
+      "peak_server_mb": 4741
+    },
+    {
+      "concurrency": 32,
+      "wall_seconds": 459.89,
+      "ok": 200,
+      "total": 200,
+      "pairs_per_min": 26.1,
+      "median_latency_s": 73.166,
+      "p95_latency_s": 76.436,
+      "peak_server_mb": 4742
+    }
+  ]
+}

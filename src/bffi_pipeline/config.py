@@ -267,6 +267,16 @@ class Settings(BaseSettings):
         default="http://localhost:3030/bffi",
         alias="FUSEKI_URL",
     )
+    # Prometheus admin API endpoint (P-32 Phase G). The local
+    # docker-compose maps container 9090 → host 9091 to avoid the
+    # Skosmos port collision; the Prometheus container is started
+    # with ``--web.enable-admin-api`` so ``reset_prometheus`` can
+    # delete a pruned run_uuid's series via
+    # ``/api/v1/admin/tsdb/delete_series``.
+    prometheus_url: str = Field(
+        default="http://localhost:9091",
+        alias="BFFI_PROMETHEUS_URL",
+    )
     # Fuseki credentials are optional. The Apache Jena Fuseki 5 image
     # protects the Graph Store Protocol (`/<dataset>/data`) endpoints
     # behind admin auth by default; M10 phase 2 needs them set when

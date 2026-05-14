@@ -1,0 +1,263 @@
+{
+  "run_label": "p02-phase-a-mlx-lm-only",
+  "gold_set_path": "/Users/mikkovihonen/Workspace/helmet-marcxml-bffi-skos-pipeline/gold/gold.jsonl",
+  "gold_set_size": 17,
+  "holdout_size": 6,
+  "prompt_hash": "sha256:7f0986ce4b4d3d29",
+  "accuracy": 0.0,
+  "decided_accuracy": 0.0,
+  "holdout_accuracy": 0.0,
+  "holdout_decided_accuracy": null,
+  "uncertain_rate": 1.0,
+  "high_confidence_accuracy": null,
+  "high_confidence_n": 0,
+  "median_latency_ms": 1966,
+  "per_category": {
+    "abridgement": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "adaptation": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "cross-genre-different-work": {
+      "n": 4,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "edition-revision": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "music-recording-vs-notated": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "same-author-different-titles": {
+      "n": 2,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "subject-as-name-discrimination": {
+      "n": 2,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "translation": {
+      "n": 4,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    },
+    "transliteration": {
+      "n": 1,
+      "accuracy": 0.0,
+      "uncertain_rate": 1.0
+    }
+  },
+  "confusion_matrix": {
+    "same_work": {
+      "same_work": 0,
+      "different_work": 0,
+      "uncertain": 6
+    },
+    "different_work": {
+      "same_work": 0,
+      "different_work": 0,
+      "uncertain": 11
+    }
+  },
+  "failures": [
+    {
+      "id": "gs-0001",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...ey are different Works.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 7508,
+      "holdout": false
+    },
+    {
+      "id": "gs-0002",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='same_work, confidence 0....the same original work.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 2844,
+      "holdout": true
+    },
+    {
+      "id": "gs-0003",
+      "category": "transliteration",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='same_work, confidence 0....tent with translation).', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1681,
+      "holdout": false
+    },
+    {
+      "id": "gs-0004",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='same_work, confidence 0....ent with a translation.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 2729,
+      "holdout": true
+    },
+    {
+      "id": "gs-0005",
+      "category": "adaptation",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...nsidered the same Work.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 2144,
+      "holdout": false
+    },
+    {
+      "id": "gs-0006",
+      "category": "abridgement",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...indicate the same Work.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1904,
+      "holdout": false
+    },
+    {
+      "id": "gs-0007",
+      "category": "music-recording-vs-notated",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden... evidence of same Work.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1534,
+      "holdout": false
+    },
+    {
+      "id": "gs-0008",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...indicate the same Work.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1199,
+      "holdout": false
+    },
+    {
+      "id": "gs-0009",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...e, expression_language.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1527,
+      "holdout": true
+    },
+    {
+      "id": "gs-0010",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...indicate the same Work.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1266,
+      "holdout": false
+    },
+    {
+      "id": "gs-0011",
+      "category": "same-author-different-titles",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...idered different Works.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 2275,
+      "holdout": false
+    },
+    {
+      "id": "gs-0012",
+      "category": "same-author-different-titles",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...ey are different works.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 2374,
+      "holdout": true
+    },
+    {
+      "id": "gs-0013",
+      "category": "cross-genre-different-work",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...language, content_type.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1776,
+      "holdout": false
+    },
+    {
+      "id": "gs-0014",
+      "category": "subject-as-name-discrimination",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden...s by different authors.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 2583,
+      "holdout": false
+    },
+    {
+      "id": "gs-0015",
+      "category": "subject-as-name-discrimination",
+      "expected": "different_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='different_work, confiden... implied content scope.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1966,
+      "holdout": true
+    },
+    {
+      "id": "gs-0016",
+      "category": "translation",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='same_work, confidence 0....e, expression_language.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 2998,
+      "holdout": false
+    },
+    {
+      "id": "gs-0017",
+      "category": "edition-revision",
+      "expected": "same_work",
+      "predicted": "uncertain",
+      "confidence": 0.0,
+      "correct": false,
+      "rationale": "Judge fell through to uncertain after retries exhausted: unrecoverable LLM error: 1 validation error for WorkMatchDecision\n  Invalid JSON: expected value at line 1 column 1 [type=json_invalid, input_value='same_work, confidence 0....ribe the same RDA Work.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latency_ms": 1441,
+      "holdout": true
+    }
+  ]
+}
