@@ -7,6 +7,7 @@ non-trivial enough to warrant their own assertions.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,11 +17,42 @@ from typer.testing import CliRunner
 
 from bffi_pipeline import cli as cli_module
 from bffi_pipeline.cli import _parse_reconcile_kinds, app
+from bffi_pipeline.config import get_settings
 from bffi_pipeline.stages.bf_to_bffi import BffiSummary
 from bffi_pipeline.stages.marc_to_bf import ConversionErrorRow, ConversionSummary
+from bffi_pipeline.stages.observability import set_active_emitter
 
 if TYPE_CHECKING:
     from pytest import MonkeyPatch
+
+
+@pytest.fixture(autouse=True)
+def _isolate_test_state(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
+    """Stop ``CliRunner().invoke()`` from littering the real ``runs/``.
+
+    Every ``invoke`` here walks typer's root callback → ``_init_observability``
+    → ``write_initial_manifest`` under ``settings.runs_root / run_uuid``. With
+    the operator's live ``.env`` saying ``BFFI_RUNS_ROOT=./runs``, those land
+    in the project's real runs dir. Three pieces of state get isolated here:
+
+    1. ``BFFI_RUNS_ROOT`` → a throwaway ``tmp_path`` so manifests land in
+       pytest's temp area instead.
+    2. ``BFFI_OBSERVABILITY_SIDECAR=none`` → skip the manifest write entirely
+       for these tests (they don't read it back, so writing is pure waste).
+    3. ``@lru_cache`` on ``get_settings`` cleared before AND after each test,
+       plus the process-wide active emitter cleared, mirroring the fixture in
+       ``test_runs_*.py`` so test ordering can't leak settings cross-module.
+    """
+    runs_root = tmp_path_factory.mktemp("test-cli-runs")
+    monkeypatch.setenv("BFFI_RUNS_ROOT", str(runs_root))
+    monkeypatch.setenv("BFFI_OBSERVABILITY_SIDECAR", "none")
+    get_settings.cache_clear()
+    set_active_emitter(None)
+    yield
+    get_settings.cache_clear()
+    set_active_emitter(None)
 
 
 def test_parse_reconcile_kinds_none_returns_none() -> None:

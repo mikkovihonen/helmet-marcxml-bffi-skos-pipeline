@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import dedent
@@ -22,6 +23,7 @@ import pytest
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS
 
+from bffi_pipeline.config import get_settings
 from bffi_pipeline.contrib_variants import (
     ContribVariantClaim,
     append_variant_claims,
@@ -43,6 +45,35 @@ from bffi_pipeline.stages.observability import (
     StageEventEmitter,
     set_active_emitter,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_test_state(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
+    """Stop ``apply_merge`` from littering the real ``runs/`` dir.
+
+    Some tests (e.g. ``test_missing_decisions_path_raises``) call
+    ``apply_merge`` without specifying every output path. The fallthroughs
+    inside ``apply_merge`` resolve to ``settings.data_dir / <filename>``,
+    and the function's ``output_path.parent.mkdir(parents=True, ...)`` call
+    fires BEFORE the expected exception is raised — leaving an empty
+    ``runs/<uuid>/`` dir behind on every test run.
+
+    The fixture redirects ``BFFI_RUNS_ROOT`` to a pytest tmp dir so those
+    fallthroughs land in scratch space, and clears ``@lru_cache`` on
+    ``get_settings`` + the process-wide active emitter before AND after
+    each test so the settings instance picks up the monkeypatch and
+    cross-module test ordering can't leak state.
+    """
+    runs_root = tmp_path_factory.mktemp("test-merge-runs")
+    monkeypatch.setenv("BFFI_RUNS_ROOT", str(runs_root))
+    get_settings.cache_clear()
+    set_active_emitter(None)
+    yield
+    get_settings.cache_clear()
+    set_active_emitter(None)
+
 
 # --- Test helpers ---------------------------------------------------------
 
