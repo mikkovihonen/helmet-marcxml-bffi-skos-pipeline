@@ -6,7 +6,7 @@
 **Plan-base commit**: `16a0007` (graduated from proposal at this commit). Phase A measurements + verification ran against this baseline.
 
 **Phase commits**:
-- Phase A (editor-anchored fallback + `bffi-prov:mintAnchor` predicate + translator-role blocklist + 4 unit tests): `<unfilled>` (set on graduation commit).
+- Phase A (editor-anchored fallback + `bffi-prov:mintAnchor` predicate + translator-role blocklist + 4 unit tests): `9261dfd` (graduation + code + tests, 2026-05-14).
 - Phase B (truly-anonymous title-only mint + cataloguer-curated rule table): `<unfilled>`.
 - Phase C (mint-key refactor): `<unfilled>`.
 

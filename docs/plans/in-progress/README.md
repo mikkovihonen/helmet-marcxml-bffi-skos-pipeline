@@ -24,7 +24,7 @@ If the plan is dropped before completion, `git mv` it to
   canonical Work to distinguish editor-anchored from
   primary-author-anchored Works; 4 unit tests; translator-role
   blocklist on LoC `relators/trl` + free-text labels in
-  fi/sv/en/de) shipped at `<unfilled>`. Bench result: 662 of 707
+  fi/sv/en/de) shipped at `9261dfd`. Bench result: 662 of 707
   previously-dropped records recovered into the canonical graph
   (98.4% coverage on the 2026-05-14 helmet-5k sample, up from
   84.9%). Phase B (title-only mint + cataloguer rule table for the
