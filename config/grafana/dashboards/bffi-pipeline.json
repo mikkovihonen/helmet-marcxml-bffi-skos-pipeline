@@ -1597,7 +1597,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Run `${active_run}`\n\n- [M2 errors](/files/${active_run}/bibframe/_errors.tsv)\n- [M3 SHACL fails](/files/${active_run}/bffi/_validation.tsv)\n- [M8 mint failures](/files/${active_run}/canonical-mint-failures.tsv)\n- [Browse all run artifacts](/files/${active_run}/)\n"
+        "content": "Run `${active_run}`\n\n**Unified review files** (P-31)\n- [Source review](/files/${active_run}/cataloguer-source-review-${active_run}.tsv) — bib_ids needing source data fix\n- [Target review](/files/${active_run}/cataloguer-target-review-${active_run}.tsv) — pipeline bugs to verify\n\n**Per-stage files**\n- [M2 errors](/files/${active_run}/bibframe/_errors.tsv)\n- [M3 SHACL fails](/files/${active_run}/bffi/_validation.tsv)\n- [M8 mint failures](/files/${active_run}/canonical-mint-failures.tsv)\n- [Browse all run artifacts](/files/${active_run}/)\n"
       }
     },
     {

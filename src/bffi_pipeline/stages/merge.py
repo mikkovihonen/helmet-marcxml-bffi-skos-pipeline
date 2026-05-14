@@ -42,6 +42,7 @@ from rdflib.namespace import DCTERMS, RDF
 from rdflib.term import Node
 
 from bffi_pipeline.blocking import fold_label
+from bffi_pipeline.cataloguer_review import append_source_row, append_target_row
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.contrib_variants import (
     DEFAULT_SIDECAR_NAME as VARIANTS_SIDECAR_NAME,
@@ -1470,7 +1471,7 @@ def _select_description_modifier(
     return V.AGENT_MARC2BIBFRAME2
 
 
-def apply_merge(
+def apply_merge(  # noqa: PLR0912 — terminal-step orchestrator: loads decisions, runs union-find, mints canonical, emits five sidecars + two cataloguer-review TSVs. Splitting fragments shared state (canonical_entries, conflicts, mint_failures) across helpers.
     decisions_path: Path | None = None,
     bffi_corpus_dir: Path | None = None,
     *,
@@ -1634,6 +1635,45 @@ def apply_merge(
     _emit_conflicts(conflicts_path, conflicts)
     _emit_mint_failures(mint_failures_path, mint_failures)
     _emit_mint_failures_tsv(mint_failures_tsv_path, mint_failures)
+    # P-31 Phase B: mint failures → unified source-review TSV (one row
+    # per (mint_failure, helmet_bib_id) so the cataloguer's spreadsheet
+    # row maps 1:1 to a Sierra record to inspect).
+    for mf in mint_failures:
+        details = f"missing inputs: {', '.join(mf.missing_inputs)}"
+        category = f"mint-failure-{'-'.join(sorted(mf.missing_inputs))}" or "mint-failure"
+        for bib_id in mf.helmet_bib_ids or [mf.anchor_work_uri]:
+            append_source_row(
+                bib_id=bib_id,
+                stage="m8",
+                category=category,
+                severity="blocking",
+                details=details,
+            )
+    # P-31 Phase C: conflict groups → unified target-review TSV. These
+    # are the M6 judge contradictions M8 refused to merge — highest-
+    # yield bug-report candidates since the cascade already surfaced
+    # uncertainty. ``member_bib_ids`` lets the cataloguer estimate
+    # severity by inspecting the source MARC records directly (a
+    # conflict spanning two well-known authors is more impactful than
+    # one between two obscure ones).
+    for c in conflicts:
+        # Use the first member as the canonical-work URI surrogate;
+        # the row carries every member's URI under expression_uris so
+        # the cataloguer can drill into all of them.
+        if not c.members:
+            continue
+        conflict_bib_ids: list[str] = []
+        for raw_uri in c.members:
+            helmet_entry = helmet_entries.get(raw_uri)
+            if helmet_entry is not None:
+                conflict_bib_ids.append(helmet_entry.helmet_bib_id)
+        append_target_row(
+            canonical_work_uri=c.members[0],
+            reason="m8-conflict",
+            confidence=None,
+            expression_uris=list(c.members),
+            member_bib_ids=conflict_bib_ids,
+        )
     del variants_bound  # value is for future telemetry; not yet exposed
 
     emit_if_active(

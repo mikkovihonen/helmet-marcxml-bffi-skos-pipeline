@@ -1,6 +1,6 @@
 # P-31 — Dashboard artifacts panel + per-run cataloguer review TSVs
 
-**Status**: in-progress (Phase A.2 shipped via an alternate mechanism on 2026-05-14; Phase A.1 superseded by the same alternate mechanism; Phases B + C re-scoped from "build new TSVs" to "consolidate the existing per-stage TSVs into the unified review format").
+**Status**: completed 2026-05-14. Phase A.1 superseded; Phase A.2 shipped via alternate mechanism; Phases B + C shipped with the unified `cataloguer_review.py` helper module + per-stage wire-ins (M2 / M3 / M8 mint failures for source-review; M8 conflicts / M9 fallback / M9 no-candidate / M9 fictional-character for target-review). `member_bib_ids` is populated for every target-review row so cataloguers can estimate severity directly from the source MARC records.
 **Source proposal**: this file at commit `338a7a3` (proposal-shape; recover via `git show 338a7a3:docs/plans/proposed/p-31-dashboard-artifacts-panel.md`).
 **Plan-base commit**: `338a7a3`. To gauge drift before executing, run
 `git diff 338a7a3..HEAD --
@@ -13,8 +13,8 @@ docker-compose.yml`.
 
 - Phase A.1 (path-gauge metric + per-stage emit-site wiring, **solo**): **superseded** by the Caddy reverse-proxy + Markdown-interpolation alternate (see Phase A.2 entry). No gauge added; the operator-facing outcome is achieved without one. If a future phase needs the gauge (e.g. P-30's truth-table audit wants a machine-readable artifact inventory), re-open as a new phase.
 - Phase A.2 (Grafana "Run artifacts" panel, **paired**): **shipped via alternate mechanism on 2026-05-14**. Implementation in the Caddy reverse-proxy commit chain (`docker-compose.yml` + `config/Caddyfile`) + the dashboard panel id 28 ("Cataloguer review TSVs") update in `config/grafana/dashboards/bffi-pipeline.json`. Operator outcome — clickable links from the dashboard to per-run TSVs — fully delivered; the mechanism is Markdown links to `/files/${active_run}/...` served by Caddy's `file_server browse`, **not** the path-gauge + table-panel design originally specced.
-- Phase B (source-review TSV + M2/M3/M9 wiring, **solo**): `<unfilled>` — re-scoped (see DOD below).
-- Phase C (target-review TSV + M8/M9 wiring, **solo**): `<unfilled>` — re-scoped (see DOD below).
+- Phase B (source-review TSV + M2/M3/M8 mint-failure wiring, **solo**): **shipped 2026-05-14**. New module `src/bffi_pipeline/cataloguer_review.py` with `append_source_row`; wire-ins at `marc_to_bf.py::run` (three except branches), `bf_to_bffi.py::run` (SHACL-fail block), `merge.py::apply_merge` (post-mint-failure-emission loop). Per-stage TSVs (`_errors.tsv`, `_validation.tsv`, `canonical-mint-failures.tsv`) stay as-is; the unified TSV is the cataloguer-handoff superset.
+- Phase C (target-review TSV + M8/M9 wiring, **solo**): **shipped 2026-05-14**. `append_target_row` in the same module; wire-ins at `merge.py::apply_merge` (post-conflict-emission loop with `reason="m8-conflict"`) and `reconcile.py::apply_reconciliation` (per-outcome cascade: `m9-fallback`, `fictional-character`, `m9-no-candidate`). FP-veto-class wiring lands as part of P-22..26 via the same helper.
 
 **Owner**: operator (Mikko) + claude pair. Phase A.2's paired-session constraint was waived in practice because the Markdown-link alternative is structurally simpler than the original table-panel design; Phases B + C remain solo-then-commit work.
 **Estimated wall-time** (remaining): ~3 h. Phase B: ~2 h (mostly consolidation of three existing per-stage TSVs into one unified file + adding the cataloguer-fill-in columns). Phase C: ~1 h (the M8 mint-failures TSV already covers most of the target-review surface; this phase adds the M9 fallback-band rows).

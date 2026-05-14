@@ -27,6 +27,7 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
 from rdflib.term import Node
 
+from bffi_pipeline.cataloguer_review import append_source_row
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.contrib_variants import (
     DEFAULT_SIDECAR_NAME,
@@ -1053,6 +1054,19 @@ def run(
             )
             validation_rows.append(row)
             _append_jsonl(validation_path, asdict(row))
+            # P-31 Phase B: also mirror into the unified source-review
+            # TSV. `details` is the SHACL message extract (matches the
+            # per-stage TSV column), `severity` is warning because
+            # Boundary-3 failures don't block the bib_id from making
+            # it through M3 — the per-record `.ttl` was written.
+            append_source_row(
+                bib_id=bib_id,
+                stage="m3",
+                category="boundary-3",
+                severity="warning",
+                details=_extract_shape_messages(report.text),
+                marcxml_path=str(rdf_path),
+            )
         summary.converted.append(bib_id)
 
     # P-19 Phase A: write the concatenated BFFI corpus so M8's load

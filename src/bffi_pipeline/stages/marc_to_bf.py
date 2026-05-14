@@ -45,6 +45,7 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF, RDFS, XSD
 
 from bffi_pipeline import __version__ as PIPELINE_VERSION
+from bffi_pipeline.cataloguer_review import append_source_row
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.observability import emit_if_active, get_active_emitter
@@ -548,6 +549,23 @@ def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
         fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _append_source_review_m2(row: ConversionErrorRow, xml_path: Path) -> None:
+    """Mirror a ``ConversionErrorRow`` into the unified source-review TSV.
+
+    Pairs with each ``_append_jsonl(errors_path, …)`` call so the
+    cataloguer-handoff superset stays in lock-step with the per-stage
+    `_errors.jsonl`. P-31 Phase B wire-in for M2.
+    """
+    append_source_row(
+        bib_id=row.helmet_bib_id or row.filename,
+        stage="m2",
+        category=row.error_type,
+        severity="blocking",
+        details=row.message,
+        marcxml_path=str(xml_path),
+    )
+
+
 def _emit_errors_tsv(path: Path, errors: list[ConversionErrorRow]) -> None:
     """Cataloguer-facing TSV companion to ``bibframe/_errors.jsonl``.
 
@@ -658,6 +676,7 @@ def run(
             )
             summary.failed.append(row)
             _append_jsonl(errors_path, asdict(row))
+            _append_source_review_m2(row, xml_path)
             continue
         except BibframeShapeError as exc:
             row = ConversionErrorRow(
@@ -672,6 +691,7 @@ def run(
                 errors_path,
                 {**asdict(row), "report_text": exc.report_text},
             )
+            _append_source_review_m2(row, xml_path)
             continue
         except Exception as exc:
             row = ConversionErrorRow(
@@ -683,6 +703,7 @@ def run(
             )
             summary.failed.append(row)
             _append_jsonl(errors_path, asdict(row))
+            _append_source_review_m2(row, xml_path)
             continue
 
         if status == "skipped":

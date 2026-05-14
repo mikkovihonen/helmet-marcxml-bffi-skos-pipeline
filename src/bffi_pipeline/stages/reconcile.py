@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
+import json
 import re
 import sqlite3
 import threading
@@ -63,6 +64,7 @@ from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF
 
 from bffi_pipeline.blocking import fold_diacritics, fold_label
+from bffi_pipeline.cataloguer_review import append_target_row
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.provenance import logger as P
@@ -1405,6 +1407,32 @@ def _apply_canonical_link(graph: Graph, request: EntityRequest, chosen_uri: str)
 STAGE_WATCHDOG_ABORTED: Final[str] = "watchdog-aborted"
 
 
+def _load_canonical_bib_ids(path: Path) -> dict[str, list[str]]:
+    """Read ``canonical-map.jsonl`` and build ``canonical_work_uri →
+    [helmet_bib_id, …]`` for the P-31 Phase C target-review wiring.
+
+    Returns an empty dict when the file isn't present (M9 run against
+    a hand-crafted canonical.ttl without M8 having produced the
+    sidecar). The target-review rows just carry empty
+    ``member_bib_ids`` in that case — the cataloguer still has the
+    canonical Work URI to drill into.
+    """
+    if not path.is_file():
+        return {}
+    out: dict[str, list[str]] = {}
+    with path.open(encoding="utf-8") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            uri = row.get("canonical_work_uri")
+            ids = row.get("helmet_bib_ids") or []
+            if isinstance(uri, str) and isinstance(ids, list):
+                out[uri] = [b for b in ids if isinstance(b, str)]
+    return out
+
+
 def _emit_provenance(
     writer_graph: Graph | None,
     *,
@@ -2414,6 +2442,12 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     canonical_path = canonical_path or (settings.data_dir / "canonical.ttl")
     output_path = output_path or canonical_path
     moment = (now or datetime.now(UTC)).replace(microsecond=0)
+    # P-31 Phase C: load the canonical-map sidecar so the M9 target-
+    # review row carries member_bib_ids — cataloguers use those to
+    # locate the source MARC and estimate the bug's severity (a wrong
+    # cluster spanning two famous authors is more impactful than one
+    # between two obscure ones).
+    canonical_bib_ids = _load_canonical_bib_ids(settings.data_dir / "canonical-map.jsonl")
     # P-12 Phase D: cadence is operator-tunable via BFFI_M9_PROGRESS_CADENCE
     # so short benches can crank it down (e.g. 50) for a livelier dashboard.
     # Default 200 matches the pre-P-12 module-level constant.
@@ -2766,6 +2800,39 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             summary.fictional += 1
         else:
             summary.no_candidate += 1
+
+        # P-31 Phase C: pipeline-transformation review surfaces. Three
+        # M9 outcome shapes get a target-review row so the cataloguer
+        # can verify whether the pipeline got the reconciliation right
+        # (and feed pipeline-incorrect rows back into prompt iteration,
+        # gold-set growth, FP veto plans). member_bib_ids resolves
+        # canonical Work URI → source Helmet bib_ids via the M8
+        # canonical-map sidecar; cataloguers use those to inspect the
+        # source MARC and estimate the bug's severity.
+        target_bib_ids = canonical_bib_ids.get(outcome.request.work_uri, [])
+        if outcome.stage == STAGE_FALLBACK:
+            append_target_row(
+                canonical_work_uri=outcome.request.work_uri,
+                reason="m9-fallback",
+                confidence=outcome.confidence,
+                member_bib_ids=target_bib_ids,
+            )
+        elif outcome.stage == STAGE_FICTIONAL:
+            append_target_row(
+                canonical_work_uri=outcome.request.work_uri,
+                reason="fictional-character",
+                confidence=None,
+                member_bib_ids=target_bib_ids,
+            )
+        elif outcome.chosen_uri is None and outcome.stage != STAGE_FICTIONAL:
+            # no-candidate path (everything not handled above with a
+            # bound chosen_uri AND not the fictional short-circuit)
+            append_target_row(
+                canonical_work_uri=outcome.request.work_uri,
+                reason="m9-no-candidate",
+                confidence=None,
+                member_bib_ids=target_bib_ids,
+            )
 
         if outcome.chosen_uri is not None:
             _apply_canonical_link(target_graph, outcome.request, outcome.chosen_uri)
