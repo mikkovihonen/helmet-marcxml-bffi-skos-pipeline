@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import atexit as _atexit
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -163,6 +163,147 @@ runs_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(runs_app, name="runs")
+
+
+_RUNS_LIST_SORT_KEYS = ("started", "ended", "size", "run_uuid")
+_RUNS_LIST_DEFAULT_LIMIT = 50
+
+
+@runs_app.command("list")
+def runs_list_command(
+    sort: Annotated[
+        str,
+        typer.Option(
+            "--sort",
+            help=(
+                "Sort key. One of: started, ended, size, run_uuid. "
+                "Default: started (descending — newest first)."
+            ),
+        ),
+    ] = "started",
+    status_filter: Annotated[
+        str | None,
+        typer.Option(
+            "--status",
+            help=(
+                "Comma-separated status filter (e.g. 'completed,running'). "
+                "Defaults to no status filter."
+            ),
+        ),
+    ] = None,
+    tag: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tag",
+            help="Tag filter; repeatable for AND semantics. Defaults to no tag filter.",
+        ),
+    ] = None,
+    older_than: Annotated[
+        str | None,
+        typer.Option(
+            "--older-than",
+            help=(
+                "Select runs whose started_at is older than this duration. "
+                "Format: NN<unit>; unit in d/w/mo/y (e.g. 30d, 2w, 6mo, 1y)."
+            ),
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            help="Maximum rows to render after sort. Default: 50.",
+        ),
+    ] = _RUNS_LIST_DEFAULT_LIMIT,
+    include_legacy: Annotated[
+        bool,
+        typer.Option(
+            "--include-legacy",
+            help=(
+                "Include directories under BFFI_RUNS_ROOT that lack a "
+                "bffi-run.json. They render with synthesised "
+                "run_uuid='legacy-<sha1>' and status='unknown'."
+            ),
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit JSON array (one object per run) to stdout instead of a table.",
+        ),
+    ] = False,
+    tsv_output: Annotated[
+        bool,
+        typer.Option(
+            "--tsv",
+            help="Emit tab-separated rows to stdout instead of a table.",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Show full started_at ISO timestamp (relative-time hint dropped).",
+        ),
+    ] = False,
+) -> None:
+    """List runs under ``BFFI_RUNS_ROOT`` with sort + filter + format options.
+
+    P-32 Phase B. Default rendering is a plain-text table tailored for
+    operator terminal width; ``--json`` / ``--tsv`` produce machine-
+    consumable output. Legacy dirs (no manifest) are skipped by default
+    so the table reflects the canonical run set; pass
+    ``--include-legacy`` to see them too.
+    """
+    from bffi_pipeline.run_manifest import (
+        compute_dir_size,
+        discover_legacy_dirs,
+        discover_runs,
+    )
+
+    if sort not in _RUNS_LIST_SORT_KEYS:
+        typer.echo(
+            f"Invalid --sort={sort!r}; expected one of: {', '.join(_RUNS_LIST_SORT_KEYS)}.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if json_output and tsv_output:
+        typer.echo("--json and --tsv are mutually exclusive.", err=True)
+        raise typer.Exit(code=2)
+
+    older_than_td, statuses, tags = _parse_prune_filters(older_than, status_filter, tag)
+
+    settings = get_settings()
+    typer.echo(f"[bffi-pipeline] BFFI_RUNS_ROOT={settings.runs_root}", err=True)
+
+    runs = list(discover_runs(settings.runs_root))
+    if include_legacy:
+        runs.extend(discover_legacy_dirs(settings.runs_root))
+
+    filtered = _filter_runs_for_listing(
+        runs,
+        older_than=older_than_td,
+        statuses=statuses,
+        tags=tags,
+    )
+
+    sized: list[tuple[DiscoveredRun, int]] = [(run, compute_dir_size(run.path)) for run in filtered]
+    sorted_rows = _sort_runs_for_listing(sized, sort_key=sort)
+    truncated_rows = sorted_rows[:limit] if limit > 0 else sorted_rows
+
+    if json_output:
+        _render_runs_list_json(truncated_rows)
+    elif tsv_output:
+        _render_runs_list_tsv(truncated_rows)
+    else:
+        _render_runs_list_table(
+            truncated_rows,
+            total_matching=len(sorted_rows),
+            verbose=verbose,
+            runs_root=settings.runs_root,
+        )
 
 
 @runs_app.command("mark-complete")
@@ -583,6 +724,178 @@ def _maybe_invoke_resets(
         _reset_prometheus(deleted_uuids)
     if reset_fuseki:
         _reset_fuseki()
+
+
+def _filter_runs_for_listing(
+    runs: list[DiscoveredRun],
+    *,
+    older_than: timedelta | None,
+    statuses: list[str] | None,
+    tags: list[str] | None,
+) -> list[DiscoveredRun]:
+    """Apply ``older-than`` / ``status`` / ``tag`` filters in AND semantics.
+
+    Mirrors the ``select_for_pruning`` predicate but without the
+    preservation rules (``keep_last`` / ``keep_tagged``) — listing just
+    wants the included set.
+    """
+    if older_than is None and not statuses and not tags:
+        return list(runs)
+    current = datetime.now(UTC)
+    out: list[DiscoveredRun] = []
+    for run in runs:
+        if older_than is not None:
+            started = run.manifest.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            if current - started < older_than:
+                continue
+        if statuses and run.manifest.status not in statuses:
+            continue
+        if tags:
+            run_tags = set(run.manifest.tags)
+            if not all(t in run_tags for t in tags):
+                continue
+        out.append(run)
+    return out
+
+
+def _sort_runs_for_listing(
+    sized: list[tuple[DiscoveredRun, int]],
+    *,
+    sort_key: str,
+) -> list[tuple[DiscoveredRun, int]]:
+    """Sort ``(run, size)`` tuples for ``runs list``.
+
+    ``started`` and ``ended`` are descending (newest first — operator
+    expects "what's most recent"). ``size`` is descending (biggest
+    first — operator expects "what's eating disk"). ``run_uuid`` is
+    ascending (alphabetical — stable for diffing JSON output).
+    """
+    if sort_key == "started":
+        return sorted(sized, key=lambda row: row[0].manifest.started_at, reverse=True)
+    if sort_key == "ended":
+        return sorted(
+            sized,
+            key=lambda row: row[0].manifest.ended_at or row[0].manifest.started_at,
+            reverse=True,
+        )
+    if sort_key == "size":
+        return sorted(sized, key=lambda row: row[1], reverse=True)
+    # "run_uuid"
+    return sorted(sized, key=lambda row: row[0].manifest.run_uuid)
+
+
+def _render_runs_list_table(
+    rows: list[tuple[DiscoveredRun, int]],
+    *,
+    total_matching: int,
+    verbose: bool,
+    runs_root: Path,
+) -> None:
+    """Render a fixed-column table to stdout."""
+    if not rows:
+        typer.echo(f"No runs match the filters under {runs_root}.")
+        return
+
+    header = f"{'RUN_UUID':<14}{'STARTED':<22}{'STATUS':<12}{'SIZE':>10}  TAGS / DESCRIPTION"
+    typer.echo(header)
+    typer.echo("-" * len(header))
+    for run, size in rows:
+        run_id = run.manifest.run_uuid[:12]
+        started = (
+            run.manifest.started_at.isoformat()
+            if verbose
+            else _relative_time(run.manifest.started_at)
+        )
+        tags = ",".join(run.manifest.tags) if run.manifest.tags else "—"
+        desc = run.manifest.description or ""
+        trailing = f"{tags}  {desc}".rstrip()
+        typer.echo(
+            f"{run_id:<14}"
+            f"{started:<22}"
+            f"{run.manifest.status:<12}"
+            f"{_human_bytes(size):>10}  "
+            f"{trailing}"
+        )
+    if len(rows) < total_matching:
+        typer.echo(f"\n(Showing {len(rows)} of {total_matching} matching; pass --limit to widen.)")
+
+
+def _render_runs_list_json(rows: list[tuple[DiscoveredRun, int]]) -> None:
+    """Render ``rows`` as a JSON array of run objects to stdout."""
+    import json as _json
+
+    payload = [_run_to_listing_dict(run, size) for run, size in rows]
+    typer.echo(_json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _render_runs_list_tsv(rows: list[tuple[DiscoveredRun, int]]) -> None:
+    """Render ``rows`` as TSV (header + one row per run) to stdout."""
+    columns = (
+        "run_uuid",
+        "started_at",
+        "ended_at",
+        "status",
+        "size_bytes",
+        "tags",
+        "description",
+    )
+    typer.echo("\t".join(columns))
+    for run, size in rows:
+        ended = run.manifest.ended_at.isoformat() if run.manifest.ended_at else ""
+        tags = ",".join(run.manifest.tags)
+        desc = (run.manifest.description or "").replace("\t", " ").replace("\n", " ")
+        typer.echo(
+            "\t".join(
+                (
+                    run.manifest.run_uuid,
+                    run.manifest.started_at.isoformat(),
+                    ended,
+                    run.manifest.status,
+                    str(size),
+                    tags,
+                    desc,
+                )
+            )
+        )
+
+
+def _run_to_listing_dict(run: DiscoveredRun, size: int) -> dict[str, object]:
+    """Project a :class:`DiscoveredRun` + size into the JSON listing schema."""
+    return {
+        "run_uuid": run.manifest.run_uuid,
+        "started_at": run.manifest.started_at.isoformat(),
+        "ended_at": (run.manifest.ended_at.isoformat() if run.manifest.ended_at else None),
+        "status": run.manifest.status,
+        "size_bytes": size,
+        "tags": list(run.manifest.tags),
+        "description": run.manifest.description,
+        "path": str(run.path),
+    }
+
+
+_RELATIVE_TIME_WEEK_SECONDS = 7 * 24 * 60 * 60
+_RELATIVE_TIME_DAY_SECONDS = 24 * 60 * 60
+_RELATIVE_TIME_HOUR_SECONDS = 60 * 60
+_RELATIVE_TIME_MINUTE_SECONDS = 60
+
+
+def _relative_time(when: datetime) -> str:
+    """Render a datetime as a short relative-time hint (e.g. ``3d ago``)."""
+    now = datetime.now(UTC)
+    anchor = when if when.tzinfo is not None else when.replace(tzinfo=UTC)
+    delta = now - anchor
+    secs = max(int(delta.total_seconds()), 0)
+    if secs >= _RELATIVE_TIME_WEEK_SECONDS:
+        return f"{secs // _RELATIVE_TIME_WEEK_SECONDS}w ago"
+    if secs >= _RELATIVE_TIME_DAY_SECONDS:
+        return f"{secs // _RELATIVE_TIME_DAY_SECONDS}d ago"
+    if secs >= _RELATIVE_TIME_HOUR_SECONDS:
+        return f"{secs // _RELATIVE_TIME_HOUR_SECONDS}h ago"
+    if secs >= _RELATIVE_TIME_MINUTE_SECONDS:
+        return f"{secs // _RELATIVE_TIME_MINUTE_SECONDS}m ago"
+    return "just now"
 
 
 _BYTES_PER_KB = 1024

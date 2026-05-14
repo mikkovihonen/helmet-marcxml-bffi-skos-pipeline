@@ -88,18 +88,18 @@ Phases B / C / D / G / H can ship in parallel branches if the operator and claud
 
 ### Phase B — `bffi-pipeline runs list`
 
-- [ ] CLI subcommand `bffi-pipeline runs list` walks `BFFI_RUNS_ROOT` (single-rooted in v1).
-- [ ] Renders a table to stdout: `run_uuid` (12-char prefix), `started_at` (relative + absolute on `--verbose`), `status`, `size` (human-readable: KB / MB / GB), `tags` (comma-sep), `description` (truncated to terminal width).
-- [ ] Flags:
+- [x] CLI subcommand `bffi-pipeline runs list` walks `BFFI_RUNS_ROOT` (single-rooted in v1).
+- [x] Renders a table to stdout: `run_uuid` (12-char prefix), `started_at` (relative + absolute on `--verbose`), `status`, `size` (human-readable: KB / MB / GB), `tags` (comma-sep), `description` (truncated to terminal width).
+- [x] Flags:
   - `--sort {started, ended, size, run_uuid}` (default `started` descending).
   - `--status <comma-sep>` filter.
   - `--tag <tag>` filter; repeatable for AND semantics.
   - `--older-than <duration>` filter (`30d`, `2w`, `6mo`). Parser shared with `prune`.
   - `--limit <N>` (default 50).
   - `--json` / `--tsv` output for piping.
-- [ ] Legacy run dirs (no `bffi-run.json`) skipped by default; `--include-legacy` opts in (renders `run_uuid` as `legacy-<dirname-hash>`, `status="unknown"`).
-- [ ] Startup-log echoes the resolved `BFFI_RUNS_ROOT`.
-- [ ] Unit tests:
+- [x] Legacy run dirs (no `bffi-run.json`) skipped by default; `--include-legacy` opts in (renders `run_uuid` as `legacy-<dirname-hash>`, `status="unknown"`).
+- [x] Startup-log echoes the resolved `BFFI_RUNS_ROOT`.
+- [x] Unit tests:
   - `test_runs_list_renders_runs_in_started_at_descending_order`.
   - `test_runs_list_filters_by_tag_and_status` (AND semantics).
   - `test_runs_list_json_output_is_parseable`.

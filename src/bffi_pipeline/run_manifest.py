@@ -20,6 +20,7 @@ writer leaves the previous file intact (never half-written).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -290,6 +291,45 @@ def discover_runs(runs_root: Path) -> list[DiscoveredRun]:
     return out
 
 
+def discover_legacy_dirs(runs_root: Path) -> list[DiscoveredRun]:
+    """Walk ``runs_root`` and return synthesised :class:`DiscoveredRun` records
+    for directories that lack a parseable ``bffi-run.json``.
+
+    Used by ``bffi-pipeline runs list --include-legacy`` so the operator
+    can see what's in their ``BFFI_RUNS_ROOT`` even before adopting
+    historical dirs into the canonical manifest schema. The synth
+    manifest carries ``run_uuid=legacy-<sha1[:8]>``, ``status="unknown"``,
+    ``description=<dirname>``, and ``started_at`` from the dir's mtime.
+    Synth values are unstable across filesystems / mounts; do NOT pass
+    them to ``runs prune`` / ``runs tag`` / etc — they exist purely so
+    legacy dirs render in ``runs list`` output.
+    """
+    if not runs_root.is_dir():
+        return []
+    out: list[DiscoveredRun] = []
+    for child in runs_root.iterdir():
+        if not child.is_dir():
+            continue
+        manifest_path = child / MANIFEST_FILENAME
+        if manifest_path.is_file():
+            continue
+        try:
+            stat = child.stat()
+        except OSError:
+            continue
+        digest = hashlib.sha1(child.name.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+        synth = RunManifest(
+            run_uuid=f"legacy-{digest}",
+            started_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+            bffi_data_dir=str(child),
+            description=child.name,
+            status="unknown",
+        )
+        out.append(DiscoveredRun(manifest=synth, path=child))
+    out.sort(key=lambda r: r.manifest.started_at)
+    return out
+
+
 def compute_dir_size(path: Path) -> int:
     """Recursive file-size sum for one run dir.
 
@@ -419,6 +459,7 @@ __all__ = [
     "append_stage_completed",
     "append_stage_observed",
     "compute_dir_size",
+    "discover_legacy_dirs",
     "discover_runs",
     "mark_run_complete",
     "parse_duration",
