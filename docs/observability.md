@@ -26,6 +26,101 @@ alongside the pipeline (it shares the `BFFI_DATA_DIR` mount without
 volume mapping); Prometheus and Grafana run as Docker Compose
 services under the `observability` profile.
 
+### Exporter lifecycle
+
+Five phases, all in `src/bffi_pipeline/metrics_exporter.py` +
+`src/bffi_pipeline/runs_reset.py`:
+
+| Phase | Trigger | What happens |
+|---|---|---|
+| **Launch** | `bffi-pipeline serve-metrics` | Rehydrate every `--sidecar` JSONL into the in-memory registry; bind `:9100`; write `<BFFI_RUNS_ROOT>/.exporter.pid` + `.exporter.argv`; register the atexit cleanup hook; enter the tail loop. |
+| **Steady state** | tail loop, `poll_seconds=1.0` | Per attached sidecar: `_tail_step()` reads new lines via inode + byte offset (no double-counting); each sidecar's co-located `_errors.jsonl` + `_validation.jsonl` get the same treatment. Every `glob_rescan_seconds=30s` the `--watch-glob` patterns re-list and auto-attach new matches. |
+| **Clean shutdown** | SIGTERM / SIGINT / interpreter exit | atexit hook removes `.exporter.pid` + `.exporter.argv` (best-effort; OSError silently swallowed if the operator already cleaned them). |
+| **Operator reset** | `bffi-pipeline runs prune --apply --reset-exporter` | Reads PID file, SIGTERMs the process, waits up to 10 s for clean exit, then (default) `subprocess.Popen(argv, start_new_session=True)` with the recorded argv. `--no-relaunch-exporter` skips the relaunch and logs a warning. |
+| **Crash recovery** | Next `--reset-exporter` after SIGKILL / OOM / container halt | `_process_alive(pid)` returns False → unlink the stale PID file, log warning, skip. No manual `rm` ever needed. |
+
+PID + argv file locations are **process-global**, not per-run:
+
+```
+<BFFI_RUNS_ROOT>/.exporter.pid       — one line: os.getpid()
+<BFFI_RUNS_ROOT>/.exporter.argv      — one line per argv token
+```
+
+Both are written at launch and removed on graceful exit. They sit
+at the runs-root because the exporter is multi-tenant over its
+sidecars (see § Operating modes); per-run-uuid PID files don't
+make sense.
+
+The reset path exists because pruning a run from disk leaves the
+live exporter's in-memory registry holding stale `{run_uuid="..."}`
+counters that no on-disk sidecar can refute. Restarting the
+exporter forces it to rehydrate from the (now-pruned) sidecars,
+which omits the deleted runs cleanly. P-32 Phase G ships this as
+plumbing; pruning a run without `--reset-exporter` leaves the
+stale series visible until Prometheus's 15-day retention ages
+them out.
+
+### Operating modes: ambient observer vs per-run focused
+
+The exporter is run-agnostic by design. The `serve()` signature
+takes a *list* of sidecars (plus optional watch-globs), and the
+in-memory registry emits `run_uuid`-labeled metrics from whatever
+events each attached sidecar carries. Two natural launch shapes:
+
+**Mode A — ambient observer (recommended; matches P-32 Phase G intent):**
+
+```bash
+uv run bffi-pipeline serve-metrics \
+    --port 9100 \
+    --watch-glob 'runs/*/stage-events.jsonl'
+```
+
+One long-lived exporter. Initial glob walk attaches every existing
+sidecar; the 30 s rescan picks up new runs as they spawn. A fresh
+`bffi-pipeline marc-to-bf` invocation that creates
+`runs/<new-uuid>/stage-events.jsonl` shows up in the dashboard's
+`active_run` dropdown within ~30 s — no exporter restart needed.
+
+**Mode B — per-run focused bench:**
+
+```bash
+uv run bffi-pipeline serve-metrics \
+    --port 9100 \
+    --sidecar runs/<specific-uuid>/stage-events.jsonl
+```
+
+Single-tenant. Useful for an isolated A/B test where you want zero
+noise from other runs. The dashboard dropdown only shows one
+option. Operator kills the exporter when done; Prometheus retains
+the data for its 15-day window.
+
+**Run vs exporter lifecycle independence:**
+
+| Question | Answer |
+|---|---|
+| Can the exporter start before any run exists? | Yes (mode A — `--watch-glob` attaches sidecars as they appear) |
+| Can a run end while the exporter keeps running? | Yes — sidecar stops growing; last counter values stay served from the registry until restart |
+| Can the exporter be "switched" to a new run? | No switch needed — it just attaches the new sidecar alongside the old ones |
+| Can the exporter forget a pruned run without a restart? | No — its in-memory registry holds stale `{run_uuid="..."}` series the sidecar can't refute. Forces the `--reset-exporter` path |
+| Does Prometheus see one run or many? | Many. Each scrape returns every attached sidecar's counters labeled by `run_uuid`. Grafana's dropdown filters the view |
+
+Mode A is the durable shape. Mode B is a temporary specialization.
+Either way, the exporter never owns the run — it's a passive tail
+of the run's on-disk JSONL output.
+
+### Inspecting exporter state
+
+```bash
+# Is anything live?
+ps aux | grep "[s]erve-metrics"
+
+# What's the canonical PID file say? (substitute your BFFI_RUNS_ROOT)
+cat runs/.exporter.pid 2>/dev/null || echo "no exporter running"
+
+# What was it launched with?
+cat runs/.exporter.argv 2>/dev/null
+```
+
 ### Counter inheritance across exporter restarts
 
 Counters (`bffi_*_total`) are cumulative within a single exporter
@@ -53,13 +148,20 @@ other counter-based panels show cumulative-by-design.
 Every Counter and Gauge carries an explicit `run_uuid` label (P-13
 Phase A). Dashboards filter every panel by `run_uuid="$active_run"`
 (P-13 Phase B), where `$active_run` is a Grafana templating variable
-derived from `topk(1, bffi_stage_started_timestamp) by (run_uuid)`
-— i.e. "the run whose start event is the most recent".
+populated by `label_values(bffi_stage_started_timestamp, run_uuid)`
+— i.e. the set of every run_uuid the exporter currently knows
+about, sorted alphabetically.
 
-Effect: starting a new pipeline run instantly flips the dashboard
-view to that run. Prior runs' data remains queryable in Prometheus
-(filter by an explicit `run_uuid=` value) for forensic comparison
-but does not visually compete with the live view.
+The dropdown holds every value the attached sidecars have ever
+emitted (subject to Prometheus's 15-day retention). The operator
+picks the run they want to watch; panels re-render against that
+single run_uuid. Prior runs' data remains queryable in Prometheus
+under their own run_uuid values for forensic comparison.
+
+To narrow the dropdown to *current* runs, either run the exporter
+in mode B (single `--sidecar`), prune old runs and SIGTERM-restart
+the exporter (`runs prune --apply --reset-exporter`; see § Exporter
+lifecycle), or both.
 
 Cardinality estimate at the bottom of the next section accounts for
 this label.
