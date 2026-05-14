@@ -1,6 +1,6 @@
-# P-32 — Run lifecycle management: canonical root + manifest + CLI + migration + reset
+# P-32 — Run lifecycle management: canonical root + manifest + CLI + reset
 
-**Status**: backlog.
+**Status**: in-progress.
 **Source proposal**: this file at commit `1fdabcd` (proposal-shape; recover via `git show 1fdabcd:docs/plans/proposed/p-32-run-lifecycle-management.md`).
 **Plan-base commit**: `1fdabcd`. To gauge drift before executing, run
 `git diff 1fdabcd..HEAD --
@@ -18,7 +18,7 @@ docker-compose.yml`.
 - Phase C (`bffi-pipeline runs prune` CLI with `--reset-*` flags): `<unfilled>`
 - Phase D (`bffi-pipeline runs tag` / `untag` / `info`): `<unfilled>`
 - Phase E (canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs): `1b9f1f0` (code + 5 unit tests + `.env.example` migration note, 2026-05-14).
-- Phase F (one-time `bffi-pipeline runs migrate` for legacy run dirs): `<unfilled>`
+- ~~Phase F (one-time `bffi-pipeline runs migrate` for legacy run dirs)~~ — **dropped 2026-05-14**, see "What this plan does NOT do". Post-Phase-E new runs already land canonical; legacy data in `scratchpad/`, `data/` etc. stays where it is as historical artifact. A future `runs adopt` command can pull individual legacy dirs into the canonical root if/when a concrete need surfaces.
 - Phase G (Prometheus + exporter reset on prune): `<unfilled>`
 - Phase H (pre-run Fuseki clear + manual `runs clear-fuseki` CLI): `<unfilled>`
 
@@ -36,31 +36,29 @@ Pipeline runs accumulate ~25-50 GB of artifacts each at full-corpus scale (BIBFR
 5. Dashboard / Prometheus state drifts from on-disk reality when runs are pruned (Phase G: `--reset-exporter` / `--reset-prometheus` flags on prune).
 6. Fuseki accumulates triples across runs, breaking reproducibility and producing duplicate `prov:Activity` URIs (Phase H: pre-run clear of `<graph_base>*` named graphs, vocabularies preserved).
 
-Phase A (manifest writer) is the foundation everything else builds on; Phase F (legacy migration) sweeps the existing accumulated state into the new canonical layout in one shot.
+Phase A (manifest writer) is the foundation everything else builds on. Legacy data on disk (pre-Phase-E run dirs scattered under `scratchpad/`, `data/`, etc.) stays as historical artifact — see "What this plan does NOT do" for the Phase F migration rationale.
 
 ## Phase dependencies + sequence
 
-Critical path:
+Critical path (post-Phase-F-drop):
 
 ```
-A (manifest writer)
+A (manifest writer)  [done at ff83135]
   ├── B (list CLI)        [parallel]
   ├── C (prune CLI)       [parallel]
   ├── D (tag/info CLI)    [parallel]
-  ├── E (canonical root)
-  │     └── F (migration)
+  ├── E (canonical root)  [done at 1b9f1f0]
   ├── G (Prometheus + exporter reset)   [parallel]
   └── H (pre-run Fuseki clear)          [parallel]
 ```
 
-Recommended ship order: **A → E → F → C → G → H → B → D**. Rationale:
+Recommended ship order: **A → E → C → G → H → B → D**. Rationale:
 
 1. A first: the manifest is the data model everything reads / writes.
-2. E next: canonical root must exist before migration writes to it.
-3. F: migrate legacy state immediately so the operator has the new layout to validate against.
-4. C: prune wants to work against the full canonical set, not a half-migrated mix.
-5. G + H: reset machinery now that the run-state model is settled.
-6. B + D: ergonomic CLI commands last; can land in any order.
+2. E next: canonical root invariant for new runs.
+3. C: prune CLI — operates only on canonical-root runs (legacy dirs invisible by design; `--include-legacy` flag remains opt-in but is never the recommended path post-F-drop).
+4. G + H: reset machinery now that the run-state model is settled.
+5. B + D: ergonomic CLI commands last; can land in any order.
 
 Phases B / C / D / G / H can ship in parallel branches if the operator and claude split work — they don't conflict at the file level (each touches a different module).
 
@@ -153,25 +151,9 @@ Phases B / C / D / G / H can ship in parallel branches if the operator and claud
   - `test_settings_data_dir_respects_explicit_override`.
   - `test_startup_log_warns_on_override`.
 
-### Phase F — `bffi-pipeline runs migrate`
+### ~~Phase F — `bffi-pipeline runs migrate`~~ (DROPPED 2026-05-14)
 
-- [ ] CLI subcommand `bffi-pipeline runs migrate --from <path>` (repeatable). Walks each `--from` path recursively, identifies run-shaped dirs (heuristic: contains `stage-events.jsonl` AND at least one of `bffi/` / `bibframe/` / `canonical.ttl` / `judge-decisions.jsonl`).
-- [ ] For each discovered dir:
-  - Derive `run_uuid`: extract from the first line of `stage-events.jsonl` if present; otherwise generate `uuid4().hex`. Log derived vs synthesised.
-  - Synthesise `bffi-run.json` with `status="adopted-legacy"`, `started_at` from dir mtime, `description` from the old dirname.
-  - Move dir to `<BFFI_RUNS_ROOT>/<run_uuid>/` via `os.rename`; fall back to `shutil.move` with a warning if cross-filesystem.
-  - Update `bffi_data_dir` field in the new manifest to reflect the canonical path.
-  - Append `(uuid, old_path, new_path, ts)` row to `<BFFI_RUNS_ROOT>/.migration.log`.
-- [ ] `--dry-run` default; `--apply` required.
-- [ ] Cross-filesystem pre-check: total bytes-to-move > 80 % of destination free space → warn; > 95 % → refuse.
-- [ ] CLI subcommand `bffi-pipeline runs migrate --rollback` reads `.migration.log` in reverse and moves dirs back. Refuses if any moved dir's `bffi-run.json` mtime is newer than the migration's row timestamp.
-- [ ] Operator successfully migrates this repo's existing `scratchpad/overnight-sample-2026-05-13/`, `scratchpad/data-cataloguer-audit-*/`, etc., into the canonical root without losing data.
-- [ ] Unit tests:
-  - `test_migrate_identifies_run_shaped_dir` (one run-shaped + one derived-data dir; only run-shaped selected).
-  - `test_migrate_dry_run_does_not_move`.
-  - `test_migrate_apply_moves_and_synthesises_manifest` happy path.
-  - `test_migrate_rollback_restores_original_paths` round-trip.
-  - `test_migrate_handles_uuid_collision` (synthesised uuid matches existing run → log + abort that one dir).
+Decision recorded in "What this plan does NOT do". Phase F was scoped to sweep existing legacy run dirs (`scratchpad/overnight-sample-2026-05-13/`, `scratchpad/data-cataloguer-audit-*/`, etc.) into the canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` layout in one shot. With Phase E ensuring every NEW run lands canonical, the value of migrating PAST runs reduces to "make legacy dirs appear in `runs list`/`prune`" — which the operator can address case-by-case via a future `runs adopt` command if a real need surfaces. The Phase F write-up is preserved in the source proposal (`git show 1fdabcd:docs/plans/proposed/p-32-run-lifecycle-management.md`).
 
 ### Phase G — Prometheus / exporter reset on prune
 
@@ -225,20 +207,19 @@ Phases B / C / D / G / H can ship in parallel branches if the operator and claud
 ### Cross-phase
 
 - [ ] `make lint && make test` green at each phase landing.
-- [ ] Operator runbook section in `docs/operator-runbook.md` covers: the canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` layout, the prune workflow (dry-run-first discipline), the migration story (one-time `runs migrate --apply`), Fuseki preserve-vs-wipe semantics, the "don't `--reset-exporter` mid-run" caveat (R9), the Fuseki cross-reference caveat (R6 — addressed by Phase H for the next run; pruned runs' historical references remain until `--reset-fuseki` drops them).
-- [ ] Final-state check after all phases land: `find scratchpad data -name 'stage-events.jsonl' 2>/dev/null` returns empty (every run migrated to `<BFFI_RUNS_ROOT>/`).
+- [ ] Operator runbook section in `docs/operator-runbook.md` covers: the canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` layout, the prune workflow (dry-run-first discipline), Fuseki preserve-vs-wipe semantics, the "don't `--reset-exporter` mid-run" caveat (R9), the Fuseki cross-reference caveat (R6 — addressed by Phase H for the next run; pruned runs' historical references remain until `--reset-fuseki` drops them), and the "legacy dirs in scratchpad/data are not managed by `runs list / prune`" note (the Phase F migration was dropped; legacy dirs stay as historical artifact).
 - [ ] Snapshot at `docs/performance/<date>-p-32-run-lifecycle.md` summarising what landed + the disk hygiene the operator gets (1-2 paragraphs + sample `runs list` output).
 
 ## Risks
 
 - **R1 — Manifest write races.** Single-process pipeline assumption applies; atomic `.tmp` + rename ensures partial files never observed.
 - **R2 — `prune` deletes the wrong thing.** `--dry-run` default; `--apply` requires a filter that excludes at least some runs; per-run sizes + totals printed pre-delete. No soft-delete in v1.
-- **R3 — Legacy runs without manifests.** Phase F's `runs migrate` handles bulk conversion.
+- **R3 — Legacy runs without manifests.** Phase F (the bulk-migration command) was dropped 2026-05-14; legacy dirs in `scratchpad/`, `data/` etc. remain on disk as historical artifact, outside `runs list / prune` scope. Operator manages them with `rm -rf` as before. A future `runs adopt <dir>` command (deferred) can pull individual legacy dirs into the canonical root if a real need surfaces.
 - **R4 — Search root coverage drift.** Single `BFFI_RUNS_ROOT` in v1 sidesteps the multi-root problem.
 - **R5 — Tag-protection bypass.** No `--ignore-tags` flag; operator must `untag` first to delete a tagged run.
 - **R6 — Fuseki accumulates triples across runs.** Addressed by Phase H (pre-run clear). Pruned-run historical references addressed by Phase G's `--reset-fuseki` flag.
-- **R7 — Migration interrupted mid-way.** Per-dir atomic; `.migration.log` records progress; re-running picks up where it left off.
-- **R8 — Cross-filesystem migration.** Pre-check `> 80 %` free-space warning, refuse at `> 95 %`. Falls back to `shutil.move` with warning.
+- ~~**R7 — Migration interrupted mid-way.**~~ Not applicable post-Phase-F-drop.
+- ~~**R8 — Cross-filesystem migration.**~~ Not applicable post-Phase-F-drop.
 - **R9 — Exporter restart drops in-flight metrics.** "Don't `--reset-exporter` mid-run" runbook note; gap bounded by ~15 s Prometheus scrape interval.
 - **R10 — Prometheus admin API disabled.** Phase G enables it by default in `docker-compose.yml`; falls back to warning + skip if unreachable.
 - **R11 — `BFFI_DATA_DIR` ergonomics regression.** Stays as escape hatch; startup-log warns when used; runbook documents the new pattern.
@@ -252,16 +233,17 @@ Each phase is independently revertable:
 
 - **Phase A / B / C / D**: revert the relevant commits; canonical root still exists but isn't actively managed.
 - **Phase E**: revert. `Settings.data_dir` resolution returns to `BFFI_DATA_DIR`-or-default; new runs land outside the canonical root again.
-- **Phase F**: `bffi-pipeline runs migrate --rollback` reads `.migration.log` and moves dirs back. Reversible only if no new runs have landed since the migration AND no moved dirs have been modified (mtime check).
+- ~~**Phase F**~~ — dropped 2026-05-14; nothing to roll back.
 - **Phase G**: revert; prune loses the reset flags but still works for on-disk deletion. Operator manually restarts exporter / wipes Prometheus TSDB if needed.
 - **Phase H**: revert; pipeline init no longer clears Fuseki. Operator manually runs `bffi-pipeline runs clear-fuseki --apply` between runs if desired (the CLI is still useful standalone). Or set `BFFI_FUSEKI_CLEAR_ON_RUN_START=false` to disable without reverting.
 
-No data loss across rollback for any phase except Phase F, which is reversible only while the rollback preconditions hold.
+No data loss across rollback for any phase.
 
 ## What this plan does NOT do (deferred)
 
 - **Soft-delete on `prune --apply`.** Hard-delete in v1 with `--dry-run` default as the safety net.
-- **`runs adopt <dir>` for one-off legacy dirs after Phase F.** Phase F's `migrate` handles bulk; `adopt` deferred until a real corner case surfaces.
+- **Phase F — one-time `bffi-pipeline runs migrate` for legacy run dirs.** Dropped 2026-05-14 (operator call). Rationale: post-Phase-E every NEW run lands at the canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` location, so the canonical-root invariant is established going forward. Migrating PAST runs — sweeping `scratchpad/overnight-sample-2026-05-13/`, `scratchpad/data-cataloguer-audit-*/`, etc. — would just make legacy dirs appear in `runs list` / `prune`, which is a convenience, not a load-bearing fix. The operator continues to manage legacy dirs with `rm -rf` as before. The Phase F design (5-test acceptance criteria; `--from <path>`, `--dry-run`, `.migration.log`, atomic per-dir moves, cross-filesystem fallback) stays preserved in the proposal-shape source at commit `1fdabcd` should the decision reverse.
+- **`runs adopt <dir>` for one-off legacy dirs.** Pulls a single legacy dir into the canonical root with a synthesised `bffi-run.json` (`status="adopted-legacy"`). Deferred until a concrete need surfaces; with Phase F dropped, this is the only path back into managed-state for any individual legacy run.
 - **`runs list` reads P-31's TSV `reviewed_at` column** to show "un-reviewed rows per run". Tight coupling to P-31's schema; deferred.
 - **Run manifest exposed via Fuseki PROV-O graph.** v1 keeps the manifest on-disk only.
 - **`runs adopt` reconstructs `stages_completed` from artifact signatures.** v1 stubs `status="adopted-legacy"`.
@@ -271,11 +253,10 @@ No data loss across rollback for any phase except Phase F, which is reversible o
 - **Vocabulary graph refresh.** `bffi-pipeline load-finto` is the existing path; Phase H leaves vocabularies untouched on every pipeline run.
 - **Multi-root `--root` flag on `runs list` / `prune`.** Single `BFFI_RUNS_ROOT` in v1.
 - **Cloud / remote storage.** All operations on local disk.
-- **`migrate --rollback` rich UX.** v1 is a straight in-reverse `.migration.log` replay; richer per-dir confirmation prompts deferred.
 
 ## Composition with sibling plans + proposals
 
 - **P-31 (dashboard artifacts panel + per-run cataloguer-review TSVs)** — P-31's per-run TSVs become part of the artifact set this plan manages. P-31 can ship before or after P-32; the cleanup story in P-31's R4 becomes resolvable once `bffi-pipeline runs prune --keep-tagged` exists. The manifest's `pre_run_fuseki_clear` field is independent of P-31; the TSV paths are exposed via P-31's `bffi_artifact_path` gauge (Phase A.1 of P-31), unaffected.
 - **P-30 (observability + audit-trail critical audit)** — sequenced *after* P-32. P-30's truth-table catalogues every surface this plan introduces: `bffi-run.json` schema, the `runs` CLI subcommand tree, the `<BFFI_RUNS_ROOT>` canonical layout, the `.exporter.pid` + `.migration.log` files, the Fuseki clear semantics, the Prometheus admin API usage.
 - **P-22..29 (FP veto stack + audit-meta proposals)** — write to a run's `data_dir` like any other run; the canonical-root change is transparent to them (they read `settings.data_dir`; the resolution rule is what changed in Phase E).
-- **`docs/performance/<date>-*.md` snapshots** — when a snapshot references a specific run, the operator should tag the run with `audit-bench` so it survives subsequent `prune --older-than` sweeps. Existing snapshots that cite `scratchpad/overnight-sample-2026-05-13/` get either rewritten during Phase F migration (path moves) or stay as historical record with `run_uuid` as the durable identifier going forward. Runbook documents: cite by `run_uuid`, not by path.
+- **`docs/performance/<date>-*.md` snapshots** — when a snapshot references a specific run, the operator should tag the run with `audit-bench` so it survives subsequent `prune --older-than` sweeps. Existing snapshots that cite `scratchpad/overnight-sample-2026-05-13/` stay as historical record (Phase F's path-rewrite was dropped); the path remains valid on disk because legacy dirs aren't migrated. Going forward, new snapshots should cite by `run_uuid` rather than path for durability — covered in the operator runbook note.
