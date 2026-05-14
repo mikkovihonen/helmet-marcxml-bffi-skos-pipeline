@@ -31,8 +31,18 @@ Surface pipeline-produced artifacts on the dashboard so the operator knows where
 
 Two operationally distinct review workflows justify two separate files:
 
-- **Source-system review** — bib_ids whose MARCXML needs correction in Sierra/Helmet. Cataloguer fixes the source record, re-exports MARCXML, re-runs the pipeline.
-- **Target-system review** — canonical Work / Expression URIs the cataloguer reviews in Skosmos. Fixes are SPARQL updates or Skosmos editor changes, not re-cataloguing.
+- **Source-system review** (Phase B) — every bib_id where the pipeline couldn't produce a complete, canonical BFFI record because the **MARCXML itself** was wrong or incomplete. Concrete surfaces in scope:
+  - **M2 conversion errors** (`bibframe/_errors.tsv`): MARC parse failure, schema-invalid leader, required-tag misses — the bib_id has no BFFI output at all.
+  - **M3 Boundary-3 SHACL violations** (`bffi/_validation.tsv`): per-record `.ttl` exists but is shape-noncompliant (missing 336/337/338 → can't type the content; malformed date literals; etc.) — the BFFI is partial.
+  - **M8 mint failures** (`canonical-mint-failures.tsv`): per-record BFFI exists but couldn't mint into a canonical Work because the source lacked a `pref_label` or any minting anchor — the bib_id never reaches the canonical graph cataloguers browse.
+
+  Cataloguer's path is the same for all three: fix the source MARC record in Sierra/Helmet → re-export → re-run the pipeline. *The pipeline did the right thing — the input wasn't right.*
+
+- **Target-system review** (Phase C) — canonical Works the pipeline transformed in a way the cataloguer flags as wrong (mis-clustered, mis-reconciled to KANTO, wrong primary author, fictional-character that should have short-circuited, FP-veto candidate, etc.). Cataloguer checks against the source system to verify the source data was actually fine, then records the verdict + the expected behaviour. **The fix is in the pipeline** — gold-set additions, M5/M6/M9 prompt or heuristic tuning, new vetoes, new SHACL rules. The cataloguer's row becomes a **bug report against the pipeline**, not a Skosmos-edit ticket. A subsequent re-run produces the corrected output and replaces the wrong state in Fuseki / Skosmos atomically (consistent with the P-32 Phase H pre-run-clear stance: Fuseki state is always a pure function of the latest pipeline run, never hand-patched).
+
+The two TSVs share the per-run-file pattern + cataloguer-fill-in columns but differ in the row schemas:
+- **Source-review** focuses on what's wrong with the source record (`category`, `severity`, `marcxml_path`).
+- **Target-review** focuses on (a) the pipeline's decision that triggered the flag (`reason`, `confidence`, `canonical_work_uri`, `member_bib_ids`), and (b) the cataloguer's bug-report disposition (`cataloguer_verdict`, `severity`, `expected_behavior`).
 
 ### File format decision: TSV, not CSV
 
@@ -109,9 +119,9 @@ Updated DOD (under B1):
   def append_source_row(
       *,
       bib_id: str,
-      stage: str,          # m2 | m3 | m9
-      category: str,       # error_type / boundary-3 / no-candidate / fictional / watchdog-aborted
-      severity: str,       # blocking | warning | info
+      stage: str,          # m2 | m3 | m8
+      category: str,       # M2 error_type | boundary-3 | mint-failure-<reason>
+      severity: str,       # blocking | warning
       details: str,
       marcxml_path: str,
   ) -> None: ...
@@ -129,7 +139,8 @@ Updated DOD (under B1):
 - [ ] `flagged_at`: UTC ISO 8601 with second precision. `reviewed_by` / `reviewed_at` / `notes`: empty strings on write (cataloguer fills in).
 - [ ] **M2 wire-in** in `src/bffi_pipeline/stages/marc_to_bf.py` — wherever the existing `_errors.jsonl` row is appended, also call `append_source_row` with the same data. `category` = the `error_type` field; `severity` = `blocking` for hard errors, `warning` for partial-failure tolerated rows; `details` = the existing error message; `marcxml_path` = the per-record MARCXML path.
 - [ ] **M3 wire-in** in `src/bffi_pipeline/stages/bf_to_bffi.py` — wherever the existing `_validation.jsonl` row is appended, also call `append_source_row`. `category` = `boundary-3`; `severity` = `warning` (Boundary 3 failures don't block, per spec); `details` = the SHACL report text; `marcxml_path` = the BIBFRAME-side `.rdf` parent of the BFFI record.
-- [ ] **M9 wire-in** in `src/bffi_pipeline/stages/reconcile.py` (or wherever M9's outcome bookkeeping lives) — emit on `no-candidate`, `fictional`, `watchdog-aborted` outcomes. `severity` = `info` for `no-candidate` and `fictional` (these are observations, not errors); `blocking` for `watchdog-aborted` (the LLM hung).
+- [ ] **M8 mint-failure wire-in** in `src/bffi_pipeline/stages/merge.py` — every bib_id that landed in `canonical-mint-failures.tsv` (P-34) gets a parallel `append_source_row` with `category` = the mint-failure `reason` (`missing-pref-label` / `missing-mint-anchor` / etc.), `severity` = `blocking` (the bib_id is absent from the canonical graph), `details` = the human-readable reason, `marcxml_path` = the source `.xml`. The standalone `canonical-mint-failures.tsv` stays as the per-stage surface; the source-review TSV is the unified cataloguer-handoff superset.
+- [ ] **No M9 wire-in for source-review.** M9's `no-candidate` / `fictional` / `watchdog-aborted` outcomes are target-review territory — the bib_id reached a canonical Work; the question is whether the pipeline's reconciliation decision was right, which the cataloguer answers against the source rather than fixing the source. See Phase C.
 - [ ] ~~Source TSV path surfaced via Phase A.1 gauge.~~ Superseded — the dashboard's panel id 28 ("Cataloguer review TSVs") will gain a Markdown link `[Unified source review](/files/${active_run}/cataloguer-source-review-${active_run}.tsv)` once the file exists. Edit the panel JSON when Phase B ships.
 - [ ] Unit tests:
   - `test_append_source_row_writes_header_once` — repeated calls produce exactly one header line.
@@ -141,7 +152,7 @@ Updated DOD (under B1):
 
 ### Phase C — Target-review TSV + M8/M9 wiring (solo)
 
-**Re-scoped 2026-05-14**: the M8 mint-failures TSV (`canonical-mint-failures.tsv` from P-34) already covers the conflict subset of the target-review surface for records that didn't mint. What's missing: rows for canonical Works that DID mint but landed on the M9 fallback band or in a conflict group, plus the FP-class wiring once P-22..26 ship. Implementation stays as originally specced — a new `append_target_row` helper alongside `append_source_row` in `cataloguer_review.py`.
+**Re-scoped 2026-05-14** (twice): the M8 mint-failures TSV (`canonical-mint-failures.tsv` from P-34) is actually a **source-review** surface — those bib_ids never made it to a canonical Work, so they belong in Phase B's consolidation, not here. Phase C is for canonical Works the pipeline **did** mint but where the pipeline's transformation may be wrong (mis-clustered, low-confidence reconciliation, fictional-character escape, FP-veto candidate). Cataloguer's job: verify against source, record verdict + expected behaviour. **Pipeline fix follows.**
 
 - [ ] `append_target_row(...)` added to the same module:
 
@@ -150,31 +161,43 @@ Updated DOD (under B1):
       *,
       canonical_work_uri: str,
       expression_uris: list[str],
-      reason: str,         # m8-conflict | m9-fallback | m9-no-candidate | fp-<class>
+      reason: str,         # m8-conflict | m9-fallback | m9-no-candidate
+                           #   | fictional-character | fp-<class>
       confidence: float | None,
       member_bib_ids: list[str],
       skosmos_url: str | None,
   ) -> None: ...
   ```
 
-- [ ] Write target: `<BFFI_DATA_DIR>/cataloguer-target-review-<run_uuid>.tsv`. Header:
+  Cataloguer-fill-in columns (`cataloguer_verdict`, `severity`,
+  `expected_behavior`, `reviewed_by`, `reviewed_at`, `notes`) are
+  written as empty strings by the helper; the cataloguer fills them
+  in directly in the TSV.
+
+- [ ] Write target: `<BFFI_DATA_DIR>/cataloguer-target-review-<run_uuid>.tsv`. Header (14 columns):
 
   ```
-  run_uuid\tcanonical_work_uri\texpression_uris\treason\tconfidence\tmember_bib_ids\tskosmos_url\tflagged_at\treviewed_by\treviewed_at\tnotes
+  run_uuid\tcanonical_work_uri\texpression_uris\treason\tconfidence\tmember_bib_ids\tskosmos_url\tflagged_at\tcataloguer_verdict\tseverity\texpected_behavior\treviewed_by\treviewed_at\tnotes
   ```
+
+  Cataloguer-fill-in column semantics:
+  - `cataloguer_verdict`: `pipeline-correct` | `pipeline-incorrect` | `uncertain`. *pipeline-correct* means the cataloguer reviewed the pipeline's decision and confirmed it; the row is a confidence-flag false alarm that **the gold set should absorb** so M5/M6 stop flagging it. *pipeline-incorrect* means the pipeline genuinely got it wrong; the row is **a bug report**. *uncertain* means the cataloguer can't decide without more context (multilingual record, edge-case authority, etc.) — escalates to a follow-up review.
+  - `severity`: `cosmetic` | `functional` | `blocking`. *cosmetic* = wrong but harmless display (e.g. misordered authors). *functional* = wrong enough to mislead a Skosmos user but doesn't block discovery (e.g. wrong KANTO bind, browsing still works). *blocking* = catastrophic (e.g. two distinct authors merged → search returns the wrong author entirely). Drives the developer's triage queue.
+  - `expected_behavior`: free text — what the pipeline should have done. Reads like a one-line ticket title ("should have been two separate canonical Works", "primary author should bind to https://urn.fi/...", "FP veto on numeric-marker mismatch", etc.). Becomes the gold-set hint or the new heuristic spec.
 
 - [ ] `expression_uris` and `member_bib_ids` are pipe-separated (`|`). Empty list serialises as empty string.
 - [ ] `confidence` serialises as a string (`""` when None, `"0.84"` otherwise — period as decimal separator regardless of locale; Excel re-parses on import per the user's column-type override).
-- [ ] `skosmos_url` is empty in v1 — Skosmos doesn't yet publish canonical Works at a stable URL. Column reserved.
+- [ ] `skosmos_url` is empty in v1 — Skosmos doesn't yet publish canonical Works at a stable URL. Column reserved for the cataloguer's verification click-through once the URL pattern stabilises.
 - [ ] De-duplication on `(canonical_work_uri, reason)` within a run.
-- [ ] **M8 wire-in** in `src/bffi_pipeline/stages/merge.py`'s conflict-emission path — every row written to `canonical-conflicts.jsonl` also calls `append_target_row` with `reason="m8-conflict"`, `confidence=None`.
-- [ ] **M9 wire-in** in the reconcile-stage's fallback-band branch — picks below the configured review threshold emit `reason="m9-fallback"` rows; `no-candidate` outcomes that escaped M9 entirely emit `reason="m9-no-candidate"`.
+- [ ] **M8 wire-in** in `src/bffi_pipeline/stages/merge.py` — every canonical Work in `canonical-conflicts.jsonl` (the M6 judge disagreement subset where the pipeline made a default-no-merge call) calls `append_target_row` with `reason="m8-conflict"`, `confidence=None`. These are the highest-yield bug-report candidates because the judge cascade ALREADY surfaced uncertainty.
+- [ ] **M9 wire-in** in the reconcile-stage's fallback-band branch — picks below the configured review threshold emit `reason="m9-fallback"` rows with the picker's confidence; `no-candidate` outcomes that escaped M9 entirely emit `reason="m9-no-candidate"` (no Finto candidates found at all); `fictional-character` short-circuits emit `reason="fictional-character"` (cataloguer verifies the qualifier was legitimate, not a false-positive on a real person whose name happens to match a fictional one).
 - [ ] ~~Target TSV path surfaced via Phase A.1 gauge.~~ Superseded — add a Markdown link `[Unified target review](/files/${active_run}/cataloguer-target-review-${active_run}.tsv)` to panel id 28 when Phase C ships.
 - [ ] Unit tests:
-  - `test_append_target_row_writes_header_once`.
-  - `test_append_target_row_serialises_list_columns_with_pipe`.
+  - `test_append_target_row_writes_header_once` — covers the full 14-column header.
+  - `test_append_target_row_serialises_list_columns_with_pipe` — `expression_uris` + `member_bib_ids`.
   - `test_append_target_row_dedupes_on_uri_plus_reason`.
   - `test_append_target_row_confidence_none_serialises_empty`.
+  - `test_append_target_row_cataloguer_fillin_columns_emit_empty` — `cataloguer_verdict` / `severity` / `expected_behavior` are written as empty strings so the cataloguer fills them in by hand.
 - [ ] `make lint && make test` green.
 
 ### Cross-phase
@@ -199,17 +222,19 @@ Updated DOD (under B1):
 - **Install a Grafana plugin.** No JSON datasource, no file datasource. The "Run artifacts" panel uses Grafana's stock table panel + the chosen link-rendering mechanism (decided in the paired session).
 - **Define Skosmos's URL pattern for canonical Works.** Upstream question; column reserved, populated when ready.
 - **CSV / Excel-decimal-locale support.** TSV is the format; Excel handles UTF-8 TSV in any locale. If a future cataloguer workflow needs `.csv`, it's an export step from the TSV, not a parallel pipeline output.
-- **Cataloguer-facing tooling for the round-trip.** The plan ships TSV-out; cataloguer fills in `reviewed_by` / `reviewed_at` / `notes` and hands the file back. How the operator ingests the reviewed TSV (re-runs pipeline with annotated metadata? files a Jira? amends Sierra?) is workflow-side, not pipeline-side. Out of scope here.
+- **Cataloguer-facing tooling for the round-trip.** The plan ships TSV-out; cataloguer fills in the workflow columns (source-review: `reviewed_by` / `reviewed_at` / `notes`; target-review: also `cataloguer_verdict` / `severity` / `expected_behavior`) and hands the file back. How the **target-review** rows are ingested into the development backlog — gold-set growth (P-06), new SHACL rules, new vetoes (P-22..26), prompt iteration on M6/M9 — is workflow-side, not pipeline-side. Out of scope here. The **source-review** round-trip (cataloguer fixes Sierra → re-export MARCXML → re-run) is workflow-side too.
+- **Patching Fuseki / Skosmos directly.** Target-review rows are **bug reports against the pipeline**, not Skosmos-edit tickets. The fix path is always *fix the pipeline → re-run → Fuseki state updates atomically* (consistent with P-32 Phase H's pre-run clear). Manual `INSERT DATA` / `DELETE WHERE` against the bffi-works graph is not a supported workflow.
 - **Audit the new surfaces.** That's P-30's territory. Sequencing puts P-31 before P-30 so P-30's truth-table catalogue covers the new gauges + TSVs.
 - **De-dup history rotation.** The in-memory `(bib_id, stage, category)` set is per-run, reset at pipeline init. Cross-run dedup would require reading the previous TSV at startup; not needed in v1.
 
 ## Composition with sibling proposals + plans
 
-- **P-30 (observability + audit-trail critical audit)** — sequenced *after* P-31. P-30's catalogue includes the path gauge + the two TSV surfaces + their derivation rules; the truth-table audits both in one pass.
-- **P-22..26 (FP veto stack)** — once those land, their audit-flagged FP classes call `append_target_row(..., reason="fp-<class>")` via Phase C's helper. P-31 lays the helper signature; the veto plans wire to it.
-- **P-27 (M6 verdict audit)** — independent. P-27 may surface findings that warrant target-TSV rows; if so, it adds a `reason` value when it ships.
+- **P-30 (observability + audit-trail critical audit)** — sequenced *after* P-31. P-30's catalogue includes the file-server surface + the two TSV files + their derivation rules; the truth-table audits both in one pass.
+- **P-22..26 (FP veto stack)** — once those land, their audit-flagged FP classes call `append_target_row(..., reason="fp-<class>")` via Phase C's helper. Target-review rows for these classes feed directly back into the veto plans (cataloguer-confirmed `pipeline-incorrect` verdicts → new veto rules or threshold adjustments). P-31 lays the helper signature; the veto plans wire to it.
+- **P-27 (M6 verdict audit)** — independent. P-27 may surface findings that warrant target-TSV rows; if so, it adds a `reason` value when it ships. Cataloguer `pipeline-incorrect` verdicts on M6-flagged rows feed into M6 prompt iteration.
 - **P-28 (audit script as CI regression fixture)** — orthogonal. P-28's fixture is a frozen bench artifact; the TSV is a runtime artifact.
-- **P-29 (M5 missed-merge recall audit)** — independent.
+- **P-29 (M5 missed-merge recall audit)** — independent. M5 recall failures surfaced by P-29 don't show up in target-review (they're invisible to M8/M9 by definition); P-29 is a separate audit surface.
+- **P-06 (gold set growth)** — the natural sink for `cataloguer_verdict=pipeline-correct` rows. The pipeline flagged the case for review (uncertain confidence, edge-case heuristic), the cataloguer confirmed the pipeline got it right — that's exactly the high-information training signal the gold set wants. A future plan can automate "absorb pipeline-correct target-review rows into gold".
 
 ## Rollback procedure
 
