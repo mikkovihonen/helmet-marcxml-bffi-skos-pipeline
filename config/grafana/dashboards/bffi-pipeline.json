@@ -1826,6 +1826,10 @@
                     }
                   ]
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "M2 ${__field.labels.error_type}"
               }
             ]
           },
@@ -1853,6 +1857,10 @@
                     }
                   ]
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "M3 ${__field.labels.error_type}"
               }
             ]
           }
