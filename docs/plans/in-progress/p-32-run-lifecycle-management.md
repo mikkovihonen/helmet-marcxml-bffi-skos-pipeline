@@ -14,7 +14,7 @@ docker-compose.yml`.
 **Phase commits**:
 
 - Phase A (`bffi-run.json` manifest writer + emit-site wiring): `ff83135` (code + 13 unit tests + plan graduation, 2026-05-14).
-- Phase B (`bffi-pipeline runs list` CLI): `<unfilled>`
+- Phase B (`bffi-pipeline runs list` CLI): `ed14ef6` (code + 7 unit tests + `discover_legacy_dirs` synth manifests, 2026-05-14).
 - Phase C (`bffi-pipeline runs prune` CLI with `--reset-*` flags): `93d50da` (code + 9 unit tests + reset stubs for Phases G/H, 2026-05-14).
 - Phase D (`bffi-pipeline runs tag` / `untag` / `info`): `<unfilled>`
 - Phase E (canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs): `1b9f1f0` (code + 5 unit tests + `.env.example` migration note, 2026-05-14).
