@@ -229,6 +229,90 @@ def runs_mark_complete_command(
     typer.echo(f"Marked {data_dir.name} as status={status}.")
 
 
+@runs_app.command("clear-fuseki")
+def runs_clear_fuseki_command(
+    apply: Annotated[
+        bool,
+        typer.Option(
+            "--apply",
+            help="Actually drop the graphs. Default is dry-run (preview only).",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Show per-graph URI + triple count + namespace classification.",
+        ),
+    ] = False,
+    force_clear: Annotated[
+        bool,
+        typer.Option(
+            "--force-clear",
+            help=(
+                "Bypass the BFFI_FUSEKI_CLEAR_MAX_TRIPLES safety threshold. "
+                "Required when an oversized graph (e.g. a misconfigured "
+                "settings.graph_base prefix-matching a vocabulary URI) needs "
+                "to be dropped anyway."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Manually drop every Fuseki named graph under ``settings.graph_base``.
+
+    P-32 Phase H. Useful as a diagnostic ("what's in Fuseki right
+    now?") and as a recovery action ("wipe Fuseki to a known-clean
+    state; let the next ``bffi-pipeline load`` rebuild from
+    canonical-skosified.ttl"). Vocabulary graphs (YSO, KANTO,
+    allars, SLM, MUSO) live in their own URI namespaces outside
+    ``graph_base`` and are NOT touched.
+    """
+    from bffi_pipeline.stages.fuseki_clear import clear_run_output_graphs
+
+    settings = get_settings()
+    auth: tuple[str, str] | None = (
+        (settings.fuseki_user, settings.fuseki_password)
+        if settings.fuseki_user and settings.fuseki_password
+        else None
+    )
+    with httpx.Client(timeout=30.0, auth=auth) as client:
+        result = clear_run_output_graphs(
+            fuseki_url=settings.fuseki_url,
+            graph_base=settings.graph_base,
+            max_triples_per_graph=settings.fuseki_clear_max_triples,
+            dry_run=not apply,
+            force=force_clear,
+            client=client,
+        )
+
+    if not result.fuseki_reachable:
+        typer.echo(
+            f"Fuseki unreachable at {settings.fuseki_url}; nothing cleared.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    verb = "would drop" if not apply else "dropped"
+    typer.echo(f"{verb} {len(result.dropped_graphs)} graph(s) under {settings.graph_base}:")
+    for graph_uri in result.dropped_graphs:
+        if verbose:
+            typer.echo(f"  {graph_uri}")
+        else:
+            typer.echo(f"  {graph_uri.removeprefix(settings.graph_base)}")
+    if result.skipped_oversized:
+        typer.echo(
+            f"\nSkipped {len(result.skipped_oversized)} oversized graph(s) "
+            f"(> {settings.fuseki_clear_max_triples:,} triples; "
+            f"pass --force-clear to drop):"
+        )
+        for graph_uri, n in result.skipped_oversized:
+            typer.echo(f"  {graph_uri}  ({n:,} triples)")
+    typer.echo(f"\nTotal triples surveyed: {result.total_triples_before:,}")
+    if not apply:
+        typer.echo("\n(--dry-run is the default; pass --apply to drop.)")
+
+
 @runs_app.command("prune")
 def runs_prune_command(
     older_than: Annotated[
@@ -2009,6 +2093,32 @@ def load_command(
             help="Fuseki dataset endpoint; defaults to FUSEKI_URL from settings.",
         ),
     ] = None,
+    no_clear_fuseki: Annotated[
+        bool,
+        typer.Option(
+            "--no-clear-fuseki",
+            help=(
+                "Skip the P-32 Phase H pre-run Fuseki clear. By default the "
+                "loader drops every named graph under settings.graph_base "
+                "before loading so the resulting Fuseki state is a pure "
+                "function of this run's canonical-skosified.ttl. Pass this "
+                "flag to layer on top of existing state (debugging / "
+                "side-by-side comparison)."
+            ),
+        ),
+    ] = False,
+    force_clear: Annotated[
+        bool,
+        typer.Option(
+            "--force-clear",
+            help=(
+                "Bypass the BFFI_FUSEKI_CLEAR_MAX_TRIPLES safety threshold. "
+                "Only needed when the operator has accidentally pointed "
+                "settings.graph_base at a vocabulary URI prefix and wants "
+                "to drop those big graphs anyway."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Load skosified data + provenance into Fuseki and run Boundary-5 smokes (M10)."""
     settings = get_settings()
@@ -2018,6 +2128,18 @@ def load_command(
         else None
     )
     with httpx.Client(timeout=30.0, auth=auth) as client:
+        # P-32 Phase H: pre-run Fuseki clear. Best-effort default; the
+        # operator's --no-clear-fuseki opts out per-invocation,
+        # BFFI_FUSEKI_CLEAR_ON_RUN_START=false / strict tunes the
+        # setting globally.
+        _maybe_clear_fuseki_before_load(
+            fuseki_url=fuseki_url or settings.fuseki_url,
+            graph_base=settings.graph_base,
+            no_clear_flag=no_clear_fuseki,
+            force_clear_flag=force_clear,
+            client=client,
+        )
+
         result = load.run(
             skosified_path=skosified_path,
             admin_vocab_path=admin_vocab_path,
@@ -2026,8 +2148,57 @@ def load_command(
             client=client,
         )
     typer.echo(result.render())
-    if not result.success:
+
+
+def _maybe_clear_fuseki_before_load(
+    *,
+    fuseki_url: str,
+    graph_base: str,
+    no_clear_flag: bool,
+    force_clear_flag: bool,
+    client: httpx.Client,
+) -> None:
+    """P-32 Phase H: clear Fuseki at the start of ``bffi-pipeline load``.
+
+    Gated by ``BFFI_FUSEKI_CLEAR_ON_RUN_START`` (``true`` default;
+    ``false`` skips; ``strict`` makes unreachable Fuseki fatal) AND
+    the CLI's ``--no-clear-fuseki`` opt-out. Records the outcome on
+    the run manifest's ``pre_run_fuseki_clear`` field.
+    """
+    from bffi_pipeline.run_manifest import MANIFEST_FILENAME, update_manifest_field
+    from bffi_pipeline.stages.fuseki_clear import clear_run_output_graphs
+
+    settings = get_settings()
+    mode = settings.fuseki_clear_on_run_start.strip().lower()
+
+    if no_clear_flag or mode == "false":
+        typer.echo(
+            "[bffi-pipeline] Phase H pre-run Fuseki clear skipped "
+            "(--no-clear-fuseki or BFFI_FUSEKI_CLEAR_ON_RUN_START=false).",
+            err=True,
+        )
+        return
+
+    result = clear_run_output_graphs(
+        fuseki_url=fuseki_url,
+        graph_base=graph_base,
+        max_triples_per_graph=settings.fuseki_clear_max_triples,
+        force=force_clear_flag,
+        client=client,
+    )
+
+    if not result.fuseki_reachable and mode == "strict":
+        typer.echo(
+            f"[bffi-pipeline] Fuseki unreachable at {fuseki_url} and "
+            "BFFI_FUSEKI_CLEAR_ON_RUN_START=strict — refusing to proceed.",
+            err=True,
+        )
         raise typer.Exit(code=1)
+
+    # Best-effort: write the outcome to the run manifest. No-op when
+    # the manifest doesn't exist (BFFI_OBSERVABILITY_SIDECAR=none).
+    manifest_path = settings.data_dir / MANIFEST_FILENAME
+    update_manifest_field(manifest_path, pre_run_fuseki_clear=result.to_manifest_dict())
 
 
 @app.command("load-finto")

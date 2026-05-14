@@ -22,6 +22,7 @@ from pathlib import Path
 import httpx
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.stages.fuseki_clear import clear_run_output_graphs
 
 logger = logging.getLogger(__name__)
 
@@ -233,16 +234,32 @@ def reset_prometheus(pruned_run_uuids: list[str]) -> None:
 
 
 def reset_fuseki() -> None:
-    """Phase H stub: drop ``<graph_base>*`` named graphs from Fuseki.
+    """Drop ``<graph_base>*`` named graphs from Fuseki (P-32 Phase H).
 
-    Today: warns and no-ops. Phase H DROPs every named graph whose URI
-    starts with ``settings.graph_base`` (preserving vocabulary graphs
-    that live in other URI namespaces).
+    Delegates to ``clear_run_output_graphs`` from the same module
+    family. Logs the outcome at warning level so the operator sees
+    it on stderr alongside the rest of the prune output. Safety
+    threshold (``BFFI_FUSEKI_CLEAR_MAX_TRIPLES``) protects against a
+    misconfigured ``graph_base`` accidentally prefix-matching a
+    vocabulary URI.
     """
+    settings = get_settings()
+    result = clear_run_output_graphs(
+        fuseki_url=settings.fuseki_url,
+        graph_base=settings.graph_base,
+        max_triples_per_graph=settings.fuseki_clear_max_triples,
+    )
+    if not result.fuseki_reachable:
+        logger.warning(
+            "[bffi-pipeline] --reset-fuseki: Fuseki at %s unreachable; skipped.",
+            settings.fuseki_url,
+        )
+        return
     logger.warning(
-        "[bffi-pipeline] --reset-fuseki requested; Phase H not yet shipped — no-op. "
-        "Manually run `bffi-pipeline load --rollback` or wait for Phase H's "
-        "`runs clear-fuseki` command."
+        "[bffi-pipeline] --reset-fuseki: dropped %d graph(s) under %s (%d triples total).",
+        len(result.dropped_graphs),
+        settings.graph_base,
+        result.total_triples_before,
     )
 
 

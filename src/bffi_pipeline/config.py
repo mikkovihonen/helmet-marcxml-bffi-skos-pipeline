@@ -277,6 +277,29 @@ class Settings(BaseSettings):
         default="http://localhost:9091",
         alias="BFFI_PROMETHEUS_URL",
     )
+    # P-32 Phase H: pre-run Fuseki clear.
+    # - "true" (default): best-effort clear at the start of every
+    #   pipeline-driving run; warn + continue if Fuseki is unreachable.
+    # - "false": skip the clear entirely. Operator-side opt-out for
+    #   debugging / side-by-side comparison runs.
+    # - "strict": fatal error if Fuseki is unreachable. For operators
+    #   who want a reproducibility guarantee — the run only proceeds
+    #   if Fuseki is in the known-clean state.
+    fuseki_clear_on_run_start: str = Field(
+        default="true",
+        alias="BFFI_FUSEKI_CLEAR_ON_RUN_START",
+    )
+    # P-32 Phase H: safety threshold per named graph for the pre-run
+    # clear. A graph larger than this gets skipped + warned about
+    # unless the operator passes --force-clear; catches the
+    # misconfigured-``graph_base`` failure mode where a vocabulary URI
+    # accidentally prefix-matches the pipeline output namespace.
+    # 100 M is well above any single pipeline run's graph size and
+    # well below the smallest Finto vocab (YSO is ~5 M triples).
+    fuseki_clear_max_triples: int = Field(
+        default=100_000_000,
+        alias="BFFI_FUSEKI_CLEAR_MAX_TRIPLES",
+    )
     # Fuseki credentials are optional. The Apache Jena Fuseki 5 image
     # protects the Graph Store Protocol (`/<dataset>/data`) endpoints
     # behind admin auth by default; M10 phase 2 needs them set when
