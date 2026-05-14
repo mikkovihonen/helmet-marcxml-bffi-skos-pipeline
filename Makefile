@@ -75,7 +75,7 @@ observability-up:
 	  echo "serve-metrics already running (PID $$(pgrep -f 'bffi-pipeline serve-metrics' | head -1)); leaving it alone." ; \
 	else \
 	  mkdir -p runs ; \
-	  nohup uv run bffi-pipeline serve-metrics \
+	  nohup env BFFI_OBSERVABILITY_SIDECAR=none uv run bffi-pipeline serve-metrics \
 	      --port 9100 \
 	      --watch-glob 'runs/*/stage-events.jsonl' \
 	    > /tmp/bffi-exporter.log 2>&1 & \
