@@ -15,7 +15,7 @@ docker-compose.yml`.
 
 - Phase A (`bffi-run.json` manifest writer + emit-site wiring): `ff83135` (code + 13 unit tests + plan graduation, 2026-05-14).
 - Phase B (`bffi-pipeline runs list` CLI): `<unfilled>`
-- Phase C (`bffi-pipeline runs prune` CLI with `--reset-*` flags): `<unfilled>`
+- Phase C (`bffi-pipeline runs prune` CLI with `--reset-*` flags): `93d50da` (code + 9 unit tests + reset stubs for Phases G/H, 2026-05-14).
 - Phase D (`bffi-pipeline runs tag` / `untag` / `info`): `<unfilled>`
 - Phase E (canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs): `1b9f1f0` (code + 5 unit tests + `.env.example` migration note, 2026-05-14).
 - ~~Phase F (one-time `bffi-pipeline runs migrate` for legacy run dirs)~~ — **dropped 2026-05-14**, see "What this plan does NOT do". Post-Phase-E new runs already land canonical; legacy data in `scratchpad/`, `data/` etc. stays where it is as historical artifact. A future `runs adopt` command can pull individual legacy dirs into the canonical root if/when a concrete need surfaces.
