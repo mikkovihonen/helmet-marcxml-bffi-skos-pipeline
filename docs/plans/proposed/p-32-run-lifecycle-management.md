@@ -1,7 +1,7 @@
-# P-32 — Run lifecycle management: canonical root + manifest + CLI + migration
+# P-32 — Run lifecycle management: canonical root + manifest + CLI + migration + reset
 
 **Status**: proposed.
-**Scope**: ~2 weeks across seven phases. A (manifest writer) is a prerequisite for B/C/D and is also the prerequisite for E (canonical root invariant) which is in turn a prerequisite for F (legacy-run migration). G (Prometheus reset) is independent and ships any time after A. B/C/D can ship in any order.
+**Scope**: ~2-3 weeks across eight phases. A (manifest writer) is a prerequisite for B/C/D and is also the prerequisite for E (canonical root invariant) which is in turn a prerequisite for F (legacy-run migration). G (Prometheus reset) is independent and ships any time after A. H (pre-run Fuseki clear) is independent and ships any time after A. B/C/D can ship in any order.
 **Proposal-base commit**: `38f8e75`. To gauge drift before acting, run
 `git diff 38f8e75..HEAD --
 src/bffi_pipeline/cli.py
@@ -23,13 +23,14 @@ Each pipeline run writes a substantial bundle of artifacts to its `BFFI_DATA_DIR
 
 Plus the per-run cataloguer-review TSVs that P-31 will add — small individually, but workflow-coupled to the cataloguer's review cycle and therefore *especially* requiring per-run identity (see P-31's "One TSV per run" rationale).
 
-Today the operator manages run accumulation by hand: remember which `BFFI_DATA_DIR` belongs to which bench, `rm -rf` the ones that are no longer needed. This is fragile in **five** ways:
+Today the operator manages run accumulation by hand: remember which `BFFI_DATA_DIR` belongs to which bench, `rm -rf` the ones that are no longer needed. This is fragile in **six** ways:
 
 1. **No registry of what runs exist.** There's no "show me all runs" command — the operator's mental model is the only index. On a machine with a dozen benches, audits, and production trials scattered between `scratchpad/`, `data/`, and ad-hoc paths, the operator has to `find . -name 'stage-events.jsonl'` to enumerate runs.
 2. **No "delete runs older than X" pattern.** The closest thing today is `find <BFFI_DATA_DIR> -mtime +30 -delete`, which is dangerous (no preview, no per-run granularity) and doesn't distinguish "old but tagged as the gold-set" from "old and disposable".
 3. **No tagging or status concept.** A run from three months ago that the cataloguer reviewed and signed off should stay (as the audit trail); a run from three months ago that was an exploratory bench whose findings are encoded elsewhere can be deleted. Today there's no way to mark the distinction; both look the same to `find -mtime`.
 4. **No canonical location.** Runs land wherever `BFFI_DATA_DIR` was pointed: `scratchpad/<descriptive-name>/`, `data/`, occasionally `/tmp/...` for one-off tests, sometimes the repo root if the operator forgot to set the env var. The "where are my runs?" question has no single answer; tooling that wants to enumerate them needs a multi-root search heuristic (P-17's `--watch-glob` pattern applied to a different concern).
 5. **No way to keep Prometheus + the dashboard in sync with on-disk reality.** When a run dir is deleted, the exporter's tail loop loses the sidecar, but the Prometheus registry retains the stale `{run_uuid="..."}` series in memory. The dashboard's `$active_run` dropdown still offers the pruned run; the gauges still show the last-known values until they age out via the metric's `stale_seconds`. The pipeline's on-disk state and the dashboard's observability state drift.
+6. **Fuseki accumulates triples across runs.** Each pipeline run loads its canonical Works + provenance graph into the Fuseki named graphs (`<graph_base>bffi-works`, `<graph_base>provenance`). Today there's no reset between runs — a second run against the same input layers new triples on top of the old, mixing two runs' Activity URIs into one provenance graph and (depending on M9 fallback decisions) potentially producing two canonical Works for the same source records. Reproducibility breaks; the Skosmos / Fuseki view diverges from what the latest run's `canonical.ttl` would describe on its own. Vocabulary graphs (Finto, YSO, KANTO, allars, SLM, MUSO) are *not* run output and must be preserved across the reset.
 
 P-31's "per-run TSV accumulation" surfaced (3) for one specific artifact, but the underlying issue is wider. A run-lifecycle management system fixes it once, for every run artifact + the dashboard side.
 
@@ -220,6 +221,57 @@ Requires Prometheus to be started with `--web.enable-admin-api`. The local-only 
 
 **Combined: `--reset-exporter --reset-prometheus`** is the recommended flag pair for "make the dashboard forget this run entirely". Either flag alone is partial — exporter restart clears the live registry but not the TSDB history; TSDB delete clears the history but leaves the exporter still emitting (if it had cached state).
 
+### H. Pre-run Fuseki clear (run-output graphs only)
+
+Every pipeline run starts by dropping the previous run's output from Fuseki, leaving vocabulary graphs untouched. This is the structural fix for failure mode (6) — Fuseki state becomes a pure function of the current run, never a smear of every run that ever loaded into it.
+
+**The "what to drop" boundary is already encoded in the URI structure**, which makes Phase H much simpler than maintaining a hand-curated whitelist:
+
+- Pipeline output graphs live under `settings.graph_base` (default `http://urn.fi/URN:NBN:fi:bib:graph:`). Today: `<graph_base>bffi-works` and `<graph_base>provenance`. Future additions (e.g. P-26's `<graph_base>title-token-idf` if it lands as a named graph) auto-inherit the namespace.
+- Vocabulary graphs use their own URI namespaces — YSO at `http://www.yso.fi/onto/yso/`, KANTO at `http://urn.fi/URN:NBN:fi:au:kanto/`, allars / SLM / MUSO at their respective Finto URIs. None of these are under `graph_base`.
+
+Phase H's rule: **drop every named graph whose URI starts with `settings.graph_base`**. Anything outside that prefix is preserved. No whitelist to maintain.
+
+**Implementation:**
+
+At pipeline init (just after `_init_observability()`, before any stage starts):
+
+1. SPARQL query Fuseki for the list of named graphs:
+   ```sparql
+   SELECT DISTINCT ?g WHERE { GRAPH ?g { ?s ?p ?o } }
+   ```
+2. Filter to graphs whose URI starts with `settings.graph_base`.
+3. For each, sanity-check the triple count + reject if it's implausibly large for a "run output" (configurable threshold `BFFI_FUSEKI_CLEAR_MAX_TRIPLES`, default `100_000_000` — sized to comfortably exceed a single run's output but flag any vocabulary graph accidentally classified as output).
+4. `DROP GRAPH <uri>` for each, via SPARQL Update.
+5. Record what was dropped in the run's manifest as `pre_run_fuseki_clear: { dropped_graphs: [...], triples_before: N, ts: ... }`.
+
+**Configuration:**
+
+- `BFFI_FUSEKI_CLEAR_ON_RUN_START` — default `true`. Operator can pass `--no-clear-fuseki` to a pipeline subcommand to skip (debugging a previous run's Fuseki state, side-by-side comparison runs, etc.). The startup log echoes the flag state.
+- `BFFI_FUSEKI_CLEAR_MAX_TRIPLES` — safety threshold per graph; refuse to drop a graph larger than this without explicit `--force-clear` flag. Catches the "operator misconfigured `graph_base` to include a vocabulary URI prefix" failure mode.
+
+**Manual CLI:**
+
+```bash
+bffi-pipeline runs clear-fuseki              # dry-run: lists what would be dropped
+bffi-pipeline runs clear-fuseki --apply      # executes the drop
+bffi-pipeline runs clear-fuseki --dry-run --verbose   # also shows triple counts per graph
+```
+
+Useful as a diagnostic ("what state is Fuseki in?") and as a recovery action ("Skosmos is showing weird stuff; wipe and let the next run rebuild").
+
+**What stays:**
+
+- Every Finto vocabulary graph (YSO, KANTO, allars, SLM, MUSO) loaded via `bffi-pipeline load-finto`. These are external value vocabularies, not run output.
+- Any operator-loaded reference data in custom namespaces (e.g. cataloguer-supplied glossaries).
+- The default graph, if anything was loaded there (operator-controlled).
+
+**What goes:**
+
+- `<graph_base>bffi-works` — canonical Works + Expressions from the previous run.
+- `<graph_base>provenance` — PROV-O graph for the previous run.
+- Any future `<graph_base>*` graph added by a stage. Phase H is forward-compatible.
+
 ### How operators use this
 
 **One-time migration** (operator runs once after Phase F ships):
@@ -241,9 +293,15 @@ bffi-pipeline runs tag <cataloguer-uuid> cataloguer-reviewed
 
 ```bash
 # Start a bench. No BFFI_DATA_DIR needed — defaults to <runs_root>/<auto_uuid>/.
+# Fuseki run-output graphs are dropped automatically at pipeline init,
+# vocabularies preserved.
 BFFI_RUN_DESCRIPTION="P-22 veto bench" uv run bffi-pipeline ...
-# Startup log echoes the resolved path:
+# Startup log echoes the resolved path AND the Fuseki clear:
 # [bffi-pipeline] data_dir=/Users/.../runs/8e7c4d.../ (canonical)
+# [bffi-pipeline] pre-run Fuseki clear: dropped 2 graph(s) under <graph_base>:
+#   <graph_base>bffi-works (847,392 triples)
+#   <graph_base>provenance (12,084 triples)
+# Vocabulary graphs preserved.
 
 # Survey what's on disk
 bffi-pipeline runs list --sort=started
@@ -274,12 +332,15 @@ bffi-pipeline runs prune --older-than 30d --keep-tagged --status=completed \
 - **R3 — Legacy runs without manifests.** Pre-P-32 run dirs have no `bffi-run.json`. The CLI skips them by default (`--include-legacy` opts in). Risk: operator runs `prune --older-than 30d` and is surprised that the 50 legacy runs from before P-32 aren't touched. Mitigation: documentation + an explicit `bffi-pipeline runs adopt <dir>` command that synthesises a minimal manifest from filesystem metadata (mtime → `started_at`, no `stages_completed`, `status=unknown`). Adopt is opt-in, low-risk.
 - **R4 — Search root coverage drift.** If the operator's runs land outside the default `BFFI_RUNS_ROOT` paths, `runs list` won't see them. Mitigation: support repeatable `--root` flags + a startup-log echo of the resolved roots. Same shape as P-17's `--watch-glob`.
 - **R5 — Tag-based protection bypass.** Operator could pass `--ignore-tags` thinking they're being explicit, then lose a tagged run. Mitigation: don't provide an `--ignore-tags` flag in v1. If the operator wants to delete a tagged run, they untag it first. One-way protection.
-- **R6 — Fuseki cross-references.** A pruned run's artifacts may be referenced by `bffi:adminMetadata` blocks loaded into Fuseki; deleting the run's `provenance.ttl` doesn't drop the Fuseki triples. Mitigation: out of scope here — this proposal manages on-disk artifacts only, not Fuseki state. A future "Fuseki garbage collection" plan addresses the cross-reference. Document the caveat in the operator runbook so the operator who pruned the run knows the SPARQL graph still carries (potentially stale) references.
+- **R6 — Fuseki accumulates triples across runs.** Without intervention, two runs against the same input layer their canonical Works + provenance triples on top of each other, breaking reproducibility and producing duplicate `prov:Activity` URIs in the merged graph. **Addressed by Phase H** (pre-run Fuseki clear): every run starts by dropping every named graph under `settings.graph_base`, leaving vocabulary graphs (Finto, YSO, KANTO, etc., which live in their own URI namespaces) untouched. The graph-URI prefix encodes the run-output-vs-vocabulary boundary; no whitelist to maintain. After all phases land, the Fuseki view is a pure function of the most-recent pipeline run; the on-disk `canonical.ttl` for that run is the canonical source-of-truth for what Fuseki contains.
 - **R7 — Migration interrupted mid-way.** If `runs migrate --apply` crashes after moving some dirs but not others, the operator is left in a half-migrated state. Mitigation: per-dir move is atomic (`os.rename`); the migration command processes dirs one at a time and prints progress; re-running picks up where it left off because already-moved dirs are no longer in the source path. The dry-run preview lists everything that will move so the operator can scope to a smaller batch if cautious.
 - **R8 — Cross-filesystem migration.** If `BFFI_RUNS_ROOT` is on a different filesystem from the legacy dirs (e.g. external SSD vs internal), `os.rename` fails and falls back to `shutil.move` (copy + delete). This temporarily doubles disk for the moving dir. Mitigation: pre-check available space on the destination filesystem; warn if total bytes to move > 80 % of free space. Operator can also work around by moving dirs in batches.
 - **R9 — Exporter restart drops in-flight metrics.** A pipeline run that is *currently happening* during `prune --reset-exporter` loses any unscraped events between the previous Prometheus scrape and the restart. Mitigation: don't run `prune --reset-exporter` mid-pipeline. If the operator does it accidentally, the next stage event after the exporter comes back triggers a rehydrate from the run's sidecar — the metric reconstruction is lossy only for the gap between scrapes, which is at most one scrape interval (~15 s). Document the "don't prune mid-run" pattern in the runbook.
 - **R10 — Prometheus admin API disabled.** The TSDB delete needs `--web.enable-admin-api` on the Prometheus instance. If the operator's compose config doesn't have it, `--reset-prometheus` warns and skips. Mitigation: Phase G updates `docker-compose.yml` to enable the admin API by default (safe — localhost-bound in the local stack); operators with custom Prometheus configs handle their own flag.
 - **R11 — `BFFI_DATA_DIR` ergonomics regression.** Operators who scripted around `BFFI_DATA_DIR=scratchpad/<descriptive-name>` need to learn the new pattern. The env var stays as an escape hatch but loses its "default place" role. Mitigation: clear migration guide in the operator runbook + the startup-log warning when `BFFI_DATA_DIR` is set explicitly so the operator notices their script is still using the old pattern.
+- **R12 — Misconfigured `graph_base` wipes vocabularies.** If `settings.graph_base` is accidentally set to a prefix that also matches a Finto vocabulary URI (e.g. `http://`), Phase H drops Finto graphs that were never run output. Mitigation: the `BFFI_FUSEKI_CLEAR_MAX_TRIPLES` safety threshold refuses to drop a graph larger than the threshold without explicit `--force-clear`. YSO is ~5 M triples; KANTO is ~2 M; vocabularies vastly exceed the per-run-output graph size, so a "drop 5 M triples?" prompt is the natural sanity gate. Defense in depth: the startup-log echoes every graph URI it's about to drop *before* dropping, with a `BFFI_FUSEKI_CLEAR_CONFIRM=interactive` mode that prompts y/n if the operator wants belt-and-braces.
+- **R13 — Phase H runs against an empty / unreachable Fuseki.** A development machine without Fuseki up shouldn't fail to run the pipeline. Mitigation: Phase H probes Fuseki at init; if unreachable, log a warning ("Fuseki at $BFFI_FUSEKI_URL unreachable; skipping pre-run clear") and continue. If `BFFI_FUSEKI_CLEAR_ON_RUN_START=strict`, refuse to start; default `true` is best-effort.
+- **R14 — Concurrent pipeline runs collide via Phase H.** Two pipelines starting near-simultaneously each drop the run-output graphs, but run A may drop graphs that run B has already loaded into. Single-machine concurrency is unusual in this project's workflow, but worth documenting. Mitigation: document "one pipeline at a time per Fuseki instance" in the runbook. If multi-pipeline becomes a real need, a future plan can introduce per-run Fuseki graph namespaces (each run loads to `<graph_base>bffi-works-<run_uuid>`) — out of scope here.
 
 ## Open questions
 
@@ -294,6 +355,9 @@ bffi-pipeline runs prune --older-than 30d --keep-tagged --status=completed \
 - **Exporter PID file location.** Phase G writes `.exporter.pid` somewhere. `<BFFI_RUNS_ROOT>/.exporter.pid` is cleanest (operator can see it next to the runs they're managing) but means the exporter has to know `BFFI_RUNS_ROOT` (it does — same settings module). Alternative: `~/.bffi/exporter.pid`. Recommend the runs-root location for v1; revisit if the operator manages multiple `BFFI_RUNS_ROOT` instances on one machine (unlikely).
 - **Prometheus admin API enable-by-default in compose config.** Phase G's `--reset-prometheus` needs `--web.enable-admin-api`. Should the `docker-compose.yml` change ship as part of P-32 itself, or as a follow-up operator instruction? Recommend ship as part of P-32 G — the local-only deployment context makes "enable admin API" a safe default. Operators with hardened Prometheus configs can disable it themselves.
 - **Migration of `judge-cache.sqlite` and `reconcile-cache.sqlite`.** Those caches are per-run today (sit inside each run dir). After migration, do they stay per-run, or do they get promoted to a shared `<BFFI_RUNS_ROOT>/.caches/` location so re-running against the same inputs reuses M6/M9 verdicts across runs? Promoting them is a substantial architectural change and not what this proposal is about — defer. P-32's migration keeps them in their existing per-run location.
+- **Should Phase H also drop the previous run's M9 reconcile-cache against Fuseki?** M9's reconcile-cache.sqlite is per-run on disk, so a fresh run starts with an empty cache anyway — no carry-over from previous Fuseki state. But if a future plan promotes the reconcile-cache to a shared cross-run location (see the prior open question), then the cache could be stale relative to the freshly-cleared Fuseki. Recommend: defer the question along with the cache-promotion decision; they have the same scope.
+- **Phase H operator-confirm mode.** `BFFI_FUSEKI_CLEAR_CONFIRM` defaults to `silent` (drop without prompting; rely on `--no-clear-fuseki` for the explicit opt-out). Should `interactive` (y/n prompt at run start) be the default for the operator's first N runs after Phase H lands, then auto-flip to `silent`? Probably overkill — the dry-run / startup-log echo is enough, and an interactive prompt would block automated re-bench cycles. Recommend `silent` default, document the manual `clear-fuseki --apply` for the cautious operator.
+- **Should `runs prune` also clear that run's *historical* triples from Fuseki, the way `--reset-prometheus` does for the TSDB?** The pre-run Phase H clear handles the *next* run starting from a clean state. But if the operator prunes the *most recently loaded* run while Fuseki still has its triples (because no subsequent run has happened yet), Fuseki keeps the orphaned data. Should `prune --apply --reset-fuseki` also drop `<graph_base>*` graphs? Recommend yes for consistency — three flags on `prune`: `--reset-exporter`, `--reset-prometheus`, `--reset-fuseki`; combined as `--reset-all` shorthand. Same DROP-graph logic as Phase H.
 
 ## Acceptance criteria (drafted; refine on graduation)
 
@@ -343,6 +407,20 @@ bffi-pipeline runs prune --older-than 30d --keep-tagged --status=completed \
 - [ ] `docker-compose.yml` updated to start Prometheus with `--web.enable-admin-api` in the local-only stack.
 - [ ] Operator runbook documents R9 ("don't `--reset-exporter` mid-run") and the combined `--reset-exporter --reset-prometheus` usage.
 
+**Phase H — Pre-run Fuseki clear**
+- [ ] Pipeline init runs a SPARQL Update that drops every named graph whose URI starts with `settings.graph_base`. Vocabulary graphs (any URI outside `graph_base`) are preserved by virtue of not matching the prefix.
+- [ ] `BFFI_FUSEKI_CLEAR_ON_RUN_START` setting (default `true`). `--no-clear-fuseki` CLI flag opts out for a single invocation.
+- [ ] `BFFI_FUSEKI_CLEAR_MAX_TRIPLES` safety threshold (default `100_000_000`). Graphs exceeding the threshold are not dropped unless `--force-clear` is passed. Catches the misconfigured-`graph_base` case (R12).
+- [ ] Startup log echoes every graph URI about to be dropped + its triple count *before* the drop executes.
+- [ ] Manifest records `pre_run_fuseki_clear: { dropped_graphs: [...], total_triples_before: N, ts: ... }`.
+- [ ] `bffi-pipeline runs clear-fuseki` CLI command (dry-run default, `--apply` to execute, `--verbose` shows per-graph triple counts). Useful as a manual diagnostic + recovery action independent of a pipeline run.
+- [ ] Fuseki unreachable at init: log a warning and continue (best-effort default). `BFFI_FUSEKI_CLEAR_ON_RUN_START=strict` makes the unreachable case fatal.
+- [ ] Unit tests:
+  - `test_phase_h_drops_only_graph_base_prefixed` — fixture with three graphs (two under `graph_base`, one external YSO-style URI); only the two are dropped.
+  - `test_phase_h_safety_threshold_refuses_large_graph` — fixture with a graph of size > threshold under `graph_base`; drop is refused without `--force-clear`.
+  - `test_phase_h_fuseki_unreachable_warns_and_continues` — point at a non-existent Fuseki URL; pipeline init succeeds with a warning log line.
+- [ ] Operator runbook documents the preserve-vs-wipe boundary (URI namespace), the `--no-clear-fuseki` opt-out for debugging, and the `runs clear-fuseki` recovery command.
+
 **Cross-phase**
 - [ ] `make lint && make test` green for each phase landing.
 - [ ] Operator runbook section added describing the full prune workflow + the Fuseki-cross-reference caveat (R6) + the migration story.
@@ -356,8 +434,9 @@ bffi-pipeline runs prune --older-than 30d --keep-tagged --status=completed \
 - **Replace the existing sample-selection `manifest.json`.** That file describes the sample composition, not the pipeline run; it stays as-is. The new file is `bffi-run.json` — distinct filename, distinct purpose.
 - **Cross-run artifact references.** If two runs share an `embeddings.faiss` cache by symlink (a possible future optimisation), `prune` doesn't know about the dependency. v1 assumes runs are self-contained; document the assumption.
 - **Promote `judge-cache.sqlite` / `reconcile-cache.sqlite` to a shared cross-run location.** Tempting (would amortise M6/M9 cost across runs against similar inputs) but architecturally substantial. Caches stay per-run in v1.
-- **Garbage-collect Fuseki triples for pruned runs.** Out of scope; separate plan when it surfaces (see R6).
 - **Per-stage TSDB partition reset.** Phase G's `--reset-prometheus` deletes the whole series set for a `run_uuid`. Finer-grained "drop only M9 metrics for run X" isn't supported; the operator drops the whole run or none of it.
+- **Per-run Fuseki graph namespaces** (one set of `<graph_base>...-<run_uuid>` graphs per run, allowing concurrent runs against one Fuseki). Out of scope; addressed by Phase H's "one pipeline at a time per Fuseki" runbook note + a future plan if multi-pipeline becomes a real need (R14).
+- **Vocabulary graph refresh.** `bffi-pipeline load-finto` is the existing path for refreshing vocabulary graphs from updated Finto dumps. Phase H doesn't touch that path; vocabularies stay until the operator explicitly refreshes them. (Phase H *does* leave them untouched on every pipeline run, which is the correct default.)
 
 ## Composition with sibling proposals + plans
 

@@ -132,25 +132,32 @@ Operational sequence:
   than just TSVs). Each pipeline run drops 25-50 GB of artifacts at
   full-corpus scale; today the operator manages run accumulation
   by hand-tracking which `BFFI_DATA_DIR` belongs to which bench
-  and `rm -rf`ing the rest. Five failure modes: no registry of
+  and `rm -rf`ing the rest. **Six failure modes**: no registry of
   what runs exist, no "delete older than X" pattern, no
-  tag-protection concept, **no canonical location** (runs land
-  wherever `BFFI_DATA_DIR` was pointed), and **no way to keep
+  tag-protection concept, no canonical location, no way to keep
   Prometheus + the dashboard in sync with on-disk reality after
-  prune**. Seven phases: A `bffi-run.json` per-run manifest, B
-  `runs list`, C `runs prune` (--dry-run default, --apply required,
-  refuses to delete without a filter that excludes some runs),
-  D `runs tag` / `untag` / `info`, **E canonical
-  `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs** (deprecates
-  operator-picked `BFFI_DATA_DIR`), **F one-time `runs migrate`
-  command** that sweeps legacy run-shaped dirs out of `scratchpad/`
+  prune, **and Fuseki accumulates triples across runs (two runs
+  layer canonical Works + provenance triples on top of each other,
+  breaking reproducibility)**. **Eight phases**: A `bffi-run.json`
+  per-run manifest, B `runs list`, C `runs prune` (--dry-run default,
+  --apply required, refuses to delete without a filter that excludes
+  some runs), D `runs tag` / `untag` / `info`, E canonical
+  `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs (deprecates
+  operator-picked `BFFI_DATA_DIR`), F one-time `runs migrate`
+  command that sweeps legacy run-shaped dirs out of `scratchpad/`
   / `data/` into the canonical root with synthesised manifests,
-  **G `prune --reset-exporter --reset-prometheus`** that restarts
-  the metrics exporter (drops stale in-memory series) and calls
-  Prometheus's TSDB admin API to delete the pruned run's series
-  from disk. Sequences before P-30 so all new surfaces (manifest,
-  CLI, canonical-root invariant, reset machinery) are in the audit
-  truth-table.
+  G `prune --reset-exporter --reset-prometheus` that restarts the
+  metrics exporter and calls Prometheus's TSDB admin API to delete
+  the pruned run's series, **H pre-run Fuseki clear** that drops
+  every named graph under `settings.graph_base` (run output:
+  `<graph_base>bffi-works`, `<graph_base>provenance`) at pipeline
+  init, leaving vocabulary graphs (Finto, YSO, KANTO, allars,
+  SLM, MUSO at their own URI namespaces) untouched. The
+  preserve-vs-wipe boundary is encoded in the URI prefix; no
+  whitelist to maintain. Triple-count safety threshold catches
+  misconfigured `graph_base`. Sequences before P-30 so all new
+  surfaces (manifest, CLI, canonical-root invariant, reset
+  machinery, pre-run clear semantics) are in the audit truth-table.
 - [`p-30-observability-audit-trail-critical-audit.md`](p-30-observability-audit-trail-critical-audit.md)
   — `proposed`. Triggered by the 2026-05-13 `used_cascade` near-
   miss. Catalogues every observability + audit-trail surface
