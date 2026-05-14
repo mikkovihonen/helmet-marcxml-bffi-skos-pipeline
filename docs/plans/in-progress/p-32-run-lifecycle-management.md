@@ -17,7 +17,7 @@ docker-compose.yml`.
 - Phase B (`bffi-pipeline runs list` CLI): `<unfilled>`
 - Phase C (`bffi-pipeline runs prune` CLI with `--reset-*` flags): `<unfilled>`
 - Phase D (`bffi-pipeline runs tag` / `untag` / `info`): `<unfilled>`
-- Phase E (canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs): `<unfilled>`
+- Phase E (canonical `<BFFI_RUNS_ROOT>/<run_uuid>/` invariant for new runs): `1b9f1f0` (code + 5 unit tests + `.env.example` migration note, 2026-05-14).
 - Phase F (one-time `bffi-pipeline runs migrate` for legacy run dirs): `<unfilled>`
 - Phase G (Prometheus + exporter reset on prune): `<unfilled>`
 - Phase H (pre-run Fuseki clear + manual `runs clear-fuseki` CLI): `<unfilled>`
