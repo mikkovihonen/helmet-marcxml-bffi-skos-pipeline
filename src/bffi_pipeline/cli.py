@@ -342,16 +342,38 @@ def serve_metrics_command(
         ),
     ] = 9100,
     sidecar: Annotated[
-        Path | None,
+        list[Path] | None,
         typer.Option(
             "--sidecar",
             help=(
-                "Path to the stage-events.jsonl sidecar to tail. Defaults "
-                "to BFFI_OBSERVABILITY_SIDECAR / <BFFI_DATA_DIR>/stage-events.jsonl."
+                "Path to a stage-events.jsonl sidecar to tail. "
+                "Repeatable — pass --sidecar multiple times to tail "
+                "multiple sidecars from one exporter (P-17). Defaults "
+                "to BFFI_OBSERVABILITY_SIDECAR / <BFFI_DATA_DIR>/stage-events.jsonl "
+                "when neither --sidecar nor --watch-glob is given."
             ),
             resolve_path=True,
         ),
     ] = None,
+    watch_glob: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--watch-glob",
+            help=(
+                "Glob pattern to auto-discover sidecars (P-17). "
+                "Repeatable. Rescanned every --glob-rescan-seconds so "
+                "fresh bench runs surface without restarting the "
+                "exporter. Example: --watch-glob 'scratchpad/**/stage-events.jsonl'."
+            ),
+        ),
+    ] = None,
+    glob_rescan_seconds: Annotated[
+        float,
+        typer.Option(
+            "--glob-rescan-seconds",
+            help="Interval between --watch-glob rescans. Default 30.0.",
+        ),
+    ] = 30.0,
     poll_seconds: Annotated[
         float,
         typer.Option(
@@ -362,20 +384,34 @@ def serve_metrics_command(
 ) -> None:
     """Run the P-11 Phase D Prometheus exporter.
 
-    Tails the stage-events sidecar and exposes the canonical pipeline
-    metric vocabulary at ``/metrics`` on the configured port. Designed
-    to run for an arbitrarily long time independent of the pipeline —
-    survives stage transitions and pipeline restarts.
+    Tails one or more stage-events sidecars and exposes the canonical
+    pipeline metric vocabulary at ``/metrics`` on the configured port.
+    Designed to run for an arbitrarily long time independent of the
+    pipeline — survives stage transitions and pipeline restarts.
+
+    P-17: ``--sidecar`` is repeatable, ``--watch-glob`` auto-discovers
+    sidecars, and each sidecar's co-located error JSONLs
+    (``bibframe/_errors.jsonl``, ``bffi/_validation.jsonl``) are
+    derived from the sidecar's PARENT DIR rather than a single global
+    ``BFFI_DATA_DIR``. The startup log echoes the resolved set so the
+    operator can confirm at a glance which sidecars + error files are
+    being watched.
 
     Pair with the local Prometheus + Grafana stack via
     ``make observability-up`` (configured under ``docker-compose.yml``;
     Grafana auto-loads the provisioned bffi-pipeline dashboard).
     """
     settings = get_settings()
-    if sidecar is None:
+    sidecar_paths: list[Path] = list(sidecar or [])
+    watch_globs: list[str] = list(watch_glob or [])
+
+    # Resolve the default sidecar only when neither --sidecar nor
+    # --watch-glob was given — operator who passes --watch-glob alone
+    # expects discovery, not the implicit default attached too.
+    if not sidecar_paths and not watch_globs:
         sidecar_str = settings.observability_sidecar.strip()
         if not sidecar_str:
-            sidecar = settings.data_dir / "stage-events.jsonl"
+            sidecar_paths.append(settings.data_dir / "stage-events.jsonl")
         elif sidecar_str.lower() in {"none", "/dev/null", "off"}:
             typer.echo(
                 "BFFI_OBSERVABILITY_SIDECAR disables the sidecar — nothing to export.",
@@ -383,16 +419,41 @@ def serve_metrics_command(
             )
             raise typer.Exit(code=2)
         else:
-            sidecar = Path(sidecar_str)
+            sidecar_paths.append(Path(sidecar_str))
 
+    # P-17: startup-log echoes the resolved set so the operator sees
+    # at a glance which sidecars + co-located error files are being
+    # watched — the gotcha from 2026-05-13 (silent stale-sidecar
+    # tail) becomes immediately diagnosable.
     typer.echo(
-        f"Serving Prometheus metrics at http://0.0.0.0:{port}/metrics (tailing {sidecar})",
+        f"Serving Prometheus metrics at http://0.0.0.0:{port}/metrics",
         err=True,
     )
+    if sidecar_paths:
+        typer.echo(f"[bffi-pipeline] tailing sidecars ({len(sidecar_paths)}):", err=True)
+        for sp in sidecar_paths:
+            typer.echo(f"  {sp}", err=True)
+            typer.echo(f"    + {sp.parent / 'bibframe' / '_errors.jsonl'}", err=True)
+            typer.echo(f"    + {sp.parent / 'bffi' / '_validation.jsonl'}", err=True)
+    if watch_globs:
+        typer.echo(
+            f"[bffi-pipeline] watch-globs ({len(watch_globs)}, rescan every "
+            f"{glob_rescan_seconds:g}s):",
+            err=True,
+        )
+        for g in watch_globs:
+            typer.echo(f"  {g!r}", err=True)
+
     from bffi_pipeline.metrics_exporter import serve
 
     try:
-        serve(sidecar, port=port, poll_seconds=poll_seconds)
+        serve(
+            sidecar_paths,
+            port=port,
+            poll_seconds=poll_seconds,
+            watch_globs=watch_globs or None,
+            glob_rescan_seconds=glob_rescan_seconds,
+        )
     except KeyboardInterrupt:
         typer.echo("\nExporter stopped.", err=True)
 

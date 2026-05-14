@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import json
 import math
+import socket
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from prometheus_client import generate_latest
 
 from bffi_pipeline.metrics_exporter import (
     PipelineMetrics,
+    _error_specs_for_sidecar,
     _ErrorFileSpec,
     _ErrorFileTailState,
     _tail_error_step,
@@ -25,6 +28,7 @@ from bffi_pipeline.metrics_exporter import (
     apply_event,
     rehydrate,
     rehydrate_error_files,
+    serve,
 )
 from bffi_pipeline.status import StageEventRow
 
@@ -1038,3 +1042,175 @@ def test_rehydrate_error_files_returns_states_with_post_rehydrate_positions(
         metrics.stage_errors_total.labels(stage="m2", error_type="shape", run_uuid="")._value.get()
         == 1
     )
+
+
+# --- P-17 multi-sidecar exporter ------------------------------------------
+
+
+def _write_event(path: Path, *, run_uuid: str, stage: str, ts: str) -> None:
+    """Append one minimal stage-event row to a sidecar JSONL."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "ts": ts,
+                    "run_uuid": run_uuid,
+                    "stage": stage,
+                    "event": "start",
+                }
+            )
+            + "\n"
+        )
+
+
+def test_p17_error_specs_derived_from_sidecar_parent(tmp_path: Path) -> None:
+    """P-17 step C — when a sidecar lives in some bench dir, its
+    co-located error files are derived from that dir, not from a
+    single global ``BFFI_DATA_DIR``. This was the prop-17 motivation:
+    the bench's ``bibframe/_errors.jsonl`` stayed invisible because
+    the exporter computed error-spec paths from ``data/`` at startup
+    while ``--sidecar`` was switched to ``scratchpad/bench/``.
+    """
+    bench_dir = tmp_path / "scratchpad" / "overnight-2026-05-13"
+    bench_dir.mkdir(parents=True)
+    sidecar = bench_dir / "stage-events.jsonl"
+
+    specs = _error_specs_for_sidecar(sidecar)
+    spec_paths = {s.stage: s.path for s in specs}
+    assert spec_paths["m2"] == bench_dir / "bibframe" / "_errors.jsonl"
+    assert spec_paths["m3"] == bench_dir / "bffi" / "_validation.jsonl"
+    # Critically, NOT pointed at any global ``data/`` dir.
+    assert "data" not in str(spec_paths["m2"])
+
+
+def test_p17_serve_tails_multiple_sidecars(tmp_path: Path) -> None:
+    """P-17 step A — ``serve`` with two sidecars rehydrates from
+    each and surfaces metrics for both runs' run_uuids. Bounded by
+    ``iterations`` for determinism.
+    """
+    bench_a = tmp_path / "bench-a"
+    bench_b = tmp_path / "bench-b"
+    bench_a.mkdir()
+    bench_b.mkdir()
+    sidecar_a = bench_a / "stage-events.jsonl"
+    sidecar_b = bench_b / "stage-events.jsonl"
+    _write_event(sidecar_a, run_uuid="run-A", stage="m2", ts="2026-05-14T10:00:00+00:00")
+    _write_event(sidecar_b, run_uuid="run-B", stage="m3", ts="2026-05-14T11:00:00+00:00")
+
+    metrics = PipelineMetrics()
+    # iterations=0 means rehydrate-and-quit, no tail loop. The
+    # start-event handler is invoked during rehydrate, which sets the
+    # started-timestamp gauges we'll assert below.
+    serve(
+        [sidecar_a, sidecar_b],
+        port=_pick_free_port(),
+        poll_seconds=0.0,
+        iterations=0,
+        metrics=metrics,
+    )
+
+    # Both runs surface as started-timestamp gauges, distinguished by
+    # run_uuid. Before P-17, only the first --sidecar would.
+    assert metrics.stage_started_ts.labels(stage="m2", run_uuid="run-A")._value.get() > 0
+    assert metrics.stage_started_ts.labels(stage="m3", run_uuid="run-B")._value.get() > 0
+
+
+def test_p17_serve_attaches_per_sidecar_error_files(tmp_path: Path) -> None:
+    """P-17 step C end-to-end — an error JSONL under a sidecar's
+    parent dir surfaces on ``bffi_stage_errors_total``, with no
+    global ``BFFI_DATA_DIR`` configured. Pins the second half of the
+    prop-17 motivation incident (M2+M3 failure-mode bargauge empty
+    despite errors in the bench dir).
+    """
+    bench = tmp_path / "bench"
+    bench.mkdir()
+    sidecar = bench / "stage-events.jsonl"
+    sidecar.write_text("", encoding="utf-8")
+    error_path = bench / "bibframe" / "_errors.jsonl"
+    error_path.parent.mkdir()
+    error_path.write_text(
+        json.dumps({"error_type": "missing-100", "run_uuid": "run-X"}) + "\n",
+        encoding="utf-8",
+    )
+
+    metrics = PipelineMetrics()
+    serve(
+        [sidecar],
+        port=_pick_free_port(),
+        poll_seconds=0.0,
+        iterations=0,
+        metrics=metrics,
+    )
+
+    # The error row sourced from <bench>/bibframe/_errors.jsonl ticks
+    # the counter — proves the error spec was derived from the
+    # sidecar's parent dir.
+    assert (
+        metrics.stage_errors_total.labels(
+            stage="m2", error_type="missing-100", run_uuid="run-X"
+        )._value.get()
+        == 1
+    )
+
+
+def test_p17_watch_glob_discovers_sidecars_at_launch(tmp_path: Path) -> None:
+    """P-17 step B — ``--watch-glob`` walks the pattern at launch and
+    attaches every match. The initial glob walk runs before the tail
+    loop, so even ``iterations=0`` surfaces the discovered runs.
+    """
+    bench_a = tmp_path / "scratchpad" / "a"
+    bench_b = tmp_path / "scratchpad" / "b"
+    bench_a.mkdir(parents=True)
+    bench_b.mkdir(parents=True)
+    _write_event(
+        bench_a / "stage-events.jsonl",
+        run_uuid="glob-A",
+        stage="m5",
+        ts="2026-05-14T12:00:00+00:00",
+    )
+    _write_event(
+        bench_b / "stage-events.jsonl",
+        run_uuid="glob-B",
+        stage="m6",
+        ts="2026-05-14T13:00:00+00:00",
+    )
+
+    metrics = PipelineMetrics()
+    # Operator-style invocation: no explicit --sidecar, just a glob.
+    serve(
+        sidecar_paths=[],
+        port=_pick_free_port(),
+        poll_seconds=0.0,
+        iterations=0,
+        metrics=metrics,
+        watch_globs=[str(tmp_path / "scratchpad" / "*" / "stage-events.jsonl")],
+    )
+
+    assert metrics.stage_started_ts.labels(stage="m5", run_uuid="glob-A")._value.get() > 0
+    assert metrics.stage_started_ts.labels(stage="m6", run_uuid="glob-B")._value.get() > 0
+
+
+def test_p17_serve_rejects_empty_input() -> None:
+    """P-17 — ``serve`` with no sidecars AND no globs is a user error
+    (nothing to tail). Raise rather than silently serving an empty
+    /metrics endpoint."""
+    with pytest.raises(ValueError):
+        serve(
+            sidecar_paths=[],
+            port=_pick_free_port(),
+            poll_seconds=0.0,
+            iterations=0,
+        )
+
+
+def _pick_free_port() -> int:
+    """Return an OS-assigned ephemeral port for the test exporter.
+
+    ``start_http_server`` binds 0.0.0.0; using a fixed port collides
+    across tests run in parallel. Asking the kernel for a free one
+    via socket(0) is the standard trick.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("0.0.0.0", 0))
+        return int(s.getsockname()[1])

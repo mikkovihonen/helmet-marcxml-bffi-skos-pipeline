@@ -33,6 +33,7 @@ synthetic events; the production CLI wires it up to a tail loop.
 
 from __future__ import annotations
 
+import glob as _glob
 import io
 import json as _json
 import time
@@ -49,7 +50,6 @@ from prometheus_client import (
     start_http_server,
 )
 
-from bffi_pipeline.config import get_settings
 from bffi_pipeline.status import (
     StageEventRow,
     parse_sidecar,
@@ -531,6 +531,20 @@ def _default_error_specs(data_dir: Path) -> list[_ErrorFileSpec]:
     ]
 
 
+def _error_specs_for_sidecar(sidecar_path: Path) -> list[_ErrorFileSpec]:
+    """P-17 — derive a per-sidecar error-spec pair from the sidecar's parent dir.
+
+    The pipeline convention is ``<BFFI_DATA_DIR>/stage-events.jsonl``,
+    ``<BFFI_DATA_DIR>/bibframe/_errors.jsonl``,
+    ``<BFFI_DATA_DIR>/bffi/_validation.jsonl`` all together. With
+    multi-sidecar tailing (one exporter watching multiple bench runs)
+    a single global ``data_dir`` is the wrong shape — each sidecar
+    has its OWN co-located error files. This derives the pair from
+    the sidecar's ``parent``.
+    """
+    return _default_error_specs(sidecar_path.parent)
+
+
 def _tail_error_step(
     metrics: PipelineMetrics, spec: _ErrorFileSpec, state: _ErrorFileTailState
 ) -> int:
@@ -586,16 +600,72 @@ def rehydrate_error_files(
     return states
 
 
-def serve(
+def _rescan_globs(watch_globs: list[str], already_attached: set[Path]) -> list[Path]:
+    """P-17 — return glob matches not yet in ``already_attached``.
+
+    Uses ``glob.glob`` (stdlib) so both CWD-relative AND absolute
+    patterns are accepted — ``Path('').glob`` rejects the latter.
+    ``recursive=True`` enables ``**`` matching. Results are sorted
+    for stable startup-log ordering. Best-effort: a glob that walks
+    a directory the operator doesn't have read access to silently
+    yields nothing for that branch.
+    """
+    discovered: set[Path] = set()
+    for pattern in watch_globs:
+        for match_str in _glob.glob(pattern, recursive=True):
+            match = Path(match_str)
+            try:
+                resolved = match.resolve()
+            except OSError:
+                continue
+            if resolved.is_file():
+                discovered.add(resolved)
+    return sorted(discovered - already_attached)
+
+
+def _attach_sidecar(
+    metrics: PipelineMetrics,
     sidecar_path: Path,
+    tail_states: dict[Path, _TailState],
+    error_specs_by_sidecar: dict[Path, list[_ErrorFileSpec]],
+    error_states: dict[str, _ErrorFileTailState],
+) -> None:
+    """P-17 — rehydrate one sidecar + its co-located error files; install state."""
+    rehydrate(metrics, sidecar_path)
+    tail_states[sidecar_path] = _TailState(
+        last_pos=sidecar_path.stat().st_size if sidecar_path.is_file() else 0
+    )
+    specs = _error_specs_for_sidecar(sidecar_path)
+    error_specs_by_sidecar[sidecar_path] = specs
+    for spec in specs:
+        st = _ErrorFileTailState(last_pos=0)
+        _tail_error_step(metrics, spec, st)
+        error_states[str(spec.path)] = st
+
+
+def serve(
+    sidecar_paths: list[Path],
     *,
     port: int = 9100,
     poll_seconds: float = 1.0,
     iterations: int | None = None,
     metrics: PipelineMetrics | None = None,
-    error_specs: list[_ErrorFileSpec] | None = None,
+    watch_globs: list[str] | None = None,
+    glob_rescan_seconds: float = 30.0,
 ) -> None:
     """Run the exporter: rehydrate, then tail forever serving ``/metrics``.
+
+    P-17: accepts a list of sidecars (single-sidecar is the
+    ``len == 1`` special case). Each sidecar's co-located error JSONL
+    pair (``<sidecar_parent>/bibframe/_errors.jsonl``,
+    ``<sidecar_parent>/bffi/_validation.jsonl``) is derived from the
+    sidecar's parent dir, not from a single global ``data_dir``.
+
+    ``watch_globs`` is rescanned every ``glob_rescan_seconds`` to
+    discover sidecars that didn't exist at launch (e.g. a fresh
+    bench run starting under ``scratchpad/<new-bench>/``). New
+    matches auto-attach: rehydrate + tail-state install + error-spec
+    derivation.
 
     ``iterations`` is the test hook — bounds the tail loop so the
     test suite stays deterministic. Production CLI passes ``None``
@@ -603,15 +673,35 @@ def serve(
     """
     if metrics is None:
         metrics = PipelineMetrics()
-    rehydrate(metrics, sidecar_path)
-    state = _TailState(last_pos=sidecar_path.stat().st_size if sidecar_path.is_file() else 0)
+    if not sidecar_paths and not watch_globs:
+        raise ValueError("serve() requires at least one sidecar path or watch-glob pattern")
 
-    # P-12 follow-up: rehydrate + tail the per-stage error JSONLs so
-    # mid-stage error type spikes show on the dashboard live, not
-    # only after the stage's ``end`` event.
-    if error_specs is None:
-        error_specs = _default_error_specs(get_settings().data_dir)
-    error_states = rehydrate_error_files(metrics, error_specs)
+    tail_states: dict[Path, _TailState] = {}
+    error_specs_by_sidecar: dict[Path, list[_ErrorFileSpec]] = {}
+    error_states: dict[str, _ErrorFileTailState] = {}
+
+    for sidecar_path in sidecar_paths:
+        _attach_sidecar(
+            metrics,
+            sidecar_path,
+            tail_states,
+            error_specs_by_sidecar,
+            error_states,
+        )
+
+    if watch_globs:
+        # Initial glob walk attaches any matches not already in the
+        # explicit ``sidecar_paths`` list, so an operator can drop
+        # ``--sidecar`` and rely entirely on ``--watch-glob``.
+        already = set(tail_states.keys())
+        for new_path in _rescan_globs(watch_globs, already):
+            _attach_sidecar(
+                metrics,
+                new_path,
+                tail_states,
+                error_specs_by_sidecar,
+                error_states,
+            )
 
     # ``start_http_server`` spawns a daemon-thread HTTP server bound
     # to 0.0.0.0 by default — perfect for the local-only deployment
@@ -619,12 +709,30 @@ def serve(
     # host via ``host.docker.internal``.
     server, server_thread = start_http_server(port, registry=metrics.registry)
     _ = server_thread  # we don't manage the daemon thread; it dies with the process
+
+    last_glob_rescan = time.monotonic()
     try:
         count = 0
         while iterations is None or count < iterations:
-            _tail_step(metrics, sidecar_path, state)
-            for spec in error_specs:
-                _tail_error_step(metrics, spec, error_states[str(spec.path)])
+            for sidecar_path, state in tail_states.items():
+                _tail_step(metrics, sidecar_path, state)
+                for spec in error_specs_by_sidecar[sidecar_path]:
+                    _tail_error_step(metrics, spec, error_states[str(spec.path)])
+
+            if watch_globs:
+                now_mono = time.monotonic()
+                if now_mono - last_glob_rescan >= glob_rescan_seconds:
+                    already = set(tail_states.keys())
+                    for new_path in _rescan_globs(watch_globs, already):
+                        _attach_sidecar(
+                            metrics,
+                            new_path,
+                            tail_states,
+                            error_specs_by_sidecar,
+                            error_states,
+                        )
+                    last_glob_rescan = now_mono
+
             time.sleep(poll_seconds)
             count += 1
     finally:
