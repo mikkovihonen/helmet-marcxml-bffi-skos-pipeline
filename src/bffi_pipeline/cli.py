@@ -16,10 +16,8 @@ import typer
 
 from bffi_pipeline import status as status_module
 from bffi_pipeline.config import Settings, get_settings
-from bffi_pipeline.diagnostics import blocking_stats as workkey
-from bffi_pipeline.eval import embed_benchmark
-from bffi_pipeline.eval import grow as eval_grow
-from bffi_pipeline.eval import harness as eval_harness
+from bffi_pipeline.diagnostics import commands as _diagnostics_commands
+from bffi_pipeline.evaluation import commands as _evaluation_commands
 from bffi_pipeline.observability.events import (
     StageEventEmitter,
     set_active_emitter,
@@ -34,7 +32,7 @@ from bffi_pipeline.stages import (
     m8,
     m9,
 )
-from bffi_pipeline.stages.m9 import local_concept_resolver, ysa_disambiguation_report
+from bffi_pipeline.stages.m9 import local_concept_resolver
 from bffi_pipeline.stages.m10 import load, load_finto, skosify_run
 
 
@@ -1712,25 +1710,8 @@ def run_command(
     typer.echo(summary.render())
 
 
-@app.command("workkey-stats")
-def workkey_stats_command(
-    path: Annotated[
-        Path,
-        typer.Argument(
-            exists=True,
-            readable=True,
-            resolve_path=True,
-            help=(
-                "Path to a single BFFI Turtle file or to a data directory "
-                "(with bffi/ and bibframe/ subdirs)."
-            ),
-        ),
-    ],
-) -> None:
-    """Report Stage-1 block-size distribution (M4)."""
-    graph = workkey.load_corpus(path)
-    stats = workkey.compute_blocks(graph)
-    typer.echo(stats.render())
+# P-38 Phase C-3: workkey-stats moved to diagnostics/commands.py.
+app.command("workkey-stats")(_diagnostics_commands.workkey_stats_command)
 
 
 @app.command("embed")
@@ -1816,176 +1797,12 @@ def embed_command(
     typer.echo(stats.render())
 
 
-@app.command("embed-benchmark")
-def embed_benchmark_command(
-    models: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--model",
-            help=(
-                "HuggingFace model name; pass multiple times to compare. "
-                "Defaults to BGE-M3 / multilingual-e5-large / jina-v3."
-            ),
-        ),
-    ] = None,
-    gold_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--gold-path",
-            help="Path to gold/gold.jsonl; defaults to repo gold/ directory.",
-            exists=True,
-            file_okay=True,
-            dir_okay=False,
-            readable=True,
-            resolve_path=True,
-        ),
-    ] = None,
-    device: Annotated[
-        str,
-        typer.Option(
-            "--device",
-            help="PyTorch device: mps (Apple Silicon), cuda, or cpu.",
-        ),
-    ] = m5.DEFAULT_DEVICE,
-    batch_size: Annotated[
-        int,
-        typer.Option(
-            "--batch-size",
-            help="Embedding batch size.",
-        ),
-    ] = m5.DEFAULT_BATCH_SIZE,
-) -> None:
-    """Compare embedding models on the gold set's same_work / different_work gap (M5 / M12)."""
-    candidate_models = tuple(models) if models else embed_benchmark.DEFAULT_MODELS
-    results = embed_benchmark.benchmark_models(
-        models=candidate_models,
-        gold_path=gold_path,
-        device=device,
-        batch_size=batch_size,
-    )
-    typer.echo(embed_benchmark.render_comparison(results))
-
-
-@app.command("eval")
-def eval_command(
-    run_label: Annotated[
-        str,
-        typer.Option(
-            "--run-label",
-            help=(
-                "Identifier for this run (e.g. 'qwen3-32b-prompt-v3'). Becomes the "
-                "filename stem under --output-dir and is recorded in the JSON summary."
-            ),
-        ),
-    ],
-    gold_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--gold-path",
-            help="Path to gold/gold.jsonl; defaults to repo gold/ directory.",
-            exists=True,
-            file_okay=True,
-            dir_okay=False,
-            readable=True,
-            resolve_path=True,
-        ),
-    ] = None,
-    output_dir: Annotated[
-        Path | None,
-        typer.Option(
-            "--output-dir",
-            help=("Directory for the JSON summary; defaults to <repo>/eval-runs (gitignored)."),
-            file_okay=False,
-            dir_okay=True,
-            resolve_path=True,
-        ),
-    ] = None,
-) -> None:
-    """Score the gold set against the M6 judge and write a JSON summary (M12).
-
-    Eval is **not in CI** per spec § 9; this subcommand is invoked
-    locally on the M5 Max via ``make eval`` before any PR that touches
-    prompts / gold / judge code. The text rendering is paste-ready for
-    the PR description; the JSON file is the durable record.
-    """
-    summary, out_path = eval_harness.run_eval(
-        run_label=run_label,
-        gold_path=gold_path,
-        output_dir=output_dir,
-    )
-    typer.echo(eval_harness.render_text(summary))
-    typer.echo("")
-    typer.echo(f"Summary written to {out_path}")
-
-
-@app.command("grow-gold")
-def grow_gold_command(
-    fuseki_url: Annotated[
-        str | None,
-        typer.Option(
-            "--fuseki-url",
-            help="Fuseki dataset base URL; defaults to FUSEKI_URL.",
-        ),
-    ] = None,
-    output_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--output-path",
-            help=(
-                "Where to write the candidate JSONL; defaults to "
-                "gold/grow-candidates.jsonl in the repo."
-            ),
-            file_okay=True,
-            dir_okay=False,
-            resolve_path=True,
-        ),
-    ] = None,
-) -> None:
-    """Grow the gold set from human-overridden judge decisions (M12 phase 3).
-
-    Run monthly per spec § 9. Writes a JSONL of candidate cases the
-    cataloguer reviews — each row needs ``category`` filled in by hand
-    before being merged into ``gold/gold.jsonl``. New cases default to
-    ``holdout: false``; cataloguers flip the flag explicitly when a
-    case should join the eval set.
-    """
-    result = eval_grow.grow(
-        fuseki_url=fuseki_url,
-        output_path=output_path,
-    )
-    typer.echo(result.render())
-
-
-@app.command("embed-stats")
-def embed_stats_command(
-    output_dir: Annotated[
-        Path | None,
-        typer.Option(
-            "--output-dir",
-            "-o",
-            help="Directory holding m5.faiss + idmap; defaults to BFFI_DATA_DIR.",
-            file_okay=False,
-            dir_okay=True,
-            readable=True,
-            resolve_path=True,
-        ),
-    ] = None,
-    top_k: Annotated[
-        int,
-        typer.Option("--top-k", help="Top-k neighbours per Work."),
-    ] = m5.DEFAULT_TOP_K,
-    cross_block: Annotated[
-        bool,
-        typer.Option(
-            "--cross-block",
-            help="Keep candidate pairs whose Stage-1 blocking keys differ.",
-        ),
-    ] = False,
-) -> None:
-    """Report band counts and similarity distribution from the persisted index (M5)."""
-    target = output_dir or get_settings().data_dir
-    stats = m5.query_candidates(target, top_k=top_k, cross_block=cross_block)
-    typer.echo(stats.render())
+# P-38 Phase C-3: M12 / M5-adjacent evaluation commands moved to
+# evaluation/commands.py.
+app.command("embed-benchmark")(_evaluation_commands.embed_benchmark_command)
+app.command("eval")(_evaluation_commands.eval_command)
+app.command("grow-gold")(_evaluation_commands.grow_gold_command)
+app.command("embed-stats")(_evaluation_commands.embed_stats_command)
 
 
 @app.command("judge")
@@ -2530,48 +2347,10 @@ def reconcile_command(
     typer.echo(summary.render())
 
 
-@app.command("ysa-disambiguation-report")
-def ysa_disambiguation_report_command(
-    canonical_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--canonical-path",
-            "-i",
-            help="Path to canonical.ttl; defaults to <BFFI_DATA_DIR>/canonical.ttl.",
-            exists=True,
-            file_okay=True,
-            dir_okay=False,
-            readable=True,
-            resolve_path=True,
-        ),
-    ] = None,
-    output_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--output-path",
-            "-o",
-            help=("CSV path; defaults to <BFFI_DATA_DIR>/ysa-disambiguation-report.csv."),
-            file_okay=True,
-            dir_okay=False,
-            resolve_path=True,
-        ),
-    ] = None,
-) -> None:
-    """Emit a cataloguer-review CSV for YSA → YSO disambiguation residue.
-
-    Walks canonical.ttl for subject literals that look like
-    pre-2018 bare YSA forms (``lapset``, ``2000-luku``, …) and
-    queries the locally-loaded YSO graph for the disambiguated forms
-    YSO replaced them with. One row per (helmet_bib_id, literal,
-    candidate) tuple; see ``docs/runbook.md`` for the operational
-    background and the SPARQL needs-review filter this report
-    complements.
-    """
-    summary = ysa_disambiguation_report.run(
-        canonical_path=canonical_path,
-        output_path=output_path,
-    )
-    typer.echo(summary.render())
+# P-38 Phase C-3: ysa-disambiguation-report moved to
+# diagnostics/commands.py (re-classified from m9 to diagnostics —
+# it's a cataloguer-review report generator, not a stage invocation).
+app.command("ysa-disambiguation-report")(_diagnostics_commands.ysa_disambiguation_report_command)
 
 
 @app.command("skosify")
