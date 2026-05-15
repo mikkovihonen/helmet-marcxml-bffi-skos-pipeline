@@ -16,6 +16,7 @@ import typer
 
 from bffi_pipeline import status as status_module
 from bffi_pipeline.config import Settings, get_settings
+from bffi_pipeline.diagnostics import blocking_stats as workkey
 from bffi_pipeline.eval import embed_benchmark
 from bffi_pipeline.eval import grow as eval_grow
 from bffi_pipeline.eval import harness as eval_harness
@@ -24,9 +25,7 @@ from bffi_pipeline.observability.events import (
     set_active_emitter,
 )
 from bffi_pipeline.provenance import writer as prov_writer
-from bffi_pipeline.stages import (
-    export as export_stage,
-)
+from bffi_pipeline.release import export as export_stage
 from bffi_pipeline.stages import (
     m2,
     m3,
@@ -34,7 +33,6 @@ from bffi_pipeline.stages import (
     m6,
     m8,
     m9,
-    workkey,
 )
 from bffi_pipeline.stages.m9 import local_concept_resolver, ysa_disambiguation_report
 from bffi_pipeline.stages.m10 import load, load_finto, skosify_run

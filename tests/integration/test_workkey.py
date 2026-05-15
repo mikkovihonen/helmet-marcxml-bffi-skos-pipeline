@@ -13,14 +13,14 @@ import pytest
 from rdflib import RDF, RDFS, BNode
 
 from bffi_pipeline.blocking import compute_blocking_key
-from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.m2 import run as run_m2
-from bffi_pipeline.stages.m3 import run as run_m3
-from bffi_pipeline.stages.workkey import (
+from bffi_pipeline.diagnostics.blocking_stats import (
     compute_blocks,
     extract_blocking_inputs,
     load_corpus,
 )
+from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.m2 import run as run_m2
+from bffi_pipeline.stages.m3 import run as run_m3
 from bffi_pipeline.uris import mint_raw_work_uri
 
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"

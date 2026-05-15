@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages import export
+from bffi_pipeline.release import export
 
 
 @pytest.fixture(autouse=True)
