@@ -38,11 +38,9 @@ import concurrent.futures
 import hashlib
 import json
 import re
-import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
@@ -57,13 +55,12 @@ if TYPE_CHECKING:
         LocalConceptResolver,
     )
 
-import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from rdflib import Graph, Literal, URIRef
 from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF
 
-from bffi_pipeline.blocking import fold_diacritics, fold_label
+from bffi_pipeline.blocking import fold_diacritics
 from bffi_pipeline.cataloguer_review import append_target_row
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.llm_json_mode import json_mode_instruction
@@ -967,165 +964,14 @@ def decide_reconciliation(
     return _decide_with_pick(request=request, sorted_candidates=sorted_candidates, pick=pick)
 
 
-# --- Authority clients ----------------------------------------------------
-
-
-class AuthorityClient(Protocol):
-    """Protocol all authority lookups satisfy."""
-
-    def query(
-        self, *, request: EntityRequest, top_k: int = DEFAULT_TOP_K
-    ) -> list[AuthorityCandidate]:
-        """Return up to ``top_k`` candidates for ``request`` from this authority."""
-        ...
-
-
-_KIND_TO_FINTO_VOCAB: Final[dict[AuthorityKind, str]] = {
-    "person": VOCAB_KANTO,
-    "corporate_body": VOCAB_KANTO,
-    "subject": VOCAB_YSO,
-    "genre_form": VOCAB_KAUNO,
-    "music_form": VOCAB_MUSO,
-}
-
-
-@dataclass
-class FintoSkosmosClient:
-    """Real client for Finto's REST API (https://api.finto.fi/rest/v1).
-
-    Caches results per ``(vocab, query, date)`` per spec § 6
-    so re-runs within the day don't hammer the public service. Inject
-    ``http_client`` (an ``httpx.Client``) so tests can use
-    ``httpx.MockTransport`` to assert on the request shape and feed
-    canned JSON.
-    """
-
-    http_client: httpx.Client
-    base_url: str = FINTO_BASE_URL
-    today: str = field(default_factory=lambda: datetime.now(UTC).date().isoformat())
-    _cache: dict[tuple[str, str, str], list[AuthorityCandidate]] = field(default_factory=dict)
-
-    def query(
-        self,
-        *,
-        request: EntityRequest,
-        top_k: int = DEFAULT_TOP_K,
-    ) -> list[AuthorityCandidate]:
-        """Hit Finto's ``/search`` endpoint for ``request.kind``-mapped vocab; cache by day."""
-        vocab = _KIND_TO_FINTO_VOCAB.get(request.kind)
-        if vocab is None:
-            return []
-        cache_key = (vocab, request.literal, self.today)
-        if cache_key in self._cache:
-            return self._cache[cache_key][:top_k]
-        # Finto's `/search` endpoint defaults to exact-match against
-        # prefLabel; cataloguer literals like "Puškin, Aleksandr" almost
-        # never exact-match a KANTO entry like "Puškin, Aleksandr,
-        # 1799-1837". Append `*` for prefix match — the lexical
-        # similarity gate downstream still filters spurious matches.
-        params = {
-            "vocab": vocab,
-            "query": _finto_search_query(request.literal),
-            "lang": "fi",
-            "maxhits": str(top_k),
-        }
-        try:
-            response = self.http_client.get(f"{self.base_url}/search", params=params, timeout=10.0)
-            response.raise_for_status()
-        except httpx.HTTPError:
-            return []
-        try:
-            payload = response.json()
-        except ValueError:
-            return []
-
-        candidates: list[AuthorityCandidate] = []
-        for item in payload.get("results", []):
-            uri = item.get("uri")
-            pref = item.get("prefLabel") or item.get("matchedPrefLabel") or ""
-            if not uri:
-                continue
-            candidates.append(
-                AuthorityCandidate(
-                    uri=str(uri),
-                    pref_label=str(pref),
-                    source_vocabulary=vocab,
-                    lexical_similarity=lexical_similarity(request.literal, str(pref)),
-                )
-            )
-        self._cache[cache_key] = candidates
-        return candidates[:top_k]
-
-
-@dataclass
-class ViafClient:
-    """VIAF lookup. Falls back here only when KANTO returned no person/corporate-body match.
-
-    Phase 1 ships the same shape as :class:`FintoSkosmosClient`; the
-    actual VIAF AutoSuggest endpoint is wired in phase 2 alongside the
-    CLI subcommand. Tests inject a ``StubAuthorityClient`` instead.
-    """
-
-    http_client: httpx.Client
-    base_url: str = "https://www.viaf.org/viaf/AutoSuggest"
-
-    def query(
-        self,
-        *,
-        request: EntityRequest,
-        top_k: int = DEFAULT_TOP_K,
-    ) -> list[AuthorityCandidate]:
-        """Hit VIAF's AutoSuggest endpoint; only persons / corporate bodies route here."""
-        if request.kind not in {"person", "corporate_body"}:
-            return []
-        try:
-            response = self.http_client.get(
-                self.base_url,
-                params={"query": request.literal},
-                timeout=10.0,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError:
-            return []
-        try:
-            payload = response.json()
-        except ValueError:
-            return []
-        candidates: list[AuthorityCandidate] = []
-        for item in payload.get("result", []) or []:
-            viaf_id = item.get("viafid") or item.get("id")
-            term = item.get("term") or item.get("displayForm") or ""
-            if not viaf_id:
-                continue
-            uri = f"https://viaf.org/viaf/{viaf_id}"
-            candidates.append(
-                AuthorityCandidate(
-                    uri=uri,
-                    pref_label=str(term),
-                    source_vocabulary=VOCAB_VIAF,
-                    lexical_similarity=lexical_similarity(request.literal, str(term)),
-                )
-            )
-        return candidates[:top_k]
-
-
-@dataclass
-class StubAuthorityClient:
-    """Test stub: returns a pre-baked candidate list per (kind, literal)."""
-
-    fixtures: dict[tuple[AuthorityKind, str], list[AuthorityCandidate]] = field(
-        default_factory=dict
-    )
-
-    def query(
-        self,
-        *,
-        request: EntityRequest,
-        top_k: int = DEFAULT_TOP_K,
-    ) -> list[AuthorityCandidate]:
-        """Look up a wired candidate list for ``(kind, literal)``; default to empty."""
-        return list(self.fixtures.get((request.kind, request.literal), []))[:top_k]
-
+# P-38 Phase B: authority-lookup HTTP clients moved to
+# m9/authority_clients.py.
+from bffi_pipeline.stages.m9.authority_clients import (  # noqa: E402
+    AuthorityClient,
+    FintoSkosmosClient,
+    StubAuthorityClient,
+    ViafClient,
+)
 
 # --- Orchestrator: walk canonical.ttl, reconcile, write back -------------
 
@@ -2156,221 +2002,17 @@ _MIN_CONCURRENCY_FOR_FACTORY: Final[int] = 2
 # is Finto-version-aware: refreshing a vocabulary dump (different
 # SHA-256) invalidates the per-vocab slice cleanly on next lookup.
 
-#: Default filename. Mirrors M6's ``judge-cache.sqlite`` naming.
-PICKER_CACHE_FILENAME: Final[str] = "reconcile-cache.sqlite"
-
-
-def picker_cache_default_path() -> Path:
-    """Return ``<BFFI_DATA_DIR>/reconcile-cache.sqlite`` from live Settings."""
-    return get_settings().data_dir / PICKER_CACHE_FILENAME
-
-
-def hash_finto_dump(path: Path) -> str:
-    """SHA-256 of one Finto vocabulary dump file.
-
-    Read in 1 MiB chunks so the hash is bounded by I/O, not by file
-    size — KANTO is ~183 MB and LCSH ~465 MB decompressed.
-    """
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def compute_finto_shas(dumps_dir: Path) -> dict[str, str]:
-    """Hash every ``<vocab>-skos.ttl`` in ``dumps_dir``.
-
-    Returns a dict keyed by vocab slug (the part before ``-skos.ttl``).
-    Missing / non-existent dumps directories return an empty dict so
-    callers distinguish "vocab not cached locally" (skip caching) from
-    "vocab cached but refreshed" (key mismatch → cache miss). Computed
-    once per :func:`apply_reconciliation` run, not per-call.
-    """
-    if not dumps_dir.is_dir():
-        return {}
-    shas: dict[str, str] = {}
-    for path in sorted(dumps_dir.glob("*-skos.ttl")):
-        vocab = path.stem.removesuffix("-skos")
-        shas[vocab] = hash_finto_dump(path)
-    return shas
-
-
-def compute_picker_cache_key(
-    *,
-    request: EntityRequest,
-    candidates: Iterable[AuthorityCandidate],
-    prompt_hash_value: str,
-    model_name: str,
-    finto_shas: dict[str, str],
-) -> tuple[str, str, str] | None:
-    """Return ``(key, vocab, finto_sha)`` or ``None`` if the call must skip cache.
-
-    Skip conditions (return ``None``):
-
-    - Empty candidate list — picker would short-circuit to ``uncertain``
-      anyway, no value in caching.
-    - VIAF-source candidates — no local dump to anchor the version,
-      so caching would risk binding to upstream-drifted data.
-    - Vocab has no on-disk Finto dump (no SHA to invalidate against).
-
-    Otherwise key = SHA-256 of:
-
-    .. code-block:: text
-
-        fold(literal) | sorted(candidate.uri) | prompt_hash |
-        model_name | vocab:finto_sha
-
-    ``fold(literal)`` uses :func:`bffi_pipeline.blocking.fold_label`
-    so diacritic-equivalent literals hit the same cached decision.
-    """
-    candidate_list = list(candidates)
-    if not candidate_list:
-        return None
-    vocab = candidate_list[0].source_vocabulary
-    if vocab == VOCAB_VIAF:
-        return None
-    finto_sha = finto_shas.get(vocab)
-    if not finto_sha:
-        return None
-    payload = "|".join(
-        (
-            fold_label(request.literal),
-            ",".join(sorted(c.uri for c in candidate_list)),
-            prompt_hash_value,
-            model_name,
-            f"{vocab}:{finto_sha}",
-        )
-    )
-    key = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return key, vocab, finto_sha
-
-
-@dataclass(frozen=True)
-class CacheHit:
-    """One row returned by :meth:`PickerCache.get`.
-
-    Carries the cached :class:`PickerDecision` plus the original
-    Activity URI so the orchestrator wires the new provenance Activity
-    through ``prov:wasInfluencedBy``.
-    """
-
-    decision: PickerDecision
-    activity_uuid: str
-
-
-class PickerCache:
-    """SQLite-backed cache for validated :class:`PickerDecision` rows.
-
-    Writes happen only after the picker has returned a structurally
-    and semantically valid response (the same gate
-    :class:`~bffi_pipeline.stages.m6.JudgeCache` applies): a
-    ``ValidationError`` short-circuits before the write so a re-run
-    can recover once the model is updated or the prompt is fixed.
-
-    Concurrency contract: one instance is shared across picker-pool
-    worker threads. A :class:`threading.Lock` serialises every SQLite
-    call (mirroring M6's cross-thread fix in commit ``1452a4f``: the
-    ``sqlite3`` module does *not* serialise concurrent statement
-    execution on a shared connection). The lock is held only for the
-    SQLite call itself, so contention is negligible next to the
-    seconds-long LLM call. ``BEGIN IMMEDIATE`` on writes prevents two
-    threads from racing on the same key.
-    """
-
-    _SCHEMA: Final[str] = """
-    CREATE TABLE IF NOT EXISTS picker_cache (
-      cache_key       TEXT PRIMARY KEY,
-      decision_json   TEXT NOT NULL,
-      finto_vocab     TEXT NOT NULL,
-      finto_sha       TEXT NOT NULL,
-      prompt_hash     TEXT NOT NULL,
-      model_name      TEXT NOT NULL,
-      activity_uuid   TEXT NOT NULL,
-      decided_at      TEXT NOT NULL
-    )
-    """
-
-    _INDEX: Final[str] = (
-        "CREATE INDEX IF NOT EXISTS picker_cache_vocab_sha ON picker_cache(finto_vocab, finto_sha)"
-    )
-
-    def __init__(self, path: Path | str) -> None:
-        self._path = Path(path)
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        with self._lock:
-            self._conn.execute(self._SCHEMA)
-            self._conn.execute(self._INDEX)
-            self._conn.commit()
-
-    def __enter__(self) -> PickerCache:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the underlying SQLite connection (idempotent)."""
-        with suppress(sqlite3.ProgrammingError), self._lock:
-            self._conn.close()
-
-    def get(self, key: str) -> CacheHit | None:
-        """Return the cached :class:`CacheHit` for ``key`` or ``None``."""
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT decision_json, activity_uuid FROM picker_cache WHERE cache_key = ?",
-                (key,),
-            ).fetchone()
-        if row is None:
-            return None
-        return CacheHit(
-            decision=PickerDecision.model_validate_json(row[0]),
-            activity_uuid=row[1],
-        )
-
-    def set(
-        self,
-        key: str,
-        *,
-        decision: PickerDecision,
-        finto_vocab: str,
-        finto_sha: str,
-        prompt_hash_value: str,
-        model_name: str,
-        activity_uuid: str,
-    ) -> None:
-        """Insert-or-replace the cached decision for ``key``.
-
-        Uses ``BEGIN IMMEDIATE`` so two worker threads that compute
-        the same key concurrently never produce a half-written row —
-        the second writer blocks at the BEGIN and then overwrites
-        cleanly (idempotent in content; decision JSON / Activity URI
-        are deterministic per input).
-        """
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                self._conn.execute(
-                    "INSERT OR REPLACE INTO picker_cache "
-                    "(cache_key, decision_json, finto_vocab, finto_sha, "
-                    "prompt_hash, model_name, activity_uuid, decided_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        key,
-                        decision.model_dump_json(),
-                        finto_vocab,
-                        finto_sha,
-                        prompt_hash_value,
-                        model_name,
-                        activity_uuid,
-                        datetime.now(UTC).isoformat(),
-                    ),
-                )
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
+# P-38 Phase B: persistent picker-decision cache moved to
+# m9/picker_cache.py.
+from bffi_pipeline.stages.m9.picker_cache import (  # noqa: E402
+    PICKER_CACHE_FILENAME,
+    CacheHit,
+    PickerCache,
+    compute_finto_shas,
+    compute_picker_cache_key,
+    hash_finto_dump,
+    picker_cache_default_path,
+)
 
 
 @dataclass(frozen=True)
