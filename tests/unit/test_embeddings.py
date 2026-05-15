@@ -34,6 +34,7 @@ from bffi_pipeline.stages.m5 import (
     query_candidates,
     to_blocking_key,
 )
+from bffi_pipeline.stages.m5 import build as _m5_build
 from bffi_pipeline.stages.m5 import runner as embeddings
 from bffi_pipeline.stages.m5.runner import _normalise_year, _short_segment
 
@@ -284,9 +285,18 @@ def _write_minimal_corpus(corpus_dir: Path) -> tuple[str, str]:
 
 @pytest.fixture
 def fake_encoder(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[float]]:
-    """Patch embeddings._embed with a deterministic string-to-vector lookup."""
+    """Patch the M5 ``_embed`` shim with a deterministic string-to-vector lookup.
+
+    Patches in two places: ``m5.runner._embed`` (the re-export surface
+    older tests / external callers may reach for) and
+    ``m5.build._embed`` (the call site ``build_index`` actually goes
+    through after P-38 Phase D's module split). Patching only the
+    re-export leaves ``build_index`` calling the real encoder.
+    """
     table: dict[str, list[float]] = {}
-    monkeypatch.setattr(embeddings, "_embed", _fake_embed_factory(table))
+    fake = _fake_embed_factory(table)
+    monkeypatch.setattr(embeddings, "_embed", fake)
+    monkeypatch.setattr(_m5_build, "_embed", fake)
     return table
 
 

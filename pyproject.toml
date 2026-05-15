@@ -74,6 +74,9 @@ ignore = ["PLR0913"]
 # Heavy ML imports (sentence_transformers, faiss, numpy) and the LangChain
 # client are deferred to function bodies on purpose so the rest of the CLI
 # does not pay the multi-second import cost.
+"src/bffi_pipeline/stages/m5/build.py" = ["PLC0415"]
+"src/bffi_pipeline/stages/m5/embed.py" = ["PLC0415"]
+"src/bffi_pipeline/stages/m5/faiss_index.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m5/runner.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m6/clients.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m6/runner.py" = ["PLC0415"]
