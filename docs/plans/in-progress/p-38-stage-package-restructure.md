@@ -8,9 +8,9 @@ to confirm no in-flight work has reshaped the surface. Particular attention to: 
 
 **Phase commits**:
 
-- Phase A (per-stage package relocation, Layer 1): `<unfilled>`
-- Phase B (internal splits of M9 / M8 / M6 / M3, Layer 2): `<unfilled>`
-- Phase C (CLI shrink + flag-to-env-var conversion, Layer 3): `<unfilled>`
+- Phase A (per-stage package relocation, Layer 1): shipped 2026-05-15 across `a05ed20` → `2fef135` (10 commits inside the layer: m2, m3, m5, m6, m8, m9, m10 relocations + observability extraction + release/diagnostics extraction + plan-doc sweep).
+- Phase B (internal splits of M9 / M8 / M6 / M3, Layer 2): M3 split shipped at `3cfcb04`. M6 / M8 / M9 splits deferred — see the "Status 2026-05-15" note under the Phase B heading. Deferral commit `a454d31`.
+- Phase C (CLI shrink + flag-to-env-var conversion, Layer 3): **deferred to a follow-up plan.** The plan's Phase C deliberately deletes nine CLI commands and converts their flags to env vars — that's a real operator-facing breakage that wants its own sequenced PR with the Phase C-0 snapshot test + Phase C-1 audit doc landing first as a gate. Doing it in the same session as Phase A + B carries too much risk of an incomplete migration. The plan body's Phase C section stays as the spec for the follow-up plan; nothing in it needs revision.
 
 **Owner**: operator (Mikko) + claude solo-then-commit. All three phases are mechanically verifiable — public API of each stage's `runner.py` is preserved exactly through Phases A and B (no signature changes; `__init__.py` re-exports keep the import contract); Phase C is a deliberate CLI breakage with a one-release migration window via hidden error stubs.
 
