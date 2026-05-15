@@ -21,13 +21,13 @@ from bffi_pipeline.eval import grow as eval_grow
 from bffi_pipeline.eval import harness as eval_harness
 from bffi_pipeline.provenance import writer as prov_writer
 from bffi_pipeline.stages import (
-    bf_to_bffi,
     embeddings,
     judge,
     load,
     load_finto,
     local_concept_resolver,
     m2,
+    m3,
     merge,
     reconcile,
     skosify_run,
@@ -1267,7 +1267,7 @@ def bf_to_bffi_command(
         from bffi_pipeline.contrib_extract_llm import LangChainContribExtractor
 
         contrib_extractor = LangChainContribExtractor(model_name=primary_model)
-    summary = bf_to_bffi.run(
+    summary = m3.run(
         bibframe_dir,
         output_dir=target,
         force=force,

@@ -44,7 +44,7 @@ from bffi_pipeline.uris import (
 )
 from bffi_pipeline.validation.bffi import validate_graph
 
-_BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+_BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
 _SPARQL_DIR: Final[Path] = _BFFI_PIPELINE_REPO_ROOT / "sparql"
 
 #: P-11 Phase A progress cadence for M3 bf-to-bffi.

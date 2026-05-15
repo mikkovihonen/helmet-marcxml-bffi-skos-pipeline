@@ -23,9 +23,13 @@ from bffi_pipeline.contrib_extract_llm import (
 )
 from bffi_pipeline.contrib_variants import load_variant_claims
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.bf_to_bffi import (
+from bffi_pipeline.stages.m3 import (
     BFFI_CORPUS_FILENAME,
     ValidationRow,
+    construct_bffi,
+    post_process,
+)
+from bffi_pipeline.stages.m3.runner import (
     _convert_one,
     _emit_validation_tsv,
     _is_parseable_date,
@@ -33,8 +37,6 @@ from bffi_pipeline.stages.bf_to_bffi import (
     _sanitize_uri,
     _sanitize_uri_whitespace,
     _write_bffi_corpus,
-    construct_bffi,
-    post_process,
 )
 from bffi_pipeline.uris import mint_raw_expression_uri, mint_raw_work_uri
 

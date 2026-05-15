@@ -18,8 +18,8 @@ from typer.testing import CliRunner
 from bffi_pipeline import cli as cli_module
 from bffi_pipeline.cli import _parse_reconcile_kinds, app
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages.bf_to_bffi import BffiSummary
 from bffi_pipeline.stages.m2 import ConversionErrorRow, ConversionSummary
+from bffi_pipeline.stages.m3 import BffiSummary
 from bffi_pipeline.stages.observability import set_active_emitter
 
 if TYPE_CHECKING:
@@ -170,7 +170,7 @@ def test_bf_to_bffi_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_
         converted=["a", "b"],
         errored=[("c", "boom")],
     )
-    monkeypatch.setattr(cli_module.bf_to_bffi, "run", lambda *a, **kw: summary)
+    monkeypatch.setattr(cli_module.m3, "run", lambda *a, **kw: summary)
     bibframe_dir = tmp_path / "bibframe"
     bibframe_dir.mkdir()
     result = CliRunner().invoke(app, ["bf-to-bffi", "--bibframe-dir", str(bibframe_dir)])
@@ -179,7 +179,7 @@ def test_bf_to_bffi_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_
 
 def test_bf_to_bffi_exits_one_on_total_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     summary = BffiSummary(errored=[("a", "boom"), ("b", "boom")])
-    monkeypatch.setattr(cli_module.bf_to_bffi, "run", lambda *a, **kw: summary)
+    monkeypatch.setattr(cli_module.m3, "run", lambda *a, **kw: summary)
     bibframe_dir = tmp_path / "bibframe"
     bibframe_dir.mkdir()
     result = CliRunner().invoke(app, ["bf-to-bffi", "--bibframe-dir", str(bibframe_dir)])
