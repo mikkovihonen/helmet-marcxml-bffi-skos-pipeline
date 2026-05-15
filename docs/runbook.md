@@ -2,31 +2,6 @@
 
 End-to-end recipe for running the BFFI pipeline against the ~800 k-record Helmet corpus on the M5 Max. Five sections — setup, observability, running, then two reference tables (Make + CLI). Anything not here lives in [`docs/local-inference.md`](local-inference.md) (mlx-lm install), [`docs/observability.md`](observability.md) (metric vocabulary), or `bffi-pipeline <cmd> --help`.
 
-## Pinned versions
-
-| Component | Pinned | Notes |
-|---|---|---|
-| `marc2bibframe2` | `third_party/marc2bibframe2` (git submodule) | M2 XSLT |
-| Embedding model | `BAAI/bge-m3` (1024-dim, multilingual) | M5; verify with `bffi-pipeline embed-benchmark` |
-| FAISS HNSW | `M=32`, `efConstruction=200`, `efSearch=64`, IP metric on L2-normalised vectors | M5 |
-| LLM primary | `Qwen3-8B-4bit` (mlx-lm; `Qwen/Qwen3-8B-MLX-4bit`) | M6 / M9 picker |
-| LLM fallback | `Qwen3-32B-4bit` (mlx-lm; `mlx-community/Qwen3-32B-4bit`) | M6 cascade |
-| Apache Jena Fuseki | `5.4.0` (downloaded by Skosmos's vendored Dockerfile) | M10 load target |
-| Skosmos | `third_party/Skosmos` (git submodule pinned at `v3.2`) | M11 UI |
-
-## Throughput on the M5 Max (full 800k)
-
-| Stage | Time | Memory |
-|---|---|---|
-| M2 MARCXML → BIBFRAME | 15–30 min | small |
-| M3 BIBFRAME → BFFI | 10–20 min | small |
-| M5 embeddings + FAISS | 30–60 min (first run downloads ~2.3 GB BGE-M3) | ~5 GB index + 2.5 GB model |
-| M6 cascade judge | ~25–40 h per 50k escalate-band pairs | ~5 GB primary; +18 GB if fallback loaded |
-| M9 reconcile | overnight (cold cache); ~5 min (warm cache) per 5k bench | small |
-| Skosify + Load | ~minutes | small |
-
----
-
 ## 1. Setup: docker-compose + LLM
 
 ### Container stack (Fuseki + Skosmos)
@@ -87,8 +62,7 @@ All operator-facing UI lives at **`http://localhost:8080`**:
 
 | Path | What |
 |---|---|
-| `/` | 301 → `/grafana/` |
-| `/grafana/` | Bundled dashboard; pick the active run from the top dropdown |
+| `/` | Bundled dashboard; pick the active run from the top dropdown |
 | `/prometheus/` | Ad-hoc PromQL |
 | `/files/` | Browse `runs/<uuid>/` — cataloguer TSVs, export tarballs, per-record artifacts |
 

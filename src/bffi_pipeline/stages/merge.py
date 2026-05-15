@@ -1640,12 +1640,10 @@ def apply_merge(  # noqa: PLR0912 — terminal-step orchestrator: loads decision
     # row maps 1:1 to a Sierra record to inspect).
     for mf in mint_failures:
         details = f"missing inputs: {', '.join(mf.missing_inputs)}"
-        category = f"mint-failure-{'-'.join(sorted(mf.missing_inputs))}" or "mint-failure"
         for bib_id in mf.helmet_bib_ids or [mf.anchor_work_uri]:
             append_source_row(
                 bib_id=bib_id,
                 stage="m8",
-                category=category,
                 severity="blocking",
                 details=details,
             )
@@ -1657,9 +1655,6 @@ def apply_merge(  # noqa: PLR0912 — terminal-step orchestrator: loads decision
     # conflict spanning two well-known authors is more impactful than
     # one between two obscure ones).
     for c in conflicts:
-        # Use the first member as the canonical-work URI surrogate;
-        # the row carries every member's URI under expression_uris so
-        # the cataloguer can drill into all of them.
         if not c.members:
             continue
         conflict_bib_ids: list[str] = []
@@ -1667,12 +1662,20 @@ def apply_merge(  # noqa: PLR0912 — terminal-step orchestrator: loads decision
             helmet_entry = helmet_entries.get(raw_uri)
             if helmet_entry is not None:
                 conflict_bib_ids.append(helmet_entry.helmet_bib_id)
+        pair_a, pair_b = c.conflicting_pair
+        path_str = " → ".join(f"{a}={b}" for a, b in c.same_work_path) or "(none)"
+        details = (
+            f"M6 judge said {pair_a} ≠ {pair_b}, but the same-work chain "
+            f"({path_str}) merged them via union-find. "
+            f"{len(c.members)} member(s) in the cycle. "
+            f"Inspect the source MARC for each member to decide which edge was wrong."
+        )
         append_target_row(
-            canonical_work_uri=c.members[0],
+            member_bib_ids=conflict_bib_ids,
             reason="m8-conflict",
             confidence=None,
-            expression_uris=list(c.members),
-            member_bib_ids=conflict_bib_ids,
+            details=details,
+            dedup_key=c.members[0],
         )
     del variants_bound  # value is for future telemetry; not yet exposed
 

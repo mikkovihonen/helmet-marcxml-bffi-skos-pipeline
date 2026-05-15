@@ -57,39 +57,14 @@ def test_append_source_row_writes_header_then_data(
     append_source_row(
         bib_id="b10001",
         stage="m2",
-        category="bibframe-conversion",
         severity="blocking",
         details="MARCXML parse failure",
-        marcxml_path="/in/b10001.xml",
     )
     path = tmp_path / "cataloguer-source-review-testrun-uuid.tsv"
     rows = _read_tsv(path)
     assert len(rows) == 2
-    assert rows[0] == [
-        "run_uuid",
-        "bib_id",
-        "stage",
-        "category",
-        "severity",
-        "details",
-        "marcxml_path",
-        "flagged_at",
-        "reviewed_by",
-        "reviewed_at",
-        "notes",
-    ]
-    # Data row carries the input; cataloguer-fill-in cols are empty.
-    data = rows[1]
-    assert data[0:7] == [
-        "testrun-uuid",
-        "b10001",
-        "m2",
-        "bibframe-conversion",
-        "blocking",
-        "MARCXML parse failure",
-        "/in/b10001.xml",
-    ]
-    assert data[8:] == ["", "", ""]  # reviewed_by, reviewed_at, notes
+    assert rows[0] == ["bib_id", "stage", "severity", "details"]
+    assert rows[1] == ["b10001", "m2", "blocking", "MARCXML parse failure"]
 
 
 def test_append_source_row_writes_header_once(
@@ -99,24 +74,22 @@ def test_append_source_row_writes_header_once(
         append_source_row(
             bib_id=f"b{i:05d}",
             stage="m2",
-            category="bibframe-shape",
             severity="blocking",
             details=f"err {i}",
         )
     rows = _read_tsv(tmp_path / "cataloguer-source-review-testrun-uuid.tsv")
     # 1 header + 3 data rows.
     assert len(rows) == 4
-    assert rows[0][0] == "run_uuid"
+    assert rows[0][0] == "bib_id"
 
 
-def test_append_source_row_dedupes_on_bib_stage_category(
+def test_append_source_row_dedupes_on_bib_stage_details(
     active_emitter: StageEventEmitter, tmp_path: Path
 ) -> None:
     for _ in range(3):
         append_source_row(
             bib_id="b10001",
             stage="m2",
-            category="bibframe-conversion",
             severity="blocking",
             details="dup",
         )
@@ -131,14 +104,13 @@ def test_append_source_row_escapes_tabs_quotes_newlines(
     append_source_row(
         bib_id="b99",
         stage="m3",
-        category="boundary-3",
         severity="warning",
         details=weird,
     )
     rows = _read_tsv(tmp_path / "cataloguer-source-review-testrun-uuid.tsv")
     assert len(rows) == 2
     # csv.reader round-trip recovers the exact bytes.
-    assert rows[1][5] == weird
+    assert rows[1][3] == weird
 
 
 def test_append_source_row_truncates_long_details(
@@ -148,12 +120,11 @@ def test_append_source_row_truncates_long_details(
     append_source_row(
         bib_id="b99",
         stage="m3",
-        category="boundary-3",
         severity="warning",
         details=long_msg,
     )
     rows = _read_tsv(tmp_path / "cataloguer-source-review-testrun-uuid.tsv")
-    details = rows[1][5]
+    details = rows[1][3]
     # 240 chars + the ellipsis sentinel.
     assert len(details) == 241
     assert details.endswith("…")
@@ -164,7 +135,6 @@ def test_append_source_row_noop_without_emitter(tmp_path: Path) -> None:
     append_source_row(
         bib_id="b1",
         stage="m2",
-        category="x",
         severity="blocking",
         details="dropped",
     )
@@ -178,79 +148,64 @@ def test_append_target_row_writes_header_then_data(
     active_emitter: StageEventEmitter, tmp_path: Path
 ) -> None:
     append_target_row(
-        canonical_work_uri="http://urn.fi/work:abc",
+        member_bib_ids=["b1", "b2"],
         reason="m8-conflict",
         confidence=None,
-        expression_uris=["http://urn.fi/expr:abc"],
-        member_bib_ids=["b1", "b2"],
+        details="conflicting pair: a ↔ b",
+        dedup_key="http://urn.fi/work:abc",
     )
     rows = _read_tsv(tmp_path / "cataloguer-target-review-testrun-uuid.tsv")
-    assert rows[0] == [
-        "run_uuid",
-        "canonical_work_uri",
-        "expression_uris",
-        "reason",
-        "confidence",
-        "member_bib_ids",
-        "skosmos_url",
-        "flagged_at",
-        "cataloguer_verdict",
-        "severity",
-        "expected_behavior",
-        "reviewed_by",
-        "reviewed_at",
-        "notes",
-    ]
-    data = rows[1]
-    assert data[1] == "http://urn.fi/work:abc"
-    assert data[2] == "http://urn.fi/expr:abc"  # pipe-joined single-item list
-    assert data[3] == "m8-conflict"
-    assert data[4] == ""  # confidence None → ""
-    assert data[5] == "b1|b2"
-    assert data[6] == ""  # skosmos_url None → ""
-    # cataloguer-fill-in columns all empty.
-    assert data[8:] == ["", "", "", "", "", ""]
+    assert rows[0] == ["member_bib_ids", "reason", "confidence", "details"]
+    assert rows[1] == ["b1|b2", "m8-conflict", "", "conflicting pair: a ↔ b"]
 
 
 def test_append_target_row_serialises_confidence_float(
     active_emitter: StageEventEmitter, tmp_path: Path
 ) -> None:
     append_target_row(
-        canonical_work_uri="http://urn.fi/work:x",
+        member_bib_ids=[],
         reason="m9-fallback",
         confidence=0.7234,
+        details="literal='Aalto, Alvar'",
+        dedup_key="http://urn.fi/work:x",
     )
     rows = _read_tsv(tmp_path / "cataloguer-target-review-testrun-uuid.tsv")
-    assert rows[1][4] == "0.7234"
+    assert rows[1][2] == "0.7234"
 
 
-def test_append_target_row_dedupes_on_uri_plus_reason(
+def test_append_target_row_dedupes_on_key_plus_reason(
     active_emitter: StageEventEmitter, tmp_path: Path
 ) -> None:
     for _ in range(3):
         append_target_row(
-            canonical_work_uri="http://urn.fi/work:dup",
+            member_bib_ids=[],
             reason="m9-fallback",
             confidence=0.5,
+            details="x",
+            dedup_key="http://urn.fi/work:dup",
         )
     rows = _read_tsv(tmp_path / "cataloguer-target-review-testrun-uuid.tsv")
     assert len(rows) == 2
 
 
-def test_append_target_row_different_reason_same_uri_writes_two_rows(
+def test_append_target_row_different_reason_same_key_writes_two_rows(
     active_emitter: StageEventEmitter, tmp_path: Path
 ) -> None:
     """The same canonical Work can carry independent flags from
     different stages (M8 conflict and M9 fallback); both rows land."""
     append_target_row(
-        canonical_work_uri="http://urn.fi/work:abc",
+        member_bib_ids=[],
         reason="m8-conflict",
         confidence=None,
+        details="conflict",
+        dedup_key="http://urn.fi/work:abc",
     )
     append_target_row(
-        canonical_work_uri="http://urn.fi/work:abc",
+        member_bib_ids=[],
         reason="m9-fallback",
         confidence=0.6,
+        details="fallback",
+        dedup_key="http://urn.fi/work:abc",
     )
     rows = _read_tsv(tmp_path / "cataloguer-target-review-testrun-uuid.tsv")
     assert len(rows) == 3  # header + 2 data rows
@@ -263,34 +218,36 @@ def test_append_target_row_member_bib_ids_pipe_joined(
     as pipe-separated values so the column is greppable from a one-
     liner without parsing each row."""
     append_target_row(
-        canonical_work_uri="http://urn.fi/work:multi",
+        member_bib_ids=["b10001", "b10002", "b10003"],
         reason="m8-conflict",
         confidence=None,
-        member_bib_ids=["b10001", "b10002", "b10003"],
+        details="three-way conflict",
+        dedup_key="http://urn.fi/work:multi",
     )
     rows = _read_tsv(tmp_path / "cataloguer-target-review-testrun-uuid.tsv")
-    assert rows[1][5] == "b10001|b10002|b10003"
+    assert rows[1][0] == "b10001|b10002|b10003"
 
 
-def test_append_target_row_empty_list_columns_serialise_as_empty(
+def test_append_target_row_empty_member_bib_ids_serialise_as_empty(
     active_emitter: StageEventEmitter, tmp_path: Path
 ) -> None:
     append_target_row(
-        canonical_work_uri="http://urn.fi/work:empty",
+        member_bib_ids=[],
         reason="m9-no-candidate",
         confidence=None,
-        expression_uris=[],
-        member_bib_ids=[],
+        details="literal='Foo Bar' (person) | candidates: (none returned by the authority client)",
+        dedup_key="http://urn.fi/work:empty",
     )
     rows = _read_tsv(tmp_path / "cataloguer-target-review-testrun-uuid.tsv")
-    assert rows[1][2] == ""  # expression_uris
-    assert rows[1][5] == ""  # member_bib_ids
+    assert rows[1][0] == ""
 
 
 def test_append_target_row_noop_without_emitter(tmp_path: Path) -> None:
     append_target_row(
-        canonical_work_uri="http://urn.fi/x",
+        member_bib_ids=[],
         reason="m9-fallback",
         confidence=0.5,
+        details="dropped",
+        dedup_key="http://urn.fi/x",
     )
     assert not (tmp_path / "cataloguer-target-review-testrun-uuid.tsv").exists()

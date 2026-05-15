@@ -97,14 +97,15 @@ def test_run_pipeline_emits_plan_event_with_full_stage_list(
     assert plans[0]["extra"]["description"] == "unit test"
 
 
-def test_run_pipeline_dispatches_export_when_included_in_stages(
+def test_run_pipeline_dispatches_export_at_tail_of_canonical_chain(
     monkeypatch: pytest.MonkeyPatch,
     active_emitter: StageEventEmitter,
     tmp_path: Path,
 ) -> None:
-    """``export`` lives in ``_DISPATCHERS`` + ``STAGE_PHASES`` but not in
-    ``CANONICAL_STAGES`` — it's opt-in via ``--stages``. Verify the
-    runner can dispatch it without error when the operator includes it."""
+    """``export`` is the last stage of ``CANONICAL_STAGES`` — every
+    finished run produces a ``bffi-export-<run_uuid>.tar.gz``. Verify
+    the runner dispatches it and that ``STAGE_PHASES`` carries an
+    entry so the dashboard's pending bar fires."""
     calls: list[str] = []
 
     def make_stub(stage_name: str):
@@ -116,15 +117,15 @@ def test_run_pipeline_dispatches_export_when_included_in_stages(
     monkeypatch.setattr(
         runner_module,
         "_DISPATCHERS",
-        {s: make_stub(s) for s in runner_module._DISPATCHERS} | {"export": make_stub("export")},
+        {s: make_stub(s) for s in runner_module._DISPATCHERS},
     )
     run_pipeline(
         input_dir=tmp_path,
         stages=("m2", "export"),
     )
     assert "export" in calls
-    # Sanity: STAGE_PHASES has an entry so the dashboard's pending bar fires.
     assert "export" in runner_module.STAGE_PHASES
+    assert runner_module.CANONICAL_STAGES[-1] == "export"
 
 
 def test_run_pipeline_plan_event_includes_stage_phases_for_m9(

@@ -78,10 +78,12 @@ from bffi_pipeline.stages.probes import (
 )
 from bffi_pipeline.stages.watchdog import emit_watchdog_event
 
-#: P-11 Phase A progress cadence for M9. Sparse enough that the
-#: sidecar stays bounded; dense enough that the status CLI's tail
-#: feels responsive across a 90-min Phase 1.
-_M9_PROGRESS_CADENCE: Final[int] = 200
+#: P-11 Phase A progress cadence for M9. Phase 2 is LLM-picker-bound
+#: at ~2-5s per entity, so a too-sparse cadence makes the dashboard
+#: look frozen for 5-15 minutes between updates. 10 keeps the sidecar
+#: bounded (~500 events on a 5k-entity Phase 1 walk) and gives the
+#: dashboard a tick every ~30-60s of Phase 2 picker work.
+_M9_PROGRESS_CADENCE: Final[int] = 10
 
 #: P-11 Phase C re-probe cadence for M9 Phase 1. One health probe per
 #: N entities surfaces mid-stage degradation in the 12-hour overnight
@@ -499,6 +501,40 @@ def _format_candidates_for_prompt(candidates: list[AuthorityCandidate]) -> str:
         f"lexical_similarity={c.lexical_similarity:.3f}"
         for i, c in enumerate(candidates, start=1)
     )
+
+
+#: Max candidates rendered in the cataloguer-facing details column.
+#: Caps row length so the TSV stays scannable in a spreadsheet; the
+#: cataloguer can drill into the full candidate list via the
+#: per-record provenance graph if more context is needed.
+_DETAILS_CANDIDATE_LIMIT: Final[int] = 5
+
+
+def _format_m9_details(outcome: ReconciliationOutcome) -> str:
+    """Build the cataloguer-facing free-text context for one M9 outcome.
+
+    Surfaces the literal we tried to reconcile, the top candidates that
+    were considered (URI + prefLabel + source vocab + lexical sim), and
+    the rationale that led to the no-candidate / fallback / fictional
+    verdict. Cataloguers use this to judge whether the pipeline got
+    the call right.
+    """
+    parts = [f"literal={outcome.request.literal!r} ({outcome.request.kind})"]
+    if outcome.candidates:
+        top = outcome.candidates[:_DETAILS_CANDIDATE_LIMIT]
+        rendered = "; ".join(
+            f"{c.uri} {c.pref_label!r} ({c.source_vocabulary}, sim={c.lexical_similarity:.2f})"
+            for c in top
+        )
+        extra = len(outcome.candidates) - _DETAILS_CANDIDATE_LIMIT
+        suffix = f" (+{extra} more)" if extra > 0 else ""
+        parts.append(f"candidates: {rendered}{suffix}")
+    else:
+        parts.append("candidates: (none returned by the authority client)")
+    rationale = (outcome.rationale or "").strip()
+    if rationale:
+        parts.append(f"rationale: {rationale}")
+    return " | ".join(parts)
 
 
 def _is_picker_connection_error(exc: BaseException) -> bool:
@@ -2812,26 +2848,29 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
         target_bib_ids = canonical_bib_ids.get(outcome.request.work_uri, [])
         if outcome.stage == STAGE_FALLBACK:
             append_target_row(
-                canonical_work_uri=outcome.request.work_uri,
+                member_bib_ids=target_bib_ids,
                 reason="m9-fallback",
                 confidence=outcome.confidence,
-                member_bib_ids=target_bib_ids,
+                details=_format_m9_details(outcome),
+                dedup_key=outcome.request.work_uri,
             )
         elif outcome.stage == STAGE_FICTIONAL:
             append_target_row(
-                canonical_work_uri=outcome.request.work_uri,
+                member_bib_ids=target_bib_ids,
                 reason="fictional-character",
                 confidence=None,
-                member_bib_ids=target_bib_ids,
+                details=_format_m9_details(outcome),
+                dedup_key=outcome.request.work_uri,
             )
         elif outcome.chosen_uri is None and outcome.stage != STAGE_FICTIONAL:
             # no-candidate path (everything not handled above with a
             # bound chosen_uri AND not the fictional short-circuit)
             append_target_row(
-                canonical_work_uri=outcome.request.work_uri,
+                member_bib_ids=target_bib_ids,
                 reason="m9-no-candidate",
                 confidence=None,
-                member_bib_ids=target_bib_ids,
+                details=_format_m9_details(outcome),
+                dedup_key=outcome.request.work_uri,
             )
 
         if outcome.chosen_uri is not None:

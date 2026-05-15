@@ -79,59 +79,24 @@ the LLM cascade runs locally without OOMing. Smaller machines run
 the development stack and the gold-set eval, but the
 800 k-record production batch needs the M5 Max envelope.
 
-Toolchain:
+### Toolchain
 
 - **Python 3.12** via [uv](https://github.com/astral-sh/uv) — the project pins everything in `uv.lock`.
 - **mlx-lm** on `:8001` (primary) + `:8002` (fallback) for the LLM judge + reconciliation picker. Full installation walkthrough in [`docs/local-inference.md`](docs/local-inference.md#installation).
 - **Docker** (or Podman with `docker-compose`) for Fuseki and Skosmos. Both containers build from source — NatLibFi's Skosmos doesn't publish a Docker image, and we pin Apache Jena Fuseki via the JAR version Skosmos's vendored Dockerfile downloads at build time.
 - **git** with submodule support — `marc2bibframe2` and `Skosmos` (pinned at `v3.2`) are vendored under `third_party/`.
 
-One-time install:
+### Pinned versions
 
-```bash
-git clone --recurse-submodules https://github.com/<org>/helmet-marcxml-bffi-skos-pipeline.git
-cd helmet-marcxml-bffi-skos-pipeline
-uv sync                                    # fetches every pinned dep
-cp .env.example .env                       # carries the committed LLM defaults
-
-# Local LLM server (mlx-lm). See docs/local-inference.md for the full
-# install + flags; this is the abbreviated form:
-uv venv ~/.venvs/mlx-lm --python 3.12 && source ~/.venvs/mlx-lm/bin/activate
-uv pip install mlx-lm
-hf download Qwen/Qwen3-8B-MLX-4bit       --local-dir ~/.mlx_models/Qwen3-8B-4bit
-hf download mlx-community/Qwen3-32B-4bit --local-dir ~/.mlx_models/Qwen3-32B-4bit
-
-docker compose build                       # one-off Skosmos + Fuseki build (~5-10 min)
-docker compose up -d                       # Fuseki + Skosmos
-```
-
-### Local LLM setup
-
-The judge and reconciliation picker both call a local OpenAI-compatible
-mlx-lm server. The end-to-end install — model acquisition, server
-flags including the load-bearing
-`--chat-template-args '{"enable_thinking":false}'` and
-`--prompt-cache-size` / `--prompt-cache-bytes` knobs from P-02 Phase B,
-`.env` wiring, and a one-shot verification probe — is documented in
-**[`docs/local-inference.md`](docs/local-inference.md#installation)**.
-Follow that section before running `bffi-pipeline judge` or
-`bffi-pipeline reconcile` for the first time.
-
-## Quick start — sample data
-
-```bash
-# Convert + cluster + reconcile + publish a small fixture set.
-bffi-pipeline marc-to-bf tests/data/sample-marcxml/curated
-bffi-pipeline bf-to-bffi
-bffi-pipeline embed
-bffi-pipeline judge
-bffi-pipeline merge
-bffi-pipeline reconcile
-bffi-pipeline skosify
-bffi-pipeline load
-```
-
-Open [http://localhost:9090](http://localhost:9090) for the Skosmos UI.
+| Component | Pinned | Notes |
+|---|---|---|
+| `marc2bibframe2` | `third_party/marc2bibframe2` (git submodule) | M2 XSLT |
+| Embedding model | `BAAI/bge-m3` (1024-dim, multilingual) | M5; verify with `bffi-pipeline embed-benchmark` |
+| FAISS HNSW | `M=32`, `efConstruction=200`, `efSearch=64`, IP metric on L2-normalised vectors | M5 |
+| LLM primary | `Qwen3-8B-4bit` (mlx-lm; `Qwen/Qwen3-8B-MLX-4bit`) | M6 / M9 picker |
+| LLM fallback | `Qwen3-32B-4bit` (mlx-lm; `Qwen/Qwen3-32B-4bit`) | M6 cascade |
+| Apache Jena Fuseki | `5.4.0` (downloaded by Skosmos's vendored Dockerfile) | M10 load target |
+| Skosmos | `third_party/Skosmos` (git submodule pinned at `v3.2`) | M11 UI |
 
 ## Production run
 
@@ -140,40 +105,6 @@ pinned versions, and the cataloguer smoke checklist, is in
 [`docs/runbook.md`](docs/runbook.md). Start there before kicking
 off a full corpus pass — multi-night LLM batches are easier to
 plan than to interrupt.
-
-`bffi-pipeline export` bundles the M9-finalised `canonical.ttl` plus its companion provenance / helmet-map / mint-failures / manifest / README into a single CC0 `.tar.gz` artifact (`--include-per-record` adds the per-record BFFI Turtles as a nested archive) for handoff to NLF or any other downstream consumer that doesn't speak the Fuseki+Skosmos stack.
-
-## Repository layout
-
-```
-.
-├── CLAUDE.md                  # session conventions; read first
-├── docs/
-│   ├── runbook.md             # canonical end-to-end recipe
-│   ├── tech-stack.md          # consolidated toolchain reference
-│   ├── validation-strategy.md # five validation boundaries
-│   ├── local-inference.md     # Apple Silicon / mlx-lm setup
-│   ├── ci-strategy.md         # CI + PR template rationale
-│   ├── plans/                 # plans of record (p-<NN>-<slug>.md, plus proposed/ subfolder)
-│   └── archived/              # reference only — original spec + the old BUILD_PLAN.md
-├── src/bffi_pipeline/
-│   ├── stages/                # per-stage code (don't cross-import)
-│   ├── eval/                  # gold-set loader, harness, growth
-│   ├── provenance/            # PROV-O + bffi-prov writer / compaction
-│   ├── validation/            # SHACL boundary validators
-│   ├── blocking.py uris.py    # M1 + M4 cross-stage helpers
-│   └── cli.py                 # typer entry point
-├── src/marcxml_export_pipeline/
-│   └── sierra/                # Sierra Postgres → MARCXML export (CLI: marcxml-export-sierra)
-├── prompts/                   # versioned LLM prompts (hashed at runtime)
-├── sparql/                    # versioned SPARQL queries
-├── config/                    # Skosify overlay, Skosmos config, SHACL shapes
-├── gold/                      # gold-set JSONL for the eval harness
-├── third_party/
-│   ├── marc2bibframe2         # NLF/LoC XSLT, vendored as a submodule
-│   └── Skosmos                # NatLibFi Skosmos v3.2, vendored; Fuseki + Skosmos both build from here
-└── docker-compose.yml         # Fuseki 5.4.0 + Skosmos v3.2 (built from third_party/Skosmos)
-```
 
 ## Testing, CI, and the LLM eval
 

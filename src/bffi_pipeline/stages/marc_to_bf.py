@@ -549,7 +549,7 @@ def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
         fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-def _append_source_review_m2(row: ConversionErrorRow, xml_path: Path) -> None:
+def _append_source_review_m2(row: ConversionErrorRow) -> None:
     """Mirror a ``ConversionErrorRow`` into the unified source-review TSV.
 
     Pairs with each ``_append_jsonl(errors_path, …)`` call so the
@@ -559,10 +559,8 @@ def _append_source_review_m2(row: ConversionErrorRow, xml_path: Path) -> None:
     append_source_row(
         bib_id=row.helmet_bib_id or row.filename,
         stage="m2",
-        category=row.error_type,
         severity="blocking",
         details=row.message,
-        marcxml_path=str(xml_path),
     )
 
 
@@ -676,7 +674,7 @@ def run(
             )
             summary.failed.append(row)
             _append_jsonl(errors_path, asdict(row))
-            _append_source_review_m2(row, xml_path)
+            _append_source_review_m2(row)
             continue
         except BibframeShapeError as exc:
             row = ConversionErrorRow(
@@ -691,7 +689,7 @@ def run(
                 errors_path,
                 {**asdict(row), "report_text": exc.report_text},
             )
-            _append_source_review_m2(row, xml_path)
+            _append_source_review_m2(row)
             continue
         except Exception as exc:
             row = ConversionErrorRow(
@@ -703,7 +701,7 @@ def run(
             )
             summary.failed.append(row)
             _append_jsonl(errors_path, asdict(row))
-            _append_source_review_m2(row, xml_path)
+            _append_source_review_m2(row)
             continue
 
         if status == "skipped":

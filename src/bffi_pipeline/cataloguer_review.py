@@ -15,7 +15,7 @@ Two per-run files at ``<BFFI_DATA_DIR>/``:
 Both helpers are no-ops when no active emitter is set (tests +
 direct-CLI invocations that don't bootstrap the pipeline emitter
 fall through silently). Dedup is per-process — `(bib_id, stage,
-category)` for source, `(canonical_work_uri, reason)` for target —
+details)` for source, `(canonical_work_uri, reason)` for target —
 so the same row from two call sites within one run lands once.
 Tests reset the dedup state via :func:`_reset_for_tests`.
 
@@ -28,7 +28,6 @@ the unified TSVs are derived cataloguer-handoff views alongside them.
 from __future__ import annotations
 
 import csv
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
@@ -36,34 +35,17 @@ from bffi_pipeline.config import get_settings
 from bffi_pipeline.stages.observability import get_active_emitter
 
 _SOURCE_HEADER: Final[tuple[str, ...]] = (
-    "run_uuid",
     "bib_id",
     "stage",
-    "category",
     "severity",
     "details",
-    "marcxml_path",
-    "flagged_at",
-    "reviewed_by",
-    "reviewed_at",
-    "notes",
 )
 
 _TARGET_HEADER: Final[tuple[str, ...]] = (
-    "run_uuid",
-    "canonical_work_uri",
-    "expression_uris",
+    "member_bib_ids",
     "reason",
     "confidence",
-    "member_bib_ids",
-    "skosmos_url",
-    "flagged_at",
-    "cataloguer_verdict",
-    "severity",
-    "expected_behavior",
-    "reviewed_by",
-    "reviewed_at",
-    "notes",
+    "details",
 )
 
 #: Max length for the ``details`` / ``expected_behavior`` free-text
@@ -74,14 +56,10 @@ _FREE_TEXT_MAX_LEN: Final[int] = 240
 # Per-process state. Module-level singletons are intentional: one
 # pipeline invocation = one process = one set of dedup keys. Tests
 # reset via :func:`_reset_for_tests`.
-_source_seen: set[tuple[str, str, str]] = set()
+_source_seen: set[tuple[str, str, str]] = set()  # (bib_id, stage, details)
 _target_seen: set[tuple[str, str]] = set()
 _source_header_written = False
 _target_header_written = False
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _truncate(value: str) -> str:
@@ -118,17 +96,13 @@ def append_source_row(
     *,
     bib_id: str,
     stage: str,
-    category: str,
     severity: str,
     details: str,
-    marcxml_path: str = "",
 ) -> None:
     """Append one row to the unified source-review TSV.
 
     ``stage`` ∈ {``"m2"``, ``"m3"``, ``"m8"``} — the upstream stage
-    that flagged the row. ``category`` is the typed error class
-    (``error_type`` for M2, ``"boundary-3"`` for M3, the mint-failure
-    ``missing_inputs`` token for M8). ``severity`` ∈ {``"blocking"``,
+    that flagged the row. ``severity`` ∈ {``"blocking"``,
     ``"warning"``} — drives cataloguer triage. ``details`` is the
     human-readable message, truncated to 240 chars.
 
@@ -138,9 +112,10 @@ def append_source_row(
     resolved = _source_tsv_path()
     if resolved is None:
         return
-    path, run_uuid = resolved
+    path, _run_uuid = resolved
 
-    key = (bib_id, stage, category)
+    truncated_details = _truncate(details)
+    key = (bib_id, stage, truncated_details)
     if key in _source_seen:
         return
     _source_seen.add(key)
@@ -151,32 +126,17 @@ def append_source_row(
         writer = csv.writer(fh, delimiter="\t", quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
         if write_header:
             writer.writerow(_SOURCE_HEADER)
-        writer.writerow(
-            [
-                run_uuid,
-                bib_id,
-                stage,
-                category,
-                severity,
-                _truncate(details),
-                marcxml_path,
-                _now_iso(),
-                "",  # reviewed_by — cataloguer fills in
-                "",  # reviewed_at — cataloguer fills in
-                "",  # notes — cataloguer fills in
-            ]
-        )
+        writer.writerow([bib_id, stage, severity, truncated_details])
     _source_header_written = True
 
 
 def append_target_row(
     *,
-    canonical_work_uri: str,
+    member_bib_ids: list[str],
     reason: str,
-    confidence: float | None = None,
-    expression_uris: list[str] | None = None,
-    member_bib_ids: list[str] | None = None,
-    skosmos_url: str | None = None,
+    confidence: float | None,
+    details: str,
+    dedup_key: str,
 ) -> None:
     """Append one row to the unified target-review TSV.
 
@@ -185,13 +145,19 @@ def append_target_row(
     ``"m9-no-candidate"``, ``"fictional-character"``, or
     ``"fp-<class>"`` once the FP veto plans land.
 
-    ``expression_uris`` + ``member_bib_ids`` pipe-separate as
-    ``a|b|c`` in the TSV (empty list → empty string).
+    ``member_bib_ids`` pipe-separates as ``a|b|c`` in the TSV (empty
+    list → empty string).
 
-    Cataloguer-fill-in columns (``cataloguer_verdict``, ``severity``,
-    ``expected_behavior``, ``reviewed_by``, ``reviewed_at``,
-    ``notes``) emit as empty strings — the cataloguer fills them in
-    directly in the file.
+    ``details`` is a free-text column the caller builds per reason:
+    M9 packs the request literal + top considered candidates (URI,
+    label, source, similarity) + picker rationale; M8-conflict
+    describes the contradiction (conflicting pair + same-work path).
+    Truncated to 240 chars.
+
+    ``dedup_key`` is the per-process dedup token: the caller picks a
+    value that uniquely identifies this surface so the same row from
+    two call sites within one run lands once. Typical values:
+    canonical_work_uri (M8-conflict), request.work_uri (M9 outcomes).
 
     No-op when no emitter is active.
     """
@@ -199,9 +165,9 @@ def append_target_row(
     resolved = _target_tsv_path()
     if resolved is None:
         return
-    path, run_uuid = resolved
+    path, _run_uuid = resolved
 
-    key = (canonical_work_uri, reason)
+    key = (dedup_key, reason)
     if key in _target_seen:
         return
     _target_seen.add(key)
@@ -214,20 +180,10 @@ def append_target_row(
             writer.writerow(_TARGET_HEADER)
         writer.writerow(
             [
-                run_uuid,
-                canonical_work_uri,
-                "|".join(expression_uris or []),
+                "|".join(member_bib_ids),
                 reason,
                 "" if confidence is None else f"{confidence:.4f}",
-                "|".join(member_bib_ids or []),
-                skosmos_url or "",
-                _now_iso(),
-                "",  # cataloguer_verdict
-                "",  # severity
-                "",  # expected_behavior
-                "",  # reviewed_by
-                "",  # reviewed_at
-                "",  # notes
+                _truncate(details),
             ]
         )
     _target_header_written = True

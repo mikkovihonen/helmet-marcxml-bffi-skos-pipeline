@@ -9,7 +9,7 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 2,
-  "refresh": "5s",
+  "refresh": "2s",
   "time": {
     "from": "now-2h",
     "to": "now"
@@ -78,7 +78,7 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 8,
+        "w": 4,
         "x": 16,
         "y": 0
       },
@@ -106,7 +106,59 @@
       "fieldConfig": {
         "defaults": {
           "noValue": "\u2014",
-          "unit": "dateTimeFromNow",
+          "unit": "dateTimeAsIso",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 34,
+      "type": "stat",
+      "title": "Ended",
+      "description": "Wall-clock end of the most recent finished stage. Shows \u2014 while the run is in progress.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bffi-prometheus"
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(bffi_stage_ended_timestamp{run_uuid=\"$active_run\"}) * 1000",
+          "legendFormat": "ended"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "none",
+        "textMode": "value",
+        "colorMode": "value",
+        "text": {
+          "titleSize": 11,
+          "valueSize": 16
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "\u2014",
+          "unit": "dateTimeAsIso",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1125,7 +1177,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m2\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m2\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m2\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m2\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + 100 * scalar(count(bffi_stage_ended_timestamp{stage=\"m2\",run_uuid=\"$active_run\"}) or vector(0)),  100)",
           "legendFormat": "% done"
         }
       ],
@@ -1184,7 +1236,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m3\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m3\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m3\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m3\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + 100 * scalar(count(bffi_stage_ended_timestamp{stage=\"m3\",run_uuid=\"$active_run\"}) or vector(0)),  100)",
           "legendFormat": "% done"
         }
       ],
@@ -1243,7 +1295,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m5\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m5\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m5\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m5\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + 100 * scalar(count(bffi_stage_ended_timestamp{stage=\"m5\",run_uuid=\"$active_run\"}) or vector(0)),  100)",
           "legendFormat": "% done"
         }
       ],
@@ -1302,7 +1354,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m6\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m6\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m6\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m6\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + 100 * scalar(count(bffi_stage_ended_timestamp{stage=\"m6\",run_uuid=\"$active_run\"}) or vector(0)),  100)",
           "legendFormat": "% done"
         }
       ],
@@ -1361,7 +1413,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m8\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m8\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m8\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m8\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + 100 * scalar(count(bffi_stage_ended_timestamp{stage=\"m8\",run_uuid=\"$active_run\"}) or vector(0)),  100)",
           "legendFormat": "% done"
         }
       ],
@@ -1420,12 +1472,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_entities_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}) or vector(0)))  or (bffi_stage_phase_planned{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"} * 0),  100)",
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"}  * 100  + 100 * scalar(count(bffi_stage_entities_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}) or vector(0))  or (bffi_stage_phase_planned{stage=\"m9\",phase=\"phase1\",run_uuid=\"$active_run\"} * 0),  100)",
           "legendFormat": "phase 1"
         },
         {
           "refId": "B",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or vector(0)))  or (bffi_stage_phase_planned{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"} * 0),  100)",
+          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"}  * 100  + 100 * scalar(count(bffi_stage_ended_timestamp{stage=\"m9\",run_uuid=\"$active_run\"}) or vector(0))  or (bffi_stage_phase_planned{stage=\"m9\",phase=\"phase2\",run_uuid=\"$active_run\"} * 0),  100)",
           "legendFormat": "phase 2"
         }
       ],
@@ -1484,7 +1536,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"skosify\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"skosify\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "expr": "clamp_max(  bffi_stage_started_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"} * 0  + 100 * scalar(count(bffi_stage_ended_timestamp{stage=\"skosify\",run_uuid=\"$active_run\"}) or vector(0)),  100)",
           "legendFormat": "% done"
         }
       ],
@@ -1543,7 +1595,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_max(  bffi_stage_entities_processed_total{stage=\"load\",phase=\"_\",run_uuid=\"$active_run\"}  / bffi_stage_entities_total{stage=\"load\",phase=\"_\",run_uuid=\"$active_run\"}  * 100  + on() (100 * (count(bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) or vector(0))),  100)",
+          "expr": "clamp_max(  bffi_stage_started_timestamp{stage=\"load\",run_uuid=\"$active_run\"} * 0  + 100 * scalar(count(bffi_stage_ended_timestamp{stage=\"load\",run_uuid=\"$active_run\"}) or vector(0)),  100)",
           "legendFormat": "% done"
         }
       ],
@@ -1587,8 +1639,8 @@
     {
       "id": 28,
       "type": "text",
-      "title": "Cataloguer review TSVs",
-      "description": "Per-run TSVs served by the Caddy reverse proxy at /files/.",
+      "title": "Run artifacts",
+      "description": "Browse this run's output directory via the Caddy reverse proxy at /files/.",
       "gridPos": {
         "h": 12,
         "w": 6,
@@ -1597,7 +1649,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Run `${active_run}`\n\n**Unified review files** (P-31)\n- [Source review](/files/${active_run}/cataloguer-source-review-${active_run}.tsv) — bib_ids needing source data fix\n- [Target review](/files/${active_run}/cataloguer-target-review-${active_run}.tsv) — pipeline bugs to verify\n\n**Per-stage files**\n- [M2 errors](/files/${active_run}/bibframe/_errors.tsv)\n- [M3 SHACL fails](/files/${active_run}/bffi/_validation.tsv)\n- [M8 mint failures](/files/${active_run}/canonical-mint-failures.tsv)\n- [Browse all run artifacts](/files/${active_run}/)\n"
+        "content": "Run `${active_run}`\n\n- <a href=\"/files/${active_run}/\" target=\"_blank\">Browse all run artifacts</a>\n"
       }
     },
     {

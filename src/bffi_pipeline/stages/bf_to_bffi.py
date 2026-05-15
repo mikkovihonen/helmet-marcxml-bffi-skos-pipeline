@@ -1062,10 +1062,8 @@ def run(
             append_source_row(
                 bib_id=bib_id,
                 stage="m3",
-                category="boundary-3",
                 severity="warning",
                 details=_extract_shape_messages(report.text),
-                marcxml_path=str(rdf_path),
             )
         summary.converted.append(bib_id)
 

@@ -16,6 +16,15 @@ Python over shell this time so:
   ``end status=failed`` before the exception re-raises, so the
   dashboard never sees a stage stuck in "running".
 
+M5 (``embed``) is the one exception: it runs in a subprocess so the OS
+reclaims BGE-M3 + FAISS memory before M6 boots mlx-lm. The child
+inherits ``BFFI_RUN_UUID`` / ``BFFI_DATA_DIR`` (so its events land in
+the shared sidecar + manifest) and sees ``BFFI_RUN_AS_CHILD=1`` (so its
+``_init_observability`` skips ``write_initial_manifest`` and the
+``mark_run_complete`` atexit). A non-zero child exit raises
+``CalledProcessError``, which the runner's existing per-stage try/except
+turns into an ``emit_failed`` + ``StageOutcome(status="failed")``.
+
 The Prometheus metrics exporter (``bffi-pipeline serve-metrics``) is
 **not** spawned by this runner — it's a long-lived background process
 managed by ``make observability-up`` / ``make observability-down``
@@ -39,6 +48,9 @@ command body so the two don't form a startup circular import.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -47,7 +59,6 @@ from typing import Final
 
 from bffi_pipeline.cli import (
     bf_to_bffi_command,
-    embed_command,
     export_command,
     judge_command,
     load_command,
@@ -56,6 +67,7 @@ from bffi_pipeline.cli import (
     reconcile_command,
     skosify_command,
 )
+from bffi_pipeline.config import get_settings
 from bffi_pipeline.stages.observability import emit_failed, emit_plan, emit_skipped
 
 #: Canonical stage order, matching the dashboard's per-stage panels and
@@ -70,6 +82,7 @@ CANONICAL_STAGES: Final[tuple[str, ...]] = (
     "m9",
     "skosify",
     "load",
+    "export",
 )
 
 #: Phase declarations per stage — feeds the ``stage_phases`` extra on the
@@ -92,9 +105,6 @@ STAGE_PHASES: Final[dict[str, tuple[str, ...]]] = {
     "m9": ("phase1", "phase2", "phase3"),
     "skosify": ("_",),
     "load": ("_",),
-    # ``export`` is not in CANONICAL_STAGES (operators opt in via
-    # ``--stages "...,export"``), but it's in STAGE_PHASES so the
-    # dashboard renders a pending bar when the operator does include it.
     "export": ("_",),
 }
 
@@ -137,7 +147,28 @@ def _dispatch_m3(*, force: bool) -> None:
 
 
 def _dispatch_m5(*, force: bool) -> None:
-    embed_command(force=force)
+    # Spawned in its own process so the OS reclaims BGE-M3 + FAISS
+    # memory on exit instead of letting it linger across M6 (mlx-lm
+    # judge). The parent resolves run_uuid in memory only
+    # (Settings._resolve_run_identity doesn't write back to os.environ),
+    # so BFFI_RUN_UUID has to be pinned explicitly — otherwise the
+    # child generates its own uuid and writes into a fresh, empty run
+    # dir. ``data_dir`` then derives correctly from
+    # ``runs_root / run_uuid`` in the child (or inherits an explicit
+    # BFFI_DATA_DIR override from the parent's env, if one was set).
+    # BFFI_RUN_AS_CHILD=1 tells the child's _init_observability to
+    # share the parent's manifest (no ``started_at`` clobber, no
+    # premature ``status=completed`` atexit) while still emitting m5
+    # events into the shared sidecar.
+    cmd = [sys.executable, "-m", "bffi_pipeline.cli", "embed"]
+    if force:
+        cmd.append("--force")
+    env = {
+        **os.environ,
+        "BFFI_RUN_AS_CHILD": "1",
+        "BFFI_RUN_UUID": get_settings().run_uuid,
+    }
+    subprocess.run(cmd, env=env, check=True)
 
 
 def _dispatch_m6(*, force: bool) -> None:
@@ -164,10 +195,11 @@ def _dispatch_load() -> None:
 
 
 def _dispatch_export() -> None:
-    # No ``include_per_record`` knob from the runner — keep the chain
-    # minimal. Operators who want the per-record archive run
-    # ``bffi-pipeline export --include-per-record`` directly after the
-    # runner finishes (or before, since ``export`` is idempotent).
+    # Default export = concatenated BFFI TTL + README only. Operators
+    # who also want the per-record archive run
+    # ``bffi-pipeline export --include-per-record`` (idempotent), since
+    # the runner deliberately doesn't expose that knob — it's a niche
+    # ~5000-file bundle that doubles archive size.
     export_command()
 
 

@@ -95,10 +95,10 @@ services:
     image: grafana/grafana:11.4.0
     container_name: bffi-grafana
     # No host port mapping — Grafana is reachable only via the Caddy
-    # reverse proxy at http://localhost:8080/grafana/. GF_SERVER_*
-    # env vars make Grafana serve from the /grafana sub-path
-    # correctly (asset URLs, dashboard links, OAuth redirects all
-    # respect the prefix).
+    # reverse proxy at http://localhost:8080/. Grafana is the catch-all
+    # behind Caddy and owns the root path; GF_SERVER_ROOT_URL keeps
+    # asset URLs, dashboard links, and OAuth redirects aligned with
+    # the public entry point.
     volumes:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -107,8 +107,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_SERVER_ROOT_URL: "http://localhost:8080/grafana/"
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SERVER_ROOT_URL: "http://localhost:8080/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "false"
     depends_on:
       - prometheus
     restart: unless-stopped

@@ -22,7 +22,8 @@ pipeline stages ─emit→ stage-events.jsonl ─tail→ serve-metrics ─scrape
                                                                   │            │
                                                                   └────────────┴──→ Caddy reverse-proxy
                                                                                     127.0.0.1:8080
-                                                                                    /prometheus/   /grafana/
+                                                                                    /  → Grafana
+                                                                                    /prometheus/
                                                                                     /files/ → runs/
 ```
 

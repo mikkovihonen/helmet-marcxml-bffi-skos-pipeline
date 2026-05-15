@@ -24,26 +24,32 @@
 	# can drill from /files/ down to a specific run.
 	handle_path /files/* {
 		root * /srv
+		# Force a download dialog for actual files (paths that don't
+		# end in `/`) so TSV / TTL / JSONL artifacts open in Excel /
+		# VS Code instead of as raw text in a browser tab. Directory
+		# listings (paths ending in `/`) keep their HTML so operators
+		# can still browse from /files/ down to a specific run.
+		@file {
+			not path */
+		}
+		header @file Content-Disposition attachment
 		file_server browse
 	}
 
-	# Grafana. The /grafana prefix is preserved (no strip) because
-	# `GF_SERVER_SERVE_FROM_SUB_PATH=true` makes Grafana itself
-	# expect to serve under /grafana — that's how its asset URLs,
-	# dashboard links, and login redirects stay consistent.
-	handle /grafana/* {
-		reverse_proxy grafana:3000
-	}
-
-	# Prometheus. Prefix preserved for the same reason — Prometheus
-	# is launched with `--web.route-prefix=/prometheus/` so it
-	# serves its UI + API under that path natively.
+	# Prometheus. Prefix preserved because Prometheus is launched
+	# with `--web.route-prefix=/prometheus/` so it serves its UI +
+	# API under that path natively.
 	handle /prometheus/* {
 		reverse_proxy prometheus:9090
 	}
 
-	# Root → Grafana, the operator's most common destination.
-	handle / {
-		redir /grafana/ permanent
+	# Grafana is the catch-all — it owns `/` and every unmatched
+	# path. `GF_SERVER_SERVE_FROM_SUB_PATH=false` lets it serve at
+	# the root; asset URLs, dashboard links, and login redirects
+	# all stay at `http://localhost:8080/…`. `handle` matchers are
+	# mutually exclusive and more-specific ones win regardless of
+	# order, so `/prometheus/*` and `/files/*` still resolve.
+	handle {
+		reverse_proxy grafana:3000
 	}
 }

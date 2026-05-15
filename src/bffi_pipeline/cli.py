@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit as _atexit
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -80,26 +81,39 @@ def _init_observability(settings: Settings) -> StageEventEmitter | None:
     # the sidecar (BFFI_OBSERVABILITY_SIDECAR=none) — same opt-out
     # axis. Tests that need a no-manifest emitter construct one
     # directly without going through ``_init_observability``.
+    #
+    # ``BFFI_RUN_AS_CHILD=1`` (set by the runner when it spawns an
+    # isolated stage subprocess for memory reclamation) makes this a
+    # no-write-no-atexit path: the child still resolves the parent's
+    # manifest path so its emit calls append to ``stages_observed`` /
+    # ``stages_completed``, but it must not clobber ``started_at`` or
+    # stamp ``status=completed`` mid-pipeline.
     manifest_path: Path | None = None
+    is_child = os.environ.get("BFFI_RUN_AS_CHILD") == "1"
     if sidecar_path is not None:
-        from bffi_pipeline.run_manifest import (
-            mark_run_complete as _mark_run_complete,
-        )
-        from bffi_pipeline.run_manifest import (
-            write_initial_manifest,
-        )
+        from bffi_pipeline.run_manifest import MANIFEST_FILENAME
 
-        manifest_path = write_initial_manifest(
-            settings.data_dir,
-            run_uuid=run_uuid,
-            description=settings.run_description,
-            pipeline_git_sha=_resolve_git_sha(),
-        )
-        # ``atexit`` stamps ``ended_at`` + ``status="completed"`` when
-        # Python shuts down normally. A crash / SIGKILL leaves the
-        # manifest at ``status="running"``; the operator clears it via
-        # ``bffi-pipeline runs mark-complete <uuid> --status=aborted``.
-        _atexit.register(_mark_run_complete, settings.data_dir, "completed")
+        if is_child:
+            manifest_path = settings.data_dir / MANIFEST_FILENAME
+        else:
+            from bffi_pipeline.run_manifest import (
+                mark_run_complete as _mark_run_complete,
+            )
+            from bffi_pipeline.run_manifest import (
+                write_initial_manifest,
+            )
+
+            manifest_path = write_initial_manifest(
+                settings.data_dir,
+                run_uuid=run_uuid,
+                description=settings.run_description,
+                pipeline_git_sha=_resolve_git_sha(),
+            )
+            # ``atexit`` stamps ``ended_at`` + ``status="completed"`` when
+            # Python shuts down normally. A crash / SIGKILL leaves the
+            # manifest at ``status="running"``; the operator clears it via
+            # ``bffi-pipeline runs mark-complete <uuid> --status=aborted``.
+            _atexit.register(_mark_run_complete, settings.data_dir, "completed")
 
     emitter = StageEventEmitter(
         sidecar_path=sidecar_path,
