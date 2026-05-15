@@ -10,6 +10,28 @@
 - Phase B (Helmet identifier denormalisation): `<unfilled>`
 - Phase C (subject + genreForm `rdfs:label` routing): `b97ad6f`. Shipped with the **R7 fallback** for the CONSTRUCT clause (`?bfSubject rdfs:label ?subjectLabel` instead of `?subject rdfs:label ?subjectLabel`). The plan's primary approach would have misattributed labels in the madsrdf-tagged case: the source raw URI (e.g. `<...#Place651-54>`) carries the cataloguer-supplied `rdfs:label`, so an inner `OPTIONAL { ?bfSubject rdfs:label ?subjectLabel }` binds `?subjectLabel`; with CONSTRUCT on `?subject` (the COALESCE result = authority URI), the label would land on the authority URI in our graph (clashes with Finto's authoritative label). R7's fix routes the label onto `?bfSubject` so authority-URI subjects stay label-free; the local raw URI carries an orphan label triple (harmless — nothing else in BFFI output references it). Three unit tests pin the behaviour: `test_construct_routes_subject_label_for_local_authority`, `test_construct_does_not_route_subject_label_for_authority_uri_subjects`, `test_construct_routes_genreform_label`.
 
+  **Phase C bench evidence** (run `d33140fce19e436aa9e9f82e8ab599f6`, 500-record bench at pipeline SHA `9f52081d`, completed 2026-05-15T05:09Z):
+
+  | Surface | Distinct targets | With `rdfs:label` | Coverage |
+  |---|---:|---:|---:|
+  | `bffi:subject` | 2 892 | 2 294 | **79.3 %** |
+  | `bffi:genreForm` | 493 | 431 | **87.4 %** |
+
+  Both surfaces clear the DoD bar (subjects at 79.3 % is the COALESCE-to-authority residual where R7 deliberately suppresses the label so Skosmos resolves from Finto — operating as designed). M9 `end` event counters from the same run:
+
+  | Counter | Pre-Phase-C (5k bench `02924cb38191`, creators-only pool) | This run (500-record, mixed pool) | Phase C signal |
+  |---|---:|---:|---|
+  | `total` | 4 183 | 1 983 | Subjects + genre candidates entered the pool (creators-only at this slice would be ~400; the extra ~1 600 is the previously-dropped 21 925-at-5k surface). |
+  | `local` | 0 | **1 047** | Tier-0 YSO/KAUNO local resolver lit up — ~53 % of the candidates bound pre-LLM, exactly the cataloguer-hour saving R6 predicted. |
+  | `no_candidate` | (dominant outcome) | 469 | Phase C labels reach the candidate generator; the residual `no_candidate` is the genuine miss surface, not the pre-fix "no label, never asked" hole. |
+  | `lexical` | — | 95 | |
+  | `llm_pick` | — | 153 | |
+  | `fallback` | — | 94 | |
+  | `fictional` | — | 125 | |
+  | `watchdog_aborted` | — | 0 | |
+
+  Full chain green: `m2 → m3 → m5 → m6 → m8 → m9 → skosify → load → export` all completed. M3 converted 495 / 500 records (the `failed_shape: 106` count is pre-existing SHACL gating, unrelated to Phase C).
+
 **Owner**: operator (Mikko) + claude solo-then-commit. All three phases are mechanically verifiable — unit tests pin the CONSTRUCT output shape; no paired session needed.
 **Estimated wall-time**: ~4 h end-to-end. Phase A: ~2 h (the rdflib-bug fallback path doubles the cost). Phase B: ~1 h. Phase C: ~1 h (the agent-label precedent at `d040a90` derisks the SPARQL change).
 
