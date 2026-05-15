@@ -30,7 +30,7 @@ from typing import Any, Final, Protocol
 
 import httpx
 
-from bffi_pipeline.stages.reconcile import (
+from bffi_pipeline.stages.m9.runner import (
     VOCAB_KAUNO,
     VOCAB_MUSO,
     VOCAB_YSO,

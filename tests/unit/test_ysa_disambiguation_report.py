@@ -18,7 +18,7 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.ysa_disambiguation_report import (
+from bffi_pipeline.stages.m9.ysa_disambiguation_report import (
     CSV_COLUMNS,
     DisambiguationCandidate,
     DisambiguationRow,

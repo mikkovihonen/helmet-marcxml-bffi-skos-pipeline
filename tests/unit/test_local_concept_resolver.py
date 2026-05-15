@@ -17,7 +17,7 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.local_concept_resolver import (
+from bffi_pipeline.stages.m9.local_concept_resolver import (
     _KIND_TO_GRAPHS,
     FusekiConceptResolver,
     LocalConceptHit,
@@ -25,7 +25,7 @@ from bffi_pipeline.stages.local_concept_resolver import (
     _build_query,
     _quote_sparql_literal,
 )
-from bffi_pipeline.stages.reconcile import (
+from bffi_pipeline.stages.m9.runner import (
     STAGE_LEXICAL,
     STAGE_LOCAL,
     AuthorityCandidate,

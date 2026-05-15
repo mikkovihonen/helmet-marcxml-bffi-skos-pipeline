@@ -42,8 +42,8 @@ from rdflib import Literal as RdfLiteral
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.local_concept_resolver import _quote_sparql_literal
-from bffi_pipeline.stages.reconcile import _iter_subject_requests
+from bffi_pipeline.stages.m9.local_concept_resolver import _quote_sparql_literal
+from bffi_pipeline.stages.m9.runner import _iter_subject_requests
 
 #: Threshold below which a literal is "missed-altlabel" (one
 #: disambiguated candidate, no genuine ambiguity) and at/above which

@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol
 from typing import Literal as LiteralType
 
 if TYPE_CHECKING:
-    from bffi_pipeline.stages.local_concept_resolver import (
+    from bffi_pipeline.stages.m9.local_concept_resolver import (
         LocalConceptHit,
         LocalConceptResolver,
     )
@@ -445,7 +445,7 @@ class StubPicker:
 
 #: Picker prompt source. Hashed at startup so reconciliation provenance
 #: pins the exact prompt that produced each decision.
-PICKER_PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[3] / "prompts" / "picker_v1.txt"
+PICKER_PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[4] / "prompts" / "picker_v1.txt"
 _PICKER_SECTION_RE: Final[re.Pattern[str]] = re.compile(r"^### (\w+)\s*$", re.MULTILINE)
 
 #: Validation retry: same shape as the M6 judge — max 2 retries on

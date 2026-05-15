@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     )
     # M9 reconcile concurrency. ThreadPoolExecutor max_workers for
     # the picker (tier-2) dispatch in
-    # ``bffi_pipeline.stages.reconcile.apply_reconciliation``.
+    # ``bffi_pipeline.stages.m9.runner.apply_reconciliation``.
     # tier-0 / tier-1 / tier-3 stay single-threaded — they're cheap
     # and write back to the canonical graph. Default 4 matches
     # M6's c=4 throughput knee on M2 Max (P-02 § A6). Setting to 1
@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     # When the LLM picker returns ``uncertain`` or low-confidence, the
     # current code falls back to the highest-lexical candidate (flagged
     # ``needs-review``) provided its similarity clears
-    # :data:`bffi_pipeline.stages.reconcile.LEXICAL_FLOOR` (0.70). Some
+    # :data:`bffi_pipeline.stages.m9.runner.LEXICAL_FLOOR` (0.70). Some
     # namesake-rich authorities (KANTO / VIAF) routinely produce
     # lexical-similar wrong-person matches between 0.70 and 0.85; raising
     # this floor forces those into ``no-candidate`` instead of a

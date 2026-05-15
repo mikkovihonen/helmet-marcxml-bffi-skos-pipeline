@@ -146,7 +146,7 @@ def strip_label_decoration(s: str) -> str:
     """Strip trailing parenthetical dates + MARC ``$e`` role markers.
 
     Designed for tier-0 lookups in
-    :mod:`bffi_pipeline.stages.local_concept_resolver` — the cataloguer-
+    :mod:`bffi_pipeline.stages.m9.local_concept_resolver` — the cataloguer-
     side literal often carries decoration the authority's prefLabel
     doesn't, blocking exact matches. Applied symmetrically to both
     cataloguer literals and authority labels at fold time so the
@@ -189,7 +189,7 @@ def fold_label(s: str) -> str:
     5. Whitespace collapse — ``" ".join(s.split())``.
 
     Used by the M9 reconcile picker-cache key composition
-    (:mod:`bffi_pipeline.stages.reconcile`) so diacritic-equivalent
+    (:mod:`bffi_pipeline.stages.m9.runner`) so diacritic-equivalent
     cataloguer literals hit the same cached LLM verdict. Previously
     also drove the P-10 Phase C tier-0 expansion path (yanked when
     P-14 was abandoned 2026-05-14 — see

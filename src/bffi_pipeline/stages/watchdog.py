@@ -5,7 +5,7 @@ Watchdog events fire when an LLM call's per-call wall-time budget
 cumulative per-pair budget is exceeded, or — for M9 — when the
 per-field budget is exceeded. The retry behaviour itself lives in
 :func:`bffi_pipeline.stages.m6.judge_pair`'s and
-:class:`bffi_pipeline.stages.reconcile.LangChainLLMPicker`'s
+:class:`bffi_pipeline.stages.m9.runner.LangChainLLMPicker`'s
 existing connection-error retry stacks; this module is the
 observability surface that lets an operator running an unattended
 overnight batch see watchdog activity in real time *and* audit it

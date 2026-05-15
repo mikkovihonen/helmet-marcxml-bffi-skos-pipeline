@@ -23,12 +23,8 @@ from rdflib.namespace import RDF, Namespace
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.vocab import PROV
-from bffi_pipeline.stages.local_concept_resolver import LocalConceptHit
-from bffi_pipeline.stages.observability import (
-    StageEventEmitter,
-    set_active_emitter,
-)
-from bffi_pipeline.stages.reconcile import (
+from bffi_pipeline.stages.m9.local_concept_resolver import LocalConceptHit
+from bffi_pipeline.stages.m9.runner import (
     ALL_AUTHORITY_KINDS,
     LEXICAL_DIRECT_THRESHOLD,
     LEXICAL_FLOOR,
@@ -64,6 +60,10 @@ from bffi_pipeline.stages.reconcile import (
     picker_prompt_hash,
     picker_prompt_text,
     reconcile_one,
+)
+from bffi_pipeline.stages.observability import (
+    StageEventEmitter,
+    set_active_emitter,
 )
 
 # --- lexical_similarity ---------------------------------------------------

@@ -26,17 +26,16 @@ from bffi_pipeline.stages import (
 from bffi_pipeline.stages import (
     load,
     load_finto,
-    local_concept_resolver,
     m2,
     m3,
     m5,
     m6,
     m8,
-    reconcile,
+    m9,
     skosify_run,
     workkey,
-    ysa_disambiguation_report,
 )
+from bffi_pipeline.stages.m9 import local_concept_resolver, ysa_disambiguation_report
 from bffi_pipeline.stages.observability import (
     StageEventEmitter,
     set_active_emitter,
@@ -2257,15 +2256,15 @@ def merge_command(
     typer.echo(result.render())
 
 
-_RECONCILE_KIND_GROUPS: dict[str, frozenset[reconcile.AuthorityKind]] = {
+_RECONCILE_KIND_GROUPS: dict[str, frozenset[m9.AuthorityKind]] = {
     "creators": frozenset({"person", "corporate_body"}),
     "subjects": frozenset({"subject"}),
     "genres": frozenset({"genre_form", "music_form"}),
-    "all": reconcile.ALL_AUTHORITY_KINDS,
+    "all": m9.ALL_AUTHORITY_KINDS,
 }
 
 
-def _parse_reconcile_kinds(raw: str | None) -> frozenset[reconcile.AuthorityKind] | None:
+def _parse_reconcile_kinds(raw: str | None) -> frozenset[m9.AuthorityKind] | None:
     """Parse the ``--kinds`` CLI option into a runtime kind set.
 
     ``None`` (or ``"all"``, or whitespace) returns ``None`` so the
@@ -2274,7 +2273,7 @@ def _parse_reconcile_kinds(raw: str | None) -> frozenset[reconcile.AuthorityKind
     """
     if raw is None or not raw.strip():
         return None
-    selected: set[reconcile.AuthorityKind] = set()
+    selected: set[m9.AuthorityKind] = set()
     for token in raw.split(","):
         name = token.strip().casefold()
         if not name:
@@ -2443,19 +2442,19 @@ def reconcile_command(
     # P-10 Phase E: validated string → typed Literal for apply_reconciliation.
     # Env-var only (no CLI flag); see plan § E.2.
     if settings.m9_picker_ordering not in (
-        reconcile.PICKER_ORDERING_PREFIX_CACHE,
-        reconcile.PICKER_ORDERING_SUBMISSION,
+        m9.PICKER_ORDERING_PREFIX_CACHE,
+        m9.PICKER_ORDERING_SUBMISSION,
     ):
         raise typer.BadParameter(
             f"BFFI_M9_PICKER_ORDERING must be "
-            f"'{reconcile.PICKER_ORDERING_PREFIX_CACHE}' or "
-            f"'{reconcile.PICKER_ORDERING_SUBMISSION}'; "
+            f"'{m9.PICKER_ORDERING_PREFIX_CACHE}' or "
+            f"'{m9.PICKER_ORDERING_SUBMISSION}'; "
             f"got {settings.m9_picker_ordering!r}."
         )
-    effective_picker_ordering: reconcile.PickerOrdering = (
-        reconcile.PICKER_ORDERING_PREFIX_CACHE
-        if settings.m9_picker_ordering == reconcile.PICKER_ORDERING_PREFIX_CACHE
-        else reconcile.PICKER_ORDERING_SUBMISSION
+    effective_picker_ordering: m9.PickerOrdering = (
+        m9.PICKER_ORDERING_PREFIX_CACHE
+        if settings.m9_picker_ordering == m9.PICKER_ORDERING_PREFIX_CACHE
+        else m9.PICKER_ORDERING_SUBMISSION
     )
     # P-10 Phase B: cache resolution. The --no-cache flag wins over the env
     # var (operator-friendly bench knob); the env var BFFI_M9_CACHE_DISABLED
@@ -2464,20 +2463,20 @@ def reconcile_command(
     watchdog_sidecar = settings.data_dir / "watchdog-events.jsonl"
 
     http_client = httpx.Client(timeout=10.0)
-    picker_cache: reconcile.PickerCache | None = (
-        reconcile.PickerCache(reconcile.picker_cache_default_path()) if cache_enabled else None
+    picker_cache: m9.PickerCache | None = (
+        m9.PickerCache(m9.picker_cache_default_path()) if cache_enabled else None
     )
     try:
-        client = reconcile.FintoSkosmosClient(http_client=http_client)
-        fallback = reconcile.ViafClient(http_client=http_client)
+        client = m9.FintoSkosmosClient(http_client=http_client)
+        fallback = m9.ViafClient(http_client=http_client)
 
         # Picker factory: at c>=2 the orchestrator builds one
         # ``LangChainLLMPicker`` per worker thread (LangChain's
         # underlying OpenAI-compat client has no documented
         # thread-safety guarantee; one client per thread is cheap).
         # At c=1 the factory is called once.
-        def picker_factory() -> reconcile.LLMPicker:
-            return reconcile.LangChainLLMPicker(model_name=primary_model)
+        def picker_factory() -> m9.LLMPicker:
+            return m9.LangChainLLMPicker(model_name=primary_model)
 
         resolver: local_concept_resolver.LocalConceptResolver | None = (
             local_concept_resolver.FusekiConceptResolver(
@@ -2490,7 +2489,7 @@ def reconcile_command(
 
         if provenance:
             with prov_writer.ProvenanceWriter(provenance_path) as writer:
-                summary, _outcomes = reconcile.apply_reconciliation(
+                summary, _outcomes = m9.apply_reconciliation(
                     canonical_path,
                     output_path=target,
                     client=client,
@@ -2510,7 +2509,7 @@ def reconcile_command(
                     disable_fallback=settings.m9_disable_fallback,
                 )
         else:
-            summary, _outcomes = reconcile.apply_reconciliation(
+            summary, _outcomes = m9.apply_reconciliation(
                 canonical_path,
                 output_path=target,
                 client=client,

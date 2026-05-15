@@ -19,7 +19,7 @@ import os
 import httpx
 import pytest
 
-from bffi_pipeline.stages.reconcile import (
+from bffi_pipeline.stages.m9.runner import (
     STAGE_FALLBACK,
     STAGE_LEXICAL,
     STAGE_LLM,

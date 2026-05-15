@@ -393,7 +393,7 @@ def graph_uri_for_uri(uri: str) -> str | None:
     """Return the Finto vocab graph URI a given resource URI belongs to,
     or ``None`` if it isn't from a known Finto namespace.
 
-    Used by :mod:`bffi_pipeline.cli` and :mod:`bffi_pipeline.stages.reconcile`
+    Used by :mod:`bffi_pipeline.cli` and :mod:`bffi_pipeline.stages.m9.runner`
     to route URIs to the right vocab when constructing Skosmos links —
     keeps the namespace mapping in one place rather than scattered
     string-prefix checks across stages.
