@@ -19,6 +19,10 @@ from bffi_pipeline.config import Settings, get_settings
 from bffi_pipeline.eval import embed_benchmark
 from bffi_pipeline.eval import grow as eval_grow
 from bffi_pipeline.eval import harness as eval_harness
+from bffi_pipeline.observability.events import (
+    StageEventEmitter,
+    set_active_emitter,
+)
 from bffi_pipeline.provenance import writer as prov_writer
 from bffi_pipeline.stages import (
     export as export_stage,
@@ -34,10 +38,6 @@ from bffi_pipeline.stages import (
 )
 from bffi_pipeline.stages.m9 import local_concept_resolver, ysa_disambiguation_report
 from bffi_pipeline.stages.m10 import load, load_finto, skosify_run
-from bffi_pipeline.stages.observability import (
-    StageEventEmitter,
-    set_active_emitter,
-)
 
 
 def _init_observability(settings: Settings) -> StageEventEmitter | None:
@@ -1593,7 +1593,7 @@ def plan_command(
     ``running`` and every other stage as ``skipped``, which is the
     correct interpretation for a one-shot invocation.
     """
-    from bffi_pipeline.stages.observability import emit_plan as _emit_plan
+    from bffi_pipeline.observability.events import emit_plan as _emit_plan
 
     _emit_plan(stages, description=description)
     rendered = ", ".join(stages)

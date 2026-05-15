@@ -18,9 +18,9 @@ from typer.testing import CliRunner
 from bffi_pipeline import cli as cli_module
 from bffi_pipeline.cli import _parse_reconcile_kinds, app
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.observability.events import set_active_emitter
 from bffi_pipeline.stages.m2 import ConversionErrorRow, ConversionSummary
 from bffi_pipeline.stages.m3 import BffiSummary
-from bffi_pipeline.stages.observability import set_active_emitter
 
 if TYPE_CHECKING:
     from pytest import MonkeyPatch

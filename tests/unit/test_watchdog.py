@@ -1,4 +1,4 @@
-"""Unit tests for ``bffi_pipeline.stages.watchdog``.
+"""Unit tests for ``bffi_pipeline.observability.watchdog``.
 
 Covers the structured event emitter in isolation; the wiring into
 ``judge.judge_pair`` is exercised separately in ``test_judge.py``
@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from bffi_pipeline.stages.watchdog import (
+from bffi_pipeline.observability.watchdog import (
     WATCHDOG_STDERR_PREFIX,
     emit_watchdog_event,
 )

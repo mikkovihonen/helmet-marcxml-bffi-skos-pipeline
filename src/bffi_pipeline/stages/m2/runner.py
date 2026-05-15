@@ -47,8 +47,8 @@ from rdflib.namespace import RDF, RDFS, XSD
 from bffi_pipeline import __version__ as PIPELINE_VERSION
 from bffi_pipeline.cataloguer_review import append_source_row
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.observability.events import emit_if_active, get_active_emitter
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.observability import emit_if_active, get_active_emitter
 from bffi_pipeline.validation.bibframe import BibframeShapeError, assert_conforms
 from bffi_pipeline.validation.marcxml import MarcXmlValidationError, validate
 

@@ -6,7 +6,7 @@ ships, or by hand with ``tail -F``) to answer "is the pipeline making
 forward progress?" without composing ``ps`` / ``curl`` /
 ``docker logs`` / log-grep against three different files.
 
-The shape mirrors :mod:`bffi_pipeline.stages.watchdog` — a stderr line
+The shape mirrors :mod:`bffi_pipeline.observability.watchdog` — a stderr line
 with a ``STAGE_EVENT `` prefix the existing log-tail tooling can pick
 up on, plus an append to a JSONL sidecar at
 ``<BFFI_DATA_DIR>/stage-events.jsonl`` for post-run analysis. The
@@ -62,7 +62,7 @@ StageEvent = Literal[
     "failed",
 ]
 
-#: stderr prefix; mirror of :data:`bffi_pipeline.stages.watchdog.WATCHDOG_STDERR_PREFIX`.
+#: stderr prefix; mirror of :data:`bffi_pipeline.observability.watchdog.WATCHDOG_STDERR_PREFIX`.
 #: ``scripts/run-full-pipeline.sh``'s log-tail filter can grow its regex to
 #: ``^(STAGE_|PIPELINE_|WATCHDOG_EVENT|STAGE_EVENT)`` to surface these
 #: alongside the existing markers.

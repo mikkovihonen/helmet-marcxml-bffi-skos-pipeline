@@ -67,16 +67,16 @@ from bffi_pipeline.blocking import fold_diacritics, fold_label
 from bffi_pipeline.cataloguer_review import append_target_row
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.llm_json_mode import json_mode_instruction
-from bffi_pipeline.provenance import logger as P
-from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.observability import emit_if_active
-from bffi_pipeline.stages.probes import (
+from bffi_pipeline.observability.events import emit_if_active
+from bffi_pipeline.observability.probes import (
     emit_health_probes,
     probe_finto,
     probe_fuseki,
     probe_mlx_lm,
 )
-from bffi_pipeline.stages.watchdog import emit_watchdog_event
+from bffi_pipeline.observability.watchdog import emit_watchdog_event
+from bffi_pipeline.provenance import logger as P
+from bffi_pipeline.provenance import vocab as V
 
 #: P-11 Phase A progress cadence for M9. Phase 2 is LLM-picker-bound
 #: at ~2-5s per entity, so a too-sparse cadence makes the dashboard

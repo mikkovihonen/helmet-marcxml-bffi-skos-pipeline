@@ -41,7 +41,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from bffi_pipeline.stages import probes
+from bffi_pipeline.observability import probes
 from bffi_pipeline.stages.m6 import runner as judge
 from bffi_pipeline.stages.m9 import runner as reconcile
 

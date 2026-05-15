@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Final
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages.observability import get_active_emitter
+from bffi_pipeline.observability.events import get_active_emitter
 
 _SOURCE_HEADER: Final[tuple[str, ...]] = (
     "bib_id",

@@ -10,11 +10,11 @@ import pytest
 
 from bffi_pipeline import runner as runner_module
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.runner import CANONICAL_STAGES, run_pipeline
-from bffi_pipeline.stages.observability import (
+from bffi_pipeline.observability.events import (
     StageEventEmitter,
     set_active_emitter,
 )
+from bffi_pipeline.runner import CANONICAL_STAGES, run_pipeline
 
 
 @pytest.fixture(autouse=True)

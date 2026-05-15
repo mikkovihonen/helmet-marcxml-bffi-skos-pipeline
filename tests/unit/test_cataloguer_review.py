@@ -14,7 +14,7 @@ from bffi_pipeline.cataloguer_review import (
     append_target_row,
 )
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages.observability import (
+from bffi_pipeline.observability.events import (
     StageEventEmitter,
     set_active_emitter,
 )

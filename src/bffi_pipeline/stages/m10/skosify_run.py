@@ -29,8 +29,8 @@ from typing import Any, Final
 from rdflib import Graph
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.observability.events import emit_if_active
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.observability import emit_if_active
 
 #: Default filenames under ``BFFI_DATA_DIR``.
 SKOSIFIED_FILENAME: Final[str] = "canonical-skosified.ttl"

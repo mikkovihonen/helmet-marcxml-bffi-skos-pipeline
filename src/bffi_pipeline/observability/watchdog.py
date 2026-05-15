@@ -70,7 +70,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal
 
-from bffi_pipeline.stages.observability import emit_if_active
+from bffi_pipeline.observability.events import emit_if_active
 
 WatchdogEvent = Literal[
     "timeout",

@@ -21,6 +21,7 @@ from typer.testing import CliRunner
 
 from bffi_pipeline.cli import app
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.observability.events import set_active_emitter
 from bffi_pipeline.run_manifest import (
     MANIFEST_FILENAME,
     read_manifest,
@@ -28,7 +29,6 @@ from bffi_pipeline.run_manifest import (
     write_initial_manifest,
 )
 from bffi_pipeline.stages.m10.fuseki_clear import ClearResult, clear_run_output_graphs
-from bffi_pipeline.stages.observability import set_active_emitter
 
 GRAPH_BASE = "http://urn.fi/URN:NBN:fi:bib:graph:"
 OUTPUT_GRAPH_1 = f"{GRAPH_BASE}bffi-works"

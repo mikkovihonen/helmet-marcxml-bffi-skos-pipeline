@@ -50,9 +50,9 @@ from bffi_pipeline.contrib_variants import (
 from bffi_pipeline.contrib_variants import (
     load_variant_claims,
 )
+from bffi_pipeline.observability.events import emit_if_active
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.logger import model_agent_uri
-from bffi_pipeline.stages.observability import emit_if_active
 from bffi_pipeline.uris import mint_work_uri
 
 # --- Constants ------------------------------------------------------------

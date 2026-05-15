@@ -2,7 +2,7 @@
 and render the pipeline's current state (P-11 Phase B).
 
 This module is the *consumer* counterpart to
-:mod:`bffi_pipeline.stages.observability`. The producer side emits
+:mod:`bffi_pipeline.observability.events`. The producer side emits
 events; this side parses the JSONL stream, collates per-stage state,
 and renders paste-ready text. Same module can also tail the sidecar
 for live re-rendering.

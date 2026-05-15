@@ -61,11 +61,11 @@ from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.llm_json_mode import json_mode_instruction
+from bffi_pipeline.observability.events import emit_if_active
+from bffi_pipeline.observability.probes import emit_health_probes, probe_mlx_lm
+from bffi_pipeline.observability.watchdog import emit_watchdog_event
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.writer import ProvenanceWriter
-from bffi_pipeline.stages.observability import emit_if_active
-from bffi_pipeline.stages.probes import emit_health_probes, probe_mlx_lm
-from bffi_pipeline.stages.watchdog import emit_watchdog_event
 
 # --- Constants ------------------------------------------------------------
 

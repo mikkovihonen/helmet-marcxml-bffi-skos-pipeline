@@ -21,6 +21,10 @@ from pydantic import ValidationError
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF, Namespace
 
+from bffi_pipeline.observability.events import (
+    StageEventEmitter,
+    set_active_emitter,
+)
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.vocab import PROV
 from bffi_pipeline.stages.m9.local_concept_resolver import LocalConceptHit
@@ -60,10 +64,6 @@ from bffi_pipeline.stages.m9.runner import (
     picker_prompt_hash,
     picker_prompt_text,
     reconcile_one,
-)
-from bffi_pipeline.stages.observability import (
-    StageEventEmitter,
-    set_active_emitter,
 )
 
 # --- lexical_similarity ---------------------------------------------------

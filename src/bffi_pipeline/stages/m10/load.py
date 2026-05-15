@@ -33,8 +33,8 @@ import httpx
 from jinja2 import Template
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages.observability import emit_if_active
-from bffi_pipeline.stages.probes import emit_health_probes, probe_fuseki
+from bffi_pipeline.observability.events import emit_if_active
+from bffi_pipeline.observability.probes import emit_health_probes, probe_fuseki
 
 #: Repo paths to the canonical config files.
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]

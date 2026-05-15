@@ -35,8 +35,8 @@ from bffi_pipeline.contrib_variants import (
     append_variant_claims,
     truncate_sidecar,
 )
+from bffi_pipeline.observability.events import emit_if_active, get_active_emitter
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.observability import emit_if_active, get_active_emitter
 from bffi_pipeline.uris import (
     mint_raw_expression_uri,
     mint_raw_work_uri,

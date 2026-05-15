@@ -14,7 +14,7 @@ import pytest
 
 from bffi_pipeline.cli import _init_observability
 from bffi_pipeline.config import Settings
-from bffi_pipeline.stages.observability import set_active_emitter
+from bffi_pipeline.observability.events import set_active_emitter
 
 
 def test_settings_data_dir_defaults_to_runs_root_slash_uuid(

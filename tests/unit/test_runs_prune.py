@@ -24,13 +24,13 @@ from typer.testing import CliRunner
 from bffi_pipeline import runs_reset
 from bffi_pipeline.cli import app
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.observability.events import set_active_emitter
 from bffi_pipeline.run_manifest import (
     RunManifest,
     discover_runs,
     parse_duration,
     write_manifest,
 )
-from bffi_pipeline.stages.observability import set_active_emitter
 
 
 def _make_run(

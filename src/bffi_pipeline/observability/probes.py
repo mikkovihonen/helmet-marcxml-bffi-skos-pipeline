@@ -24,7 +24,7 @@ from typing import Final, Literal
 
 import httpx
 
-from bffi_pipeline.stages.observability import emit_if_active
+from bffi_pipeline.observability.events import emit_if_active
 
 #: Default probe wall-clock budget. 5 s is generous for a healthcheck;
 #: a service that can't respond within 5 s is degraded by definition

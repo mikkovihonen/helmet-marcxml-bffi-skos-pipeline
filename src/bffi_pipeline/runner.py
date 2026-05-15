@@ -68,7 +68,7 @@ from bffi_pipeline.cli import (
     skosify_command,
 )
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages.observability import emit_failed, emit_plan, emit_skipped
+from bffi_pipeline.observability.events import emit_failed, emit_plan, emit_skipped
 
 #: Canonical stage order, matching the dashboard's per-stage panels and
 #: the existing ``bffi-pipeline plan`` convention. ``m4`` (workkey-stats)

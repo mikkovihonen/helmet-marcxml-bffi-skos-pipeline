@@ -1,4 +1,4 @@
-"""Unit tests for ``bffi_pipeline.stages.observability`` (P-11 Phase A).
+"""Unit tests for ``bffi_pipeline.observability.events`` (P-11 Phase A).
 
 The emitter is a small surface but its contract — stderr line + JSONL
 append, thread-safe, watchdog absorption forwarding — is what Phase B
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from bffi_pipeline.stages.observability import (
+from bffi_pipeline.observability.events import (
     STAGE_EVENT_STDERR_PREFIX,
     StageEventEmitter,
     emit_if_active,
@@ -23,7 +23,7 @@ from bffi_pipeline.stages.observability import (
     get_active_emitter,
     set_active_emitter,
 )
-from bffi_pipeline.stages.watchdog import emit_watchdog_event
+from bffi_pipeline.observability.watchdog import emit_watchdog_event
 
 
 @pytest.fixture(autouse=True)

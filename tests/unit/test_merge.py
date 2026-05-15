@@ -28,6 +28,10 @@ from bffi_pipeline.contrib_variants import (
     ContribVariantClaim,
     append_variant_claims,
 )
+from bffi_pipeline.observability.events import (
+    StageEventEmitter,
+    set_active_emitter,
+)
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m8 import (
     CanonicalEntry,
@@ -44,10 +48,6 @@ from bffi_pipeline.stages.m8.runner import (
     _expression_contributions,
     _first_contribution_agent_uri,
     _load_work_records_from_corpus,
-)
-from bffi_pipeline.stages.observability import (
-    StageEventEmitter,
-    set_active_emitter,
 )
 
 

@@ -1,4 +1,4 @@
-"""Unit tests for ``bffi_pipeline.stages.probes`` (P-11 Phase C).
+"""Unit tests for ``bffi_pipeline.observability.probes`` (P-11 Phase C).
 
 All HTTP traffic goes through ``httpx.MockTransport``; the live
 network is never contacted. Probes must never raise — every error
@@ -14,11 +14,11 @@ from typing import Any
 import httpx
 import pytest
 
-from bffi_pipeline.stages.observability import (
+from bffi_pipeline.observability.events import (
     StageEventEmitter,
     set_active_emitter,
 )
-from bffi_pipeline.stages.probes import (
+from bffi_pipeline.observability.probes import (
     ProbeResult,
     emit_health_probes,
     probe_finto,
