@@ -1281,7 +1281,7 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
     ``(kind, literal)`` lookups, so two canonical Works asking for the
     same subject only hit Finto once.
     """
-    from bffi_pipeline.stages.load_finto import graph_uri_for_uri
+    from bffi_pipeline.stages.m10.load_finto import graph_uri_for_uri
 
     for work in graph.subjects(RDF.type, V.BFFI.Work):
         if not isinstance(work, URIRef):

@@ -22,7 +22,7 @@ from pathlib import Path
 import httpx
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages.fuseki_clear import clear_run_output_graphs
+from bffi_pipeline.stages.m10.fuseki_clear import clear_run_output_graphs
 
 logger = logging.getLogger(__name__)
 

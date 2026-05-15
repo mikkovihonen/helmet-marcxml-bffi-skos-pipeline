@@ -138,7 +138,7 @@ def _quote_sparql_literal(value: str) -> str:
 
     JSON's string escaping is conservative enough to be a valid SPARQL
     string literal — same trick used in
-    :mod:`bffi_pipeline.stages.load`.
+    :mod:`bffi_pipeline.stages.m10.load`.
     """
     return json.dumps(value, ensure_ascii=False)
 

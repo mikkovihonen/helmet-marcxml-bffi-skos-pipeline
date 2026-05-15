@@ -24,18 +24,16 @@ from bffi_pipeline.stages import (
     export as export_stage,
 )
 from bffi_pipeline.stages import (
-    load,
-    load_finto,
     m2,
     m3,
     m5,
     m6,
     m8,
     m9,
-    skosify_run,
     workkey,
 )
 from bffi_pipeline.stages.m9 import local_concept_resolver, ysa_disambiguation_report
+from bffi_pipeline.stages.m10 import load, load_finto, skosify_run
 from bffi_pipeline.stages.observability import (
     StageEventEmitter,
     set_active_emitter,
@@ -616,7 +614,7 @@ def runs_clear_fuseki_command(
     allars, SLM, MUSO) live in their own URI namespaces outside
     ``graph_base`` and are NOT touched.
     """
-    from bffi_pipeline.stages.fuseki_clear import clear_run_output_graphs
+    from bffi_pipeline.stages.m10.fuseki_clear import clear_run_output_graphs
 
     settings = get_settings()
     auth: tuple[str, str] | None = (
@@ -2820,7 +2818,7 @@ def _maybe_clear_fuseki_before_load(
     the run manifest's ``pre_run_fuseki_clear`` field.
     """
     from bffi_pipeline.run_manifest import MANIFEST_FILENAME, update_manifest_field
-    from bffi_pipeline.stages.fuseki_clear import clear_run_output_graphs
+    from bffi_pipeline.stages.m10.fuseki_clear import clear_run_output_graphs
 
     settings = get_settings()
     mode = settings.fuseki_clear_on_run_start.strip().lower()

@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from bffi_pipeline.stages.load import (
+from bffi_pipeline.stages.m10.load import (
     LoadResult,
     SmokeResult,
     delete_graph,

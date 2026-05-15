@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from bffi_pipeline.stages.load_finto import (
+from bffi_pipeline.stages.m10.load_finto import (
     FINTO_VOCABS,
     FintoVocab,
     VocabResult,

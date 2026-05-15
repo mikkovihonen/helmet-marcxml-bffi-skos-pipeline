@@ -36,7 +36,7 @@ from bffi_pipeline.stages.observability import emit_if_active
 SKOSIFIED_FILENAME: Final[str] = "canonical-skosified.ttl"
 
 #: Project-relative paths to the canonical config files.
-_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
 DEFAULT_OVERLAY_PATH: Final[Path] = _REPO_ROOT / "config" / "overlay" / "bffi-skos-overlay.ttl"
 DEFAULT_CONFIG_PATH: Final[Path] = _REPO_ROOT / "config" / "bffi.cfg"
 

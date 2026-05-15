@@ -32,7 +32,7 @@ from typing import Any
 
 import httpx
 
-from bffi_pipeline.stages.load import delete_graph, run_select
+from bffi_pipeline.stages.m10.load import delete_graph, run_select
 
 logger = logging.getLogger(__name__)
 

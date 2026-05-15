@@ -40,7 +40,7 @@ from typing import Any, Final
 import httpx
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages import load as load_stage
+from bffi_pipeline.stages.m10 import load as load_stage
 
 #: Repo-relative path to the SPARQL query the grow stage runs.
 DEFAULT_GROW_QUERY_PATH: Final[Path] = (

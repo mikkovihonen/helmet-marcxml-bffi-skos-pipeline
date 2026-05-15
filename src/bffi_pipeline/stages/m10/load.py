@@ -37,7 +37,7 @@ from bffi_pipeline.stages.observability import emit_if_active
 from bffi_pipeline.stages.probes import emit_health_probes, probe_fuseki
 
 #: Repo paths to the canonical config files.
-_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
 DEFAULT_SMOKE_PATH: Final[Path] = _REPO_ROOT / "config" / "shapes" / "post-load-smoke.rq"
 DEFAULT_HELMET_LOOKUP_PATH: Final[Path] = _REPO_ROOT / "sparql" / "queries" / "helmet_lookup.rq"
 DEFAULT_ADMIN_VOCAB_PATH: Final[Path] = _REPO_ROOT / "config" / "bffi-admin-vocabulary.ttl"

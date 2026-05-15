@@ -16,7 +16,7 @@ from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.skosify_run import (
+from bffi_pipeline.stages.m10.skosify_run import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_OVERLAY_PATH,
     SKOSIFIED_FILENAME,

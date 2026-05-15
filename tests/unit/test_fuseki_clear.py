@@ -1,4 +1,4 @@
-"""Unit tests for ``bffi_pipeline.stages.fuseki_clear`` (P-32 Phase H).
+"""Unit tests for ``bffi_pipeline.stages.m10.fuseki_clear`` (P-32 Phase H).
 
 The five named acceptance tests pin: the prefix-only drop boundary,
 the oversized-graph safety threshold, the unreachable-Fuseki warn-
@@ -27,7 +27,7 @@ from bffi_pipeline.run_manifest import (
     update_manifest_field,
     write_initial_manifest,
 )
-from bffi_pipeline.stages.fuseki_clear import ClearResult, clear_run_output_graphs
+from bffi_pipeline.stages.m10.fuseki_clear import ClearResult, clear_run_output_graphs
 from bffi_pipeline.stages.observability import set_active_emitter
 
 GRAPH_BASE = "http://urn.fi/URN:NBN:fi:bib:graph:"

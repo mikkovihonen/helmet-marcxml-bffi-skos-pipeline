@@ -29,7 +29,7 @@ from urllib.parse import quote
 import httpx
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.stages.load import upload_graph
+from bffi_pipeline.stages.m10.load import upload_graph
 
 DEFAULT_USER_AGENT: Final[str] = (
     "bffi-pipeline/0.1 (+https://github.com/mikkovihonen/helmet-marcxml-bffi-skos-pipeline)"
