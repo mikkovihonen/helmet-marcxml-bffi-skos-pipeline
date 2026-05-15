@@ -1,6 +1,6 @@
 # P-38 — Restructure `src/bffi_pipeline/stages/` into per-stage packages and shrink the CLI toward runner-driven operation
 
-**Status**: completed 2026-05-15. All three phases (A relocation, B sub-module splits, C CLI shrink) shipped. Operationally validated end-to-end on a 500-record bench (run `a37f430ad7e540ddb2b9506e0f01a863`, pre-Phase-C-2): `bffi-pipeline run` ran clean from M2 through export, M3 routing was bit-identical to the pre-P-38 baseline, M9 tier counters drifted only in the picker-cache-warm-hit direction (no behavioural delta detectable). Graduated from `proposed/` on 2026-05-15 after eight design questions resolved in conversation; all `Lean:` notes from the proposal hardened into the Decisions table below. Deferrals — Phase B deeper sub-module splits beyond the cohesive first-pass, Phase C-0 snapshot test, Phase C-1 audit doc — are explicit follow-up items rather than gaps; the operator-facing CLI shrink (Phase C-2) and the structural refactor (Phases A + B) are both fully shipped.
+**Status**: in-progress 2026-05-15. Phases A / B / C shipped and bench-validated against post-Phase-C-2 run `da372063` (pipeline SHA `48894d6`, end-event counters bit-identical to the pre-Phase-C-2 baseline modulo a 189-byte tarball delta from doc updates). **Phase D (runner-thinning) opened 2026-05-15** to push the structural intent one step further: each `m<N>/runner.py` shrinks to just the `run()` entry point + its docstring, with every dataclass / private helper / sidecar emitter / extraction routine relocated to a cohesive sibling module. See the "Phase D" section below for the per-stage target shape. The Decisions table is unchanged; Phase D is a continuation of Phase B's "split into cohesive sub-modules" using the same noqa-re-import pattern that preserves the test-facing `m<N>.runner._private` import path bit-identically.
 
 **Plan-base commit**: `cfb7202` (the HEAD at which the proposal was drafted and graduated; current `main` on 2026-05-15). Before executing, run
 `git diff cfb7202..HEAD -- src/bffi_pipeline/stages/ src/bffi_pipeline/cli.py src/bffi_pipeline/runner.py tests/ Makefile docs/runbook.md docs/observability.md docs/local-inference.md`
@@ -11,6 +11,7 @@ to confirm no in-flight work has reshaped the surface. Particular attention to: 
 - Phase A (per-stage package relocation, Layer 1): shipped 2026-05-15 across `a05ed20` → `2fef135` (10 commits inside the layer: m2, m3, m5, m6, m8, m9, m10 relocations + observability extraction + release/diagnostics extraction + plan-doc sweep).
 - Phase B (internal splits of M9 / M8 / M6 / M3, Layer 2): shipped 2026-05-15 across four commits. M3 split at `3cfcb04` (sanitize.py + language_detect.py + contributions.py); M6 split at `07088be` (prompts.py + validation.py + cache.py + clients.py); M8 split at `3f4ea43` (union_find.py + contribution_variants.py); M9 split at `44dfe03` (authority_clients.py + picker_cache.py). Deeper extractions deferred per the "Status 2026-05-15" note under the Phase B heading.
 - Phase C (CLI shrink + flag-to-env-var conversion, Layer 3): **shipped 2026-05-15** across Phase C-3 (commit `5217516` — six diagnostic + evaluation commands relocated to `diagnostics/commands.py` + `evaluation/commands.py`; CLI surface preserved bit-identically) and Phase C-2 (commit `f53c6df` — nine per-stage canonical-chain commands removed from the operator-facing CLI: `marc-to-bf`, `bf-to-bffi`, `embed`, `judge`, `merge`, `reconcile`, `skosify`, `load`, `export`). The M5 subprocess prerequisite was solved by adding `stages/m5/__main__.py` so `runner.py` spawns `python -m bffi_pipeline.stages.m5` instead of the deleted `bffi-pipeline embed`. Hidden migration stubs print a discoverable error message (`Use 'bffi-pipeline run --from-stage m<N> --force-stages m<N>' instead`) for one release window. **Phase C-0 (CLI-surface snapshot test) and Phase C-1 (flag-to-env-var audit doc) deferred to a follow-up** — the env-var equivalents for the deleted commands' tuning flags already exist via the M5_* / M6_* / M9_* / BFFI_M9_* namespaced env vars; an exhaustive audit catalogue is documentation work, not a code change. Docs (`runbook.md`, `local-inference.md`, `observability.md`) updated in the same commit as Phase C-2.
+- Phase D (runner-thinning): `<TBD>`. Each `m<N>/runner.py` shrinks to just the `run()` entry point + its docstring; remaining dataclasses / private helpers / sidecar emitters / extraction routines move to cohesive sibling modules. Same noqa-re-import pattern as Phase B.
 
 **Owner**: operator (Mikko) + claude solo-then-commit. All three phases are mechanically verifiable — public API of each stage's `runner.py` is preserved exactly through Phases A and B (no signature changes; `__init__.py` re-exports keep the import contract); Phase C is a deliberate CLI breakage with a one-release migration window via hidden error stubs.
 
@@ -236,6 +237,30 @@ Per the Phase C-1 table:
 - [ ] `docs/runbook.md` rewritten to remove line 109's "individual stage commands are still available" claim — they're not.
 - [ ] `make lint && make test` green.
 - [ ] Bench regression: run the canonical chain against the curated dev sample. Expect identical output to a pre-Phase-C run (Phase C changes the CLI surface, not the pipeline behaviour).
+
+### Phase D — Runner-thinning: each `m<N>/runner.py` becomes just `run()`
+
+Phase B carved out cohesive sub-modules from each sprawling stage's `runner.py`; Phase D finishes the job. The end state per stage is **one file with one function**: `runner.py` contains only the public `run()` entry point + its docstring. Every dataclass, private helper, sidecar emitter, graph-extraction routine, and SPARQL/HTTP shim moves to a sibling module in the same package.
+
+Pattern (proven by Phase B's M3 / M6 / M8 / M9 commits):
+
+1. Move each cohesive block to a new sibling file with the right imports.
+2. In `runner.py`, replace each inline definition with a `from .sibling import …  # noqa: F401` so the test-facing `m<N>.runner._private` import path keeps resolving bit-identically.
+3. For stages without an existing `run()` function (M5/M6/M8/M9), introduce one that calls the existing top-level operator function (`build_index() + query_candidates()` for M5; `judge_batch()` for M6; `apply_merge()` for M8; `apply_reconciliation()` for M9).
+4. Add the new sibling to `pyproject.toml`'s `[tool.ruff.lint.per-file-ignores]` for PLC0415 if it carries deferred imports (LLM/Finto/heavy modules).
+
+Per-stage target shape (sibling list — each row is a new file):
+
+| Stage | Existing siblings | New siblings to add in Phase D | Target runner.py |
+|---|---|---|---:|
+| m2 | (none) | `xslt.py`, `marcxml_repair.py`, `provenance.py`, `schemas.py`, `sidecars.py`, `convert.py` | ~80 lines |
+| m3 | sanitize, language_detect, contributions | `construct.py`, `validation_emit.py`, `schemas.py`, `post_process.py`, `convert.py` | ~80 lines |
+| m5 | (none) | `schemas.py`, `bands.py`, `graph_extract.py`, `embed.py`, `faiss_index.py`, `io.py`, `build.py` | ~80 lines |
+| m6 | prompts, validation, cache, clients | `outcome.py`, `cascade.py`, `graph_extract.py`, `batch.py`, `sidecars.py` | ~100 lines |
+| m8 | union_find, contribution_variants | `schemas.py`, `decisions.py`, `graph_extract.py`, `helmet_map.py`, `sidecars.py`, `mint.py`, `corpus.py`, `apply.py` | ~100 lines |
+| m9 | authority_clients, picker_cache, local_concept_resolver, ysa_disambiguation_report | `schemas.py`, `probe.py`, `lexical.py`, `picker_prompt.py`, `picker_chain.py`, `picker.py`, `decisions.py`, `requests.py`, `graph_mutate.py`, `pool.py`, `apply.py` | ~120 lines |
+
+Phase D ships as one commit per stage. Public surface stays bit-identical: every existing import path through `bffi_pipeline.stages.m<N>` or `bffi_pipeline.stages.m<N>.runner` keeps resolving via the `# noqa: F401` re-imports. Tests don't need changes.
 
 ## Risk register
 
