@@ -5,7 +5,7 @@ Two public entry points:
 - :func:`log_merge_decision` mints a ULID-keyed
   ``bffi-prov:WorkMergeDecision`` Activity for a single LLM-judge call
   (primary or second-opinion). Every cascade step in M6's
-  :class:`~bffi_pipeline.stages.judge.JudgeOutcome` becomes one such
+  :class:`~bffi_pipeline.stages.m6.JudgeOutcome` becomes one such
   Activity, so the ``bffi-prov:stage`` literal differentiates 32 B
   primary decisions from 72 B cascade re-runs.
 

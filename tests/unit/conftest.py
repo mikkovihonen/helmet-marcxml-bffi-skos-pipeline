@@ -41,7 +41,8 @@ from collections.abc import Iterator
 
 import pytest
 
-from bffi_pipeline.stages import judge, probes, reconcile
+from bffi_pipeline.stages import probes, reconcile
+from bffi_pipeline.stages.m6 import runner as judge
 
 
 def _stub_probe(

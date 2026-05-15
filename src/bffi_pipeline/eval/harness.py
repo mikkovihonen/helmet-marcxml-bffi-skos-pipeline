@@ -86,7 +86,7 @@ def _gold_to_work_record(record: GoldRecord, *, fallback_id: str) -> Any:
     conservative: only fields that exist on both sides are propagated;
     judge-only fields like ``creator_uri`` stay ``None``.
     """
-    from bffi_pipeline.stages.judge import WorkRecord
+    from bffi_pipeline.stages.m6 import WorkRecord
 
     notes: list[str] = []
     if record.notes:
@@ -132,14 +132,14 @@ class JudgePair(Protocol):
 
 def _default_judge_pair() -> JudgePair:
     """Return the real ``judge_pair`` from the M6 stage. Lazy import."""
-    from bffi_pipeline.stages.judge import judge_pair
+    from bffi_pipeline.stages.m6 import judge_pair
 
     return judge_pair
 
 
 def _default_prompt_hash() -> str:
     """Return the live judge-prompt hash. Lazy import keeps tests fast."""
-    from bffi_pipeline.stages.judge import prompt_hash
+    from bffi_pipeline.stages.m6 import prompt_hash
 
     return prompt_hash()
 

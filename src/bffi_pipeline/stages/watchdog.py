@@ -4,7 +4,7 @@ Watchdog events fire when an LLM call's per-call wall-time budget
 (``LLM_CALL_TIMEOUT_SECONDS``) is exceeded, or — for M6 — when the
 cumulative per-pair budget is exceeded, or — for M9 — when the
 per-field budget is exceeded. The retry behaviour itself lives in
-:func:`bffi_pipeline.stages.judge.judge_pair`'s and
+:func:`bffi_pipeline.stages.m6.judge_pair`'s and
 :class:`bffi_pipeline.stages.reconcile.LangChainLLMPicker`'s
 existing connection-error retry stacks; this module is the
 observability surface that lets an operator running an unattended

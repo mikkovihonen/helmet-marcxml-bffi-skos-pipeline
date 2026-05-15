@@ -71,13 +71,13 @@ from bffi_pipeline.stages.watchdog import emit_watchdog_event
 
 #: Two-shot prompt source. Hashed at startup; the hash is logged with every
 #: provenance record so a future audit can reproduce or regress a decision.
-PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[3] / "prompts" / "judge_v1.txt"
+PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[4] / "prompts" / "judge_v1.txt"
 #: Fast-mode prompt — rationale required only for ``uncertain`` or
 #: ``confidence < FALLBACK_CONFIDENCE_THRESHOLD`` decisions. Used when
 #: ``judge_pair`` is called with ``full_rationale=False`` to save the
 #: rationale-generation tokens on confident clear-cut calls.
 PROMPT_PATH_FAST: Final[Path] = (
-    Path(__file__).resolve().parents[3] / "prompts" / "judge_v1_fast.txt"
+    Path(__file__).resolve().parents[4] / "prompts" / "judge_v1_fast.txt"
 )
 
 #: Section markers in ``judge_v1.txt`` (the file is plain text — no YAML).

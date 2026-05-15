@@ -17,8 +17,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from bffi_pipeline.stages import judge
-from bffi_pipeline.stages.judge import (
+from bffi_pipeline.stages.m6 import (
     CONNECTION_BACKOFF_SECONDS,
     FALLBACK_CONFIDENCE_THRESHOLD,
     MAX_CONNECTION_RETRIES,
@@ -31,12 +30,13 @@ from bffi_pipeline.stages.judge import (
     WorkMatchDecision,
     WorkMatchDecisionFast,
     WorkRecord,
-    _cache_key,
     cascade_judge,
     judge_pair,
     prompt_hash,
     synthesize_auto_merge_outcome,
 )
+from bffi_pipeline.stages.m6 import runner as judge
+from bffi_pipeline.stages.m6.runner import _cache_key
 
 # --- Helpers --------------------------------------------------------------
 
@@ -193,7 +193,7 @@ def test_m6_prompt_prefix_is_byte_stable() -> None:
     the schemas legitimately change, regenerate the fixtures via::
 
         uv run python -c '
-        from bffi_pipeline.stages.judge import (
+        from bffi_pipeline.stages.m6 import (
             _M6_PROMPT_PREFIX_FULL,
             _M6_PROMPT_PREFIX_FAST,
         )

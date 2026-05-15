@@ -17,8 +17,7 @@ from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.writer import ProvenanceWriter
-from bffi_pipeline.stages import judge
-from bffi_pipeline.stages.judge import (
+from bffi_pipeline.stages.m6 import (
     CHECKPOINT_INTERVAL,
     DECISIONS_FILENAME,
     CascadeStep,
@@ -30,6 +29,7 @@ from bffi_pipeline.stages.judge import (
     extract_work_records,
     judge_batch,
 )
+from bffi_pipeline.stages.m6 import runner as judge
 
 
 @pytest.fixture(autouse=True)

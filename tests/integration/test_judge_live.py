@@ -25,7 +25,7 @@ from typing import Final
 import pytest
 
 from bffi_pipeline.eval.gold_set import GoldCase, GoldRecord, load_gold_set
-from bffi_pipeline.stages.judge import (
+from bffi_pipeline.stages.m6 import (
     JudgeOutcome,
     WorkRecord,
     cascade_judge,

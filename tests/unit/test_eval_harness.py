@@ -25,7 +25,7 @@ from bffi_pipeline.eval.harness import (
     run_eval,
     summarize,
 )
-from bffi_pipeline.stages.judge import WorkMatchDecision
+from bffi_pipeline.stages.m6 import WorkMatchDecision
 
 # --- summarize: pure aggregation -----------------------------------------
 

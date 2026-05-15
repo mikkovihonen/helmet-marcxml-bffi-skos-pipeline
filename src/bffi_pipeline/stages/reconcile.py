@@ -538,7 +538,7 @@ def _format_m9_details(outcome: ReconciliationOutcome) -> str:
 
 
 def _is_picker_connection_error(exc: BaseException) -> bool:
-    """Mirror :func:`bffi_pipeline.stages.judge._is_connection_error` for the picker."""
+    """Mirror :func:`bffi_pipeline.stages.m6._is_connection_error` for the picker."""
     name = type(exc).__name__
     if name in {
         "ConnectError",
@@ -2149,7 +2149,7 @@ _MIN_CONCURRENCY_FOR_FACTORY: Final[int] = 2
 
 # --- P-10 Phase B: persistent picker decision cache -----------------------
 #
-# Mirrors M6's :class:`~bffi_pipeline.stages.judge.JudgeCache`:
+# Mirrors M6's :class:`~bffi_pipeline.stages.m6.JudgeCache`:
 # a SQLite-backed key/value store that survives ``apply_reconciliation``
 # runs so the same ``(literal, candidate_set, prompt, model,
 # finto_vocab+sha)`` tuple does not re-pay an LLM picker call. The key
@@ -2264,7 +2264,7 @@ class PickerCache:
 
     Writes happen only after the picker has returned a structurally
     and semantically valid response (the same gate
-    :class:`~bffi_pipeline.stages.judge.JudgeCache` applies): a
+    :class:`~bffi_pipeline.stages.m6.JudgeCache` applies): a
     ``ValidationError`` short-circuits before the write so a re-run
     can recover once the model is updated or the prompt is fixed.
 

@@ -24,13 +24,13 @@ from bffi_pipeline.stages import (
     export as export_stage,
 )
 from bffi_pipeline.stages import (
-    judge,
     load,
     load_finto,
     local_concept_resolver,
     m2,
     m3,
     m5,
+    m6,
     merge,
     reconcile,
     skosify_run,
@@ -2086,7 +2086,7 @@ def judge_command(
             ),
             min=1,
         ),
-    ] = judge.DEFAULT_CONCURRENCY,
+    ] = m6.DEFAULT_CONCURRENCY,
     full_rationale: Annotated[
         bool,
         typer.Option(
@@ -2154,14 +2154,14 @@ def judge_command(
         settings.llm_call_timeout_seconds = abort_budget_seconds
     if pair_budget_seconds is not None:
         settings.llm_pair_timeout_seconds = pair_budget_seconds
-    target_output = output_path or (settings.data_dir / judge.DECISIONS_FILENAME)
+    target_output = output_path or (settings.data_dir / m6.DECISIONS_FILENAME)
 
-    def _on_progress(snapshot: judge.JudgeBatchProgress) -> None:
+    def _on_progress(snapshot: m6.JudgeBatchProgress) -> None:
         typer.echo(snapshot.render())
 
     if provenance:
         with prov_writer.ProvenanceWriter(provenance_path) as writer:
-            result = judge.judge_batch(
+            result = m6.judge_batch(
                 candidates_path,
                 target_output,
                 bffi_corpus_dir=bffi_corpus_dir,
@@ -2174,7 +2174,7 @@ def judge_command(
                 full_rationale=full_rationale,
             )
     else:
-        result = judge.judge_batch(
+        result = m6.judge_batch(
             candidates_path,
             target_output,
             bffi_corpus_dir=bffi_corpus_dir,
