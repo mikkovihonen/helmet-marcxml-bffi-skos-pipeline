@@ -160,7 +160,11 @@ def _dispatch_m5(*, force: bool) -> None:
     # share the parent's manifest (no ``started_at`` clobber, no
     # premature ``status=completed`` atexit) while still emitting m5
     # events into the shared sidecar.
-    cmd = [sys.executable, "-m", "bffi_pipeline.cli", "embed"]
+    # P-38 Phase C-2: subprocess entry point switched from
+    # `bffi-pipeline embed` (now-deleted CLI command) to a direct
+    # module invocation. Same env-var contract (BFFI_RUN_UUID +
+    # BFFI_DATA_DIR + BFFI_RUN_AS_CHILD); same tuning defaults.
+    cmd = [sys.executable, "-m", "bffi_pipeline.stages.m5"]
     if force:
         cmd.append("--force")
     env = {

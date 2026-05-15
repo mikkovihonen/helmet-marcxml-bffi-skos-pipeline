@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import atexit as _atexit
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Final
 
 if TYPE_CHECKING:
     from bffi_pipeline.run_manifest import DiscoveredRun
@@ -173,6 +174,59 @@ runs_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(runs_app, name="runs")
+
+
+# P-38 Phase C-2: per-stage canonical-chain commands are no longer
+# part of the operator-facing CLI surface. The routine operator path
+# for any stage is ``bffi-pipeline run --from-stage <stage>
+# --force-stages <stage>`` — see ``docs/runbook.md``. The functions
+# below stay defined (without an ``@app.command(...)`` decorator) as
+# plain Python functions so ``bffi_pipeline.runner`` can still call
+# them; only the typer registration was removed.
+#
+# For one release we register hidden stubs at the old command names so
+# operators running the deleted invocation get a clear migration
+# message instead of typer's default "No such command" error. The
+# stubs print to stderr and exit with code 2 so shell drivers fail
+# loudly. ``hidden=True`` keeps them out of ``--help``.
+
+
+def _make_removed_command_stub(deleted_name: str, runner_stage: str) -> Callable[[], None]:
+    """Return a typer-compatible callback that prints a migration message
+    and exits non-zero. ``deleted_name`` is the command operators typed;
+    ``runner_stage`` is the value they should pass to ``--from-stage`` /
+    ``--force-stages`` on ``bffi-pipeline run``.
+    """
+
+    def _stub() -> None:
+        typer.echo(
+            f"Error: 'bffi-pipeline {deleted_name}' has been removed "
+            f"(P-38 Phase C-2). Use 'bffi-pipeline run --from-stage "
+            f"{runner_stage} --force-stages {runner_stage}' instead. "
+            f"See docs/runbook.md.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    _stub.__doc__ = f"[deleted, use 'bffi-pipeline run --from-stage {runner_stage}']"
+    return _stub
+
+
+_REMOVED_PER_STAGE_COMMANDS: Final[dict[str, str]] = {
+    "marc-to-bf": "m2",
+    "bf-to-bffi": "m3",
+    "embed": "m5",
+    "judge": "m6",
+    "merge": "m8",
+    "reconcile": "m9",
+    "skosify": "skosify",
+    "load": "load",
+    "export": "export",
+}
+for _deleted_name, _runner_stage in _REMOVED_PER_STAGE_COMMANDS.items():
+    app.command(_deleted_name, hidden=True)(
+        _make_removed_command_stub(_deleted_name, _runner_stage)
+    )
 
 
 _RUNS_LIST_SORT_KEYS = ("started", "ended", "size", "run_uuid")
@@ -1133,7 +1187,6 @@ def _root() -> None:
     _init_observability(get_settings())
 
 
-@app.command("marc-to-bf")
 def marc_to_bf_command(
     input_dir: Annotated[
         Path,
@@ -1179,7 +1232,6 @@ def marc_to_bf_command(
         raise typer.Exit(code=1)
 
 
-@app.command("bf-to-bffi")
 def bf_to_bffi_command(
     bibframe_dir: Annotated[
         Path | None,
@@ -1714,7 +1766,6 @@ def run_command(
 app.command("workkey-stats")(_diagnostics_commands.workkey_stats_command)
 
 
-@app.command("embed")
 def embed_command(
     corpus_dir: Annotated[
         Path | None,
@@ -1805,7 +1856,6 @@ app.command("grow-gold")(_evaluation_commands.grow_gold_command)
 app.command("embed-stats")(_evaluation_commands.embed_stats_command)
 
 
-@app.command("judge")
 def judge_command(
     candidates_path: Annotated[
         Path | None,
@@ -2000,7 +2050,6 @@ def judge_command(
     typer.echo(result.render())
 
 
-@app.command("merge")
 def merge_command(
     decisions_path: Annotated[
         Path | None,
@@ -2102,7 +2151,6 @@ def _parse_reconcile_kinds(raw: str | None) -> frozenset[m9.AuthorityKind] | Non
     return frozenset(selected) if selected else None
 
 
-@app.command("reconcile")
 def reconcile_command(
     canonical_path: Annotated[
         Path | None,
@@ -2353,7 +2401,6 @@ def reconcile_command(
 app.command("ysa-disambiguation-report")(_diagnostics_commands.ysa_disambiguation_report_command)
 
 
-@app.command("skosify")
 def skosify_command(
     canonical_path: Annotated[
         Path | None,
@@ -2428,7 +2475,6 @@ def skosify_command(
     typer.echo(result.render())
 
 
-@app.command("load")
 def load_command(
     skosified_path: Annotated[
         Path | None,
@@ -2533,7 +2579,6 @@ def load_command(
     typer.echo(result.render())
 
 
-@app.command("export")
 def export_command(
     output_path: Annotated[
         Path | None,

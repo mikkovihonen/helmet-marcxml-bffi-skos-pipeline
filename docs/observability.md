@@ -87,7 +87,7 @@ uv run bffi-pipeline serve-metrics \
 
 One long-lived exporter. Initial glob walk attaches every existing
 sidecar; the 30 s rescan picks up new runs as they spawn. A fresh
-`bffi-pipeline marc-to-bf` invocation that creates
+`bffi-pipeline run` invocation that creates
 `runs/<new-uuid>/stage-events.jsonl` shows up in the dashboard's
 `active_run` dropdown within ~30 s — no exporter restart needed.
 

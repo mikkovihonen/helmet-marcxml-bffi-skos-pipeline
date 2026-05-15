@@ -124,7 +124,7 @@ LLM_MODEL_PRIMARY=/Users/<you>/.mlx_models/Qwen3-8B-4bit
 LLM_MODEL_FALLBACK=/Users/<you>/.mlx_models/Qwen3-32B-4bit
 ```
 
-Then any pipeline CLI call (`bffi-pipeline judge`, `bffi-pipeline reconcile`, etc.) picks up the new endpoint.
+Then any `bffi-pipeline run` invocation picks up the new endpoint (M6 / M9 read the env at stage entry). The per-stage `judge` / `reconcile` commands were removed in P-38 Phase C-2; use `bffi-pipeline run --from-stage m6 --force-stages m6` (or `m9`) to exercise a single stage against the new endpoint.
 
 ## Memory budget
 
@@ -184,7 +184,7 @@ on the 8B server is ~4.7 GB).
 
 | Setting | Value |
 |---|---|
-| `M6_CONCURRENCY` (client `bffi-pipeline judge --concurrency`) | **4** |
+| `M6_CONCURRENCY` (env var; replaced the deleted `bffi-pipeline judge --concurrency` flag in P-38 Phase C-2) | **4** |
 | `mlx_lm.server --decode-concurrency` | **4** |
 | `mlx_lm.server --prompt-concurrency` | **4** |
 | `mlx_lm.server --prompt-cache-size` | 200 |

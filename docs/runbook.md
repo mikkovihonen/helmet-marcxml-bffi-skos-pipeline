@@ -97,16 +97,11 @@ The runner mints its own UUID and prints it at startup. Stage events flow to `ru
 
 ### Bundle the output for handoff
 
-```sh
-uv run bffi-pipeline export                          # default: canonical.ttl + provenance + helmet-map + mint-failures + manifest + README, CC0
-uv run bffi-pipeline export --include-per-record     # nests bffi/*.ttl as per-record-ttls.tar.gz inside
-```
-
-Output goes to `runs/<uuid>/bffi-export-<uuid>.tar.gz`.
+`bffi-pipeline run` writes the export tarball at the end of the canonical chain (the `export` stage is on `CANONICAL_STAGES`); operators don't run a separate export step. Output goes to `runs/<uuid>/bffi-export-<uuid>.tar.gz`.
 
 ### Single-stage runs (debug / iteration)
 
-The individual stage commands (`bffi-pipeline marc-to-bf`, `bf-to-bffi`, `embed`, `judge`, `merge`, `reconcile`, `skosify`, `load`) are still available for stage-level iteration. The runner just chains them in one process with shared emitter context; their flags are unchanged. For routine runs, use `bffi-pipeline run`.
+Use `bffi-pipeline run --from-stage <stage> --force-stages <stage>` to re-run an individual stage. The nine per-stage CLI commands (`marc-to-bf`, `bf-to-bffi`, `embed`, `judge`, `merge`, `reconcile`, `skosify`, `load`, `export`) were removed in P-38 Phase C-2; operators who try the old invocations get a discoverable migration message pointing at the new path. Tuning knobs that used to live on per-stage flags (e.g. `judge --concurrency`) are now namespaced env vars (`M6_CONCURRENCY`, `M9_CONCURRENCY`, etc.) — see `.env.example` and `docs/local-inference.md`.
 
 ---
 

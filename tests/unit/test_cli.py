@@ -7,7 +7,7 @@ non-trivial enough to warrant their own assertions.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -120,6 +120,24 @@ def _make_error_row(filename: str = "1.xml") -> ConversionErrorRow:
     )
 
 
+#
+# Post-P-38-Phase-C-2 note: ``marc-to-bf`` / ``bf-to-bffi`` are no
+# longer registered typer commands (only hidden migration-stub commands
+# survive at those names). The underlying Python functions stay defined
+# in ``cli`` so ``bffi_pipeline.runner`` can call them; the
+# partial-failure exit policy is tested by calling those functions
+# directly and catching the ``typer.Exit`` they raise.
+
+
+def _exit_code_of(func: Callable[..., None], *args: object, **kwargs: object) -> int:
+    """Call ``func`` and return the ``typer.Exit`` code it raises (or 0)."""
+    try:
+        func(*args, **kwargs)
+    except typer.Exit as exc:
+        return exc.exit_code
+    return 0
+
+
 def test_marc_to_bf_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     """Some succeed, some fail → exit 0; failures stay observable via
     ``summary.render()`` + ``_errors.jsonl``."""
@@ -130,8 +148,7 @@ def test_marc_to_bf_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_
     monkeypatch.setattr(cli_module.m2, "run", lambda *a, **kw: summary)
     input_dir = tmp_path / "in"
     input_dir.mkdir()
-    result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
-    assert result.exit_code == 0, result.output
+    assert _exit_code_of(cli_module.marc_to_bf_command, input_dir) == 0
 
 
 def test_marc_to_bf_exits_one_on_total_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -144,8 +161,7 @@ def test_marc_to_bf_exits_one_on_total_failure(monkeypatch: MonkeyPatch, tmp_pat
     monkeypatch.setattr(cli_module.m2, "run", lambda *a, **kw: summary)
     input_dir = tmp_path / "in"
     input_dir.mkdir()
-    result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
-    assert result.exit_code == 1, result.output
+    assert _exit_code_of(cli_module.marc_to_bf_command, input_dir) == 1
 
 
 def test_marc_to_bf_exits_zero_when_only_idempotent_skips(
@@ -160,8 +176,7 @@ def test_marc_to_bf_exits_zero_when_only_idempotent_skips(
     monkeypatch.setattr(cli_module.m2, "run", lambda *a, **kw: summary)
     input_dir = tmp_path / "in"
     input_dir.mkdir()
-    result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
-    assert result.exit_code == 0, result.output
+    assert _exit_code_of(cli_module.marc_to_bf_command, input_dir) == 0
 
 
 def test_bf_to_bffi_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -173,8 +188,7 @@ def test_bf_to_bffi_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_
     monkeypatch.setattr(cli_module.m3, "run", lambda *a, **kw: summary)
     bibframe_dir = tmp_path / "bibframe"
     bibframe_dir.mkdir()
-    result = CliRunner().invoke(app, ["bf-to-bffi", "--bibframe-dir", str(bibframe_dir)])
-    assert result.exit_code == 0, result.output
+    assert _exit_code_of(cli_module.bf_to_bffi_command, bibframe_dir=bibframe_dir) == 0
 
 
 def test_bf_to_bffi_exits_one_on_total_failure(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -182,5 +196,15 @@ def test_bf_to_bffi_exits_one_on_total_failure(monkeypatch: MonkeyPatch, tmp_pat
     monkeypatch.setattr(cli_module.m3, "run", lambda *a, **kw: summary)
     bibframe_dir = tmp_path / "bibframe"
     bibframe_dir.mkdir()
-    result = CliRunner().invoke(app, ["bf-to-bffi", "--bibframe-dir", str(bibframe_dir)])
-    assert result.exit_code == 1, result.output
+    assert _exit_code_of(cli_module.bf_to_bffi_command, bibframe_dir=bibframe_dir) == 1
+
+
+def test_removed_marc_to_bf_command_prints_migration_message(tmp_path: Path) -> None:
+    """P-38 Phase C-2: the hidden stub at ``marc-to-bf`` exits with
+    code 2 and prints a migration hint pointing at ``bffi-pipeline run
+    --from-stage m2``. Operators running the deleted invocation get a
+    discoverable failure instead of typer's default "no such command"."""
+    result = CliRunner().invoke(app, ["marc-to-bf"])
+    assert result.exit_code == 2
+    assert "removed" in result.output
+    assert "run --from-stage m2" in result.output
