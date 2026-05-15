@@ -9,7 +9,7 @@ to confirm no in-flight work has reshaped the surface. Particular attention to: 
 **Phase commits**:
 
 - Phase A (per-stage package relocation, Layer 1): shipped 2026-05-15 across `a05ed20` → `2fef135` (10 commits inside the layer: m2, m3, m5, m6, m8, m9, m10 relocations + observability extraction + release/diagnostics extraction + plan-doc sweep).
-- Phase B (internal splits of M9 / M8 / M6 / M3, Layer 2): M3 split shipped at `3cfcb04`. M6 / M8 / M9 splits deferred — see the "Status 2026-05-15" note under the Phase B heading. Deferral commit `a454d31`.
+- Phase B (internal splits of M9 / M8 / M6 / M3, Layer 2): shipped 2026-05-15 across four commits. M3 split at `3cfcb04` (sanitize.py + language_detect.py + contributions.py); M6 split at `07088be` (prompts.py + validation.py + cache.py + clients.py); M8 split at `3f4ea43` (union_find.py + contribution_variants.py); M9 split at `44dfe03` (authority_clients.py + picker_cache.py). Deeper extractions deferred per the "Status 2026-05-15" note under the Phase B heading.
 - Phase C (CLI shrink + flag-to-env-var conversion, Layer 3): **deferred to a follow-up plan.** The plan's Phase C deliberately deletes nine CLI commands and converts their flags to env vars — that's a real operator-facing breakage that wants its own sequenced PR with the Phase C-0 snapshot test + Phase C-1 audit doc landing first as a gate. Doing it in the same session as Phase A + B carries too much risk of an incomplete migration. The plan body's Phase C section stays as the spec for the follow-up plan; nothing in it needs revision.
 
 **Owner**: operator (Mikko) + claude solo-then-commit. All three phases are mechanically verifiable — public API of each stage's `runner.py` is preserved exactly through Phases A and B (no signature changes; `__init__.py` re-exports keep the import contract); Phase C is a deliberate CLI breakage with a one-release migration window via hidden error stubs.
@@ -136,7 +136,16 @@ Splits each of M9 reconcile, M8 merge, M6 judge, M3 bf_to_bffi into cohesive sub
 
 **Conditional:** **M3 split waits for P-36 to land.** P-36 deletes ~120 lines of `bf_to_bffi.py` post-process helpers; splitting before P-36 forces redoing the M3 split. If P-36 hasn't landed when Phase B starts, ship M9 + M8 + M6 splits and defer M3 to a follow-up.
 
-**Status 2026-05-15:** M3 split shipped (the smallest of the four, post-P-36). M6 / M8 / M9 splits **deferred to a follow-up plan** — the M3 split established the safe pattern (move blocks to new modules, re-import in runner.py with `# noqa: F401` to preserve the `m<N>.runner._private` import path tests rely on), but executing it across M6 (1750 lines), M8 (1840 lines), and M9 (2986 lines) inside a single session ran into stream-editing damage and schema-cycle complications too easily. Each remaining stage's split is its own design call that benefits from a dedicated session. P-38's PR ships with M3 split + the Phase A relocations; the M6 / M8 / M9 splits become P-N0+ follow-ups.
+**Status 2026-05-15:** All four stage splits shipped — M3 first (the safe pattern), then M6 / M8 / M9. Each split lifts cohesive sub-concerns out of `m<N>/runner.py` into sibling modules under the same package, with public surface preserved bit-identically via `# noqa: F401` re-imports in runner.py so tests reaching for private symbols through `m<N>.runner._private` keep working without changes.
+
+Final shapes per stage:
+
+- **M3** (`bf_to_bffi`, was 1104 lines): `runner.py` + `sanitize.py` (URI / date scrubbing) + `language_detect.py` (`prefLabel` retagging) + `contributions.py` (245$c cascade emitter).
+- **M6** (`judge`, was 1754 lines → runner now 1259): `runner.py` + `prompts.py` (loading / hashing / section parsing) + `validation.py` (Pydantic schemas + Boundary-4 validators + `STUB_PHRASES` / `UNCERTAIN_MAX_CONFIDENCE` / `MIN_RATIONALE_CHARS`) + `cache.py` (SQLite judge-cache) + `clients.py` (LangChain chain builder + retry-error classifiers + byte-stable `_M6_PROMPT_PREFIX_*` constants).
+- **M8** (`merge`, was 1842 lines): `runner.py` + `union_find.py` (path-compressed disjoint-set with lex-smallest-root union) + `contribution_variants.py` (F2 `skos:altLabel` binding pass). Other prospective splits (the ~470-line BFFI graph reader, the canonical-Turtle emitter, `_load_work_records_from_corpus`) sit on top of dataclasses `apply_merge` weaves together; extracting them needs splitting the dataclasses too — left for follow-up.
+- **M9** (`reconcile`, was 2986 lines → runner now 2628): `runner.py` + `authority_clients.py` (Finto / VIAF HTTP clients + `AuthorityClient` Protocol) + `picker_cache.py` (P-10 Phase B persistent picker-decision cache). Picker schema + picker-pool orchestration sit too close to `apply_reconciliation`'s shared state for safe in-session extraction; left for follow-up.
+
+Each per-file-ignores entry in `pyproject.toml` got updated as files moved.
 
 - [ ] **M9 (`reconcile.py`, 2 986 lines) split.** Single commit moving the body into sub-modules within `m9/`. Final shape:
 
