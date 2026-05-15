@@ -40,27 +40,21 @@ cheap and never opens a network socket.
 
 from __future__ import annotations
 
-import hashlib
 import json as _json
 import re
-import sqlite3
-import threading
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from functools import lru_cache
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ValidationError
 from rdflib import Graph, URIRef
 from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.llm_json_mode import json_mode_instruction
 from bffi_pipeline.observability.events import emit_if_active
 from bffi_pipeline.observability.probes import emit_health_probes, probe_mlx_lm
 from bffi_pipeline.observability.watchdog import emit_watchdog_event
@@ -68,20 +62,21 @@ from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.writer import ProvenanceWriter
 
 # --- Constants ------------------------------------------------------------
-
-#: Two-shot prompt source. Hashed at startup; the hash is logged with every
-#: provenance record so a future audit can reproduce or regress a decision.
-PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[4] / "prompts" / "judge_v1.txt"
-#: Fast-mode prompt — rationale required only for ``uncertain`` or
-#: ``confidence < FALLBACK_CONFIDENCE_THRESHOLD`` decisions. Used when
-#: ``judge_pair`` is called with ``full_rationale=False`` to save the
-#: rationale-generation tokens on confident clear-cut calls.
-PROMPT_PATH_FAST: Final[Path] = (
-    Path(__file__).resolve().parents[4] / "prompts" / "judge_v1_fast.txt"
+# P-38 Phase B: prompt loading + section parsing + hashing moved to
+# m6/prompts.py. Re-imported here so callsites + tests reaching for
+# the private symbols via .runner keep working bit-identically.
+from bffi_pipeline.stages.m6.prompts import (  # noqa: F401
+    _PROMPT_SECTION_RE,
+    PROMPT_PATH,
+    PROMPT_PATH_FAST,
+    _parse_prompt_sections,
+    _parse_prompt_sections_fast,
+    _parse_sections,
+    prompt_hash,
+    prompt_hash_fast,
+    prompt_text,
+    prompt_text_fast,
 )
-
-#: Section markers in ``judge_v1.txt`` (the file is plain text — no YAML).
-_PROMPT_SECTION_RE: Final[re.Pattern[str]] = re.compile(r"^### (\w+)\s*$", re.MULTILINE)
 
 #: Confidence cutoff below which the primary's ``same_work`` decision is
 #: re-run on the 72 B fallback. Documented in spec § 7 / docs/local-inference.md.
@@ -111,13 +106,6 @@ STAGE_AUTO_MERGE: Final[str] = "auto-merge-embedding"
 #: Plan: ``docs/plans/completed/p-03-m6-stall-watchdog.md``.
 STAGE_WATCHDOG: Final[str] = "watchdog-aborted"
 
-#: Subset of timeout-shaped exception names that the watchdog
-#: specifically counts as "the LLM took too long" — narrower than
-#: :func:`_is_connection_error` which also catches network resets etc.
-_TIMEOUT_EXCEPTION_NAMES: Final[frozenset[str]] = frozenset(
-    {"ReadTimeout", "ConnectTimeout", "APITimeoutError", "Timeout"}
-)
-
 #: Stub phrases the rationale must NOT contain. Stored already lower-cased.
 STUB_PHRASES: Final[tuple[str, ...]] = (
     "i don't know",
@@ -134,203 +122,20 @@ UNCERTAIN_MAX_CONFIDENCE: Final[float] = 0.7
 #: punctuation-only payloads from passing as substantive reasoning.
 MIN_RATIONALE_CHARS: Final[int] = 20
 
-#: Default cache filename under ``BFFI_DATA_DIR``.
-CACHE_FILENAME: Final[str] = "judge-cache.sqlite"
-
 #: LoC URI prefixes used to short-code language and content-type values
 #: (matches the bffi:language / bffi:content URIs M3 emits).
 _LANG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
 _CONTENT_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/contentTypes/"
 
-# --- Schemas --------------------------------------------------------------
-
-
-class WorkRecord(BaseModel):
-    """One side of a candidate pair, populated from the BFFI Work + BIBFRAME agent."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    record_id: str
-    creator: str | None = None
-    creator_uri: str | None = None
-    preferred_title: str | None = None
-    variant_titles: list[str] = Field(default_factory=list)
-    original_language: str | None = None
-    expression_language: str | None = None
-    content_type: str | None = None
-    date_of_origin: str | None = None
-    publication_year: str | None = None
-    notes: list[str] = Field(default_factory=list)
-
-
-class WorkMatchDecision(BaseModel):
-    """Structured judgment. Per spec § 7 the model must fill exactly this schema."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    decision: Literal["same_work", "different_work", "uncertain"]
-    confidence: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="0.0-1.0. Use <0.7 when uncertain; reserve >0.9 for clear cases.",
-    )
-    rationale: str = Field(
-        min_length=20,
-        description=(
-            "2-4 sentences citing specific field values from BOTH records. "
-            "Do not introduce facts not present in the inputs."
-        ),
-    )
-    matching_fields: list[str] = Field(default_factory=list)
-    diverging_fields: list[str] = Field(default_factory=list)
-
-    # --- Boundary 4 semantic validators (spec § 10 + § 7) -----------------
-
-    @model_validator(mode="after")
-    def _coherent_uncertain(self) -> WorkMatchDecision:
-        if self.decision == "uncertain" and self.confidence > UNCERTAIN_MAX_CONFIDENCE:
-            raise ValueError(
-                f"decision='uncertain' is incoherent with confidence > {UNCERTAIN_MAX_CONFIDENCE}"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def _same_work_needs_evidence(self) -> WorkMatchDecision:
-        if self.decision == "same_work" and not self.matching_fields:
-            raise ValueError("decision='same_work' requires at least one matching_field")
-        return self
-
-    @model_validator(mode="after")
-    def _rationale_is_substantive(self) -> WorkMatchDecision:
-        text = self.rationale.strip()
-        if len(text) < MIN_RATIONALE_CHARS:
-            raise ValueError(f"rationale shorter than {MIN_RATIONALE_CHARS} characters")
-        lowered = text.lower()
-        for phrase in STUB_PHRASES:
-            if re.search(rf"\b{re.escape(phrase)}\b", lowered):
-                raise ValueError(f"rationale contains stub phrase: {phrase!r}")
-        return self
-
-
-class WorkMatchDecisionFast(BaseModel):
-    """Fast-mode structured judgment with conditional rationale.
-
-    Boundary-4 contract is preserved exactly where it matters
-    (``uncertain`` or ``confidence < FALLBACK_CONFIDENCE_THRESHOLD``);
-    high-confidence ``same_work`` / ``different_work`` decisions may
-    set ``rationale=None`` to save the rationale-generation tokens.
-    Converted to :class:`WorkMatchDecision` at the boundary —
-    :func:`_synthesize_fast_rationale` fills the strict schema's
-    rationale from the structured fields so downstream serialisation,
-    caching, and provenance writers see one unified shape.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    decision: Literal["same_work", "different_work", "uncertain"]
-    confidence: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="0.0-1.0. Use <0.7 when uncertain; reserve >0.9 for clear cases.",
-    )
-    rationale: str | None = Field(
-        default=None,
-        description=(
-            "Set to null when decision is 'same_work'/'different_work' AND "
-            "confidence ≥ 0.85. Required (2-4 sentences citing field values) "
-            "when decision is 'uncertain' or confidence < 0.85."
-        ),
-    )
-    matching_fields: list[str] = Field(default_factory=list)
-    diverging_fields: list[str] = Field(default_factory=list)
-
-    # --- Boundary 4 semantic validators (spec § 10 + § 7) -----------------
-
-    @model_validator(mode="after")
-    def _coherent_uncertain(self) -> WorkMatchDecisionFast:
-        if self.decision == "uncertain" and self.confidence > UNCERTAIN_MAX_CONFIDENCE:
-            raise ValueError(
-                f"decision='uncertain' is incoherent with confidence > {UNCERTAIN_MAX_CONFIDENCE}"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def _same_work_needs_evidence(self) -> WorkMatchDecisionFast:
-        if self.decision == "same_work" and not self.matching_fields:
-            raise ValueError("decision='same_work' requires at least one matching_field")
-        return self
-
-    @model_validator(mode="after")
-    def _rationale_required_when_low_confidence(self) -> WorkMatchDecisionFast:
-        needs_rationale = (
-            self.decision == "uncertain" or self.confidence < FALLBACK_CONFIDENCE_THRESHOLD
-        )
-        text = (self.rationale or "").strip()
-        if needs_rationale:
-            if len(text) < MIN_RATIONALE_CHARS:
-                raise ValueError(
-                    f"rationale ≥ {MIN_RATIONALE_CHARS} chars required for 'uncertain' "
-                    f"or confidence < {FALLBACK_CONFIDENCE_THRESHOLD} decisions"
-                )
-            lowered = text.lower()
-            for phrase in STUB_PHRASES:
-                if re.search(rf"\b{re.escape(phrase)}\b", lowered):
-                    raise ValueError(f"rationale contains stub phrase: {phrase!r}")
-        elif text:
-            # Optional rationale supplied on a high-conf decision —
-            # still guard against stub phrases so a "n/a" placeholder
-            # can't sneak through.
-            lowered = text.lower()
-            for phrase in STUB_PHRASES:
-                if re.search(rf"\b{re.escape(phrase)}\b", lowered):
-                    raise ValueError(f"rationale contains stub phrase: {phrase!r}")
-        return self
-
-    def to_strict(self) -> WorkMatchDecision:
-        """Convert to the strict :class:`WorkMatchDecision`.
-
-        Synthesises a placeholder rationale from the structured fields
-        when the fast-mode response left it null, so downstream code
-        (provenance writer, JSONL row, cache) sees one unified shape
-        regardless of mode.
-        """
-        rationale = (self.rationale or "").strip()
-        if not rationale:
-            rationale = _synthesize_fast_rationale(
-                decision=self.decision,
-                confidence=self.confidence,
-                matching_fields=self.matching_fields,
-                diverging_fields=self.diverging_fields,
-            )
-        return WorkMatchDecision(
-            decision=self.decision,
-            confidence=self.confidence,
-            rationale=rationale,
-            matching_fields=list(self.matching_fields),
-            diverging_fields=list(self.diverging_fields),
-        )
-
-
-def _synthesize_fast_rationale(
-    *,
-    decision: str,
-    confidence: float,
-    matching_fields: list[str],
-    diverging_fields: list[str],
-) -> str:
-    """Build a one-sentence rationale from structured fields for
-    fast-mode high-confidence decisions that omitted natural-language
-    reasoning. Passes Boundary-4 (≥ MIN_RATIONALE_CHARS chars, no
-    stub phrases) so it round-trips through the strict schema.
-    """
-    matching = ", ".join(matching_fields) if matching_fields else "(none cited)"
-    diverging = ", ".join(diverging_fields) if diverging_fields else "(none cited)"
-    return (
-        f"Fast-mode decision: {decision} at confidence {confidence:.2f}. "
-        f"Matching fields: {matching}. Diverging fields: {diverging}. "
-        "Rationale omitted by --no-full-rationale; structured fields are the evidence."
-    )
-
+# P-38 Phase B: Pydantic verdict schemas + Boundary-4 validators moved
+# to m6/validation.py. Re-imported here so callsites + tests reaching
+# for them via .runner keep working bit-identically.
+from bffi_pipeline.stages.m6.validation import (  # noqa: E402, F401
+    WorkMatchDecision,
+    WorkMatchDecisionFast,
+    WorkRecord,
+    _synthesize_fast_rationale,
+)
 
 # --- Cascade record -------------------------------------------------------
 
@@ -368,328 +173,28 @@ class JudgeOutcome:
         return any(s.stage == STAGE_SECOND_OPINION for s in self.steps)
 
 
-# --- Prompt loading + hashing ---------------------------------------------
-
-
-@lru_cache(maxsize=1)
-def prompt_text() -> str:
-    """Return the raw ``prompts/judge_v1.txt`` contents."""
-    if not PROMPT_PATH.is_file():
-        raise FileNotFoundError(f"Judge prompt not found at {PROMPT_PATH!s}.")
-    return PROMPT_PATH.read_text(encoding="utf-8")
-
-
-@lru_cache(maxsize=1)
-def prompt_text_fast() -> str:
-    """Return the raw ``prompts/judge_v1_fast.txt`` contents."""
-    if not PROMPT_PATH_FAST.is_file():
-        raise FileNotFoundError(f"Fast judge prompt not found at {PROMPT_PATH_FAST!s}.")
-    return PROMPT_PATH_FAST.read_text(encoding="utf-8")
-
-
-@lru_cache(maxsize=1)
-def prompt_hash() -> str:
-    """SHA-256 of :func:`prompt_text`. Logged with every provenance record."""
-    return "sha256:" + hashlib.sha256(prompt_text().encode("utf-8")).hexdigest()[:16]
-
-
-@lru_cache(maxsize=1)
-def prompt_hash_fast() -> str:
-    """SHA-256 of :func:`prompt_text_fast`. Logged separately so a re-run
-    that switches modes invalidates the cache automatically (different
-    prompt → different ``cache_key`` per :func:`_cache_key`)."""
-    return "sha256:" + hashlib.sha256(prompt_text_fast().encode("utf-8")).hexdigest()[:16]
-
-
-def _parse_sections(raw: str, source_path: Path) -> dict[str, str]:
-    """Shared section-splitter for SYSTEM / EXAMPLES / USER blocks."""
-    sections: dict[str, str] = {}
-    matches = list(_PROMPT_SECTION_RE.finditer(raw))
-    if not matches:
-        raise ValueError(f"No '### SECTION' markers found in {source_path!s}.")
-    for i, m in enumerate(matches):
-        name = m.group(1)
-        start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
-        sections[name] = raw[start:end].strip()
-    for required in ("SYSTEM", "EXAMPLES", "USER"):
-        if required not in sections:
-            raise ValueError(f"{source_path!s} is missing required '### {required}' section.")
-    return sections
-
-
-@lru_cache(maxsize=1)
-def _parse_prompt_sections() -> dict[str, str]:
-    """Split ``judge_v1.txt`` into ``SYSTEM`` / ``EXAMPLES`` / ``USER`` blocks."""
-    return _parse_sections(prompt_text(), PROMPT_PATH)
-
-
-@lru_cache(maxsize=1)
-def _parse_prompt_sections_fast() -> dict[str, str]:
-    """Split ``judge_v1_fast.txt`` into ``SYSTEM`` / ``EXAMPLES`` / ``USER`` blocks."""
-    return _parse_sections(prompt_text_fast(), PROMPT_PATH_FAST)
-
-
-# --- Cached M6 system-prompt prefix (P-02 Phase B) ------------------------
-#
-# The system-message string fed to every M6 LLM call is identical for a
-# given schema across all pairs in a run — only the user-message tail
-# varies. Computing the system prefix once at module-import time keeps it
-# byte-stable, which is what mlx-lm's server-side prefix cache keys on.
-# Drift in the prompt files or the schema definition silently invalidates
-# every cache slot; ``tests/unit/test_judge.py``'s
-# ``test_m6_prompt_prefix_is_byte_stable`` is the regression gate.
-
-
-def _build_m6_prompt_prefix(sections: dict[str, str], schema: type[BaseModel]) -> str:
-    prefix = (
-        sections["SYSTEM"] + "\n\n" + sections["EXAMPLES"] + "\n\n" + json_mode_instruction(schema)
-    )
-    # The user-message template is appended downstream as a separate
-    # ChatMessage. A trailing newline here keeps any future suffix
-    # concatenation from accidentally splicing across the last
-    # schema-instruction token, which mlx-lm tokenises into a clean
-    # boundary every time.
-    if not prefix.endswith("\n"):
-        prefix = prefix + "\n"
-    return prefix
-
-
-_M6_PROMPT_PREFIX_FULL: Final[str] = _build_m6_prompt_prefix(
-    _parse_prompt_sections(), WorkMatchDecision
-)
-_M6_PROMPT_PREFIX_FAST: Final[str] = _build_m6_prompt_prefix(
-    _parse_prompt_sections_fast(), WorkMatchDecisionFast
+# P-38 Phase B: SQLite cache + cache-key helpers moved to m6/cache.py.
+# Re-imported here so callsites + tests reaching for them via .runner
+# keep working bit-identically.
+from bffi_pipeline.stages.m6.cache import (  # noqa: E402, F401
+    CACHE_FILENAME,
+    JudgeCache,
+    _cache_key,
+    _canonicalise_record,
+    default_cache_path,
 )
 
-
-# --- Custom SQLite cache (post-validation only) ---------------------------
-
-
-def _canonicalise_record(record: WorkRecord) -> str:
-    """Stable JSON dump of a record — sorted keys, no nones, ASCII-safe."""
-    return record.model_dump_json(exclude_none=True, by_alias=False)
-
-
-def _cache_key(
-    *,
-    model_name: str,
-    prompt_hash_value: str,
-    record_a: WorkRecord,
-    record_b: WorkRecord,
-) -> str:
-    payload = "|".join(
-        (
-            model_name,
-            prompt_hash_value,
-            _canonicalise_record(record_a),
-            _canonicalise_record(record_b),
-        )
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-class JudgeCache:
-    """Tiny SQLite-backed cache for validated :class:`WorkMatchDecision`\\ s.
-
-    Writes happen *only* after a response has passed structural and
-    semantic validation — see :func:`judge_pair`. Validation-failed
-    responses are deliberately not cached so a re-run can recover
-    once the model is updated or the prompt is fixed.
-    """
-
-    _SCHEMA = """
-    CREATE TABLE IF NOT EXISTS judge_cache (
-      cache_key   TEXT PRIMARY KEY,
-      model_name  TEXT NOT NULL,
-      prompt_hash TEXT NOT NULL,
-      decision    TEXT NOT NULL,
-      created_at  TEXT NOT NULL
-    )
-    """
-
-    def __init__(self, path: Path | str):
-        self._path = path
-        # check_same_thread=False permits cross-thread use of the connection,
-        # but the sqlite3 module does NOT serialise concurrent statement
-        # execution on a shared connection (an unlocked concurrent
-        # ``execute()`` raises ``sqlite3.InterfaceError: bad parameter or
-        # other API misuse``, surfaced during the M6_CONCURRENCY=4
-        # production-scale run). ``_lock`` serialises every ``execute()`` /
-        # ``commit()``. Held only for the SQLite call itself, so contention
-        # is negligible compared to the seconds-long LLM call each thread
-        # spends elsewhere.
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
-        with self._lock:
-            self._conn.execute(self._SCHEMA)
-            self._conn.commit()
-
-    def __enter__(self) -> JudgeCache:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Close the underlying SQLite connection (idempotent)."""
-        with suppress(sqlite3.ProgrammingError), self._lock:
-            self._conn.close()
-
-    def get(self, key: str) -> WorkMatchDecision | None:
-        """Return the cached decision for ``key`` or ``None`` if not present."""
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT decision FROM judge_cache WHERE cache_key = ?",
-                (key,),
-            ).fetchone()
-        if row is None:
-            return None
-        return WorkMatchDecision.model_validate_json(row[0])
-
-    def set(
-        self,
-        key: str,
-        decision: WorkMatchDecision,
-        *,
-        model_name: str,
-        prompt_hash_value: str,
-    ) -> None:
-        """Insert-or-replace the cached decision for ``key``.
-
-        ``model_name`` and ``prompt_hash_value`` are committed alongside
-        the decision for audit; never silently re-cache a decision under
-        a different model or prompt.
-        """
-        with self._lock:
-            self._conn.execute(
-                "INSERT OR REPLACE INTO judge_cache "
-                "(cache_key, model_name, prompt_hash, decision, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (
-                    key,
-                    model_name,
-                    prompt_hash_value,
-                    decision.model_dump_json(),
-                    datetime.now(UTC).isoformat(),
-                ),
-            )
-            self._conn.commit()
-
-
-def default_cache_path() -> Path:
-    """Return ``<BFFI_DATA_DIR>/judge-cache.sqlite`` from the live Settings."""
-    return get_settings().data_dir / CACHE_FILENAME
-
-
-# --- LangChain chain construction (deferred) ------------------------------
-
-
-def _is_connection_error(exc: BaseException) -> bool:
-    """Treat any low-level network or timeout error as a retry-worthy event.
-
-    LangChain wraps OpenAI client errors; the underlying httpx ``ConnectError``,
-    ``ReadTimeout`` and ``RemoteProtocolError`` should all backoff. We
-    detect by class-name suffix so this stays robust if LangChain changes
-    the wrapping path.
-    """
-    name = type(exc).__name__
-    if name in {
-        "ConnectError",
-        "ConnectTimeout",
-        "ReadTimeout",
-        "ReadError",
-        "RemoteProtocolError",
-        "APIConnectionError",
-        "APITimeoutError",
-        "Timeout",
-    }:
-        return True
-    # Walk the cause chain — LangChain wraps original errors in OutputParserException etc.
-    cause = exc.__cause__ or exc.__context__
-    if cause is not None and cause is not exc:
-        return _is_connection_error(cause)
-    return False
-
-
-def _is_timeout_error(exc: BaseException) -> bool:
-    """Narrower variant of :func:`_is_connection_error` for the watchdog.
-
-    Returns True only for exceptions where the LLM call hit a
-    wall-time ceiling — not for generic network resets / RPC errors.
-    The watchdog emits ``timeout`` / ``give_up`` events on this
-    subset; the cascade's retry stack covers both.
-    """
-    name = type(exc).__name__
-    if name in _TIMEOUT_EXCEPTION_NAMES:
-        return True
-    cause = exc.__cause__ or exc.__context__
-    if cause is not None and cause is not exc:
-        return _is_timeout_error(cause)
-    return False
-
-
-def _build_chain(
-    *,
-    model_name: str,
-    base_url: str,
-    api_key: str,
-    temperature: float = 0.0,
-    seed: int = 42,
-    full_rationale: bool = True,
-    timeout: int | None = None,
-) -> Any:
-    """Compose ``ChatOpenAI(...).with_structured_output(schema)``.
-
-    ``full_rationale=True`` (default) uses the strict
-    :class:`WorkMatchDecision` schema + the original prompt — every
-    decision returns a substantive ≥ MIN_RATIONALE_CHARS rationale.
-
-    ``full_rationale=False`` swaps in :class:`WorkMatchDecisionFast`
-    and ``judge_v1_fast.txt``. The model is instructed (and
-    structured-output schema permits) to set ``rationale=null`` for
-    confident ``same_work``/``different_work`` decisions; rationale
-    stays required for ``uncertain`` or ``confidence < 0.85``. Saves
-    ~50-200 tokens per high-conf pair at the cost of a thinner
-    natural-language audit trail.
-    """
-    from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
-    from pydantic import SecretStr
-
-    sections = _parse_prompt_sections() if full_rationale else _parse_prompt_sections_fast()
-    schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
-    # System prefix is the module-level byte-stable constant (P-02 Phase B);
-    # pinning the bytes preserves the prefix-cache hit rate on mlx-lm.
-    # ``method="json_mode"`` only sets ``response_format={"type":"json_object"}``
-    # — LangChain does not auto-inject a schema description into the prompt.
-    # Ollama tolerates that because ``format=json`` is constrained decoding;
-    # mlx-lm 0.31 has no constrained-decoding fallback and otherwise copies
-    # the few-shot prose. The instruction inside the prefix makes the JSON
-    # contract explicit on both backends. P-02 A5.
-    prefix = _M6_PROMPT_PREFIX_FULL if full_rationale else _M6_PROMPT_PREFIX_FAST
-    template = ChatPromptTemplate.from_messages(
-        [
-            ("system", prefix),
-            ("user", sections["USER"]),
-        ]
-    )
-    llm_kwargs: dict[str, Any] = {
-        "base_url": base_url,
-        "api_key": SecretStr(api_key),
-        "model": model_name,
-        "temperature": temperature,
-        "seed": seed,
-    }
-    if timeout is not None:
-        # ChatOpenAI propagates ``timeout`` to the underlying httpx client.
-        # httpx raises ``ReadTimeout`` when the server doesn't produce a
-        # complete response within the budget — caught by the watchdog
-        # path in :func:`judge_pair`.
-        llm_kwargs["timeout"] = timeout
-    llm = ChatOpenAI(**llm_kwargs)
-    return template | llm.with_structured_output(schema, method="json_mode")
-
+# P-38 Phase B: LangChain chain construction + retry-error classifiers
+# moved to m6/clients.py.
+from bffi_pipeline.stages.m6.clients import (  # noqa: E402, F401
+    _M6_PROMPT_PREFIX_FAST,
+    _M6_PROMPT_PREFIX_FULL,
+    _TIMEOUT_EXCEPTION_NAMES,
+    _build_chain,
+    _build_m6_prompt_prefix,
+    _is_connection_error,
+    _is_timeout_error,
+)
 
 # Type alias for the injectable chain — anything with .invoke({record_a, record_b, sim}).
 ChainLike = Any

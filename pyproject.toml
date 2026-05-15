@@ -75,6 +75,7 @@ ignore = ["PLR0913"]
 # client are deferred to function bodies on purpose so the rest of the CLI
 # does not pay the multi-second import cost.
 "src/bffi_pipeline/stages/m5/runner.py" = ["PLC0415"]
+"src/bffi_pipeline/stages/m6/clients.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m6/runner.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m3/contributions.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m3/language_detect.py" = ["PLC0415"]
