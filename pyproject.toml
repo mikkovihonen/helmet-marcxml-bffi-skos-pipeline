@@ -76,6 +76,8 @@ ignore = ["PLR0913"]
 # does not pay the multi-second import cost.
 "src/bffi_pipeline/stages/m5/runner.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m6/runner.py" = ["PLC0415"]
+"src/bffi_pipeline/stages/m3/contributions.py" = ["PLC0415"]
+"src/bffi_pipeline/stages/m3/language_detect.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m3/runner.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m9/runner.py" = ["PLC0415"]
 "src/bffi_pipeline/stages/m10/load_finto.py" = ["PLC0415"]
