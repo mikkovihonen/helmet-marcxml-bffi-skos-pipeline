@@ -47,9 +47,6 @@ from bffi_pipeline.config import get_settings
 from bffi_pipeline.contrib_variants import (
     DEFAULT_SIDECAR_NAME as VARIANTS_SIDECAR_NAME,
 )
-from bffi_pipeline.contrib_variants import (
-    load_variant_claims,
-)
 from bffi_pipeline.observability.events import emit_if_active
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.logger import model_agent_uri
@@ -81,44 +78,8 @@ HELMET_MAP_FILENAME: Final[str] = "helmet-map.jsonl"
 _M8_PROGRESS_CADENCE: Final[int] = 500
 
 
-# --- Union-find -----------------------------------------------------------
-
-
-class _UnionFind:
-    """Tiny path-compressed union-find. Nodes are arbitrary hashable values."""
-
-    def __init__(self) -> None:
-        self._parent: dict[str, str] = {}
-
-    def add(self, x: str) -> None:
-        if x not in self._parent:
-            self._parent[x] = x
-
-    def find(self, x: str) -> str:
-        self.add(x)
-        root = x
-        while self._parent[root] != root:
-            root = self._parent[root]
-        # path compression
-        while self._parent[x] != root:
-            self._parent[x], x = root, self._parent[x]
-        return root
-
-    def union(self, x: str, y: str) -> None:
-        rx, ry = self.find(x), self.find(y)
-        if rx != ry:
-            # Pick the lex-smaller root for determinism
-            new_root, child = (rx, ry) if rx < ry else (ry, rx)
-            self._parent[child] = new_root
-
-    def groups(self) -> dict[str, list[str]]:
-        out: dict[str, list[str]] = {}
-        for x in list(self._parent):
-            out.setdefault(self.find(x), []).append(x)
-        for v in out.values():
-            v.sort()
-        return out
-
+# P-38 Phase B: union-find data structure moved to m8/union_find.py.
+from bffi_pipeline.stages.m8.union_find import _UnionFind  # noqa: E402
 
 # --- Decisions ------------------------------------------------------------
 
@@ -1708,64 +1669,11 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
     )
 
 
-def _apply_contrib_variants(
-    g: Graph,
-    *,
-    variants_sidecar_path: Path,
-    canonical_entries: list[CanonicalEntry],
-) -> int:
-    """Read F2 ``contrib-variants.jsonl`` and attach ``skos:altLabel``
-    on the canonical agent each claim points at. Returns the number
-    of altLabels added (zero when sidecar is absent or no claim
-    matches).
-
-    Matching: each claim's ``raw_work_uri`` rolls up to the canonical
-    Work via :class:`CanonicalEntry`. On every Expression of that
-    canonical Work, every agent whose ``rdfs:label`` equals the
-    claim's ``canonical_label`` gets ``skos:altLabel <variant_label>``.
-    Multiple matches per claim are fine (an agent may be shared
-    across Expressions); duplicates are deduplicated by rdflib's
-    set-semantics graph add.
-
-    Idempotent: re-running on the same sidecar adds the same
-    triples, which is a no-op; canonical.ttl stays byte-stable.
-    """
-    claims = load_variant_claims(variants_sidecar_path)
-    if not claims:
-        return 0
-
-    raw_to_canonical: dict[str, str] = {}
-    for entry in canonical_entries:
-        for raw in entry.raw_work_uris:
-            raw_to_canonical[raw] = entry.canonical_work_uri
-
-    added = 0
-    for claim in claims:
-        canonical_uri = raw_to_canonical.get(claim.raw_work_uri)
-        if canonical_uri is None:
-            continue
-        canonical_node = URIRef(canonical_uri)
-        canonical_lit = Literal(claim.canonical_label)
-        variant_lit = Literal(claim.variant_label)
-        # Walk every Contribution attached to the canonical Work
-        # itself (primary contributions — MARC 100$a) AND every
-        # Contribution attached to its Expressions (non-primary —
-        # MARC 700$a). Both shapes can carry the canonical agent the
-        # cascade matched against; missing either path drops a
-        # legitimate variant binding.
-        contrib_subjects: list[Node] = list(g.objects(canonical_node, V.BFFI.contribution))
-        for expr in g.objects(canonical_node, V.BFFI.hasExpression):
-            contrib_subjects.extend(g.objects(expr, V.BFFI.contribution))
-        for contrib in contrib_subjects:
-            for agent in g.objects(contrib, V.BFFI.agent):
-                if (agent, V.RDFS.label, canonical_lit) not in g:
-                    continue
-                if (agent, V.SKOS.altLabel, variant_lit) in g:
-                    continue
-                g.add((agent, V.SKOS.altLabel, variant_lit))
-                added += 1
-    return added
-
+# P-38 Phase B: F2 transliteration-variant binding pass moved to
+# m8/contribution_variants.py.
+from bffi_pipeline.stages.m8.contribution_variants import (  # noqa: E402
+    _apply_contrib_variants,
+)
 
 #: P-19 Phase A — matches ``BFFI_CORPUS_FILENAME`` in
 #: ``stages/bf_to_bffi.py``. Stages don't import each other per
