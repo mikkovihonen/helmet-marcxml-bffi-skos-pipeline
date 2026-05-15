@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from bffi_pipeline.eval.gold_set import GoldCase, GoldRecord, load_gold_set
-from bffi_pipeline.stages.embeddings import (
+from bffi_pipeline.stages.m5 import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_DEVICE,
     WorkEmbeddingInput,

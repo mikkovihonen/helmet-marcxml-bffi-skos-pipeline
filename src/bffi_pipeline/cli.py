@@ -21,21 +21,21 @@ from bffi_pipeline.eval import grow as eval_grow
 from bffi_pipeline.eval import harness as eval_harness
 from bffi_pipeline.provenance import writer as prov_writer
 from bffi_pipeline.stages import (
-    embeddings,
+    export as export_stage,
+)
+from bffi_pipeline.stages import (
     judge,
     load,
     load_finto,
     local_concept_resolver,
     m2,
     m3,
+    m5,
     merge,
     reconcile,
     skosify_run,
     workkey,
     ysa_disambiguation_report,
-)
-from bffi_pipeline.stages import (
-    export as export_stage,
 )
 from bffi_pipeline.stages.observability import (
     StageEventEmitter,
@@ -1757,10 +1757,7 @@ def embed_command(
         typer.Option(
             "--output-dir",
             "-o",
-            help=(
-                "Directory for embeddings.faiss and embeddings.idmap.json; "
-                "defaults to BFFI_DATA_DIR."
-            ),
+            help=("Directory for m5.faiss and m5.idmap.json; defaults to BFFI_DATA_DIR."),
             file_okay=False,
             dir_okay=True,
             resolve_path=True,
@@ -1772,28 +1769,28 @@ def embed_command(
             "--model",
             help="HuggingFace model name (default BAAI/bge-m3).",
         ),
-    ] = embeddings.DEFAULT_MODEL,
+    ] = m5.DEFAULT_MODEL,
     device: Annotated[
         str,
         typer.Option(
             "--device",
             help="PyTorch device: mps (Apple Silicon), cuda, or cpu.",
         ),
-    ] = embeddings.DEFAULT_DEVICE,
+    ] = m5.DEFAULT_DEVICE,
     batch_size: Annotated[
         int,
         typer.Option(
             "--batch-size",
             help="Embedding batch size (M5 Max saturates at 64-128).",
         ),
-    ] = embeddings.DEFAULT_BATCH_SIZE,
+    ] = m5.DEFAULT_BATCH_SIZE,
     top_k: Annotated[
         int,
         typer.Option(
             "--top-k",
             help="Top-k neighbours per Work for candidate-pair generation.",
         ),
-    ] = embeddings.DEFAULT_TOP_K,
+    ] = m5.DEFAULT_TOP_K,
     cross_block: Annotated[
         bool,
         typer.Option(
@@ -1811,7 +1808,7 @@ def embed_command(
 ) -> None:
     """Build the FAISS HNSW index and emit candidate pairs (M5)."""
     target = output_dir or get_settings().data_dir
-    build_result = embeddings.build_index(
+    build_result = m5.build_index(
         corpus_dir,
         output_dir=target,
         model_name=model_name,
@@ -1820,7 +1817,7 @@ def embed_command(
         force=force,
     )
     typer.echo(build_result.render())
-    stats = embeddings.query_candidates(target, top_k=top_k, cross_block=cross_block)
+    stats = m5.query_candidates(target, top_k=top_k, cross_block=cross_block)
     typer.echo(stats.render())
 
 
@@ -1854,14 +1851,14 @@ def embed_benchmark_command(
             "--device",
             help="PyTorch device: mps (Apple Silicon), cuda, or cpu.",
         ),
-    ] = embeddings.DEFAULT_DEVICE,
+    ] = m5.DEFAULT_DEVICE,
     batch_size: Annotated[
         int,
         typer.Option(
             "--batch-size",
             help="Embedding batch size.",
         ),
-    ] = embeddings.DEFAULT_BATCH_SIZE,
+    ] = m5.DEFAULT_BATCH_SIZE,
 ) -> None:
     """Compare embedding models on the gold set's same_work / different_work gap (M5 / M12)."""
     candidate_models = tuple(models) if models else embed_benchmark.DEFAULT_MODELS
@@ -1971,7 +1968,7 @@ def embed_stats_command(
         typer.Option(
             "--output-dir",
             "-o",
-            help="Directory holding embeddings.faiss + idmap; defaults to BFFI_DATA_DIR.",
+            help="Directory holding m5.faiss + idmap; defaults to BFFI_DATA_DIR.",
             file_okay=False,
             dir_okay=True,
             readable=True,
@@ -1981,7 +1978,7 @@ def embed_stats_command(
     top_k: Annotated[
         int,
         typer.Option("--top-k", help="Top-k neighbours per Work."),
-    ] = embeddings.DEFAULT_TOP_K,
+    ] = m5.DEFAULT_TOP_K,
     cross_block: Annotated[
         bool,
         typer.Option(
@@ -1992,7 +1989,7 @@ def embed_stats_command(
 ) -> None:
     """Report band counts and similarity distribution from the persisted index (M5)."""
     target = output_dir or get_settings().data_dir
-    stats = embeddings.query_candidates(target, top_k=top_k, cross_block=cross_block)
+    stats = m5.query_candidates(target, top_k=top_k, cross_block=cross_block)
     typer.echo(stats.render())
 
 

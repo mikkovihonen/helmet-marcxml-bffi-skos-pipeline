@@ -18,8 +18,7 @@ from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.blocking import compute_blocking_key
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages import embeddings
-from bffi_pipeline.stages.embeddings import (
+from bffi_pipeline.stages.m5 import (
     BAND_AUTO_MERGE,
     BAND_REJECT,
     CANDIDATES_FILENAME,
@@ -28,8 +27,6 @@ from bffi_pipeline.stages.embeddings import (
     Band,
     CandidatePair,
     WorkEmbeddingInput,
-    _normalise_year,
-    _short_segment,
     build_index,
     classify_band,
     embedding_input_string,
@@ -37,6 +34,8 @@ from bffi_pipeline.stages.embeddings import (
     query_candidates,
     to_blocking_key,
 )
+from bffi_pipeline.stages.m5 import runner as embeddings
+from bffi_pipeline.stages.m5.runner import _normalise_year, _short_segment
 
 # --- embedding_input_string -----------------------------------------------
 
