@@ -34,6 +34,17 @@ CONSTRUCT {
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent .
   ?primaryAgent rdfs:label ?primaryAgentLabel .
+  # P-36 Phase C: route ``rdfs:label`` for subjects and genreForms.
+  # Labels go on ``?bfSubject`` (the source subject node), NOT on
+  # ``?subject`` (the COALESCE result). When the cataloguer attached a
+  # MADS authority cross-link (madsrdf:isIdentifiedByAuthority), the
+  # COALESCE picks the authority URI as ``?subject``, but the
+  # cataloguer-supplied label is on the raw bf:Place / bf:Person source
+  # node — routing it to ``?subject`` would misattribute the label to
+  # the authority URI in our graph. Authority labels stay label-free
+  # here so Skosmos can resolve them from Finto at render time.
+  ?bfSubject rdfs:label ?subjectLabel .
+  ?workGenre rdfs:label ?workGenreLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -88,10 +99,21 @@ WHERE {
     ?bfWork bf:subject ?bfSubject .
     OPTIONAL { ?bfSubject madsrdf:isIdentifiedByAuthority ?bfSubjectAuth }
     BIND(COALESCE(?bfSubjectAuth, ?bfSubject) AS ?subject)
+    # P-36 Phase C: route the cataloguer-supplied label off ?bfSubject
+    # (the source node). See CONSTRUCT comment above for the routing
+    # decision. Single-triple inner OPTIONAL — same shape as the
+    # ?primaryAgent rdfs:label pattern at d040a90, so the rdflib
+    # nested-OPTIONAL bug doesn't bite.
+    OPTIONAL { ?bfSubject rdfs:label ?subjectLabel }
   }
   OPTIONAL { ?bfWork bf:classification ?class }
   OPTIONAL { ?bfWork bf:originDate     ?originDate }
-  OPTIONAL { ?bfWork bf:genreForm      ?workGenre }
+  OPTIONAL {
+    ?bfWork bf:genreForm ?workGenre .
+    # P-36 Phase C: route genreForm label. Same single-triple inner
+    # OPTIONAL pattern as the subject case above.
+    OPTIONAL { ?workGenre rdfs:label ?workGenreLabel }
+  }
   OPTIONAL { ?bfWork bflc:marcKey      ?marcKey }
   OPTIONAL {
     ?bfWork bf:title ?t . ?t bf:mainTitle ?workLabel .

@@ -226,6 +226,128 @@ def test_subject_without_authority_cross_link_falls_back_to_bf_subject_uri() -> 
     assert yso_topic in subjects, f"bf:Topic URI missing from bffi:subject: {subjects}"
 
 
+def test_construct_routes_subject_label_for_local_authority() -> None:
+    """P-36 Phase C: 650 subjects without $0 (local Topic nodes carrying
+    ``rdfs:label`` in marc2bibframe2 output) must round-trip their
+    cataloguer-supplied label through M3's CONSTRUCT so M9's
+    ``_iter_subject_requests`` can build a candidate.
+
+    Pre-fix: 18,928 ``bffi:subject`` targets on the helmet-5k-clean-full
+    bench (run ``02924cb38191``) carried zero ``rdfs:label`` triples;
+    M9 silently dropped every one. Same bug shape as the agent-label
+    bug fixed at ``d040a90``.
+    """
+    local_topic = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b10189452#Topic650-23")
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Viulukoulu" ] ;
+                bf:subject <{local_topic}> .
+
+            <{local_topic}> a bf:Topic ;
+                rdfs:label "viulu" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    subjects = set(bffi.objects(EXPECTED_WORK, V.BFFI.subject))
+    assert local_topic in subjects, f"local Topic missing from bffi:subject: {subjects}"
+    labels = set(bffi.objects(local_topic, V.RDFS.label))
+    assert Literal("viulu") in labels, (
+        f"expected the cataloguer-supplied label to round-trip onto the "
+        f"local Topic URI; got labels={labels}"
+    )
+
+
+def test_construct_does_not_route_subject_label_for_authority_uri_subjects() -> None:
+    """P-36 Phase C + R7: when the COALESCE picks an authority URI as
+    ``bffi:subject`` (the P-15 path — bf:Place / bf:Person /
+    bf:Organization with ``madsrdf:isIdentifiedByAuthority``), the
+    authority URI must NOT carry an ``rdfs:label`` triple in the BFFI
+    output. Skosmos resolves authority labels from the loaded Finto
+    graphs at render time; labeling YSO/KANTO URIs in our local graph
+    would clash with Finto's authoritative form.
+
+    The CONSTRUCT routes the label onto ``?bfSubject`` (the source raw
+    URI) rather than ``?subject`` (the COALESCE result), so the
+    authority URI stays label-free. The raw URI carries the label as
+    an orphan triple — harmless because nothing references the raw
+    URI in the BFFI output (``bffi:subject`` points at the authority
+    URI).
+    """
+    yso_italy = URIRef("http://www.yso.fi/onto/yso/p105111")
+    raw_place_uri = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b26322791#Place651-54")
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:      <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix madsrdf: <http://www.loc.gov/mads/rdf/v1#> .
+            @prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Mafia-saga" ] ;
+                bf:subject <{raw_place_uri}> .
+
+            <{raw_place_uri}> a bf:Place ;
+                rdfs:label "Italien" ;
+                madsrdf:isIdentifiedByAuthority <{yso_italy}> .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    auth_labels = set(bffi.objects(yso_italy, V.RDFS.label))
+    assert not auth_labels, (
+        f"authority URI {yso_italy} should not carry rdfs:label in the BFFI "
+        f"output (Skosmos resolves authority labels from Finto); got {auth_labels}"
+    )
+
+
+def test_construct_routes_genreform_label() -> None:
+    """P-36 Phase C: bf:genreForm targets must round-trip their
+    ``rdfs:label`` through M3's CONSTRUCT so M9 has something to walk.
+
+    Pre-fix: 2,997 ``bffi:genreForm`` targets on the helmet-5k bench
+    carried zero ``rdfs:label`` triples. Same routing bug as for
+    subjects, fixed by the same single-triple inner OPTIONAL pattern.
+    """
+    genre_uri = URIRef("http://urn.fi/URN:NBN:fi:au:kaunokki:p10072")
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Sotaromaani" ] ;
+                bf:genreForm <{genre_uri}> .
+
+            <{genre_uri}> a bf:GenreForm ;
+                rdfs:label "sotaromaanit" .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    genres = set(bffi.objects(EXPECTED_WORK, V.BFFI.genreForm))
+    assert genre_uri in genres, f"genreForm URI missing from bffi:genreForm: {genres}"
+    labels = set(bffi.objects(genre_uri, V.RDFS.label))
+    assert Literal("sotaromaanit") in labels, (
+        f"expected genreForm label to round-trip; got labels={labels}"
+    )
+
+
 def test_post_process_tags_pref_labels_with_language() -> None:
     source = _build_source()
     bffi = construct_bffi(source)
