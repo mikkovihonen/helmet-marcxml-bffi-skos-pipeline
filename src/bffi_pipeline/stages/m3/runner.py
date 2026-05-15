@@ -12,19 +12,10 @@ the CLI prints a summary warning.
 
 from __future__ import annotations
 
-import json
-import os
-import re
-from collections.abc import Iterable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from datetime import datetime
-from functools import lru_cache
 from pathlib import Path
-from typing import Final, cast
-
-from rdflib import Graph
-from rdflib.namespace import DCTERMS, RDF, RDFS
-from rdflib.term import Node
+from typing import Final
 
 from bffi_pipeline.cataloguer_review import append_source_row
 from bffi_pipeline.config import get_settings
@@ -33,10 +24,6 @@ from bffi_pipeline.contrib_variants import (
     truncate_sidecar,
 )
 from bffi_pipeline.observability.events import emit_if_active, get_active_emitter
-from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.uris import (
-    register_sparql_functions,
-)
 from bffi_pipeline.validation.bffi import validate_graph
 
 _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
@@ -58,9 +45,26 @@ BFFI_CORPUS_FILENAME: Final[str] = "bffi-corpus.ttl"
 #      .runner` (the pre-split path) keep working bit-identically.
 # F401 noqa: ruff doesn't know `_is_parseable_date` etc. are reachable
 # from this module's namespace by external callers.
+# P-38 Phase D: SPARQL CONSTRUCT runner moved to m3/construct.py.
+from bffi_pipeline.stages.m3.construct import (  # noqa: E402, F401
+    _expression_query,
+    _work_query,
+    construct_bffi,
+)
 from bffi_pipeline.stages.m3.contributions import (  # noqa: E402, F401
     _emit_extracted_contributions,
     _read_helmet_bib_id,
+)
+
+# P-38 Phase D: per-record conversion pipeline + corpus concat moved to
+# m3/convert.py.
+from bffi_pipeline.stages.m3.convert import (  # noqa: E402, F401
+    _append_jsonl,
+    _atomic_write_bytes,
+    _convert_one,
+    _is_output_fresh,
+    _iter_bibframe_files,
+    _write_bffi_corpus,
 )
 from bffi_pipeline.stages.m3.language_detect import (  # noqa: E402, F401
     _DETECTABLE_LANGS,
@@ -71,6 +75,9 @@ from bffi_pipeline.stages.m3.language_detect import (  # noqa: E402, F401
     _candidate_languages,
     _retag_pref_labels,
 )
+
+# P-38 Phase D: graph post-processing moved to m3/post_process.py.
+from bffi_pipeline.stages.m3.post_process import post_process  # noqa: E402
 from bffi_pipeline.stages.m3.sanitize import (  # noqa: E402, F401
     _DATE_DATATYPES,
     _DATE_VALIDATORS,
@@ -92,323 +99,19 @@ from bffi_pipeline.stages.m3.sanitize import (  # noqa: E402, F401
     _sanitize_uri_whitespace,
 )
 
-# --- Public dataclasses ---------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ValidationRow:
-    """One row of ``_validation.jsonl`` per (Boundary-3-failing) record.
-
-    ``run_uuid`` is populated from the active observability emitter
-    so the exporter's error-tail loop (P-12 Option B) can attribute
-    each row to its originating pipeline invocation. Empty string
-    when no emitter is active (e.g. unit tests that bypass the CLI
-    bootstrap) — rows surface under ``run_uuid=""`` in metrics.
-    """
-
-    helmet_bib_id: str
-    output_file: str
-    conforms: bool
-    report_text: str
-    run_uuid: str = ""
-
-
-#: Truncate over-long rendered messages in the validation TSV so a
-#: spreadsheet stays readable. The full multi-line report lives in
-#: the JSONL for forensic lookup; the TSV is for cataloguer triage.
-_VALIDATION_TSV_MESSAGE_MAX: Final[int] = 240
-
-#: Regex to extract every ``sh:message Literal("…")`` clause from
-#: rdflib's SHACL report serialization. The message text is the
-#: cataloguer-actionable bit; the rest of the report is rdflib
-#: boilerplate (severity, source shape, focus node etc.) that's only
-#: useful for pipeline-team debugging.
-_SH_MESSAGE_RE: Final[re.Pattern[str]] = re.compile(
-    r'sh:message\s+Literal\(\s*"([^"\\]*(?:\\.[^"\\]*)*)"', re.DOTALL
+# P-38 Phase D: public dataclasses moved to m3/schemas.py.
+from bffi_pipeline.stages.m3.schemas import (  # noqa: E402
+    BffiSummary,
+    ValidationRow,
 )
 
-
-def _extract_shape_messages(report_text: str) -> str:
-    """Pull every ``sh:message Literal("…")`` out of a SHACL report.
-
-    Joined with ``" | "`` when a single record has multiple
-    violations. Falls back to the full report (with control chars
-    collapsed) when no messages can be extracted — better to surface
-    the rdflib boilerplate than an empty cell.
-    """
-    matches = _SH_MESSAGE_RE.findall(report_text)
-    if not matches:
-        return " ".join(report_text.replace("\t", " ").split())
-    return " | ".join(m.strip() for m in matches)
-
-
-def _emit_validation_tsv(path: Path, rows: list[ValidationRow]) -> None:
-    """Cataloguer-facing TSV companion to ``bffi/_validation.jsonl``.
-
-    Three columns the cataloguer can open in Excel / Sheets / Numbers
-    and act on without parsing JSON:
-
-    - ``helmet_bib_id`` — lookup key in Helmet / Sierra.
-    - ``shape_message`` — the human-readable ``sh:message`` text
-      extracted from the SHACL report (e.g. ``"bffi:Work must have
-      skos:prefLabel in fi/sv/en."``). Multiple violations on one
-      record are joined with ``" | "``. This is the
-      cataloguer-actionable column.
-    - ``output_file`` — the BFFI Turtle file the failed shape was
-      validated against (e.g. ``b1234.ttl``); pipeline-team
-      cross-reference. The full multi-line rdflib SHACL report
-      stays in the JSONL companion.
-
-    Messages over 240 chars are truncated with an ellipsis to keep
-    spreadsheet rendering readable. Full report stays in JSONL.
-
-    Always emitted — even when every record passed Boundary-3, a
-    header-only TSV is written so cataloguer workflows wired to the
-    artifact path don't need a missing-file guard.
-
-    Sorted by ``helmet_bib_id`` for stable diffs across re-runs.
-    Atomic write via ``.tmp`` + ``replace``.
-
-    Mirrors the M2 ``bibframe/_errors.tsv`` + the M8
-    ``canonical-mint-failures.tsv`` conventions so cataloguers see a
-    consistent artifact shape across stages.
-    """
-    header = "helmet_bib_id\tshape_message\toutput_file\n"
-    out_rows: list[tuple[str, str, str]] = []
-    for row in rows:
-        message = _extract_shape_messages(row.report_text)
-        message_clean = " ".join(message.replace("\t", " ").split())
-        if len(message_clean) > _VALIDATION_TSV_MESSAGE_MAX:
-            message_clean = message_clean[: _VALIDATION_TSV_MESSAGE_MAX - 1] + "…"
-        out_rows.append((row.helmet_bib_id, message_clean, row.output_file))
-    out_rows.sort()
-    body = "".join(f"{bib_id}\t{msg}\t{output_file}\n" for bib_id, msg, output_file in out_rows)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(header + body, encoding="utf-8")
-    tmp.replace(path)
-
-
-@dataclass
-class BffiSummary:
-    """Aggregate counts for an end-of-run report."""
-
-    converted: list[str] = field(default_factory=list)
-    skipped_idempotent: list[str] = field(default_factory=list)
-    failed_shape: list[str] = field(default_factory=list)
-    errored: list[tuple[str, str]] = field(default_factory=list)
-
-    @property
-    def total(self) -> int:
-        """Total number of input files seen, excluding shape-only flags."""
-        return len(self.converted) + len(self.skipped_idempotent) + len(self.errored)
-
-    def render(self) -> str:
-        """Format this summary as paste-ready text for the bf-to-bffi CLI."""
-        lines = [
-            f"BIBFRAME to BFFI conversion summary ({self.total} input file(s))",
-            f"  converted: {len(self.converted)}",
-            f"  skipped (already converted): {len(self.skipped_idempotent)}",
-            f"  shape-failing (kept; flagged): {len(self.failed_shape)}",
-            f"  errored: {len(self.errored)}",
-        ]
-        if self.failed_shape:
-            lines.append("Shape-failing records:")
-            lines.extend(f"  - {bib}" for bib in self.failed_shape)
-        if self.errored:
-            lines.append("Hard errors (record skipped):")
-            lines.extend(f"  - {bib}: {msg}" for bib, msg in self.errored)
-        return "\n".join(lines)
-
-
-# --- Caching --------------------------------------------------------------
-
-
-@lru_cache(maxsize=1)
-def _work_query() -> str:
-    return (_SPARQL_DIR / "bf_to_bffi_work.rq").read_text(encoding="utf-8")
-
-
-@lru_cache(maxsize=1)
-def _expression_query() -> str:
-    return (_SPARQL_DIR / "bf_to_bffi_expression.rq").read_text(encoding="utf-8")
-
-
-# --- CONSTRUCT runner -----------------------------------------------------
-
-
-def construct_bffi(source: Graph) -> Graph:
-    """Run both CONSTRUCT passes against ``source`` and merge into one graph."""
-    register_sparql_functions()
-    out = Graph()
-    for query in (_work_query(), _expression_query()):
-        result = source.query(query)
-        for triple in cast("Iterable[tuple[Node, Node, Node]]", result):
-            out.add(triple)
-    return out
-
-
-# --- Post-processing ------------------------------------------------------
-
-
-def post_process(
-    bffi_graph: Graph,
-    source: Graph,
-    *,
-    llm_detector: object | None = None,
-    contrib_extractor: object | None = None,
-    variants_sidecar_path: Path | None = None,
-    now: datetime | None = None,
-) -> Graph:
-    """Mutate ``bffi_graph`` in place: tag prefLabels, denormalise Helmet
-    identifiers for Skosmos display, optionally extract 245$c
-    contributors, bind namespaces.
-
-    ``llm_detector`` enables the M3 title-language cascade;
-    ``contrib_extractor`` enables the M3 245$c contributor-extraction
-    cascade. Either / both can be ``None`` to keep that stage
-    graph-only. ``variants_sidecar_path`` is where the cascade
-    appends one row per detected transliteration variant; M8's
-    binding pass reads the same file.
-    """
-    candidates = _candidate_languages(source)
-    if candidates:
-        _retag_pref_labels(bffi_graph, candidates, llm_detector=llm_detector)
-    _emit_extracted_contributions(
-        bffi_graph,
-        source,
-        contrib_extractor=contrib_extractor,
-        variants_sidecar_path=variants_sidecar_path,
-        now=now,
-    )
-    bffi_graph.bind("bf", V.BF)
-    bffi_graph.bind("bffi", V.BFFI)
-    bffi_graph.bind("bib", V.BIB)
-    bffi_graph.bind("dct", DCTERMS)
-    bffi_graph.bind("rdf", RDF)
-    bffi_graph.bind("rdfs", RDFS)
-    bffi_graph.bind("skos", V.SKOS)
-    return bffi_graph
-
-
-# --- Driver ---------------------------------------------------------------
-
-
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, path)
-
-
-def _is_output_fresh(input_path: Path, output_path: Path) -> bool:
-    return output_path.exists() and output_path.stat().st_mtime >= input_path.stat().st_mtime
-
-
-def _iter_bibframe_files(bibframe_dir: Path) -> Iterator[Path]:
-    yield from sorted(p for p in bibframe_dir.glob("*.rdf") if not p.name.startswith("_"))
-
-
-def _write_bffi_corpus(bffi_dir: Path, corpus_path: Path) -> int:
-    """Concatenate every per-record BFFI Turtle into a single corpus file.
-
-    M8's load (~8 min on 20 k bench, projected ~5.5 h on the 800 k
-    corpus) is dominated by per-file ``open`` + parser-init overhead,
-    not by graph size. Layering one ``bffi-corpus.ttl`` stream over
-    the per-record store collapses ``len(bffi/*.ttl)`` opens into one
-    on M8's side. P-19 Phase A.
-
-    Idempotent: skip when the existing concat is at least as new as
-    every per-record ``.ttl``. The per-record layout stays canonical
-    — the concat is a derived view.
-
-    ``@prefix`` declarations are deduplicated (single block at the
-    top, per-record headers stripped) to avoid a multi-millionfold
-    redeclaration that rdflib's parser would walk on a full-corpus
-    parse. Returns the number of per-record files concatenated, or
-    ``0`` when the concat was skipped or no input files existed.
-    """
-    if not bffi_dir.is_dir():
-        return 0
-    per_record = sorted(bffi_dir.glob("*.ttl"))
-    if not per_record:
-        return 0
-    if corpus_path.is_file():
-        corpus_mtime = corpus_path.stat().st_mtime
-        if all(p.stat().st_mtime <= corpus_mtime for p in per_record):
-            return 0
-
-    seen_prefixes: set[str] = set()
-    prefix_lines: list[str] = []
-    body_chunks: list[str] = []
-    for path in per_record:
-        with path.open("r", encoding="utf-8") as fh:
-            body_lines: list[str] = []
-            for line in fh:
-                stripped = line.strip()
-                if stripped.startswith("@prefix") or stripped.startswith("@base"):
-                    if stripped not in seen_prefixes:
-                        seen_prefixes.add(stripped)
-                        prefix_lines.append(line.rstrip("\n"))
-                    continue
-                body_lines.append(line)
-            body_chunks.append("".join(body_lines).rstrip("\n"))
-
-    tmp = corpus_path.with_suffix(corpus_path.suffix + ".tmp")
-    corpus_path.parent.mkdir(parents=True, exist_ok=True)
-    with tmp.open("w", encoding="utf-8") as fh:
-        for line in prefix_lines:
-            fh.write(line + "\n")
-        fh.write("\n")
-        for chunk in body_chunks:
-            if not chunk.strip():
-                continue
-            fh.write(chunk)
-            fh.write("\n\n")
-    os.replace(tmp, corpus_path)
-    return len(per_record)
-
-
-def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-
-
-def _convert_one(
-    input_path: Path,
-    output_path: Path,
-    *,
-    llm_detector: object | None = None,
-    contrib_extractor: object | None = None,
-    variants_sidecar_path: Path | None = None,
-    now: datetime | None = None,
-) -> Graph:
-    source = Graph()
-    source.parse(str(input_path), format="xml")
-    # Cataloguer $0 values occasionally carry stray whitespace that
-    # marc2bibframe2 passes through unchanged; rdflib refuses to
-    # serialize those as Turtle and the whole record's M3 conversion
-    # would fail hard. Sanitize the parsed source so the CONSTRUCT
-    # pass sees clean URIs.
-    _sanitize_uri_whitespace(source)
-    # Cataloguer-supplied date placeholders (e.g. ``"19  -  -  T00:00:00"``
-    # for "year not yet entered") parse as xsd:dateTime in
-    # marc2bibframe2's output but raise ValueError when rdflib tries
-    # to coerce them at downstream load. Drop the datatype tag so the
-    # literal survives as plain text rather than crashing the merge.
-    _sanitize_date_literals(source)
-    bffi_graph = construct_bffi(source)
-    post_process(
-        bffi_graph,
-        source,
-        llm_detector=llm_detector,
-        contrib_extractor=contrib_extractor,
-        variants_sidecar_path=variants_sidecar_path,
-        now=now,
-    )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write_bytes(output_path, bffi_graph.serialize(format="turtle").encode("utf-8"))
-    return bffi_graph
+# P-38 Phase D: SHACL-validation TSV emitter moved to m3/validation_emit.py.
+from bffi_pipeline.stages.m3.validation_emit import (  # noqa: E402, F401
+    _SH_MESSAGE_RE,
+    _VALIDATION_TSV_MESSAGE_MAX,
+    _emit_validation_tsv,
+    _extract_shape_messages,
+)
 
 
 def run(
