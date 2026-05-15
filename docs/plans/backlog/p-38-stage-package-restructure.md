@@ -22,12 +22,16 @@ to confirm no in-flight work has reshaped the surface. Particular attention to: 
 
 **Phase priority**: **Phase A ships first, unconditionally.** Phase B can interleave with Phase C *for stages where neither layer depends on the other* (which is true for all four B-eligible stages — Layer 2 splits the stage runner internals, Layer 3 deletes CLI commands that import from the public surface). M3's Layer-2 split waits for P-36. Within Phase C, the sub-phases run in order (0 → 1 → 2 → 3) — Phase 1's audit is the contract Phase 2 executes against.
 
-**Sequencing prerequisites** (other in-flight plans):
+**Sequencing prerequisites** (in-flight plans this one must coordinate with):
 
-- P-31 (dashboard artifacts panel, in-progress, Phases B+C shipped at `801184d`). Touches `cataloguer_review.py` and the `append_*_row` callsites in `bf_to_bffi.py`, `marc_to_bf.py`, `merge.py`, `reconcile.py`. Does *not* rename files. Phase A's import-site rewrite is mechanically compatible; coordinate so Phase A lands after P-31's remaining phases to keep the rebase cost on P-31, not on this plan.
-- P-32 (run lifecycle management, backlog). Introduces a new run-manifest surface. Does *not* rename files. Same coordination note as P-31.
-- P-35 (M3 cascade follow-ups, in-progress). Touches `bf_to_bffi.py`. Same compatibility note — Phase A's M3 rename is mechanical; the M3 Layer-2 split (Phase B) waits for P-36 in any case.
-- P-36 (M3 SPARQL migration, backlog). **Phase B's M3 sub-split waits for P-36 to land.** Phase A's rename can ship before P-36 — the rename moves the file, P-36 then edits the renamed file. P-36's Definition of Done bullets reference `src/bffi_pipeline/stages/bf_to_bffi.py`; either Phase A runs after P-36 (preferred) or Phase A's commit updates P-36's path references in the same commit.
+- **P-35** (M3 cascade follow-ups, **in-progress**). Touches `bf_to_bffi.py`. Phase A's M3 file rename is mechanically compatible with P-35's edits — coordinate so Phase A lands after P-35's remaining phases to keep the rebase cost on P-35. The M3 Layer-2 split (Phase B) waits for P-36 in any case.
+- **P-36** (M3 SPARQL migration, **backlog**). **Phase B's M3 sub-split waits for P-36 to land.** Phase A's rename can ship before P-36 — the rename moves the file, P-36 then edits the renamed file. P-36's Definition of Done bullets reference `src/bffi_pipeline/stages/bf_to_bffi.py`; either Phase A runs after P-36 (preferred) or Phase A's commit updates P-36's path references in the same commit.
+
+**Recently landed in this surface area** (already part of `main`; the Plan-base drift-check command at the top of this document will surface any callsite changes — listed here so the executor knows where to look if the drift check shows movement):
+
+- **P-31** (dashboard artifacts panel, **completed**) — touched `cataloguer_review.py` and `append_*_row` callsites in `bf_to_bffi.py`, `marc_to_bf.py`, `merge.py`, `reconcile.py`.
+- **P-32** (run lifecycle management, **completed**) — introduced the run-manifest surface.
+- **P-34** (M8 mint anonymous main-entry works, **completed**) — touched `merge.py`'s mint logic.
 
 ## Motivation
 
