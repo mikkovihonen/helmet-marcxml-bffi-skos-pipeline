@@ -35,6 +35,7 @@ from bffi_pipeline.stages.m6 import (
     prompt_hash,
     synthesize_auto_merge_outcome,
 )
+from bffi_pipeline.stages.m6 import cascade as _m6_cascade
 from bffi_pipeline.stages.m6 import runner as judge
 from bffi_pipeline.stages.m6.runner import _cache_key
 
@@ -768,6 +769,7 @@ def test_cascade_routes_primary_and_fallback_to_distinct_base_urls(
         LLM_BASE_URL_FALLBACK="http://127.0.0.1:8002/v1",
     )
     monkeypatch.setattr(judge, "default_cache_path", lambda: tmp_cache._path)
+    monkeypatch.setattr(_m6_cascade, "default_cache_path", lambda: tmp_cache._path)
 
     decisions = {
         "http://127.0.0.1:8001/v1": _uncertain(),
@@ -775,6 +777,7 @@ def test_cascade_routes_primary_and_fallback_to_distinct_base_urls(
     }
     calls, fake = _make_recorder_build_chain(decisions)
     monkeypatch.setattr(judge, "_build_chain", fake)
+    monkeypatch.setattr(_m6_cascade, "_build_chain", fake)
 
     outcome = cascade_judge(
         _make_record("a"),
@@ -806,6 +809,7 @@ def test_cascade_falls_back_to_llm_base_url_when_per_tier_unset(
         LLM_BASE_URL_FALLBACK="",
     )
     monkeypatch.setattr(judge, "default_cache_path", lambda: tmp_cache._path)
+    monkeypatch.setattr(_m6_cascade, "default_cache_path", lambda: tmp_cache._path)
 
     calls: list[dict[str, Any]] = []
     queue: list[WorkMatchDecision] = [_uncertain(), _high_conf_same_work()]
@@ -815,6 +819,7 @@ def test_cascade_falls_back_to_llm_base_url_when_per_tier_unset(
         return _ScriptedChain([queue.pop(0)])
 
     monkeypatch.setattr(judge, "_build_chain", fake_build)
+    monkeypatch.setattr(_m6_cascade, "_build_chain", fake_build)
 
     cascade_judge(
         _make_record("a"),

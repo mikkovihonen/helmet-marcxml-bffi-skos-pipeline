@@ -5,66 +5,93 @@ development, mlx-lm for production batches; both speak the same
 chat-completions API). Application code talks through
 ``langchain-openai`` with ``LLM_BASE_URL`` from ``Settings``.
 
-Phase 1 (this module) lands the structural pieces:
+The judge is split across five cohesive siblings inside this package:
 
-- :class:`WorkRecord`, :class:`WorkMatchDecision` schemas with the
-  three Boundary-4 ``@model_validator(mode="after")`` checks per
-  spec § 7.
-- :func:`judge_pair`: single-model judgment wrapping the LangChain
-  chain, with validation-failure retry (max 2 retries), connection-
-  error retry with exponential backoff (5 / 30 / 120 s, max 3
-  retries), and a custom post-validation SQLite cache. Permanent
-  failures land as ``decision="uncertain"`` with the error in the
-  rationale.
-- :func:`cascade_judge`: 32 B primary → 72 B fallback when the
-  primary returns ``uncertain`` or ``same_work`` with confidence
-  below :data:`FALLBACK_CONFIDENCE_THRESHOLD`. Returns the final
-  decision plus a list of :class:`CascadeStep`\\ s so downstream
-  provenance writers can log each LLM call with the right
-  ``bffi-prov:stage`` value.
-- :class:`JudgeCache`: a thin SQLite-backed key/value store keyed on
-  ``(model, prompt_hash, record_a_canonical, record_b_canonical)``.
-  Writes happen only after a response has passed both structural
-  *and* semantic validation. Cache hits return identical
-  ``WorkMatchDecision`` objects with no LLM call.
+- :mod:`prompts` — judge_v1 / judge_v1_fast prompt loaders + hashing.
+- :mod:`validation` — Pydantic verdict schemas with the three
+  Boundary-4 ``@model_validator(mode="after")`` checks per spec § 7.
+- :mod:`cache` — SQLite-backed key/value store keyed on the canonical
+  ``(model, prompt_hash, record_a, record_b)`` tuple. Post-validation
+  writes only.
+- :mod:`clients` — LangChain chain construction + retry-error
+  classification (timeouts vs. other connection errors).
+- :mod:`outcome` — :class:`CascadeStep`, :class:`JudgeOutcome`,
+  ``STAGE_*`` provenance tags, the synthetic-decision builders.
+- :mod:`cascade` — :func:`judge_pair` (single-call, retry + cache) and
+  :func:`cascade_judge` (32 B primary → 72 B fallback).
+- :mod:`graph_extract` — combined BFFI + BIBFRAME graph →
+  per-Work :class:`WorkRecord` extraction.
+- :mod:`sidecars` — candidate / decision JSONL + ``.checkpoint`` mirror.
+- :mod:`batch` — :func:`judge_batch` driver, progress + result shapes.
 
-Phase 2 (separate commit) will add the batch driver that consumes
-M5's ``embed-candidates.jsonl``, the checkpoint file, the
-mlx-lm concurrent mode, and the ``bffi-pipeline judge`` CLI
-subcommand.
-
-Heavy LangChain client construction is deferred to
-:func:`_build_chain` and ``judge_pair`` — importing this module is
-cheap and never opens a network socket.
+P-38 Phase D: runner.py is a thin re-export shell. The ``# noqa: F401``
+imports keep the ``m6.runner._private`` test path resolving
+bit-identically; tests that monkeypatch the runner namespace also need
+the matching sub-module's symbol patched (see m6 test fixtures).
 """
 
 from __future__ import annotations
 
-import json as _json
-import re
-import time
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Final
-
-from pydantic import BaseModel, ValidationError
-from rdflib import Graph, URIRef
-from rdflib import Literal as RdfLiteral
-from rdflib.namespace import RDF, RDFS
-
-from bffi_pipeline.config import get_settings
-from bffi_pipeline.observability.events import emit_if_active
-from bffi_pipeline.observability.probes import emit_health_probes, probe_mlx_lm
-from bffi_pipeline.observability.watchdog import emit_watchdog_event
-from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.provenance.writer import ProvenanceWriter
-
-# --- Constants ------------------------------------------------------------
-# P-38 Phase B: prompt loading + section parsing + hashing moved to
-# m6/prompts.py. Re-imported here so callsites + tests reaching for
-# the private symbols via .runner keep working bit-identically.
+# P-38 Phase D: re-export ``get_settings`` so the historical
+# ``m6.runner.get_settings`` lookup (used by tests via
+# ``judge.get_settings()``) stays reachable.
+from bffi_pipeline.config import get_settings  # noqa: F401
+from bffi_pipeline.stages.m6.batch import (  # noqa: F401
+    CHECKPOINT_INTERVAL,
+    DEFAULT_CONCURRENCY,
+    CascadeFn,
+    JudgeBatchProgress,
+    JudgeBatchResult,
+    _emit_provenance,
+    judge_batch,
+)
+from bffi_pipeline.stages.m6.cache import (  # noqa: F401
+    CACHE_FILENAME,
+    JudgeCache,
+    _cache_key,
+    _canonicalise_record,
+    default_cache_path,
+)
+from bffi_pipeline.stages.m6.cascade import (  # noqa: F401
+    CONNECTION_BACKOFF_SECONDS,
+    FALLBACK_CONFIDENCE_THRESHOLD,
+    MAX_CONNECTION_RETRIES,
+    MAX_VALIDATION_RETRIES,
+    ChainLike,
+    _needs_second_opinion,
+    cascade_judge,
+    judge_pair,
+)
+from bffi_pipeline.stages.m6.clients import (  # noqa: F401
+    _M6_PROMPT_PREFIX_FAST,
+    _M6_PROMPT_PREFIX_FULL,
+    _TIMEOUT_EXCEPTION_NAMES,
+    _build_chain,
+    _build_m6_prompt_prefix,
+    _is_connection_error,
+    _is_timeout_error,
+)
+from bffi_pipeline.stages.m6.graph_extract import (  # noqa: F401
+    _CONTENT_URI_PREFIX,
+    _LANG_URI_PREFIX,
+    _expression_summary,
+    _first_pref_label,
+    _load_work_records_from_corpus,
+    _origin_date,
+    _primary_creator,
+    _strip_loc_prefix,
+    extract_work_records,
+)
+from bffi_pipeline.stages.m6.outcome import (
+    STAGE_AUTO_MERGE,
+    STAGE_PRIMARY,
+    STAGE_SECOND_OPINION,
+    STAGE_WATCHDOG,
+    CascadeStep,
+    JudgeOutcome,
+    _uncertain_decision,  # noqa: F401
+    synthesize_auto_merge_outcome,
+)
 from bffi_pipeline.stages.m6.prompts import (  # noqa: F401
     _PROMPT_SECTION_RE,
     PROMPT_PATH,
@@ -77,1149 +104,28 @@ from bffi_pipeline.stages.m6.prompts import (  # noqa: F401
     prompt_text,
     prompt_text_fast,
 )
-
-#: Confidence cutoff below which the primary's ``same_work`` decision is
-#: re-run on the 72 B fallback. Documented in spec § 7 / docs/local-inference.md.
-FALLBACK_CONFIDENCE_THRESHOLD: Final[float] = 0.85
-
-#: Validation retry: spec § 7 calls for max 2 retries on parse / Boundary-4
-#: failures. The total number of LLM attempts is therefore 3.
-MAX_VALIDATION_RETRIES: Final[int] = 2
-
-#: Connection retry: spec § 7 calls for max 3 retries with exponential
-#: backoff after a connection error or timeout. Total attempts = 4.
-MAX_CONNECTION_RETRIES: Final[int] = 3
-CONNECTION_BACKOFF_SECONDS: Final[tuple[float, ...]] = (5.0, 30.0, 120.0)
-
-#: ``bffi-prov:stage`` values per spec § 7. Both primary and second-opinion
-#: decisions are logged with these tags so post-merge SPARQL queries can
-#: distinguish 32 B-only decisions from cascade-resolved ones.
-STAGE_PRIMARY: Final[str] = "llm-judge-primary"
-STAGE_SECOND_OPINION: Final[str] = "llm-judge-second-opinion"
-#: ``bffi-prov:stage`` for pairs above the M5 auto-merge band ceiling
-#: (similarity ≥ 0.90 per spec § 6). These are merged deterministically
-#: without an LLM call — the embedding similarity is the entire signal.
-STAGE_AUTO_MERGE: Final[str] = "auto-merge-embedding"
-#: ``bffi-prov:stage`` for pairs that fell through the M6 cascade
-#: because every LLM call (primary + fallback) exceeded
-#: ``LLM_CALL_TIMEOUT_SECONDS`` and exhausted the retry budget.
-#: Plan: ``docs/plans/completed/p-03-m6-stall-watchdog.md``.
-STAGE_WATCHDOG: Final[str] = "watchdog-aborted"
-
-#: Stub phrases the rationale must NOT contain. Stored already lower-cased.
-STUB_PHRASES: Final[tuple[str, ...]] = (
-    "i don't know",
-    "unable to determine",
-    "n/a",
-    "not sure",
+from bffi_pipeline.stages.m6.sidecars import (  # noqa: F401
+    AUTO_MERGE_BAND,
+    CHECKPOINT_SUFFIX,
+    DECISIONS_FILENAME,
+    ESCALATE_BAND,
+    JudgeCheckpoint,
+    _checkpoint_path_for,
+    _load_auto_merge_candidates,
+    _load_candidate_jsonl,
+    _load_checkpoint,
+    _serialise_decision,
+    _write_checkpoint,
 )
-
-#: Maximum confidence allowed when the model returns ``decision="uncertain"``.
-#: Anything higher is incoherent with the decision label and triggers Boundary-4.
-UNCERTAIN_MAX_CONFIDENCE: Final[float] = 0.7
-
-#: Minimum rationale length, in characters. Stops one-word answers and
-#: punctuation-only payloads from passing as substantive reasoning.
-MIN_RATIONALE_CHARS: Final[int] = 20
-
-#: LoC URI prefixes used to short-code language and content-type values
-#: (matches the bffi:language / bffi:content URIs M3 emits).
-_LANG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
-_CONTENT_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/contentTypes/"
-
-# P-38 Phase B: Pydantic verdict schemas + Boundary-4 validators moved
-# to m6/validation.py. Re-imported here so callsites + tests reaching
-# for them via .runner keep working bit-identically.
-from bffi_pipeline.stages.m6.validation import (  # noqa: E402, F401
+from bffi_pipeline.stages.m6.validation import (
+    MIN_RATIONALE_CHARS,
+    STUB_PHRASES,
+    UNCERTAIN_MAX_CONFIDENCE,  # noqa: F401
     WorkMatchDecision,
     WorkMatchDecisionFast,
     WorkRecord,
-    _synthesize_fast_rationale,
+    _synthesize_fast_rationale,  # noqa: F401
 )
-
-# --- Cascade record -------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class CascadeStep:
-    """One LLM call's outcome inside :func:`cascade_judge`.
-
-    Carries everything a provenance writer needs to mint a per-call
-    ``prov:Activity`` later: which model, the stage tag, the cache-hit
-    flag, and the resulting decision.
-    """
-
-    stage: str  # STAGE_PRIMARY or STAGE_SECOND_OPINION
-    model_name: str
-    decision: WorkMatchDecision
-    cache_hit: bool
-    latency_seconds: float
-
-
-@dataclass
-class JudgeOutcome:
-    """Cascade result: final decision + per-step record for provenance."""
-
-    final: WorkMatchDecision
-    steps: list[CascadeStep] = field(default_factory=list)
-
-    @property
-    def used_cascade(self) -> bool:
-        """True iff the second-opinion model was invoked.
-
-        Second-opinion fires when the primary returned ``uncertain`` or
-        a ``same_work`` decision below the cascade-confidence threshold.
-        """
-        return any(s.stage == STAGE_SECOND_OPINION for s in self.steps)
-
-
-# P-38 Phase B: SQLite cache + cache-key helpers moved to m6/cache.py.
-# Re-imported here so callsites + tests reaching for them via .runner
-# keep working bit-identically.
-from bffi_pipeline.stages.m6.cache import (  # noqa: E402, F401
-    CACHE_FILENAME,
-    JudgeCache,
-    _cache_key,
-    _canonicalise_record,
-    default_cache_path,
-)
-
-# P-38 Phase B: LangChain chain construction + retry-error classifiers
-# moved to m6/clients.py.
-from bffi_pipeline.stages.m6.clients import (  # noqa: E402, F401
-    _M6_PROMPT_PREFIX_FAST,
-    _M6_PROMPT_PREFIX_FULL,
-    _TIMEOUT_EXCEPTION_NAMES,
-    _build_chain,
-    _build_m6_prompt_prefix,
-    _is_connection_error,
-    _is_timeout_error,
-)
-
-# Type alias for the injectable chain — anything with .invoke({record_a, record_b, sim}).
-ChainLike = Any
-
-
-# --- judge_pair -----------------------------------------------------------
-
-
-def _uncertain_decision(reason: str) -> WorkMatchDecision:
-    """Build the canonical 'fall-through' decision for unrecoverable failures.
-
-    Confidence is pinned to 0.0 to satisfy the ``_coherent_uncertain``
-    validator (which requires confidence ≤ 0.7 when decision is
-    ``uncertain``); the rationale carries the original error text so a
-    later operator can grep for it. Stub phrases are stripped from
-    ``reason`` because the rationale validator forbids them, and ``reason``
-    is also padded to ≥ 20 characters with a stable prefix.
-    """
-    cleaned = reason.strip() or "no error message available"
-    lowered = cleaned.lower()
-    for phrase in STUB_PHRASES:
-        if re.search(rf"\b{re.escape(phrase)}\b", lowered):
-            cleaned = re.sub(
-                rf"\b{re.escape(phrase)}\b",
-                "[stub phrase elided]",
-                cleaned,
-                flags=re.IGNORECASE,
-            )
-    rationale = f"Judge fell through to uncertain after retries exhausted: {cleaned}"
-    return WorkMatchDecision(
-        decision="uncertain",
-        confidence=0.0,
-        rationale=rationale,
-        matching_fields=[],
-        diverging_fields=[],
-    )
-
-
-def judge_pair(  # noqa: PLR0912, PLR0915 — two retry layers (connection + validation) keep this single-purpose, splitting would scatter state.
-    record_a: WorkRecord,
-    record_b: WorkRecord,
-    sim: float,
-    *,
-    model_name: str | None = None,
-    base_url: str | None = None,
-    chain: ChainLike | None = None,
-    cache: JudgeCache | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-    full_rationale: bool = True,
-    watchdog_sidecar_path: Path | None = None,
-    pair_deadline: float | None = None,
-) -> tuple[WorkMatchDecision, bool, float]:
-    """Judge a single Work-pair with retry, post-validation cache.
-
-    Returns ``(decision, cache_hit, latency_seconds)``. ``cache_hit`` lets
-    the caller (e.g. cascade_judge / the future batch driver) record
-    whether this answer cost an LLM call.
-
-    ``chain`` and ``cache`` are injection points for tests; production
-    callers leave them ``None`` so the defaults — a fresh
-    ``ChatOpenAI`` chain pointed at the configured base URL, and the
-    SQLite cache under ``data_dir`` — are constructed lazily.
-
-    ``full_rationale=True`` (default) uses the strict
-    :class:`WorkMatchDecision` schema; the LLM must produce a
-    substantive rationale on every call. ``full_rationale=False``
-    swaps in :class:`WorkMatchDecisionFast` + ``judge_v1_fast.txt`` so
-    confident ``same_work``/``different_work`` decisions may set
-    ``rationale=null``; the boundary conversion synthesises a
-    placeholder rationale from ``matching_fields`` /
-    ``diverging_fields`` so cached + JSONL + provenance outputs see
-    one unified shape regardless of mode.
-    """
-    settings = get_settings()
-    effective_model = model_name or settings.llm_model_primary
-    effective_base_url = base_url or settings.llm_base_url
-    chain = chain or _build_chain(
-        model_name=effective_model,
-        base_url=effective_base_url,
-        api_key=settings.llm_api_key,
-        full_rationale=full_rationale,
-        timeout=settings.llm_call_timeout_seconds,
-    )
-    pair_id = f"{record_a.record_id}+{record_b.record_id}"
-
-    own_cache = cache is None
-    if own_cache:
-        cache = JudgeCache(default_cache_path())
-
-    started = time.monotonic()
-    try:
-        # Prompt hash discriminates strict vs. fast — a re-run that
-        # flips the flag invalidates cached entries automatically.
-        ph = prompt_hash() if full_rationale else prompt_hash_fast()
-        key = _cache_key(
-            model_name=effective_model,
-            prompt_hash_value=ph,
-            record_a=record_a,
-            record_b=record_b,
-        )
-
-        cached = cache.get(key) if cache else None
-        if cached is not None:
-            return cached, True, time.monotonic() - started
-
-        invoke_payload = {
-            "record_a": record_a.model_dump_json(indent=2, exclude_none=True),
-            "record_b": record_b.model_dump_json(indent=2, exclude_none=True),
-            "sim": sim,
-        }
-
-        connection_attempts = 0
-        validation_attempts = 0
-        last_error: str = "unknown failure"
-        schema: type[BaseModel] = WorkMatchDecision if full_rationale else WorkMatchDecisionFast
-
-        while True:
-            # Per-pair budget check (plan P-03 Phase B). Fires when
-            # cumulative wall time across cascade tiers + retries
-            # exceeds the budget — orthogonal to the per-call
-            # ceiling. No further retries; the pair lands as
-            # ``uncertain``.
-            if pair_deadline is not None and time.monotonic() > pair_deadline:
-                emit_watchdog_event(
-                    pair_id=pair_id,
-                    event="pair_budget_exceeded",
-                    model_name=effective_model,
-                    elapsed_seconds=time.monotonic() - started,
-                    retry_n=connection_attempts,
-                    sidecar_path=watchdog_sidecar_path,
-                )
-                last_error = (
-                    "pair budget exceeded — cumulative cascade wall time "
-                    "passed LLM_PAIR_TIMEOUT_SECONDS"
-                )
-                break
-            try:
-                raw = chain.invoke(invoke_payload)
-            except Exception as exc:
-                if _is_connection_error(exc):
-                    if _is_timeout_error(exc):
-                        # Surface the wedge to the operator + audit trail.
-                        # Same retry behaviour as any other connection
-                        # error, but tagged distinctly so the dry-run
-                        # bench can count specifically watchdog events.
-                        emit_watchdog_event(
-                            pair_id=pair_id,
-                            event="timeout",
-                            model_name=effective_model,
-                            elapsed_seconds=time.monotonic() - started,
-                            retry_n=connection_attempts,
-                            sidecar_path=watchdog_sidecar_path,
-                        )
-                    if connection_attempts < MAX_CONNECTION_RETRIES:
-                        sleep(CONNECTION_BACKOFF_SECONDS[connection_attempts])
-                        connection_attempts += 1
-                        last_error = (
-                            f"connection error after {connection_attempts} retry(ies): {exc!s}"
-                        )
-                        continue
-                    if _is_timeout_error(exc):
-                        emit_watchdog_event(
-                            pair_id=pair_id,
-                            event="give_up",
-                            model_name=effective_model,
-                            elapsed_seconds=time.monotonic() - started,
-                            retry_n=connection_attempts,
-                            sidecar_path=watchdog_sidecar_path,
-                        )
-                    last_error = (
-                        f"connection error after {MAX_CONNECTION_RETRIES} retries exhausted: "
-                        f"{exc!s}"
-                    )
-                    break
-                last_error = f"unrecoverable LLM error: {exc!s}"
-                break
-
-            try:
-                parsed = raw if isinstance(raw, schema) else schema.model_validate(raw)
-            except (ValidationError, ValueError) as exc:
-                if validation_attempts < MAX_VALIDATION_RETRIES:
-                    validation_attempts += 1
-                    last_error = f"validation failure (attempt {validation_attempts}): {exc!s}"
-                    continue
-                last_error = f"validation failed after {MAX_VALIDATION_RETRIES} retries: {exc!s}"
-                break
-
-            # Convert fast → strict at the boundary so downstream code
-            # (cache.set, JSONL serialiser, provenance writer) sees one
-            # consistent schema regardless of mode.
-            if isinstance(parsed, WorkMatchDecisionFast):
-                decision: WorkMatchDecision = parsed.to_strict()
-            else:
-                decision = parsed  # type: ignore[assignment]
-
-            if cache is not None:
-                cache.set(key, decision, model_name=effective_model, prompt_hash_value=ph)
-            return decision, False, time.monotonic() - started
-
-        return _uncertain_decision(last_error), False, time.monotonic() - started
-    finally:
-        if own_cache and cache is not None:
-            cache.close()
-
-
-# --- cascade_judge --------------------------------------------------------
-
-
-def _needs_second_opinion(decision: WorkMatchDecision) -> bool:
-    if decision.decision == "uncertain":
-        return True
-    return decision.decision == "same_work" and decision.confidence < FALLBACK_CONFIDENCE_THRESHOLD
-
-
-def cascade_judge(
-    record_a: WorkRecord,
-    record_b: WorkRecord,
-    sim: float,
-    *,
-    primary_model: str | None = None,
-    fallback_model: str | None = None,
-    primary_base_url: str | None = None,
-    fallback_base_url: str | None = None,
-    primary_chain: ChainLike | None = None,
-    fallback_chain: ChainLike | None = None,
-    cache: JudgeCache | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-    full_rationale: bool = True,
-    watchdog_sidecar_path: Path | None = None,
-) -> JudgeOutcome:
-    """Two-stage cascade per spec § 7 / docs/local-inference.md.
-
-    Runs the primary model first; re-runs the fallback model when the
-    primary returns ``uncertain`` or ``same_work`` with confidence below
-    :data:`FALLBACK_CONFIDENCE_THRESHOLD`. Both decisions are returned
-    in :attr:`JudgeOutcome.steps` so the future provenance writer can
-    log them with the ``llm-judge-primary`` and
-    ``llm-judge-second-opinion`` ``bffi-prov:stage`` tags.
-
-    ``full_rationale`` is propagated to both per-stage ``judge_pair``
-    calls. The fast-mode prompt instructs the LLM to skip rationale
-    for high-confidence ``same_work``/``different_work``; the fallback
-    stage always fires for ``uncertain`` or low-confidence primaries
-    where rationale is required regardless of mode.
-    """
-    settings = get_settings()
-    primary_name = primary_model or settings.llm_model_primary
-    fallback_name = fallback_model or settings.llm_model_fallback
-
-    # Per-tier base URL resolution (plan P-02 § D1). Explicit kwarg
-    # wins; otherwise fall through to the per-tier env var; otherwise
-    # to the single ``llm_base_url`` (Ollama-shaped setups where one
-    # process serves both models). Empty string means "unset".
-    primary_url = primary_base_url or settings.llm_base_url_primary or settings.llm_base_url
-    fallback_url = fallback_base_url or settings.llm_base_url_fallback or settings.llm_base_url
-
-    # Per-pair wall-time ceiling (P-03 Phase B). Single deadline
-    # shared across both cascade tiers — the budget belongs to the
-    # pair, not the individual model attempt.
-    pair_deadline: float | None = None
-    if settings.llm_pair_timeout_seconds and settings.llm_pair_timeout_seconds > 0:
-        pair_deadline = time.monotonic() + settings.llm_pair_timeout_seconds
-
-    own_cache = cache is None
-    if own_cache:
-        cache = JudgeCache(default_cache_path())
-
-    try:
-        primary_decision, primary_cache_hit, primary_latency = judge_pair(
-            record_a,
-            record_b,
-            sim,
-            model_name=primary_name,
-            base_url=primary_url,
-            chain=primary_chain,
-            cache=cache,
-            sleep=sleep,
-            full_rationale=full_rationale,
-            watchdog_sidecar_path=watchdog_sidecar_path,
-            pair_deadline=pair_deadline,
-        )
-        steps = [
-            CascadeStep(
-                stage=STAGE_PRIMARY,
-                model_name=primary_name,
-                decision=primary_decision,
-                cache_hit=primary_cache_hit,
-                latency_seconds=primary_latency,
-            )
-        ]
-        if not _needs_second_opinion(primary_decision):
-            return JudgeOutcome(final=primary_decision, steps=steps)
-
-        fallback_decision, fallback_cache_hit, fallback_latency = judge_pair(
-            record_a,
-            record_b,
-            sim,
-            model_name=fallback_name,
-            base_url=fallback_url,
-            chain=fallback_chain,
-            cache=cache,
-            sleep=sleep,
-            full_rationale=full_rationale,
-            watchdog_sidecar_path=watchdog_sidecar_path,
-            pair_deadline=pair_deadline,
-        )
-        steps.append(
-            CascadeStep(
-                stage=STAGE_SECOND_OPINION,
-                model_name=fallback_name,
-                decision=fallback_decision,
-                cache_hit=fallback_cache_hit,
-                latency_seconds=fallback_latency,
-            )
-        )
-        return JudgeOutcome(final=fallback_decision, steps=steps)
-    finally:
-        if own_cache and cache is not None:
-            cache.close()
-
-
-# --- Phase 2: BFFI graph → WorkRecord -------------------------------------
-
-
-def _first_pref_label(graph: Graph, subject: URIRef) -> str | None:
-    for o in graph.objects(subject, V.SKOS.prefLabel):
-        if isinstance(o, RdfLiteral):
-            return str(o)
-    return None
-
-
-def _strip_loc_prefix(uri: str, prefix: str) -> str | None:
-    if uri.startswith(prefix):
-        tail = uri[len(prefix) :]
-        return tail or None
-    return uri.rsplit("/", 1)[-1] if "/" in uri else uri
-
-
-def _primary_creator(graph: Graph, work: URIRef) -> tuple[str | None, str | None]:
-    """Return ``(creator_label, creator_uri)`` for ``work``'s primary contribution."""
-    for contrib in graph.objects(work, V.BFFI.contribution):
-        if V.BFFI.PrimaryContribution not in set(graph.objects(contrib, RDF.type)):
-            continue
-        for agent in graph.objects(contrib, V.BFFI.agent):
-            if not isinstance(agent, URIRef):
-                continue
-            for label in graph.objects(agent, RDFS.label):
-                if isinstance(label, RdfLiteral):
-                    return str(label), str(agent)
-            return None, str(agent)
-    return None, None
-
-
-def _expression_summary(graph: Graph, work: URIRef) -> tuple[str | None, str | None, list[str]]:
-    """Return (language, content_type, variant_titles) for ``work``'s expressions."""
-    expression_language: str | None = None
-    content_type: str | None = None
-    variant_titles: list[str] = []
-    for expr in graph.objects(work, V.BFFI.hasExpression):
-        if not isinstance(expr, URIRef):
-            continue
-        if expression_language is None:
-            for lang in graph.objects(expr, V.BFFI.language):
-                if isinstance(lang, URIRef):
-                    expression_language = _strip_loc_prefix(str(lang), _LANG_URI_PREFIX)
-                    break
-        if content_type is None:
-            for ct in graph.objects(expr, V.BFFI.content):
-                if isinstance(ct, URIRef):
-                    content_type = _strip_loc_prefix(str(ct), _CONTENT_URI_PREFIX)
-                    break
-        for var in graph.objects(expr, V.SKOS.altLabel):
-            if isinstance(var, RdfLiteral):
-                variant_titles.append(str(var))
-    return expression_language, content_type, variant_titles
-
-
-def _origin_date(graph: Graph, work: URIRef) -> str | None:
-    for date in graph.objects(work, V.BFFI.originDate):
-        return str(date)
-    return None
-
-
-def extract_work_records(graph: Graph) -> dict[str, WorkRecord]:
-    """Walk the combined BFFI + BIBFRAME graph and return ``Work URI → WorkRecord``.
-
-    The judge's view of a Work is richer than the embedder's: it splits
-    *original* and *expression* language, captures variant titles, and
-    keeps ``date_of_origin`` (from ``bffi:originDate``). Stage-isolation
-    rules forbid importing the M4 / M5 extractors, so this is a
-    parallel implementation rather than a delegation.
-    """
-    records: dict[str, WorkRecord] = {}
-    for work in graph.subjects(RDF.type, V.BFFI.Work):
-        if not isinstance(work, URIRef):
-            continue
-        creator, creator_uri = _primary_creator(graph, work)
-        expression_language, content_type, variant_titles = _expression_summary(graph, work)
-        records[str(work)] = WorkRecord(
-            record_id=str(work),
-            creator=creator,
-            creator_uri=creator_uri,
-            preferred_title=_first_pref_label(graph, work),
-            variant_titles=variant_titles,
-            original_language=expression_language,  # default: assume mono until M9 splits
-            expression_language=expression_language,
-            content_type=content_type,
-            date_of_origin=_origin_date(graph, work),
-            publication_year=None,
-        )
-    return records
-
-
-# --- Phase 2: batch driver -----------------------------------------------
-
-
-@dataclass(frozen=True)
-class JudgeBatchProgress:
-    """Snapshot of an in-flight ``judge_batch`` run."""
-
-    completed: int
-    total: int
-    cache_hits: int
-    fresh_calls: int
-    cascade_used: int
-    elapsed_seconds: float
-    eta_seconds: float | None
-
-    @property
-    def avg_seconds_per_pair(self) -> float | None:
-        """Average time per completed pair, or ``None`` before the first one finishes."""
-        return self.elapsed_seconds / self.completed if self.completed else None
-
-    def render(self) -> str:
-        """Format this progress sample as a one-line CLI status string."""
-        avg = self.avg_seconds_per_pair
-        if avg is None:
-            return f"{self.completed:,} / {self.total:,} pairs"
-        if self.eta_seconds is None:
-            eta = "ETA --"
-        else:
-            hours, remainder = divmod(int(self.eta_seconds), 3600)
-            minutes = remainder // 60
-            eta = f"ETA {hours}h {minutes:02d}m"
-        return (
-            f"{self.completed:,} / {self.total:,} pairs · "
-            f"{avg:.1f}s/pair · {eta} · "
-            f"{self.cache_hits:,} cache hits · "
-            f"{self.fresh_calls:,} fresh calls"
-        )
-
-
-@dataclass
-class JudgeCheckpoint:
-    """Persistent checkpoint state mirrored on disk between 100-pair flushes."""
-
-    start_time: str
-    last_completed_idx: int
-    total_pairs: int
-    cache_hits: int
-    fresh_calls: int
-    cascade_used: int
-
-    def to_json(self) -> str:
-        """Serialise this checkpoint to JSON for the on-disk mirror."""
-        return _json.dumps(
-            {
-                "start_time": self.start_time,
-                "last_completed_idx": self.last_completed_idx,
-                "total_pairs": self.total_pairs,
-                "cache_hits": self.cache_hits,
-                "fresh_calls": self.fresh_calls,
-                "cascade_used": self.cascade_used,
-            },
-            indent=2,
-        )
-
-    @classmethod
-    def from_json(cls, raw: str) -> JudgeCheckpoint:
-        """Reconstruct a checkpoint from the JSON-on-disk mirror."""
-        data = _json.loads(raw)
-        return cls(
-            start_time=data["start_time"],
-            last_completed_idx=int(data["last_completed_idx"]),
-            total_pairs=int(data["total_pairs"]),
-            cache_hits=int(data["cache_hits"]),
-            fresh_calls=int(data["fresh_calls"]),
-            cascade_used=int(data.get("cascade_used", 0)),
-        )
-
-
-@dataclass
-class JudgeBatchResult:
-    """End-of-run summary for ``judge_batch``."""
-
-    total_pairs: int
-    completed: int
-    cache_hits: int
-    fresh_calls: int
-    cascade_used: int
-    auto_merged: int = 0
-    decision_counts: dict[str, int] = field(default_factory=dict)
-    elapsed_seconds: float = 0.0
-    output_path: str = ""
-    checkpoint_path: str = ""
-
-    def render(self) -> str:
-        """Format the batch result as paste-ready text for the judge CLI."""
-        lines = [
-            "M6 judge batch complete",
-            f"  total candidates: {self.total_pairs:,}",
-            f"  completed:        {self.completed:,}",
-            f"  auto-merged:      {self.auto_merged:,}",
-            f"  cache hits:       {self.cache_hits:,}",
-            f"  fresh calls:      {self.fresh_calls:,}",
-            f"  cascade used:     {self.cascade_used:,}",
-            f"  elapsed:          {self.elapsed_seconds / 60:.1f} min",
-            f"  output JSONL:     {self.output_path}",
-        ]
-        if self.decision_counts:
-            lines.append("  decision counts:")
-            for label in ("same_work", "different_work", "uncertain"):
-                lines.append(f"    {label:<16s} {self.decision_counts.get(label, 0):>8,}")
-        return "\n".join(lines)
-
-
-CHECKPOINT_INTERVAL: Final[int] = 100
-ESCALATE_BAND: Final[str] = "escalate"
-AUTO_MERGE_BAND: Final[str] = "auto-merge"
-DECISIONS_FILENAME: Final[str] = "judge-decisions.jsonl"
-CHECKPOINT_SUFFIX: Final[str] = ".checkpoint"
-DEFAULT_CONCURRENCY: Final[int] = 1
-
-
-def _checkpoint_path_for(output_path: Path) -> Path:
-    return output_path.with_name(output_path.name + CHECKPOINT_SUFFIX)
-
-
-def _serialise_decision(
-    pair: dict[str, Any],
-    outcome: JudgeOutcome,
-) -> dict[str, Any]:
-    """Build the per-row JSONL payload written to ``output_path``."""
-    final = outcome.final
-    return {
-        "work_a": pair["work_a"],
-        "work_b": pair["work_b"],
-        "similarity": pair["similarity"],
-        "block_a": pair.get("block_a"),
-        "block_b": pair.get("block_b"),
-        "cross_block": pair.get("cross_block"),
-        "decision": final.decision,
-        "confidence": final.confidence,
-        "rationale": final.rationale,
-        "matching_fields": list(final.matching_fields),
-        "diverging_fields": list(final.diverging_fields),
-        "used_cascade": outcome.used_cascade,
-        "cascade": [
-            {
-                "stage": step.stage,
-                "model": step.model_name,
-                "decision": step.decision.decision,
-                "confidence": step.decision.confidence,
-                "cache_hit": step.cache_hit,
-                "latency_seconds": step.latency_seconds,
-            }
-            for step in outcome.steps
-        ],
-    }
-
-
-def _load_candidate_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Load M5's ``embed-candidates.jsonl`` keeping only the escalate band."""
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Candidates JSONL not found at {path!s}. Run `bffi-pipeline embed` first."
-        )
-    rows: list[dict[str, Any]] = []
-    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            row = _json.loads(line)
-        except _json.JSONDecodeError as exc:
-            raise ValueError(f"Bad JSON at {path!s}:{line_no}: {exc}") from exc
-        if row.get("band") != ESCALATE_BAND:
-            continue
-        rows.append(row)
-    return rows
-
-
-def _load_auto_merge_candidates(path: Path) -> list[dict[str, Any]]:
-    """Load M5's ``embed-candidates.jsonl`` keeping only the auto-merge band.
-
-    These pairs cleared the M5 ceiling (similarity ≥ 0.90, spec § 6)
-    and merge deterministically without an LLM call — the embedding
-    similarity alone is the merge signal. Loading them separately
-    from the escalate band keeps the LLM cascade path unchanged.
-    """
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Candidates JSONL not found at {path!s}. Run `bffi-pipeline embed` first."
-        )
-    rows: list[dict[str, Any]] = []
-    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            row = _json.loads(line)
-        except _json.JSONDecodeError as exc:
-            raise ValueError(f"Bad JSON at {path!s}:{line_no}: {exc}") from exc
-        if row.get("band") != AUTO_MERGE_BAND:
-            continue
-        rows.append(row)
-    return rows
-
-
-def synthesize_auto_merge_outcome(
-    row: dict[str, Any],
-    *,
-    embedding_model: str = "BAAI/bge-m3",
-) -> JudgeOutcome:
-    """Build a :class:`JudgeOutcome` for an M5 auto-merge-band pair.
-
-    Per spec § 6, similarity ≥ 0.90 pairs merge deterministically
-    without an LLM call. The synthetic outcome carries one
-    ``CascadeStep`` tagged with :data:`STAGE_AUTO_MERGE` and the M5
-    embedding model as ``model_name`` so provenance still reflects
-    which agent made the decision (the embedding model, not an LLM).
-
-    ``confidence`` reuses the embedding similarity directly — it's
-    already on a [0, 1] scale and exceeds the ≥ 0.90 floor.
-    Boundary-4 validators require ``matching_fields`` non-empty for
-    ``same_work``; ``"embedding_similarity"`` is the literal signal.
-    """
-    similarity = float(row.get("similarity", 0.0))
-    # FAISS inner-product on L2-normalised vectors can drift a hair
-    # above 1.0 (~1.0000001) from float32 accumulation noise. Clamp
-    # to the Pydantic ``le=1.0`` constraint on ``WorkMatchDecision.
-    # confidence`` rather than rejecting the pair.
-    similarity_clamped = min(max(similarity, 0.0), 1.0)
-    block_a = row.get("block_a", "")
-    block_b = row.get("block_b", "")
-    rationale = (
-        f"M5 auto-merge band: embedding similarity {similarity:.3f} ≥ 0.90 "
-        f"(spec § 6 ceiling). Same blocking key ({block_a}); LLM judge "
-        "skipped — same_work signal is unambiguous at this similarity. "
-        f"Block_a={block_a!r} block_b={block_b!r}."
-    )
-    decision = WorkMatchDecision(
-        decision="same_work",
-        confidence=similarity_clamped,
-        matching_fields=["embedding_similarity"],
-        diverging_fields=[],
-        rationale=rationale,
-    )
-    step = CascadeStep(
-        stage=STAGE_AUTO_MERGE,
-        model_name=embedding_model,
-        decision=decision,
-        cache_hit=False,
-        latency_seconds=0.0,
-    )
-    return JudgeOutcome(final=decision, steps=[step])
-
-
-def _load_checkpoint(path: Path) -> JudgeCheckpoint | None:
-    if not path.is_file():
-        return None
-    try:
-        return JudgeCheckpoint.from_json(path.read_text(encoding="utf-8"))
-    except (ValueError, KeyError):
-        return None
-
-
-def _write_checkpoint(path: Path, ckpt: JudgeCheckpoint) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(ckpt.to_json(), encoding="utf-8")
-    tmp.replace(path)
-
-
-CascadeFn = Callable[..., JudgeOutcome]
-
-
-def _emit_provenance(
-    writer: ProvenanceWriter,
-    row: dict[str, Any],
-    outcome: JudgeOutcome,
-    seen_models: set[str],
-) -> None:
-    """Log every cascade step in ``outcome`` as a separate WorkMergeDecision.
-
-    Per spec § 8 / docs/local-inference.md the cascade's primary and
-    second-opinion calls each become their own ``prov:Activity`` with
-    distinct ``bffi-prov:stage`` tags so a SPARQL query can ask
-    "which decisions did the 32 B alone make?" vs "which got a 72 B
-    second opinion?". Software-agent blocks are emitted once per
-    model_id (caller tracks the seen set across the batch run).
-    """
-    inputs = (row["work_a"], row["work_b"])
-    similarity = float(row.get("similarity", 0.0))
-    for step in outcome.steps:
-        if step.model_name not in seen_models:
-            writer.add_software_agent(model_id=step.model_name)
-            seen_models.add(step.model_name)
-        writer.add_merge_decision(
-            inputs=inputs,
-            decision=step.decision.decision,
-            confidence=step.decision.confidence,
-            embedding_similarity=similarity,
-            rationale=step.decision.rationale,
-            matching_fields=step.decision.matching_fields,
-            diverging_fields=step.decision.diverging_fields,
-            prompt_hash=prompt_hash(),
-            raw_response=step.decision.model_dump_json(),
-            model_id=step.model_name,
-            stage=step.stage,
-            cache_hit=step.cache_hit,
-        )
-
-
-def judge_batch(  # noqa: PLR0912, PLR0915 — orchestrates resume + per-pair retry + checkpoint write; splitting fragments state.
-    candidates_path: Path | None = None,
-    output_path: Path | None = None,
-    *,
-    bffi_corpus_dir: Path | None = None,
-    work_records: dict[str, WorkRecord] | None = None,
-    resume: bool = True,
-    primary_model: str | None = None,
-    fallback_model: str | None = None,
-    primary_chain: ChainLike | None = None,
-    fallback_chain: ChainLike | None = None,
-    cache: JudgeCache | None = None,
-    cascade: CascadeFn | None = None,
-    progress_callback: Callable[[JudgeBatchProgress], None] | None = None,
-    decision_callback: Callable[[dict[str, Any], JudgeOutcome], None] | None = None,
-    provenance_writer: ProvenanceWriter | None = None,
-    concurrency: int = DEFAULT_CONCURRENCY,
-    sleep: Callable[[float], None] = time.sleep,
-    full_rationale: bool = True,
-    watchdog_sidecar_path: Path | None = None,
-) -> JudgeBatchResult:
-    """Run the cascade over every escalate-band pair from M5.
-
-    Inputs / outputs default under ``BFFI_DATA_DIR``. ``resume=True``
-    (the default) skips past ``last_completed_idx`` recorded in the
-    checkpoint; ``resume=False`` blows away both the output JSONL and
-    its checkpoint sibling before starting.
-
-    ``decision_callback`` is a generic per-pair hook used by tests and
-    custom integrations. ``provenance_writer`` is the spec § 8
-    integration: when supplied, every cascade step is logged as a
-    discrete ``bffi-prov:WorkMergeDecision`` Activity (so a primary +
-    second-opinion pair produces two Activities), and each distinct
-    model gets a ``prov:SoftwareAgent`` block emitted once.
-    """
-    settings = get_settings()
-    candidates_path = candidates_path or (settings.data_dir / "embed-candidates.jsonl")
-    output_path = output_path or (settings.data_dir / DECISIONS_FILENAME)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = _checkpoint_path_for(output_path)
-    if watchdog_sidecar_path is None:
-        # Default sidecar lives alongside the other M6 artefacts so a
-        # ``BFFI_DATA_DIR`` swap rotates it automatically.
-        watchdog_sidecar_path = settings.data_dir / "watchdog-events.jsonl"
-
-    cascade_fn: CascadeFn = cascade if cascade is not None else cascade_judge
-
-    candidates = _load_candidate_jsonl(candidates_path)
-    total = len(candidates)
-    emit_if_active(
-        stage="m6",
-        event="start",
-        counters={"total": total},
-        extra={"concurrency": concurrency, "resume": resume},
-    )
-    # P-11 Phase C: probe both mlx-lm cascade ports at entry. The
-    # primary at :8001 and the fallback at :8002 are independent
-    # processes; either can be down without the other.
-    #
-    # P-12 Phase B: when the fallback URL equals the primary URL
-    # (degenerate cascade — the same process probed twice — typical
-    # on dev hosts where the 32B fallback doesn't fit, see CLAUDE.md
-    # § "Dev machine constraints"), pass an empty URL into
-    # probe_mlx_lm so it short-circuits to status="not_configured".
-    # The dashboard then greys the cell instead of colouring it red.
-    primary_url = settings.llm_base_url_primary or settings.llm_base_url
-    raw_fallback = settings.llm_base_url_fallback or settings.llm_base_url
-    fallback_url = raw_fallback if raw_fallback != primary_url else ""
-    emit_health_probes(
-        "m6",
-        {
-            "mlx-lm-primary": probe_mlx_lm(primary_url, dep="mlx-lm-primary"),
-            "mlx-lm-fallback": probe_mlx_lm(fallback_url, dep="mlx-lm-fallback"),
-        },
-    )
-
-    if work_records is None:
-        if bffi_corpus_dir is None:
-            bffi_corpus_dir = settings.data_dir
-        work_records = _load_work_records_from_corpus(bffi_corpus_dir)
-
-    own_cache = cache is None
-    if own_cache:
-        cache = JudgeCache(default_cache_path())
-
-    seen_models: set[str] = set()
-
-    started = time.monotonic()
-
-    start_idx = 0
-    cache_hits = 0
-    fresh_calls = 0
-    cascade_used = 0
-    decision_counts: dict[str, int] = {}
-
-    if not resume:
-        if output_path.exists():
-            output_path.unlink()
-        if checkpoint_path.exists():
-            checkpoint_path.unlink()
-        start_time_iso = datetime.now(UTC).isoformat()
-        write_mode = "w"
-    else:
-        existing = _load_checkpoint(checkpoint_path)
-        if existing is not None and existing.total_pairs == total:
-            start_idx = existing.last_completed_idx + 1
-            cache_hits = existing.cache_hits
-            fresh_calls = existing.fresh_calls
-            cascade_used = existing.cascade_used
-            start_time_iso = existing.start_time
-            write_mode = "a"
-        else:
-            start_time_iso = datetime.now(UTC).isoformat()
-            if output_path.exists():
-                output_path.unlink()
-            write_mode = "w"
-
-    if concurrency < 1:
-        raise ValueError(f"concurrency must be ≥ 1, got {concurrency!r}")
-
-    def _judge_one(idx: int) -> tuple[dict[str, Any], JudgeOutcome]:
-        row = candidates[idx]
-        a = work_records.get(row["work_a"]) if work_records else None
-        b = work_records.get(row["work_b"]) if work_records else None
-        if a is None or b is None:
-            return row, JudgeOutcome(
-                final=_uncertain_decision(
-                    f"missing WorkRecord for {row['work_a']} or {row['work_b']}; "
-                    "M2 + M3 must run before M6."
-                ),
-                steps=[],
-            )
-        return row, cascade_fn(
-            a,
-            b,
-            row["similarity"],
-            primary_model=primary_model,
-            fallback_model=fallback_model,
-            primary_chain=primary_chain,
-            fallback_chain=fallback_chain,
-            cache=cache,
-            sleep=sleep,
-            full_rationale=full_rationale,
-            watchdog_sidecar_path=watchdog_sidecar_path,
-        )
-
-    def _record_outcome(
-        idx: int,
-        row: dict[str, Any],
-        outcome: JudgeOutcome,
-        fh: Any,
-    ) -> None:
-        nonlocal cache_hits, fresh_calls, cascade_used
-        fh.write(_json.dumps(_serialise_decision(row, outcome), ensure_ascii=False) + "\n")
-        fh.flush()
-
-        if decision_callback is not None:
-            decision_callback(row, outcome)
-        if provenance_writer is not None:
-            _emit_provenance(provenance_writer, row, outcome, seen_models)
-
-        if outcome.used_cascade:
-            cascade_used += 1
-        for step in outcome.steps:
-            if step.cache_hit:
-                cache_hits += 1
-            else:
-                fresh_calls += 1
-        decision_counts[outcome.final.decision] = decision_counts.get(outcome.final.decision, 0) + 1
-
-        completed = idx + 1
-        if completed % CHECKPOINT_INTERVAL == 0 or completed == total:
-            elapsed = time.monotonic() - started
-            avg = elapsed / max(1, completed - start_idx)
-            remaining = max(0, total - completed)
-            eta_seconds = remaining * avg if avg > 0 else None
-            _write_checkpoint(
-                checkpoint_path,
-                JudgeCheckpoint(
-                    start_time=start_time_iso,
-                    last_completed_idx=idx,
-                    total_pairs=total,
-                    cache_hits=cache_hits,
-                    fresh_calls=fresh_calls,
-                    cascade_used=cascade_used,
-                ),
-            )
-            # P-12 Phase D + follow-up: emit progress at the checkpoint
-            # cadence so the exporter can derive throughput / ETA + the
-            # dashboard's M6 outcome bargauge populates live (via the
-            # _PROGRESS_OUTCOME_KEYS bridge in metrics_exporter.py).
-            emit_if_active(
-                stage="m6",
-                event="progress",
-                counters={"processed": completed, "total": total},
-                extra={
-                    "cache_hits": cache_hits,
-                    "fresh_calls": fresh_calls,
-                    "cascade_used": cascade_used,
-                    "auto_merged": auto_merge_written,
-                },
-            )
-            if progress_callback is not None:
-                progress_callback(
-                    JudgeBatchProgress(
-                        completed=completed,
-                        total=total,
-                        cache_hits=cache_hits,
-                        fresh_calls=fresh_calls,
-                        cascade_used=cascade_used,
-                        elapsed_seconds=elapsed,
-                        eta_seconds=eta_seconds,
-                    )
-                )
-
-    auto_merge_rows = _load_auto_merge_candidates(candidates_path)
-    auto_merge_written = 0
-
-    try:
-        with output_path.open(write_mode, encoding="utf-8") as fh:
-            # Auto-merge band: spec § 6 says sim ≥ 0.90 merges without
-            # an LLM call. Write these synthetic same_work decisions
-            # once per fresh run (write_mode == "w"); resumed runs
-            # ("a" mode) leave them in place from the prior invocation.
-            if write_mode == "w":
-                for am_row in auto_merge_rows:
-                    am_outcome = synthesize_auto_merge_outcome(am_row)
-                    fh.write(
-                        _json.dumps(_serialise_decision(am_row, am_outcome), ensure_ascii=False)
-                        + "\n"
-                    )
-                    if decision_callback is not None:
-                        decision_callback(am_row, am_outcome)
-                    if provenance_writer is not None:
-                        _emit_provenance(provenance_writer, am_row, am_outcome, seen_models)
-                    decision_counts[am_outcome.final.decision] = (
-                        decision_counts.get(am_outcome.final.decision, 0) + 1
-                    )
-                    auto_merge_written += 1
-                fh.flush()
-
-            if concurrency == 1:
-                for idx in range(start_idx, total):
-                    row, outcome = _judge_one(idx)
-                    _record_outcome(idx, row, outcome, fh)
-            else:
-                # Submit/drain in fixed-size chunks so output JSONL stays in input
-                # order and the checkpoint can rely on `last_completed_idx` being
-                # contiguous. Reuses one thread pool across chunks.
-                from concurrent.futures import ThreadPoolExecutor
-
-                with ThreadPoolExecutor(max_workers=concurrency) as pool:
-                    for chunk_start in range(start_idx, total, concurrency):
-                        chunk_end = min(chunk_start + concurrency, total)
-                        idxs = list(range(chunk_start, chunk_end))
-                        futures = [pool.submit(_judge_one, idx) for idx in idxs]
-                        for offset, future in enumerate(futures):
-                            row, outcome = future.result()
-                            _record_outcome(idxs[offset], row, outcome, fh)
-    finally:
-        if own_cache and cache is not None:
-            cache.close()
-
-    emit_if_active(
-        stage="m6",
-        event="end",
-        counters={
-            "total_pairs": total,
-            "completed": total,
-            "cache_hits": cache_hits,
-            "fresh_calls": fresh_calls,
-            "cascade_used": cascade_used,
-            "auto_merged": auto_merge_written,
-        },
-        extra={"elapsed_seconds": time.monotonic() - started},
-    )
-    return JudgeBatchResult(
-        total_pairs=total,
-        completed=total,
-        cache_hits=cache_hits,
-        fresh_calls=fresh_calls,
-        cascade_used=cascade_used,
-        auto_merged=auto_merge_written,
-        decision_counts=decision_counts,
-        elapsed_seconds=time.monotonic() - started,
-        output_path=str(output_path),
-        checkpoint_path=str(checkpoint_path),
-    )
-
-
-def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, WorkRecord]:
-    """Read all BFFI Turtle + BIBFRAME RDF/XML under ``corpus_dir`` and extract."""
-    g = Graph()
-    bffi_dir = corpus_dir / "bffi"
-    bibframe_dir = corpus_dir / "bibframe"
-    if bffi_dir.is_dir():
-        for path in sorted(bffi_dir.glob("*.ttl")):
-            g.parse(str(path), format="turtle")
-    if bibframe_dir.is_dir():
-        for path in sorted(bibframe_dir.glob("*.rdf")):
-            if not path.name.startswith("_"):
-                g.parse(str(path), format="xml")
-    return extract_work_records(g)
-
 
 __all__ = [
     "AUTO_MERGE_BAND",
@@ -1227,15 +133,18 @@ __all__ = [
     "CHECKPOINT_SUFFIX",
     "CONNECTION_BACKOFF_SECONDS",
     "DECISIONS_FILENAME",
+    "DEFAULT_CONCURRENCY",
     "ESCALATE_BAND",
     "FALLBACK_CONFIDENCE_THRESHOLD",
     "MAX_CONNECTION_RETRIES",
     "MAX_VALIDATION_RETRIES",
+    "MIN_RATIONALE_CHARS",
     "PROMPT_PATH",
     "PROMPT_PATH_FAST",
     "STAGE_AUTO_MERGE",
     "STAGE_PRIMARY",
     "STAGE_SECOND_OPINION",
+    "STAGE_WATCHDOG",
     "STUB_PHRASES",
     "CascadeStep",
     "JudgeBatchProgress",

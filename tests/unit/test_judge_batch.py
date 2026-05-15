@@ -29,6 +29,8 @@ from bffi_pipeline.stages.m6 import (
     extract_work_records,
     judge_batch,
 )
+from bffi_pipeline.stages.m6 import batch as _m6_batch
+from bffi_pipeline.stages.m6 import cascade as _m6_cascade
 from bffi_pipeline.stages.m6 import runner as judge
 
 
@@ -42,9 +44,17 @@ def _redirect_default_cache_path(
     Without this, ``judge_batch`` called without an explicit ``cache=`` opens
     ``data/judge-cache.sqlite`` next to the working directory — a path that
     does not exist in the test sandbox.
+
+    P-38 Phase D split the batch driver and the cascade across separate
+    sub-modules; both look up ``default_cache_path`` against their own
+    module namespaces, so patching only ``runner.default_cache_path``
+    leaves the actual call sites unpatched.
     """
     cache_path = tmp_path_factory.mktemp("judge-cache") / "judge-cache.sqlite"
-    monkeypatch.setattr(judge, "default_cache_path", lambda: cache_path)
+    fake = lambda: cache_path  # noqa: E731
+    monkeypatch.setattr(judge, "default_cache_path", fake)
+    monkeypatch.setattr(_m6_batch, "default_cache_path", fake)
+    monkeypatch.setattr(_m6_cascade, "default_cache_path", fake)
 
 
 # --- extract_work_records -------------------------------------------------
@@ -430,6 +440,7 @@ def test_batch_writes_checkpoint_at_interval(
 ) -> None:
     """Override CHECKPOINT_INTERVAL for the test to keep it fast."""
     monkeypatch.setattr(judge, "CHECKPOINT_INTERVAL", 2)
+    monkeypatch.setattr(_m6_batch, "CHECKPOINT_INTERVAL", 2)
 
     candidates = tmp_path / "candidates.jsonl"
     out = tmp_path / "decisions.jsonl"
@@ -546,6 +557,7 @@ def test_progress_callback_carries_eta_and_cache_counters(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(judge, "CHECKPOINT_INTERVAL", 1)
+    monkeypatch.setattr(_m6_batch, "CHECKPOINT_INTERVAL", 1)
     candidates = tmp_path / "candidates.jsonl"
     out = tmp_path / "decisions.jsonl"
     _write_candidates(

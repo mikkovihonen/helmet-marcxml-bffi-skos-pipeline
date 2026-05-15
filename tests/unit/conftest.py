@@ -42,7 +42,7 @@ from collections.abc import Iterator
 import pytest
 
 from bffi_pipeline.observability import probes
-from bffi_pipeline.stages.m6 import runner as judge
+from bffi_pipeline.stages.m6 import batch as judge_batch_mod
 from bffi_pipeline.stages.m9 import runner as reconcile
 
 
@@ -79,8 +79,10 @@ def _block_unit_test_network() -> Iterator[None]:
     - ``reconcile.probe_mlx_lm`` / ``reconcile.probe_finto`` /
       ``reconcile.probe_fuseki`` — the imports the M9 entry-point
       health probes resolve against.
-    - ``judge.probe_mlx_lm`` — the import the M6 entry-point health
-      probes resolve against.
+    - ``judge_batch_mod.probe_mlx_lm`` — the import the M6 batch
+      driver's entry-point health probes resolve against (P-38
+      Phase D moved the M6 health-probe call site out of the
+      runner module into ``m6.batch``).
 
     Socket layer: ``socket.socket.connect`` raises on non-loopback
     targets. Loopback (``127.0.0.1`` / ``::1`` / ``localhost``) stays
@@ -95,11 +97,11 @@ def _block_unit_test_network() -> Iterator[None]:
         reconcile.probe_finto,
         reconcile.probe_fuseki,
     )
-    saved_judge_probe_mlx_lm = judge.probe_mlx_lm
+    saved_judge_probe_mlx_lm = judge_batch_mod.probe_mlx_lm
     reconcile.probe_mlx_lm = _stub_probe  # type: ignore[assignment]
     reconcile.probe_finto = _stub_probe  # type: ignore[assignment]
     reconcile.probe_fuseki = _stub_probe  # type: ignore[assignment]
-    judge.probe_mlx_lm = _stub_probe  # type: ignore[assignment]
+    judge_batch_mod.probe_mlx_lm = _stub_probe  # type: ignore[assignment]
 
     # Layer 2: socket-level guard. Loopback stays open; everything
     # else raises a clear error pointing at this file.
@@ -129,5 +131,5 @@ def _block_unit_test_network() -> Iterator[None]:
             reconcile.probe_finto,
             reconcile.probe_fuseki,
         ) = saved_reconcile
-        judge.probe_mlx_lm = saved_judge_probe_mlx_lm
+        judge_batch_mod.probe_mlx_lm = saved_judge_probe_mlx_lm
         socket.socket.connect = saved_socket_connect  # type: ignore[method-assign]
