@@ -3,7 +3,7 @@
 **Status**: proposed.
 **Scope**: 1-2 days.
 **Proposal-base commit**: `6b6be25`. To gauge drift before acting, run
-`git diff 6b6be25..HEAD -- src/bffi_pipeline/stages/embeddings.py src/bffi_pipeline/text/`.
+`git diff 6b6be25..HEAD -- src/bffi_pipeline/stages/m5/runner.py src/bffi_pipeline/text/`.
 **Source data**: `scratchpad/merge-cluster-verdicts/verdicts.jsonl`.
 
 ## Motivation
@@ -40,7 +40,7 @@ projected on the full corpus.
 
 ### Why M5 misses
 
-`embedding_input_string` (`src/bffi_pipeline/stages/embeddings.py:212`)
+`embedding_input_string` (`src/bffi_pipeline/stages/m5/runner.py:212`)
 puts the title in one field. BGE-M3 down-weights short numeric tokens
 ("2", "11", "1990") because the bulk of the lexical context is the
 shared series prefix. Cosine similarity for "Naruto Vol. 2" vs

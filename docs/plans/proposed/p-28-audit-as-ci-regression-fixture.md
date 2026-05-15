@@ -89,8 +89,8 @@ CI run logs both.
 CI wiring: `.github/workflows/audit.yml` (or extend the existing
 test workflow) runs `make audit-test` on every PR that touches:
 - `scripts/audit-merge-clusters.py`
-- `src/bffi_pipeline/stages/embeddings.py`
-- `src/bffi_pipeline/stages/merge.py`
+- `src/bffi_pipeline/stages/m5/runner.py`
+- `src/bffi_pipeline/stages/m8/runner.py`
 - `src/bffi_pipeline/text/`
 - `sparql/`
 

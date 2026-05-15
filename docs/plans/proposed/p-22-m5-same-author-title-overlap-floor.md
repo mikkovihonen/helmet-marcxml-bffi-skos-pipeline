@@ -3,7 +3,7 @@
 **Status**: proposed.
 **Scope**: 1-2 days.
 **Proposal-base commit**: `6b6be25`. To gauge drift before acting, run
-`git diff 6b6be25..HEAD -- src/bffi_pipeline/stages/embeddings.py src/bffi_pipeline/stages/merge.py sparql/`.
+`git diff 6b6be25..HEAD -- src/bffi_pipeline/stages/m5/runner.py src/bffi_pipeline/stages/m8/runner.py sparql/`.
 **Source data**: `scratchpad/merge-cluster-verdicts/verdicts.jsonl` (audit of the 2026-05-13 overnight 20 k bench).
 
 ## Motivation
@@ -44,7 +44,7 @@ that nonetheless cosine-cluster.
 
 ### Why the embeddings collide
 
-`src/bffi_pipeline/stages/embeddings.py:212` packs five
+`src/bffi_pipeline/stages/m5/runner.py:212` packs five
 pipe-separated fields:
 
 ```
@@ -112,7 +112,7 @@ positive rate stays high.
 script imports from the new module; current behaviour unchanged.
 
 **A.2 Add token-overlap floor at the auto-merge decision point.**
-~15 lines in `src/bffi_pipeline/stages/embeddings.py` (extend
+~15 lines in `src/bffi_pipeline/stages/m5/runner.py` (extend
 `classify_band` signature or add a new `decide_with_context` that the
 caller in `merge.py` uses). Default
 `AUTO_MERGE_TITLE_OVERLAP_MIN = 3`, configurable via

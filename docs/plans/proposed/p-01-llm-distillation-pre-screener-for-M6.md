@@ -12,9 +12,9 @@ then:
   per-proposal file.
 
 To gauge how much the project has changed since drafting, run
-`git diff 8f4affe..HEAD -- src/bffi_pipeline/stages/judge.py
-src/bffi_pipeline/stages/embeddings.py
-src/bffi_pipeline/stages/merge.py
+`git diff 8f4affe..HEAD -- src/bffi_pipeline/stages/m6/runner.py
+src/bffi_pipeline/stages/m5/runner.py
+src/bffi_pipeline/stages/m8/runner.py
 src/bffi_pipeline/provenance/`. The "Motivation" and "Approach"
 sections were authored against the structure those files had at
 `8f4affe`; significant refactors there mean the proposal needs a

@@ -7,7 +7,7 @@ follow-ups that need their own execution document because they
 require a one-time benchmark on the M5 Max that the rest of the
 pipeline depends on for committed defaults.
 **Plan-base commit**: `fe0b8dd`. To gauge drift before executing,
-run `git diff fe0b8dd..HEAD -- src/bffi_pipeline/stages/embeddings.py
+run `git diff fe0b8dd..HEAD -- src/bffi_pipeline/stages/m5/runner.py
 src/bffi_pipeline/eval/embed_benchmark.py`.
 **Phase commits**:
 
@@ -37,7 +37,7 @@ as placeholder defaults:
 
 ## Definition of done
 
-- A docstring at the top of `src/bffi_pipeline/stages/embeddings.py`
+- A docstring at the top of `src/bffi_pipeline/stages/m5/runner.py`
   records the chosen model, the mean similarity gap on the gold
   set, and the chosen `efSearch` with the recall numbers per
   sweep value.
@@ -52,7 +52,7 @@ as placeholder defaults:
 - `src/bffi_pipeline/eval/embed_benchmark.py` is committed and runnable
   via `bffi-pipeline embed-benchmark`; it walks gold pairs and
   reports per-model same_work vs different_work mean similarity.
-- `src/bffi_pipeline/stages/embeddings.py` defaults to BGE-M3, 1024
+- `src/bffi_pipeline/stages/m5/runner.py` defaults to BGE-M3, 1024
   dimensions, HNSW `M=32 efConstruction=200 efSearch=64`.
 - The gold set is currently 17 cases (`gold/gold.jsonl`) — small,
   but enough to differentiate models on the same_work / different_work
@@ -101,7 +101,7 @@ unless the gap difference is > 0.05.
 
 If the winner is BGE-M3:
 
-- Edit `src/bffi_pipeline/stages/embeddings.py`'s module docstring
+- Edit `src/bffi_pipeline/stages/m5/runner.py`'s module docstring
   to add the bench result table + the date + the gold-set size.
   No code change needed.
 
@@ -165,7 +165,7 @@ the chosen value.
 
 ### B3. Update the default
 
-Edit `src/bffi_pipeline/stages/embeddings.py`'s HNSW config constant
+Edit `src/bffi_pipeline/stages/m5/runner.py`'s HNSW config constant
 to the chosen `efSearch`. Update the module docstring with the
 sweep table:
 

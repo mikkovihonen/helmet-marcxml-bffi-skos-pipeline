@@ -127,7 +127,7 @@ from P-26's verdict distribution, minus the 64 legitimate-
 reedition + 20 legitimate-translation true-positives). For each
 cluster, construct the canonical M6 input — work_a + work_b BFFI
 fragments, prompt template, embedding similarity — and invoke the
-judge synchronously through `src/bffi_pipeline/stages/judge.py`. Log
+judge synchronously through `src/bffi_pipeline/stages/m6/runner.py`. Log
 the verdict against the audit's heuristic verdict.
 
 ```python

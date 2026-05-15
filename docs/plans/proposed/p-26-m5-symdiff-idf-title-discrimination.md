@@ -72,7 +72,7 @@ by P-26)` on P-26 graduation.
 
 ### Why M5 doesn't already do this
 
-`embedding_input_string` (`src/bffi_pipeline/stages/embeddings.py:212`)
+`embedding_input_string` (`src/bffi_pipeline/stages/m5/runner.py:212`)
 hands the title as one opaque string to BGE-M3, which embeds the
 *whole* sequence. Cosine similarity weights every position roughly
 equally — it has no "which tokens differ" signal at the cascade
@@ -122,7 +122,7 @@ Persist as `<BFFI_DATA_DIR>/title-token-idf.parquet`. Expected size
 `bffi-corpus.ttl` (per P-19) is newer than the parquet.
 
 Wire as a new M3 finalisation step in
-`src/bffi_pipeline/stages/bf_to_bffi.py` (or a new
+`src/bffi_pipeline/stages/m3/runner.py` (or a new
 `stages/idf_index.py` for cleanliness — preferred, the build is a
 self-contained pass). Emit standard `start` / `end` observability
 events with counters `{n_titles, n_unique_tokens, max_idf, min_idf}`

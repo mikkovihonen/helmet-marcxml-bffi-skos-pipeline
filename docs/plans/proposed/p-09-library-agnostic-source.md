@@ -6,10 +6,10 @@
 `git diff 1678e1c..HEAD --
 src/bffi_pipeline/config.py
 src/bffi_pipeline/provenance/vocab.py
-src/bffi_pipeline/stages/marc_to_bf.py
-src/bffi_pipeline/stages/bf_to_bffi.py
-src/bffi_pipeline/stages/merge.py
-src/bffi_pipeline/stages/ysa_disambiguation_report.py
+src/bffi_pipeline/stages/m2/runner.py
+src/bffi_pipeline/stages/m3/runner.py
+src/bffi_pipeline/stages/m8/runner.py
+src/bffi_pipeline/stages/m9/ysa_disambiguation_report.py
 src/bffi_pipeline/validation/marcxml.py`.
 
 ## Motivation
@@ -20,13 +20,13 @@ The project is pro bono and earmarked for the National Library of Finland (`CLAU
 |---|---|
 | `provenance/vocab.py:89` | `RECORDING_SOURCE_HELMET = <…bib:recording-source/helmet>` |
 | `provenance/vocab.py:91` | `HELMET_SOURCE_URI = <…bib:source:helmet>` (config-overridable, but the name + default are Helmet-specific) |
-| `stages/marc_to_bf.py:54` | `_HELMET_RECORD_NS = "http://urn.fi/URN:NBN:fi:bib:helmet/"` (no env override) |
-| `stages/marc_to_bf.py:345` | `g.add((ident, V.BF.source, V.HELMET_SOURCE_URI))` — emits the Helmet source on every record, unconditional on MARC 003 |
-| `stages/marc_to_bf.py:386` | `helmet_record = URIRef(f"{_HELMET_RECORD_NS}{helmet_id}")` — `bffi:sourceMetadata` target |
-| `stages/merge.py:404` | `f"{graph_base}ident/helmet/{bib_id}"` |
-| `stages/merge.py:992` | `f"{graph_base}helmet/{bib_id}"` |
-| `stages/merge.py:62` | `HELMET_MAP_FILENAME = "helmet-map.jsonl"` |
-| `stages/ysa_disambiguation_report.py:78` | `_HELMET_IDENT_PREFIX = "http://urn.fi/…/ident/helmet/"` |
+| `stages/m2/runner.py:54` | `_HELMET_RECORD_NS = "http://urn.fi/URN:NBN:fi:bib:helmet/"` (no env override) |
+| `stages/m2/runner.py:345` | `g.add((ident, V.BF.source, V.HELMET_SOURCE_URI))` — emits the Helmet source on every record, unconditional on MARC 003 |
+| `stages/m2/runner.py:386` | `helmet_record = URIRef(f"{_HELMET_RECORD_NS}{helmet_id}")` — `bffi:sourceMetadata` target |
+| `stages/m8/runner.py:404` | `f"{graph_base}ident/helmet/{bib_id}"` |
+| `stages/m8/runner.py:992` | `f"{graph_base}helmet/{bib_id}"` |
+| `stages/m8/runner.py:62` | `HELMET_MAP_FILENAME = "helmet-map.jsonl"` |
+| `stages/m9/ysa_disambiguation_report.py:78` | `_HELMET_IDENT_PREFIX = "http://urn.fi/…/ident/helmet/"` |
 
 The information needed to drive every one of those triples already lives in **MARC controlfield 003** (the ILS source code, `FI-HELME` in Helmet's case — Vaarakirjastot would carry `FI-VAARA`, Heili `FI-HEILI`, etc.). The export tool sets 003; marc2bibframe2 surfaces it as `bf:Agent[bf:code]` on the BIBFRAME side; the pipeline currently ignores both and writes the FI-HELME URI unconditionally.
 
@@ -103,9 +103,9 @@ Cosmetic but completes the decoupling. Existing data dirs would need the file re
 - [`src/bffi_pipeline/config.py`](../../src/bffi_pipeline/config.py) — where `LibrarySource` lands.
 - [`src/bffi_pipeline/provenance/vocab.py`](../../src/bffi_pipeline/provenance/vocab.py) — `HELMET_SOURCE_URI` and `RECORDING_SOURCE_HELMET` constants to remove.
 - [`src/bffi_pipeline/validation/marcxml.py`](../../src/bffi_pipeline/validation/marcxml.py) — `helmet_bib_id_from_filename` and `_FILENAME_PATTERN` to remove or simplify.
-- [`src/bffi_pipeline/stages/marc_to_bf.py`](../../src/bffi_pipeline/stages/marc_to_bf.py) — `_HELMET_RECORD_NS`, `_add_helmet_identifier`, `_admin_metadata_uri` call sites.
-- [`src/bffi_pipeline/stages/merge.py`](../../src/bffi_pipeline/stages/merge.py) — `ident/helmet/`, `helmet/`, `HELMET_MAP_FILENAME` call sites.
-- [`src/bffi_pipeline/stages/ysa_disambiguation_report.py`](../../src/bffi_pipeline/stages/ysa_disambiguation_report.py) — `_HELMET_IDENT_PREFIX` (becomes computed from `LibrarySource` set).
+- [`src/bffi_pipeline/stages/m2/runner.py`](../../src/bffi_pipeline/stages/m2/runner.py) — `_HELMET_RECORD_NS`, `_add_helmet_identifier`, `_admin_metadata_uri` call sites.
+- [`src/bffi_pipeline/stages/m8/runner.py`](../../src/bffi_pipeline/stages/m8/runner.py) — `ident/helmet/`, `helmet/`, `HELMET_MAP_FILENAME` call sites.
+- [`src/bffi_pipeline/stages/m9/ysa_disambiguation_report.py`](../../src/bffi_pipeline/stages/m9/ysa_disambiguation_report.py) — `_HELMET_IDENT_PREFIX` (becomes computed from `LibrarySource` set).
 - [`src/bffi_pipeline/provenance/writer.py`](../../src/bffi_pipeline/provenance/writer.py) and [`src/bffi_pipeline/provenance/logger.py`](../../src/bffi_pipeline/provenance/logger.py) — Activity emission sites for the renamed `bffi-prov:bibId` + new `bffi-prov:sourceCode` predicates.
 - `CLAUDE.md` § "Committed identifiers" — the FI-HELME URI defaults Phase B preserves byte-for-byte; the bffi-prov v2 predicate rename lands in the same commit that updates this section.
 - `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` § 8 — the bffi-prov vocabulary reference doc (per `CLAUDE.md`'s pointer); Phase B documents the v2 predicate set there.

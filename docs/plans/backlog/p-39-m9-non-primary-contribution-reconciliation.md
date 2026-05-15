@@ -5,7 +5,7 @@
 **Source-of-record**: P-35 Phase F3 content as committed at `eb74943`. Recoverable via `git show eb74943:docs/plans/in-progress/p-35-m3-cascade-follow-ups.md` if the F3 prose history needs to be traced back to its origin in the M3-cascade plan.
 
 **Plan-base commit**: `eb74943`. Before executing, run
-`git diff eb74943..HEAD -- src/bffi_pipeline/stages/reconcile.py src/bffi_pipeline/stages/merge.py src/bffi_pipeline/stages/bf_to_bffi.py gold/contrib.jsonl`
+`git diff eb74943..HEAD -- src/bffi_pipeline/stages/m9/runner.py src/bffi_pipeline/stages/m8/runner.py src/bffi_pipeline/stages/m3/runner.py gold/contrib.jsonl`
 to confirm no in-flight work has reshaped the M9 surface this plan touches.
 
 **Phase commits**:
@@ -55,7 +55,7 @@ The 5,000-record measurement documented in `docs/archived/BUILD_PLAN.md` project
 
 #### B.1 Walker
 
-- [ ] In `src/bffi_pipeline/stages/reconcile.py` (or `m9/runner.py` post-P-38-Phase-A), add `_iter_extracted_contribution_requests` that yields `EntityRequest(literal=<rdfs:label>, kind="person", ...)` per blank-node agent on a non-primary canonical contribution. Mirror the shape of `_iter_subject_requests` (the precedent already present in the file).
+- [ ] In `src/bffi_pipeline/stages/m9/runner.py` (or `m9/runner.py` post-P-38-Phase-A), add `_iter_extracted_contribution_requests` that yields `EntityRequest(literal=<rdfs:label>, kind="person", ...)` per blank-node agent on a non-primary canonical contribution. Mirror the shape of `_iter_subject_requests` (the precedent already present in the file).
 - [ ] Walker iterates the canonical graph (Phase F1 output) rather than per-bib raw output — non-primary contributions on canonical Expressions are exactly the population F3 targets.
 - [ ] Walker skips contributions whose agent already carries a `prov:specializationOf <kanto-uri>` triple (F2's bindings — already reconciled; no point re-asking Finto).
 

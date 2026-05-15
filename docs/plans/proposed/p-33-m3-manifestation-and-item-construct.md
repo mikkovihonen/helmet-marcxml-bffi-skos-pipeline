@@ -16,8 +16,8 @@ materially before this is acted on, re-verify with:
 git diff 47477cd..HEAD -- \
     sparql/bf_to_bffi_work.rq \
     sparql/bf_to_bffi_expression.rq \
-    src/bffi_pipeline/stages/bf_to_bffi.py \
-    src/bffi_pipeline/stages/marc_to_bf.py \
+    src/bffi_pipeline/stages/m3/runner.py \
+    src/bffi_pipeline/stages/m2/runner.py \
     src/marcxml_export_pipeline/sierra/marcxml.py \
     config/shapes/bibframe-conversion.shape.ttl \
     docs/lkd.rdf
@@ -249,7 +249,7 @@ The 549baa0 workaround code path stays for one cycle after the
 re-stamping the SHACL shape; the URI-regex exclusion gets removed
 in the cycle after that, once the demotion is corpus-validated.
 
-### Stage wiring (`stages/bf_to_bffi.py`)
+### Stage wiring (`stages/m3/runner.py`)
 
 The runner reads `bf_to_bffi_work.rq` and `bf_to_bffi_expression.rq`
 today, executes both CONSTRUCTs, and unions their output graphs into

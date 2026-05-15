@@ -8,8 +8,8 @@ the first mlx-lm-only gold-set eval surfaced the structured-output
 gap. If `main` has moved before this is acted on, re-verify with
 `git diff e28bb9d..HEAD --
 src/bffi_pipeline/llm_json_mode.py
-src/bffi_pipeline/stages/judge.py
-src/bffi_pipeline/stages/reconcile.py
+src/bffi_pipeline/stages/m6/runner.py
+src/bffi_pipeline/stages/m9/runner.py
 src/bffi_pipeline/contrib_extract_llm.py
 src/bffi_pipeline/title_lang_llm.py`.
 

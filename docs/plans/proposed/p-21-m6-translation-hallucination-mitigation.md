@@ -6,9 +6,9 @@
 `git diff 3ae3da6..HEAD --
 prompts/picker_v1.txt
 prompts/judge_v1.txt
-src/bffi_pipeline/stages/judge.py
-src/bffi_pipeline/stages/marc_to_bf.py
-src/bffi_pipeline/stages/bf_to_bffi.py`.
+src/bffi_pipeline/stages/m6/runner.py
+src/bffi_pipeline/stages/m2/runner.py
+src/bffi_pipeline/stages/m3/runner.py`.
 
 ## Motivation
 

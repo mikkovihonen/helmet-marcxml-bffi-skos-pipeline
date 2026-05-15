@@ -4,8 +4,8 @@
 **Scope**: 1-3 days depending on which mitigation paths ship; can be split.
 **Proposal-base commit**: `f630b83`. To gauge drift before acting, run
 `git diff f630b83..HEAD --
-src/bffi_pipeline/stages/embeddings.py
-src/bffi_pipeline/stages/merge.py
+src/bffi_pipeline/stages/m5/runner.py
+src/bffi_pipeline/stages/m8/runner.py
 sparql/`.
 
 ## Motivation
@@ -34,7 +34,7 @@ The rationale is wrong — the similarity is *not* unambiguous at 0.906 when the
 
 ### Why the embeddings collide
 
-The current `embedding_input_string` (per `src/bffi_pipeline/stages/embeddings.py`) packs five fields, pipe-separated:
+The current `embedding_input_string` (per `src/bffi_pipeline/stages/m5/runner.py`) packs five fields, pipe-separated:
 
 ```
 creator: Schildt, Göran | title: Alvar Aalto | language: fin/eng | year: 1998/2007 | type: txt
@@ -113,9 +113,9 @@ Ship **B + C as a paired Phase A**, leave A and D as future-rollback knobs.
 
 **A.1 M3 SPARQL CONSTRUCT.** Pull `bf:subtitle` from the `bf:Title` node and concatenate into a `bffi:fullTitle` property. ~5 lines in `sparql/bf_to_bffi_work.rq`.
 
-**A.2 Embedding extraction.** `_first_pref_label` becomes a 2-source fallback: prefer `bffi:fullTitle`, else `skos:prefLabel`. ~10 lines in `src/bffi_pipeline/stages/embeddings.py`.
+**A.2 Embedding extraction.** `_first_pref_label` becomes a 2-source fallback: prefer `bffi:fullTitle`, else `skos:prefLabel`. ~10 lines in `src/bffi_pipeline/stages/m5/runner.py`.
 
-**A.3 M5 / M6 cascade — year-distance veto.** In the auto-merge decision branch (`stages/embeddings.py` or wherever the cascade picks `same_work` at sim ≥ 0.90), add:
+**A.3 M5 / M6 cascade — year-distance veto.** In the auto-merge decision branch (`stages/m5/runner.py` or wherever the cascade picks `same_work` at sim ≥ 0.90), add:
 
 ```python
 if abs((year_a or 0) - (year_b or 0)) >= AUTO_MERGE_YEAR_GAP:
