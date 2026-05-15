@@ -27,7 +27,7 @@ from bffi_pipeline.stages import (
     load,
     load_finto,
     local_concept_resolver,
-    marc_to_bf,
+    m2,
     merge,
     reconcile,
     skosify_run,
@@ -1174,7 +1174,7 @@ def marc_to_bf_command(
 ) -> None:
     """Convert MARCXML to BIBFRAME RDF/XML (M2)."""
     target = output_dir or get_settings().data_dir
-    summary = marc_to_bf.run(input_dir, output_dir=target, force=force)
+    summary = m2.run(input_dir, output_dir=target, force=force)
     typer.echo(summary.render())
     # Partial-failure exit policy: non-zero only when *nothing* made
     # progress (no successes, no idempotent skips). 800 k-record

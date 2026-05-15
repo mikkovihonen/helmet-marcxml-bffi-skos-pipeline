@@ -13,11 +13,8 @@ from pathlib import Path
 
 from lxml import etree
 
-from bffi_pipeline.stages.marc_to_bf import (
-    ConversionErrorRow,
-    _emit_errors_tsv,
-    _sanitize_language_tags,
-)
+from bffi_pipeline.stages.m2 import ConversionErrorRow
+from bffi_pipeline.stages.m2.runner import _emit_errors_tsv, _sanitize_language_tags
 
 _XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 

@@ -57,7 +57,7 @@ _HELMET_RECORD_NS: Final[str] = "http://urn.fi/URN:NBN:fi:bib:helmet/"
 
 #: P-11 Phase A progress cadence for M2 marc-to-bf.
 _M2_PROGRESS_CADENCE: Final[int] = 100
-_BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+_BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
 _MARC2BIBFRAME2_DIR: Final[Path] = _BFFI_PIPELINE_REPO_ROOT / "third_party" / "marc2bibframe2"
 _XSLT_PATH: Final[Path] = _MARC2BIBFRAME2_DIR / "xsl" / "marc2bibframe2.xsl"
 

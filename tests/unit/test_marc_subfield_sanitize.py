@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from lxml import etree
 
-from bffi_pipeline.stages.marc_to_bf import _sanitize_subfield_separators
+from bffi_pipeline.stages.m2.runner import _sanitize_subfield_separators
 
 _MARC_NS = "http://www.loc.gov/MARC21/slim"
 _NSMAP = {None: _MARC_NS}

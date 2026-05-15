@@ -16,7 +16,7 @@ from rdflib.namespace import RDF
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import BffiSummary
 from bffi_pipeline.stages.bf_to_bffi import run as run_m3
-from bffi_pipeline.stages.marc_to_bf import run as run_m2
+from bffi_pipeline.stages.m2 import run as run_m2
 from bffi_pipeline.uris import mint_raw_expression_uri, mint_raw_work_uri
 
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"

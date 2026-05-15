@@ -15,7 +15,7 @@ from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.marc_to_bf import (
+from bffi_pipeline.stages.m2 import (
     ConversionErrorRow,
     ConversionSummary,
     HelmetMapRow,

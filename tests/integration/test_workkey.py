@@ -15,7 +15,7 @@ from rdflib import RDF, RDFS, BNode
 from bffi_pipeline.blocking import compute_blocking_key
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import run as run_m3
-from bffi_pipeline.stages.marc_to_bf import run as run_m2
+from bffi_pipeline.stages.m2 import run as run_m2
 from bffi_pipeline.stages.workkey import (
     compute_blocks,
     extract_blocking_inputs,

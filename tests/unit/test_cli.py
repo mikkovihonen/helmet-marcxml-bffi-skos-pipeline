@@ -19,7 +19,7 @@ from bffi_pipeline import cli as cli_module
 from bffi_pipeline.cli import _parse_reconcile_kinds, app
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.stages.bf_to_bffi import BffiSummary
-from bffi_pipeline.stages.marc_to_bf import ConversionErrorRow, ConversionSummary
+from bffi_pipeline.stages.m2 import ConversionErrorRow, ConversionSummary
 from bffi_pipeline.stages.observability import set_active_emitter
 
 if TYPE_CHECKING:
@@ -127,7 +127,7 @@ def test_marc_to_bf_exits_zero_on_partial_failure(monkeypatch: MonkeyPatch, tmp_
         succeeded=["a.xml", "b.xml"],
         failed=[_make_error_row("c.xml")],
     )
-    monkeypatch.setattr(cli_module.marc_to_bf, "run", lambda *a, **kw: summary)
+    monkeypatch.setattr(cli_module.m2, "run", lambda *a, **kw: summary)
     input_dir = tmp_path / "in"
     input_dir.mkdir()
     result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
@@ -141,7 +141,7 @@ def test_marc_to_bf_exits_one_on_total_failure(monkeypatch: MonkeyPatch, tmp_pat
         succeeded=[],
         failed=[_make_error_row("a.xml"), _make_error_row("b.xml")],
     )
-    monkeypatch.setattr(cli_module.marc_to_bf, "run", lambda *a, **kw: summary)
+    monkeypatch.setattr(cli_module.m2, "run", lambda *a, **kw: summary)
     input_dir = tmp_path / "in"
     input_dir.mkdir()
     result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
@@ -157,7 +157,7 @@ def test_marc_to_bf_exits_zero_when_only_idempotent_skips(
         skipped_idempotent=["a.xml", "b.xml"],
         failed=[_make_error_row("c.xml")],
     )
-    monkeypatch.setattr(cli_module.marc_to_bf, "run", lambda *a, **kw: summary)
+    monkeypatch.setattr(cli_module.m2, "run", lambda *a, **kw: summary)
     input_dir = tmp_path / "in"
     input_dir.mkdir()
     result = CliRunner().invoke(app, ["marc-to-bf", str(input_dir)])
