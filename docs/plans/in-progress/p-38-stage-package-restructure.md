@@ -136,6 +136,8 @@ Splits each of M9 reconcile, M8 merge, M6 judge, M3 bf_to_bffi into cohesive sub
 
 **Conditional:** **M3 split waits for P-36 to land.** P-36 deletes ~120 lines of `bf_to_bffi.py` post-process helpers; splitting before P-36 forces redoing the M3 split. If P-36 hasn't landed when Phase B starts, ship M9 + M8 + M6 splits and defer M3 to a follow-up.
 
+**Status 2026-05-15:** M3 split shipped (the smallest of the four, post-P-36). M6 / M8 / M9 splits **deferred to a follow-up plan** — the M3 split established the safe pattern (move blocks to new modules, re-import in runner.py with `# noqa: F401` to preserve the `m<N>.runner._private` import path tests rely on), but executing it across M6 (1750 lines), M8 (1840 lines), and M9 (2986 lines) inside a single session ran into stream-editing damage and schema-cycle complications too easily. Each remaining stage's split is its own design call that benefits from a dedicated session. P-38's PR ships with M3 split + the Phase A relocations; the M6 / M8 / M9 splits become P-N0+ follow-ups.
+
 - [ ] **M9 (`reconcile.py`, 2 986 lines) split.** Single commit moving the body into sub-modules within `m9/`. Final shape:
 
   - [ ] `m9/runner.py` — top-level `reconcile()` loop, decision orchestration, public `run()` entry point
