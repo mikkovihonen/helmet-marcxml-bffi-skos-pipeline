@@ -33,21 +33,26 @@ CONSTRUCT {
            bf:identifiedBy   ?ident ;
            dct:identifier    ?helmetBibIdLiteral .
   ?otherContrib a bffi:Contribution ;
-                bffi:agent ?otherAgent .
+                bffi:agent ?otherAgent ;
+                bf:role    ?otherRole .
   ?otherAgent rdfs:label ?otherAgentLabel .
+  ?otherRole a         bf:Role ;
+             rdfs:label ?otherRoleLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
 }
-# Note: bf:role propagation (URI form for cataloguer $4 + blank-node-
-# with-rdfs:label form for $e free-text) is handled in
-# bffi_pipeline.stages.bf_to_bffi._propagate_non_primary_roles
-# because rdflib's SPARQL CONSTRUCT incorrectly binds variables
-# inside nested OPTIONALs in this case (observed: a CONSTRUCT clause
-# `?otherContrib bf:role ?role` emits with ?role bound to
-# ?otherAgent even when the source has zero bf:role triples). Doing
-# the propagation in the Python post-process keeps the SPARQL simple
-# and the binding correct.
+# P-36 Phase A: bf:role propagation (URI form for cataloguer $4 +
+# blank-node-with-rdfs:label form for $e free-text) routes via the
+# inner OPTIONAL inside the non-primary contribution block below.
+# The d040a90 precedent (?primaryAgent rdfs:label inside the
+# PrimaryContribution OPTIONAL) proved the rdflib nested-OPTIONAL
+# bug doesn't bite when the inner OPTIONAL is structurally simple.
+# The role case wraps two patterns inside the OPTIONAL (the role
+# triple + a nested OPTIONAL for the label) — the bug-check fixtures
+# (URI form, blank-node-with-label form, three-roles-one-agent form)
+# covered by tests/unit/test_bf_to_bffi.py confirmed the binding is
+# correct.
 WHERE {
   ?bfWork a bf:Work .
 
@@ -84,6 +89,10 @@ WHERE {
     FILTER NOT EXISTS { ?c a bf:PrimaryContribution }
     ?c bf:agent ?otherAgent .
     OPTIONAL { ?otherAgent rdfs:label ?otherAgentLabel }
+    OPTIONAL {
+      ?c bf:role ?otherRole .
+      OPTIONAL { ?otherRole rdfs:label ?otherRoleLabel }
+    }
     BIND(BNODE() AS ?otherContrib)
   }
 

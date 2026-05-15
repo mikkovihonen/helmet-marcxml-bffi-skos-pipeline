@@ -685,9 +685,15 @@ def test_emitter_emits_new_contribution_when_extractor_returns_pure_relator() ->
     assert str(label) == "Tim Spector"
 
 
-def test_post_process_propagates_uri_role_to_bffi_contribution() -> None:
-    """Source MARC ``$4`` controlled relator → BIBFRAME ``bf:role <URI>``;
-    M3 must carry that URI through to the bffi:Contribution it mints."""
+def test_construct_routes_uri_role_to_bffi_contribution() -> None:
+    """P-36 Phase A: source MARC ``$4`` controlled relator →
+    BIBFRAME ``bf:role <URI>``; M3's SPARQL CONSTRUCT carries that URI
+    through to the bffi:Contribution it mints.
+
+    Pre-Phase-A this was a Python post-process helper
+    (``_propagate_non_primary_roles``); Phase A routes it via the inner
+    OPTIONAL in ``bf_to_bffi_expression.rq``.
+    """
     source = Graph()
     source.parse(
         data=textwrap.dedent(
@@ -714,7 +720,6 @@ def test_post_process_propagates_uri_role_to_bffi_contribution() -> None:
         format="turtle",
     )
     bffi = construct_bffi(source)
-    post_process(bffi, source)
     [contrib] = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
     assert (
         contrib,
@@ -723,11 +728,12 @@ def test_post_process_propagates_uri_role_to_bffi_contribution() -> None:
     ) in bffi
 
 
-def test_post_process_propagates_blank_node_role_label_with_typing() -> None:
-    """Source MARC ``$e`` free-text → BIBFRAME blank-node ``bf:role`` with
-    ``rdfs:label``; M3 must re-emit a fresh blank node typed ``bf:Role``
-    with the same label so Skosmos can render the cataloguer's
-    Finnish role text on the canonical Expression."""
+def test_construct_routes_blank_node_role_label_with_typing() -> None:
+    """P-36 Phase A: source MARC ``$e`` free-text → BIBFRAME blank-node
+    ``bf:role`` with ``rdfs:label``; M3's SPARQL CONSTRUCT re-emits a
+    fresh blank node typed ``bf:Role`` with the same label so Skosmos
+    can render the cataloguer's Finnish role text on the canonical
+    Expression."""
     source = Graph()
     source.parse(
         data=textwrap.dedent(
@@ -753,7 +759,6 @@ def test_post_process_propagates_blank_node_role_label_with_typing() -> None:
         format="turtle",
     )
     bffi = construct_bffi(source)
-    post_process(bffi, source)
     [contrib] = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
     [role] = list(bffi.objects(contrib, V.BF.role))
     # Role is a blank node typed bf:Role with the cataloguer's label
@@ -761,12 +766,13 @@ def test_post_process_propagates_blank_node_role_label_with_typing() -> None:
     assert (role, V.RDFS.label, Literal("cembalo")) in bffi
 
 
-def test_post_process_routes_one_role_per_repeated_agent() -> None:
-    """Cataloguer enters ``700 $a Hogwood, Christopher`` three times,
-    once per instrument. Source has 3 distinct bf:Contributions sharing
-    one agent URI but each carrying a different role. The propagator
-    must route one role per output contribution (no fan-out, no
-    duplication)."""
+def test_construct_routes_one_role_per_repeated_agent() -> None:
+    """P-36 Phase A: cataloguer enters ``700 $a Hogwood, Christopher``
+    three times, once per instrument. Source has 3 distinct
+    bf:Contributions sharing one agent URI but each carrying a different
+    role. M3's SPARQL CONSTRUCT routes one role per output contribution
+    (no fan-out, no duplication) because the BIND(BNODE() AS ?otherContrib)
+    fires once per (source ?c, ?otherRole) solution row."""
     source = Graph()
     source.parse(
         data=textwrap.dedent(
@@ -799,7 +805,6 @@ def test_post_process_routes_one_role_per_repeated_agent() -> None:
         format="turtle",
     )
     bffi = construct_bffi(source)
-    post_process(bffi, source)
     contribs = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
     assert len(contribs) == 3
     role_labels: set[str] = set()

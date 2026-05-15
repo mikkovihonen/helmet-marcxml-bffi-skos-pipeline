@@ -10,8 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from rdflib import RDF, RDFS, BNode
 
 from bffi_pipeline.blocking import compute_blocking_key
+from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.bf_to_bffi import run as run_m3
 from bffi_pipeline.stages.marc_to_bf import run as run_m2
 from bffi_pipeline.stages.workkey import (
@@ -86,3 +88,39 @@ def test_load_corpus_accepts_single_ttl_file(corpus_path: Path) -> None:
     assert len(entries) == 1
     assert entries[0].title == "Sota ja rauha"
     assert entries[0].creator == "Tolstoy, Leo, 1828-1910"
+
+
+def test_translator_e_role_round_trips_through_m2_m3(corpus_path: Path) -> None:
+    """P-36 Phase A: a MARC 700 with ``$e kääntäjä.`` (Finnish translator
+    role) round-trips through M2 → M3 to a ``bffi:Contribution`` carrying
+    ``bf:role [a bf:Role ; rdfs:label "..."]``.
+
+    Fixture ``10000001.xml`` ("Sota ja rauha", Tolstoy) has
+    ``700 1   $a Adrian, Esa, $e kääntäjä.`` — the translator who rendered
+    War and Peace into Finnish. marc2bibframe2 emits this as a blank-node
+    ``bf:Role`` with the cataloguer's text on ``rdfs:label``; the M3
+    SPARQL CONSTRUCT (post-Phase-A) routes both the role node and its
+    label onto the bffi:Contribution.
+
+    Pre-Phase-A this propagation happened in
+    ``bf_to_bffi._propagate_non_primary_roles`` (now deleted). The
+    assertion shape is unchanged.
+    """
+    g = load_corpus(corpus_path / "bffi" / "10000001.ttl")
+    contribs = list(g.subjects(RDF.type, V.BFFI.Contribution))
+    assert contribs, "expected at least one bffi:Contribution for 10000001"
+    role_labels: set[str] = set()
+    for contrib in contribs:
+        for role in g.objects(contrib, V.BF.role):
+            if not isinstance(role, BNode):
+                continue
+            assert (role, RDF.type, V.BF.Role) in g, (
+                f"role blank node {role} missing a bf:Role typing"
+            )
+            for lab in g.objects(role, RDFS.label):
+                role_labels.add(str(lab))
+    # marc2bibframe2 carries the trailing period through; that's the
+    # cataloguer's text as recorded.
+    assert "kääntäjä." in role_labels or "kääntäjä" in role_labels, (
+        f"expected a Finnish translator role label; got {role_labels}"
+    )
