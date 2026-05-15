@@ -1,6 +1,6 @@
-# P-35 — M3 cascade follow-ups: F1, F2, F3
+# P-35 — M3 cascade follow-ups: F1, F2
 
-**Status**: in-progress (Phase F1 shipped pre-renumber; F2 + F3 still backlog).
+**Status**: in-progress (Phase F1 shipped pre-renumber; F2 remaining). **Phase F3 extracted to its own plan on 2026-05-15** — see [`../backlog/p-39-m9-non-primary-contribution-reconciliation.md`](../backlog/p-39-m9-non-primary-contribution-reconciliation.md). Reason: F3's corpus-scale wall-time (3-5 h), M12 gold-set pre-flight gate (P-06), and cataloguer-review surface make it its own deliverable, not a sub-phase of M3 cascade follow-ups.
 
 **Renumbered from P-05 on 2026-05-14** to clear a number collision
 with the (now-abandoned)
@@ -39,31 +39,21 @@ src/bffi_pipeline/contrib_extract_llm.py`.
   verifying P-34 Phase A's interaction with non-primary
   contributions.
 - Phase F2 (transliteration sidecar + M9 binding): `<unfilled>`.
-- Phase F3 (M9 walks non-primary contributions): `<unfilled>`.
+- ~~Phase F3 (M9 walks non-primary contributions)~~ — extracted to [`P-39`](../backlog/p-39-m9-non-primary-contribution-reconciliation.md).
 
 **Owner**: TBD.
-**Estimated wall-time**: F1 was ~half-day actual; 1-1.5 days for F2;
-2-3 days for F3 (mostly bench + cataloguer-gating, not code).
+**Estimated wall-time**: F1 was ~half-day actual; 1-1.5 days for F2. (F3's 2-3 days are tracked separately under P-39.)
 
 ## Goal
 
-Three sequenced follow-ups to the M3 contributor-extraction cascade,
-each gated on the previous one. Together they make cataloguer-
-visible canonical Works show the contributions the cascade extracted
-and bind the variant forms to their KANTO authorities.
+Two sequenced follow-ups to the M3 contributor-extraction cascade. Together they make cataloguer-visible canonical Works show the contributions the cascade extracted (F1) and bind the variant forms to their KANTO authorities (F2). General KANTO reconciliation for the rest of the extracted-name population is tracked separately under [P-39](../backlog/p-39-m9-non-primary-contribution-reconciliation.md), because its corpus-scale bench, M12 gold-set pre-flight gate, and cataloguer-review surface make it its own deliverable.
 
 | Phase | Touches | LOC | Bind / reconciliation effect at 800 k scale |
 |---|---|---|---|
-| **F1** — M8 propagates non-primary contributions onto canonical Expressions | M8 | ~150 | Pure plumbing; unblocks F2 and F3 by making cascade-emitted entities cataloguer-visible. |
+| **F1** — M8 propagates non-primary contributions onto canonical Expressions | M8 | ~150 | Pure plumbing; unblocks F2 (and P-39) by making cascade-emitted entities cataloguer-visible. |
 | **F2** — Transliteration-variant binding (sidecar + M9 reader) | M3 sidecar emitter, M9 reader | ~400 | ~15 k–30 k variant pointers per cascade run; KANTO bind rate ~70-90 % on these. Highest leverage per cataloguer-hour saved (dedupes review queues). |
-| **F3** — M9 walks non-primary contributions on canonical Expressions for general KANTO reconciliation | M9 | ~250 | ~40 k–75 k unique Finto API calls; bind rate ~30-50 % (KANTO is Finnish — Hogwood / Spector / etc. don't resolve); ~30 k–55 k records flagged `needs-review`. Wall time ~3-5 h sequential, ~1-2 h with M9 concurrency. ~40 MB extra triples. |
 
-The order matters: without **F1**, the entities F2 and F3 reconcile
-are only visible on per-bib raw Expression pages, not on the merged
-canonical Works cataloguers actually browse. **F3 is pre-gated on
-M12 gold-set validation** — without that, ~5-10 hours of compute
-could amplify cascade misclassifications into thousands of bad
-KANTO bindings.
+The order matters: without **F1**, the entities F2 reconciles are only visible on per-bib raw Expression pages, not on the merged canonical Works cataloguers actually browse.
 
 ## Definition of done
 
@@ -76,13 +66,7 @@ KANTO bindings.
   row per cascade-resolved transliteration variant; M9 emits
   `<variant-bnode> prov:specializationOf <kanto-uri>` for each row
   where the canonical agent's reconciliation found a KANTO URI.
-- **F3**: Every blank-node agent on a non-primary canonical
-  contribution either carries a `prov:specializationOf <kanto-uri>`
-  triple (resolved) or a `bffi-prov:reconciliation-status
-  "needs-review"` triple (couldn't resolve). M9's
-  `_iter_extracted_contribution_requests` walker yields one
-  EntityRequest per such blank node; the existing M9 cache + Finto
-  rate-limiting kicks in.
+(Phase F3's Definition of Done lives in [P-39](../backlog/p-39-m9-non-primary-contribution-reconciliation.md) now.)
 
 ## Current state
 
@@ -216,76 +200,12 @@ breaking M9. Revert reconcile.py's reader if needed.
 
 ---
 
-## Phase F3 — M9 walks non-primary contributions on canonical
-
-Estimated wall-time: ~2-3 days, most of it in the cataloguer-review
-gate and the corpus-scale bench, not coding.
-
-### F3.0. M12 gold-set gate (pre-flight)
-
-**Do not start F3 until** `gold/contrib.jsonl` reaches 30-50
-cataloguer-vetted cases (tracked in P-06 / M12). The scaffolding is
-committed but the cataloguer extension is still external work.
-Without that, F3 amplifies cascade misclassifications into
-thousands of bad KANTO bindings at corpus scale.
-
-Check: `wc -l gold/contrib.jsonl` ≥ 30.
-
-### F3.1. Walker
-
-In `reconcile.py`, add `_iter_extracted_contribution_requests` that
-yields `EntityRequest(literal=<rdfs:label>, kind="person", ...)`
-per blank-node agent on a non-primary canonical contribution.
-
-### F3.2. Linker
-
-Add `_link_extracted_agent` that mirrors the primary-agent linker:
-`<blank-node-agent> prov:specializationOf <kanto-uri>` (same shape
-as the bridge M9 already emits for raw agents). The existing M9
-cache by `(kind, literal)` deduplicates Finto calls automatically.
-
-### F3.3. Bench
-
-- Run on the 500-record test slice from F1.4 first. Confirm:
-  bind rate ≥ 30 % (KANTO Finnish coverage is the limiter),
-  Finto API calls dedupe via cache, walltime scales linearly.
-- Then run against the production canonical graph from v2.
-  Expectation:
-  - ~40 k-75 k unique Finto calls (cache-deduped).
-  - Wall time ~3-5 h sequential; ~1-2 h with M9 concurrency.
-  - Bind rate ~30-50 %.
-  - ~30 k-55 k records get `needs-review` flagged.
-  - +40 MB triples.
-
-### F3.4. Tests + acceptance
-
-- [ ] Walker yields the right shape on a synthetic fixture
-      with one canonical non-primary contribution.
-- [ ] Linker emits the binding triple OR the `needs-review` flag,
-      deterministically per `(kind, literal)`.
-- [ ] M9 bench on the 500-record slice confirms bind rate ≥ 30 %.
-- [ ] Production-scale bench numbers match the expectations within
-      a factor of 2 (otherwise investigate before declaring done).
-
-### F3.5. Rollback
-
-Revert the M9 walker + linker. The triples added by F3 carry a
-distinctive predicate combination (blank-node-agent +
-`prov:specializationOf` + KANTO URI), so a SPARQL DELETE WHERE on
-that pattern removes the F3 contributions cleanly without affecting
-F2's variant bindings.
-
----
-
 ## Risks
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | F1 dedup blank-node IDs leak non-determinism | Medium | The byte-stability test is the contract. CI runs M8 twice on the same fixture and asserts identical Turtle. |
 | F2 sidecar grows unbounded across re-runs | Low | M3 cascade is idempotent per (record_id, c_subfield_form); sidecar emitter uses idempotent append (skip if (record, form) already present). |
-| F3 cascade misclassifications get amplified | Medium-high | F3.0 gold-set gate. M12 gold-set growth (P-06) is the prerequisite. |
-| Finto API rate-limiting trips during F3 production run | Low-medium | Existing M9 rate limiter + cache should handle it. If sustained 429s appear, drop M9 concurrency. |
-| KANTO bind rate is much lower than projected (< 20 %) | Medium-low | F3.3 bench surfaces this before commit. If bind rate is too low, F3 still adds the `needs-review` flag (useful) but the projected cataloguer-hour saving evaporates. Document and ship anyway. |
 
 ## Open issues to close before / during execution
 
@@ -293,7 +213,7 @@ F2's variant bindings.
   it runs during M3. Is there value in moving the cascade *after*
   M8 so it operates directly on canonical Works? Probably yes —
   fewer duplicate emissions, no F1 propagation needed — but it's
-  a bigger refactor than F1 + F2 + F3 combined. Out of scope
+  a bigger refactor than F1 + F2 + P-39 combined. Out of scope
   here; record as a future proposal if F1 turns out to be more
   fragile than expected.
 - Should the F2 sidecar live under `data/` (re-run safe) or
@@ -310,5 +230,4 @@ F2's variant bindings.
 - `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` § 8 — provenance
   stage enum (archived spec); F2 may require a new value, and the live
   enum reference lives in `CLAUDE.md` § "Committed identifiers".
-- `gold/contrib.jsonl` — the cataloguer-vetted dataset gating F3.
-- P-06 — gold-set growth that unblocks F3.0.
+- [P-39](../backlog/p-39-m9-non-primary-contribution-reconciliation.md) — extracted from this plan's former Phase F3; tracks general KANTO reconciliation for cascade-extracted non-primary contributions.
