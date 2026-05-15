@@ -1256,7 +1256,7 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
     ``bffi:genreForm`` targets on canonical Works.
 
     Reconciles three target shapes (see :class:`SubjectTarget` in
-    :mod:`bffi_pipeline.stages.merge`):
+    :mod:`bffi_pipeline.stages.m8`):
 
     - **Blank-node target** with ``rdfs:label`` + optional ``bf:source``:
       classic unresolved cataloguer-supplied subject.

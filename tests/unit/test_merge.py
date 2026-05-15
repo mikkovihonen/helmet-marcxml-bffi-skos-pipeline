@@ -29,19 +29,21 @@ from bffi_pipeline.contrib_variants import (
     append_variant_claims,
 )
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.merge import (
+from bffi_pipeline.stages.m8 import (
     CanonicalEntry,
     CanonicalWorkInputs,
     ContributionTarget,
     ExpressionContribution,
     HelmetMapEntry,
     SubjectTarget,
+    apply_merge,
+)
+from bffi_pipeline.stages.m8.runner import (
     _anonymous_work_anchor_uri,
     _apply_contrib_variants,
     _expression_contributions,
     _first_contribution_agent_uri,
     _load_work_records_from_corpus,
-    apply_merge,
 )
 from bffi_pipeline.stages.observability import (
     StageEventEmitter,

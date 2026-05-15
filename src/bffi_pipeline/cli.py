@@ -31,7 +31,7 @@ from bffi_pipeline.stages import (
     m3,
     m5,
     m6,
-    merge,
+    m8,
     reconcile,
     skosify_run,
     workkey,
@@ -2247,7 +2247,7 @@ def merge_command(
     ] = None,
 ) -> None:
     """Apply judge decisions to mint canonical Works (M8)."""
-    result = merge.apply_merge(
+    result = m8.apply_merge(
         decisions_path,
         bffi_corpus_dir,
         output_path=output_path,

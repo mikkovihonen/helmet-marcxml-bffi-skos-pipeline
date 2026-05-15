@@ -1471,7 +1471,7 @@ def _select_description_modifier(
     return V.AGENT_MARC2BIBFRAME2
 
 
-def apply_merge(  # noqa: PLR0912 — terminal-step orchestrator: loads decisions, runs union-find, mints canonical, emits five sidecars + two cataloguer-review TSVs. Splitting fragments shared state (canonical_entries, conflicts, mint_failures) across helpers.
+def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads decisions, runs union-find, mints canonical, emits five sidecars + two cataloguer-review TSVs. Splitting fragments shared state (canonical_entries, conflicts, mint_failures) across helpers.
     decisions_path: Path | None = None,
     bffi_corpus_dir: Path | None = None,
     *,
