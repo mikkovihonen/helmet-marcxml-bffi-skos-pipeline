@@ -636,32 +636,6 @@ def _emit_role_on_contribution(
         graph.add((role_node, RDFS.label, Literal(role_label)))
 
 
-def _emit_helmet_identifiers(graph: Graph) -> None:
-    """For every Work / Expression with a Helmet ``bf:identifiedBy`` link,
-    emit a flat ``dct:identifier`` literal carrying the same bib_id
-    string (Sierra-style display form, e.g. ``"b100000010"``, minted
-    upstream in ``marcxml-export-sierra``).
-
-    Skosmos can't traverse the structured ``bf:Local`` blank node to
-    render the identifier on the concept page; the flat predicate
-    surfaces a copy-pasteable bib number cataloguers reference in
-    Sierra and the Helmet OPAC. The structured ``bf:identifiedBy``
-    stays for BIBFRAME interop.
-    """
-    to_add: list[tuple[URIRef, URIRef, Literal]] = []
-    for s, _, ident in graph.triples((None, V.BF.identifiedBy, None)):
-        if not isinstance(s, URIRef):
-            continue
-        if (ident, V.BF.source, V.HELMET_SOURCE_URI) not in graph:
-            continue
-        bib_id = graph.value(ident, RDF.value)
-        if not isinstance(bib_id, Literal):
-            continue
-        to_add.append((s, DCTERMS.identifier, Literal(str(bib_id))))
-    for triple in to_add:
-        graph.add(triple)
-
-
 def _read_helmet_bib_id(source: Graph, work: URIRef) -> str | None:
     """Walk ``work``'s ``bf:identifiedBy`` chain for the bare Helmet bib ID.
 
@@ -818,7 +792,6 @@ def post_process(
     candidates = _candidate_languages(source)
     if candidates:
         _retag_pref_labels(bffi_graph, candidates, llm_detector=llm_detector)
-    _emit_helmet_identifiers(bffi_graph)
     _propagate_non_primary_roles(bffi_graph, source)
     _emit_extracted_contributions(
         bffi_graph,

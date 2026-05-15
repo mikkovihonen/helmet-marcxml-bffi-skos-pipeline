@@ -496,25 +496,39 @@ def test_pref_label_picks_main_work_language_not_contained_work() -> None:
     assert label.language == "sv"
 
 
-def test_post_process_emits_sierra_style_dct_identifier_on_work_and_expression() -> None:
-    """Skosmos can't traverse the structured ``bf:Local`` blank node. M3
-    post-processing denormalises the Helmet bib ID onto every Work and
-    Expression as a flat ``dct:identifier`` literal carrying the same
-    string as the structured ``rdf:value`` — the Sierra display form
-    (``b<id><check>``) minted upstream by ``marcxml-export-sierra``.
-    This fixture uses the bare numeric ``10000001`` as a stand-in;
-    production data carries the full display form here."""
+def test_construct_emits_sierra_style_dct_identifier_on_work_and_expression() -> None:
+    """P-36 Phase B: M3's SPARQL CONSTRUCT denormalises the Helmet bib ID
+    onto every Work and Expression as a flat ``dct:identifier`` literal
+    carrying the same string as the structured ``rdf:value`` — the
+    Sierra display form (``b<id><check>``) minted upstream by
+    ``marcxml-export-sierra``. Skosmos can't traverse the structured
+    ``bf:Local`` blank node, so the flat predicate is what cataloguers
+    see on the concept page.
+
+    Pre-Phase-B this was a Python post-process helper
+    (``_emit_helmet_identifiers``); Phase B routes it via the CONSTRUCT
+    so the post-process surface shrinks and the CONSTRUCT becomes the
+    single source of truth for "what BFFI triples M3 emits per source
+    record".
+
+    Fixture uses the bare numeric ``10000001`` as a stand-in; production
+    data carries the full display form here.
+    """
     source = _build_source()
     bffi = construct_bffi(source)
-    post_process(bffi, source)
     for target in (EXPECTED_WORK, EXPECTED_EXPR):
         idents = list(bffi.objects(target, DCTERMS.identifier))
         assert Literal("10000001") in idents, f"Helmet bib id missing on {target}"
 
 
-def test_post_process_does_not_emit_dct_identifier_for_non_helmet_sources() -> None:
+def test_construct_does_not_emit_dct_identifier_for_non_helmet_sources() -> None:
     """A ``bf:identifiedBy`` triple from a non-Helmet source must not produce a
-    Sierra-style ``dct:identifier`` — that form is Helmet/Sierra-specific."""
+    Sierra-style ``dct:identifier`` — that form is Helmet/Sierra-specific.
+
+    The CONSTRUCT's WHERE clause filters on
+    ``?ident bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet>``, so
+    non-Helmet identifiers don't bind ``?helmetBibIdLiteral`` and no
+    ``dct:identifier`` triple is emitted."""
     source = Graph()
     source.parse(
         data=textwrap.dedent(
@@ -534,7 +548,6 @@ def test_post_process_does_not_emit_dct_identifier_for_non_helmet_sources() -> N
         format="turtle",
     )
     bffi = construct_bffi(source)
-    post_process(bffi, source)
     assert not list(bffi.objects(EXPECTED_WORK, DCTERMS.identifier))
 
 

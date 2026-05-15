@@ -14,6 +14,7 @@
 PREFIX bf:      <http://id.loc.gov/ontologies/bibframe/>
 PREFIX bflc:    <http://id.loc.gov/ontologies/bflc/>
 PREFIX bffi:    <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX dct:     <http://purl.org/dc/terms/>
 PREFIX madsrdf: <http://www.loc.gov/mads/rdf/v1#>
 PREFIX rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
@@ -30,7 +31,8 @@ CONSTRUCT {
            bffi:genreForm      ?workGenre ;
            bffi:marcKey        ?marcKey ;
            skos:prefLabel      ?workLabel ;
-           bf:identifiedBy     ?ident .
+           bf:identifiedBy     ?ident ;
+           dct:identifier      ?helmetBibIdLiteral .
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent .
   ?primaryAgent rdfs:label ?primaryAgentLabel .
@@ -120,10 +122,17 @@ WHERE {
   }
 
   # Helmet identifier preservation (added by M2 post-process).
+  # P-36 Phase B: also denormalise the bib_id as a flat dct:identifier
+  # literal on the Work. Skosmos can't traverse the structured bf:Local
+  # blank node to render the identifier on the concept page; the flat
+  # predicate surfaces a copy-pasteable bib number cataloguers reference
+  # in Sierra and the Helmet OPAC. The structured bf:identifiedBy stays
+  # for BIBFRAME interop.
   OPTIONAL {
     ?bfWork bf:identifiedBy ?ident .
     ?ident  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
             rdf:value ?identValue ;
             bf:source ?identSource .
+    BIND(STR(?identValue) AS ?helmetBibIdLiteral)
   }
 }
