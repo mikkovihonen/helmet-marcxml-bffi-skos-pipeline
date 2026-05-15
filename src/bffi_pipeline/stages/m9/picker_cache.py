@@ -34,11 +34,8 @@ from bffi_pipeline.config import get_settings
 from bffi_pipeline.stages.m9.authority_clients import VOCAB_VIAF
 
 if TYPE_CHECKING:
-    from bffi_pipeline.stages.m9.runner import (
-        AuthorityCandidate,
-        EntityRequest,
-        PickerDecision,
-    )
+    from bffi_pipeline.stages.m9.picker import PickerDecision
+    from bffi_pipeline.stages.m9.schemas import AuthorityCandidate, EntityRequest
 
 #: Default filename. Mirrors M6's ``judge-cache.sqlite`` naming.
 PICKER_CACHE_FILENAME: Final[str] = "reconcile-cache.sqlite"
@@ -201,7 +198,7 @@ class PickerCache:
 
     def get(self, key: str) -> CacheHit | None:
         """Return the cached :class:`CacheHit` for ``key`` or ``None``."""
-        from bffi_pipeline.stages.m9.runner import PickerDecision as _PickerDecision
+        from bffi_pipeline.stages.m9.picker import PickerDecision as _PickerDecision
 
         with self._lock:
             row = self._conn.execute(

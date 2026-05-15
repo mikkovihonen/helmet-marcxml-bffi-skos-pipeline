@@ -22,30 +22,33 @@ from typing import TYPE_CHECKING, Final, Protocol
 import httpx
 
 if TYPE_CHECKING:
-    from bffi_pipeline.stages.m9.runner import (
+    from bffi_pipeline.stages.m9.schemas import (
         AuthorityCandidate,
         AuthorityKind,
         EntityRequest,
     )
 
-# Import these at runtime via late-binding helper to avoid circular
-# imports at module-load time (runner.py imports this module).
+# P-38 Phase D: schemas / lexical helpers live in their own siblings
+# now, so authority_clients can import them at module load time without
+# pulling in the rest of m9/runner.py's heavy graph (LangChain etc.).
+# Kept as late-binding functions for backwards-compatibility — the
+# wrapper signature stays identical to the pre-refactor shape.
 
 
 def _finto_search_query(literal: str) -> str:
     """Append ``*`` for prefix match (Finto's default is exact match).
 
-    Local mirror so this module doesn't depend on runner's identical
-    helper.
+    Local mirror that forwards to the canonical helper in
+    :mod:`bffi_pipeline.stages.m9.schemas`.
     """
-    from bffi_pipeline.stages.m9.runner import _finto_search_query as _real
+    from bffi_pipeline.stages.m9.schemas import _finto_search_query as _real
 
     return _real(literal)
 
 
 def _lexical_similarity(a: str, b: str) -> float:
-    """Late-bound import to runner's similarity helper."""
-    from bffi_pipeline.stages.m9.runner import lexical_similarity
+    """Forwards to :func:`bffi_pipeline.stages.m9.lexical.lexical_similarity`."""
+    from bffi_pipeline.stages.m9.lexical import lexical_similarity
 
     return lexical_similarity(a, b)
 
@@ -103,7 +106,7 @@ class FintoSkosmosClient:
         top_k: int = DEFAULT_TOP_K,
     ) -> list[AuthorityCandidate]:
         """Hit Finto's ``/search`` endpoint for ``request.kind``-mapped vocab; cache by day."""
-        from bffi_pipeline.stages.m9.runner import AuthorityCandidate as _AuthorityCandidate
+        from bffi_pipeline.stages.m9.schemas import AuthorityCandidate as _AuthorityCandidate
 
         vocab = _KIND_TO_FINTO_VOCAB.get(request.kind)
         if vocab is None:
@@ -169,7 +172,7 @@ class ViafClient:
         top_k: int = DEFAULT_TOP_K,
     ) -> list[AuthorityCandidate]:
         """Hit VIAF's AutoSuggest endpoint; only persons / corporate bodies route here."""
-        from bffi_pipeline.stages.m9.runner import AuthorityCandidate as _AuthorityCandidate
+        from bffi_pipeline.stages.m9.schemas import AuthorityCandidate as _AuthorityCandidate
 
         if request.kind not in {"person", "corporate_body"}:
             return []

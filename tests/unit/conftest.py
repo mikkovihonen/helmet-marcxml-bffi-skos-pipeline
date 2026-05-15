@@ -43,7 +43,7 @@ import pytest
 
 from bffi_pipeline.observability import probes
 from bffi_pipeline.stages.m6 import batch as judge_batch_mod
-from bffi_pipeline.stages.m9 import runner as reconcile
+from bffi_pipeline.stages.m9 import probe as m9_probe
 
 
 def _stub_probe(
@@ -76,9 +76,11 @@ def _block_unit_test_network() -> Iterator[None]:
 
     Probe layer patches:
 
-    - ``reconcile.probe_mlx_lm`` / ``reconcile.probe_finto`` /
-      ``reconcile.probe_fuseki`` — the imports the M9 entry-point
-      health probes resolve against.
+    - ``m9_probe.probe_mlx_lm`` / ``m9_probe.probe_finto`` /
+      ``m9_probe.probe_fuseki`` — the imports the M9 entry-point
+      health probes resolve against (P-38 Phase D moved the M9
+      probe call site out of the runner module into
+      ``m9.probe``).
     - ``judge_batch_mod.probe_mlx_lm`` — the import the M6 batch
       driver's entry-point health probes resolve against (P-38
       Phase D moved the M6 health-probe call site out of the
@@ -92,15 +94,15 @@ def _block_unit_test_network() -> Iterator[None]:
     tests don't trip the guard.
     """
     # Layer 1: probe stubs on the consumer modules.
-    saved_reconcile = (
-        reconcile.probe_mlx_lm,
-        reconcile.probe_finto,
-        reconcile.probe_fuseki,
+    saved_m9_probe = (
+        m9_probe.probe_mlx_lm,
+        m9_probe.probe_finto,
+        m9_probe.probe_fuseki,
     )
     saved_judge_probe_mlx_lm = judge_batch_mod.probe_mlx_lm
-    reconcile.probe_mlx_lm = _stub_probe  # type: ignore[assignment]
-    reconcile.probe_finto = _stub_probe  # type: ignore[assignment]
-    reconcile.probe_fuseki = _stub_probe  # type: ignore[assignment]
+    m9_probe.probe_mlx_lm = _stub_probe  # type: ignore[assignment]
+    m9_probe.probe_finto = _stub_probe  # type: ignore[assignment]
+    m9_probe.probe_fuseki = _stub_probe  # type: ignore[assignment]
     judge_batch_mod.probe_mlx_lm = _stub_probe  # type: ignore[assignment]
 
     # Layer 2: socket-level guard. Loopback stays open; everything
@@ -127,9 +129,9 @@ def _block_unit_test_network() -> Iterator[None]:
         yield
     finally:
         (
-            reconcile.probe_mlx_lm,
-            reconcile.probe_finto,
-            reconcile.probe_fuseki,
-        ) = saved_reconcile
+            m9_probe.probe_mlx_lm,
+            m9_probe.probe_finto,
+            m9_probe.probe_fuseki,
+        ) = saved_m9_probe
         judge_batch_mod.probe_mlx_lm = saved_judge_probe_mlx_lm
         socket.socket.connect = saved_socket_connect  # type: ignore[method-assign]
