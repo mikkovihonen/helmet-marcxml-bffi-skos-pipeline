@@ -1,6 +1,8 @@
 # P-35 — M3 cascade follow-ups: F1, F2
 
-**Status**: in-progress (Phase F1 shipped pre-renumber; F2 remaining). **Phase F3 extracted to its own plan on 2026-05-15** — see [`../backlog/p-39-m9-non-primary-contribution-reconciliation.md`](../backlog/p-39-m9-non-primary-contribution-reconciliation.md). Reason: F3's corpus-scale wall-time (3-5 h), M12 gold-set pre-flight gate (P-06), and cataloguer-review surface make it its own deliverable, not a sub-phase of M3 cascade follow-ups.
+**Status**: completed 2026-05-15. F1 shipped pre-renumber; F2 shipped at `8174aee` + bugfix `51d3e0e`. **Phase F3 extracted to its own plan on 2026-05-15** — see [`../backlog/p-39-m9-non-primary-contribution-reconciliation.md`](../backlog/p-39-m9-non-primary-contribution-reconciliation.md).
+
+**Implementation note for F2** — diverged from the original plan in a clean way: F2.2 was specified as a *M9 reader* emitting `<variant-bnode> prov:specializationOf <kanto-uri>`; the shipped implementation is an *M8 binding pass* (`stages/merge.py:_apply_contrib_variants`) emitting `skos:altLabel <variant_label>` on the canonical agent whose `rdfs:label` matches `canonical_label`. The M8 approach merges the variant into the canonical agent's identity *before* M9 sees it, so M9's existing primary-agent reconciliation handles both forms naturally — no separate variant-reconciliation pass needed. The original F2.2 spec's "no extra Finto API calls" guarantee holds (M8 binding is a pure local join). The implementation file `src/bffi_pipeline/contrib_variants.py` retains the F2 schema (sidecar JSONL contract) unchanged.
 
 **Renumbered from P-05 on 2026-05-14** to clear a number collision
 with the (now-abandoned)
@@ -38,7 +40,7 @@ src/bffi_pipeline/contrib_extract_llm.py`.
   rot was caught while folding `proposed/P-05` into P-34 and
   verifying P-34 Phase A's interaction with non-primary
   contributions.
-- Phase F2 (transliteration sidecar + M9 binding): `<unfilled>`.
+- Phase F2 (transliteration sidecar + M8 binding): `8174aee` (initial — sidecar emitter in M3 + M8 binding pass with `skos:altLabel`), `51d3e0e` (follow-up — fix variant-binding URI mismatch + cover primary contributions).
 - ~~Phase F3 (M9 walks non-primary contributions)~~ — extracted to [`P-39`](../backlog/p-39-m9-non-primary-contribution-reconciliation.md).
 
 **Owner**: TBD.
@@ -160,38 +162,24 @@ Format follows the existing `helmet-map.jsonl` / `embed-candidates.jsonl`
 conventions (one JSON object per line). Schema is local to the
 sidecar — no new ontology terms.
 
-### F2.2. M9 reader
+### F2.2. M8 binding pass (shipped — diverged from plan)
 
-In `src/bffi_pipeline/stages/reconcile.py`, add a step that runs
-after the primary-agent reconciliation pass: load
-`contrib-variants.jsonl`, for each row find the canonical agent's
-reconciled KANTO URI on the same canonical Work, emit
-`<variant-blank-node> prov:specializationOf <kanto-uri>`.
+**Shipped as an M8 binding pass, not an M9 reader.** See the Status note at the top of this file for rationale. The implementation lives in `src/bffi_pipeline/stages/merge.py::_apply_contrib_variants`: it reads `contrib-variants.jsonl` (via `bffi_pipeline.contrib_variants.load_variant_claims`), for each claim rolls `raw_work_uri` up to the canonical Work via `CanonicalEntry`, walks every Contribution attached to the canonical Work (primary) and its Expressions (non-primary), and on every agent whose `rdfs:label` matches `canonical_label` adds `skos:altLabel <variant_label>`. M9's existing primary-agent reconciliation then handles both forms because they share the same agent node.
 
-The canonical agent's URI is already resolved (primary pass
-already ran), so this is zero extra Finto traffic — pure local
-join.
+The "no extra Finto API calls" guarantee from the original plan holds — M8 binding is a pure local join, never reaches the network.
 
-### F2.3. Tests
+### F2.3. Tests (shipped)
 
-- Sidecar emission: fixture cascade output with two transliteration
-  variants; assert the JSONL has exactly two rows with the right
-  fields.
-- M9 reader: synthesised graph where the canonical agent has a
-  reconciled KANTO URI, the sidecar references that agent's
-  variant blank-node; assert the M9 output has the
-  `prov:specializationOf` triple wired up.
-- Negative: variant whose canonical agent didn't reconcile —
-  assert M9 silently skips (the variant stays unbound, no error).
+- `tests/unit/test_contrib_variants.py` (15 tests): schema validation (`ContribVariantClaim`), append/load round-trip, dedup on `(raw_work_uri, variant_label, canonical_label)`, truncate semantics.
+- `tests/unit/test_bf_to_bffi.py`: M3 cascade emits the expected sidecar rows for fixture cases.
+- `tests/unit/test_merge.py`: M8 binding attaches `skos:altLabel` on the matching canonical agent; missing-claim and no-matching-agent paths silently skip.
 
 ### F2.4. Acceptance
 
-- [ ] Sidecar emitter writes well-formed JSONL during M3 cascade.
-- [ ] M9 reader emits the variant-binding triples deterministically.
-- [ ] No extra Finto API calls vs the baseline (verifiable via the
-      M9 cache stats).
-- [ ] Cataloguer-spot-check: pick 10 variant bindings, manually
-      verify both forms point at the same KANTO authority.
+- [x] Sidecar emitter writes well-formed JSONL during M3 cascade. — `contrib_variants.py` + `stages/bf_to_bffi.py:758-778`, shipped `8174aee`.
+- [x] M8 binding emits the variant-binding triples deterministically. — `stages/merge.py:_apply_contrib_variants`, idempotent (rdflib set-semantics + explicit `(agent, skos:altLabel, variant) in g` guard at line 1763-1764).
+- [x] No extra Finto API calls vs the baseline — M8 binding is a pure local join (no `httpx` import path in `_apply_contrib_variants`).
+- [ ] Cataloguer-spot-check: pick 10 variant bindings, manually verify both forms point at the same KANTO authority. — *external cataloguer work, tracked separately if/when bench output surfaces variant bindings to review.*
 
 ### F2.5. Rollback
 

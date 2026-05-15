@@ -24,7 +24,7 @@ to confirm no in-flight work has reshaped the M9 surface this plan touches.
 
 **Sequencing prerequisites**:
 
-- **P-35 Phase F2** (in P-35, in-progress). F2 binds transliteration variants to their canonical agents' reconciled KANTO URIs via a sidecar. F3's walker yields one EntityRequest per blank-node agent on a non-primary canonical contribution — F2's sidecar bindings have to be in place first because F2 covers the variant-of-canonical case and F3 covers the no-variant-pointer case; without F2 the boundary between the two is muddy.
+- **P-35 Phase F2** (**completed** at `8174aee` + `51d3e0e`). F2 binds transliteration variants to their canonical agents via M8's `skos:altLabel` pass — diverged from the original plan's M9 reader approach in a clean way (M8 merges the variant into the canonical agent's identity before M9 sees it, so M9's existing primary-agent reconciliation handles both forms naturally). This plan's walker (B.1) targets the residual population: cascade-extracted agents that are *not* transliteration variants of a 100/700 agent, so they have no sidecar binding and no `skos:altLabel`-driven merge. F2 being shipped removes a sequencing prerequisite.
 - **P-06** (gold-set growth, backlog). `gold/contrib.jsonl` must reach 30-50 cataloguer-vetted cases. Without that, F3 amplifies cascade misclassifications into thousands of bad KANTO bindings at corpus scale.
 - **P-38 Phase A** (if it lands first). P-38 renames `reconcile.py` → `m9/runner.py`. The Definition-of-Done bullets below reference `reconcile.py`; if P-38 Phase A lands first, update the path references in this plan in lockstep.
 
