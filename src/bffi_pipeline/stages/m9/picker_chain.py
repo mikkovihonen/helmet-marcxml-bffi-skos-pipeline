@@ -108,7 +108,7 @@ def _build_picker_chain(
         "seed": seed,
     }
     if request_timeout_seconds is not None:
-        chat_kwargs["request_timeout"] = request_timeout_seconds
+        chat_kwargs["timeout"] = request_timeout_seconds
     llm = ChatOpenAI(**chat_kwargs)
     return template | llm.with_structured_output(PickerDecision, method="json_mode")
 
