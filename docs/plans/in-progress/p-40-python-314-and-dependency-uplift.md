@@ -13,7 +13,14 @@
 - Phase C.3 (langchain-openai 0 → 1): `aef2790`
 - Phase C.4 (sentence-transformers 3 → 5): `0c50274`
 - Phase C.5 (lxml 5 → 6): `2ed2cf6`
-- Phase C.6 (python-ulid 2 → 3): `<unfilled>` (this commit)
+- Phase C.6 (python-ulid 2 → 3): `0f6379a`
+
+**Operator-only verifications still owed before the plan can graduate to `completed/`:**
+
+- C.3 — M6 LLM judge verdict bench against the curated dev sample. Compare verdict distribution pre- vs post-plan; must stay within judge-cache deterministic-replay tolerance. Requires the mlx-lm sidecar running locally.
+- C.4 — M5 20 k-record bench on the M5 Max. Capture wall time, peak MPS memory, FAISS index size; compare to the most recent pre-plan baseline. Requires sentence-transformers model download and the 20 k subset of the corpus.
+
+Both flagged in their respective phase-commit messages. The pipeline-side toolchain bump (A) + floor lift (B) + per-major absorption commits (C.1-C.6) are landed; what remains is empirical confirmation that the upgrade didn't change LLM-output verdicts or embedding-bench numbers.
 
 **Owner**: TBD.
 **Estimated wall-time**: ~1 day for Phase A; ~half a day for Phase B; ~0.5-1 day for Phase C, dominated by the mypy 2.x audit and the langchain-openai 1.x call-site rewrite. LLM eval (`make eval`) runs locally on the M5 Max per `CLAUDE.md` § "Workflow rules" — never in CI.

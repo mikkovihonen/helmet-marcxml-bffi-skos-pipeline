@@ -81,7 +81,7 @@ the development stack and the gold-set eval, but the
 
 ### Toolchain
 
-- **Python 3.12** via [uv](https://github.com/astral-sh/uv) — the project pins everything in `uv.lock`.
+- **Python 3.14** via [uv](https://github.com/astral-sh/uv) — the project pins everything in `uv.lock`.
 - **mlx-lm** on `:8001` (primary) + `:8002` (fallback) for the LLM judge + reconciliation picker. Full installation walkthrough in [`docs/local-inference.md`](docs/local-inference.md#installation).
 - **Docker** (or Podman with `docker-compose`) for Fuseki and Skosmos. Both containers build from source — NatLibFi's Skosmos doesn't publish a Docker image, and we pin Apache Jena Fuseki via the JAR version Skosmos's vendored Dockerfile downloads at build time.
 - **git** with submodule support — `marc2bibframe2` and `Skosmos` (pinned at `v3.2`) are vendored under `third_party/`.
