@@ -144,6 +144,12 @@ disable_error_code = ["no-untyped-call"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# P-40 Phase C.2: pytest-asyncio 1.x's default mode differs from 0.x.
+# "strict" requires every async test to be marked `@pytest.mark.asyncio`
+# (or use a fixture that implies it); a missing marker fails loudly
+# rather than silently collecting as sync. Set explicitly so the
+# contract is re-readable and survives future pytest-asyncio defaults.
+asyncio_mode = "strict"
 markers = [
     "integration: tests that require Docker services (Fuseki/Skosmos)",
     "requires_llm: tests that additionally require a running Ollama instance",

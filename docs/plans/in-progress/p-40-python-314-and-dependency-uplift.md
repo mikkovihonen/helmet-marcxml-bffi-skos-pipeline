@@ -8,8 +8,8 @@
 
 - Phase A (Python 3.14 toolchain): `ebf6c11`
 - Phase B (dependency floor lift): `2604ce0`
-- Phase C.1 (mypy 1 → 2): `<unfilled>` (this commit)
-- Phase C.2 (pytest 8 → 9 + pytest-asyncio 0 → 1): `<unfilled>`
+- Phase C.1 (mypy 1 → 2): `bca79dc`
+- Phase C.2 (pytest 8 → 9 + pytest-asyncio 0 → 1): `<unfilled>` (this commit)
 - Phase C.3 (langchain-openai 0 → 1): `<unfilled>`
 - Phase C.4 (sentence-transformers 3 → 5): `<unfilled>`
 - Phase C.5 (lxml 5 → 6): `<unfilled>`
