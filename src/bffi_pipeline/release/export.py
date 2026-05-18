@@ -105,7 +105,7 @@ def _git_sha() -> str | None:
             check=False,
             timeout=5,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except FileNotFoundError, subprocess.TimeoutExpired:
         return None
     if out.returncode != 0:
         return None
@@ -143,7 +143,7 @@ def _build_manifest(
                 "stages_completed": list(m.stages_completed),
                 "tags": list(m.tags),
             }
-        except (ValueError, OSError):
+        except ValueError, OSError:
             # Lenient: a malformed manifest shouldn't block the export.
             run_meta = {"run_uuid": data_dir.name, "manifest_read_error": True}
     else:

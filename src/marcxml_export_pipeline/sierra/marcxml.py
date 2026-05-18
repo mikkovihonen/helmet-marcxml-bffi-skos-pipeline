@@ -199,7 +199,7 @@ def build_leader(lf: Leaderfield | None) -> str:
     base_address_raw = lf.base_address or "0"
     try:
         base_address = f"{int(base_address_raw):05d}"
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         base_address = "00000"
     return (
         "00000"

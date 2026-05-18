@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "MARCXML to BFFI Works/Expressions to Skosmos pipeline (pro bono for the National Library of Finland)."
 license = "Apache-2.0"
 authors = [{ name = "Mikko Vihonen" }]
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.14"
 readme = "README.md"
 
 dependencies = [
@@ -62,7 +62,7 @@ packages = ["src/bffi_pipeline", "src/marcxml_export_pipeline"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -109,7 +109,7 @@ ignore = ["PLR0913"]
 "src/marcxml_export_pipeline/sierra/marcxml.py" = ["PLC0415"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 strict = true
 files = ["src"]
 mypy_path = "src"

@@ -212,7 +212,7 @@ class FusekiConceptResolver:
             )
             response.raise_for_status()
             payload = response.json()
-        except (httpx.HTTPError, ValueError):
+        except httpx.HTTPError, ValueError:
             return None
         bindings = payload.get("results", {}).get("bindings", [])
         return bindings or None

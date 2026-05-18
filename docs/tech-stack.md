@@ -40,7 +40,7 @@ deeper doc that owns the topic.
 
 | Component | Pin | Role |
 |---|---|---|
-| Python | 3.12 (pinned in `pyproject.toml`, enforced via `uv`) | One runtime for the whole pipeline. |
+| Python | 3.14 (pinned in `pyproject.toml` + `.python-version`, enforced via `uv`) | One runtime for the whole pipeline. |
 | [uv](https://github.com/astral-sh/uv) | Latest | Dep resolver + virtualenv manager. Everything pinned in `uv.lock`. |
 | ruff | ≥ 0.5 | Lint (`make lint`) + format (`make format`). |
 | mypy | ≥ 1.10, `--strict` | Type-checks every line of `src/`. |

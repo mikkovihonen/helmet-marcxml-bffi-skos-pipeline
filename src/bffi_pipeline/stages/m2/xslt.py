@@ -51,7 +51,7 @@ def marc2bibframe2_version() -> str:
             capture_output=True,
             text=True,
         ).stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError, FileNotFoundError:
         return "unknown"
     try:
         tag = subprocess.run(
@@ -61,5 +61,5 @@ def marc2bibframe2_version() -> str:
             text=True,
         ).stdout.strip()
         return f"{tag}+{sha[:12]}"
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError, FileNotFoundError:
         return sha

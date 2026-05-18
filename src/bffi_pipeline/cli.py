@@ -160,7 +160,7 @@ def _resolve_git_sha() -> str | None:
             text=True,
             timeout=2.0,
         )
-    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+    except subprocess.SubprocessError, FileNotFoundError, OSError:
         return None
     sha = result.stdout.strip()
     return sha or None

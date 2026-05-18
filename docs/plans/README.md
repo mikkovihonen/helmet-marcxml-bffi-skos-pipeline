@@ -82,6 +82,19 @@ reference for what shipped.
   prerequisite for P-01, P-04 statistical power, and P-35 F3.
 ### In progress
 
+- [`in-progress/p-40-python-314-and-dependency-uplift.md`](in-progress/p-40-python-314-and-dependency-uplift.md)
+  — Move `requires-python` from `>=3.11,<3.13` to `>=3.14`, lift
+  all 27 dependency floors to track what `uv.lock` already
+  resolves, and absorb seven breaking-major bumps (`mypy`,
+  `pytest`, `pytest-asyncio`, `langchain-openai`,
+  `sentence-transformers`, `lxml`, `python-ulid`) as one commit
+  per breakage class. Phase A (toolchain) in progress —
+  pyproject + .python-version + uv.lock regen + PEP 695/758
+  syntax cleanups staged; lint + 1083 unit tests + 18
+  integration tests green on 3.14.4. Phase B (floor lift) and
+  C.1-C.6 (per-major absorption) still ahead. Free-threaded
+  Python (`python3.14t`) deferred to a follow-on proposal as the
+  enabling prerequisite for future in-stage multithreading work.
 - [`in-progress/p-35-m3-cascade-follow-ups.md`](in-progress/p-35-m3-cascade-follow-ups.md)
   — Three sequenced M3 follow-ups (F1, F2, F3) that make
   cascade-extracted contributions cataloguer-visible on canonical

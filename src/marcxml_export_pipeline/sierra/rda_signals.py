@@ -43,7 +43,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, TypeAlias
+from typing import Any, Final
 
 from marcxml_export_pipeline.sierra.dtos import Varfield
 from marcxml_export_pipeline.sierra.itype_to_rda import (
@@ -150,7 +150,7 @@ class RecordContext:
     material_code: str | None
 
 
-CascadeLayer: TypeAlias = Callable[[RecordContext], PartialRda]
+type CascadeLayer = Callable[[RecordContext], PartialRda]
 
 
 def resolve_rda(ctx: RecordContext, layers: Sequence[CascadeLayer]) -> RdaCarrier | None:

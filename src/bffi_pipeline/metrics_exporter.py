@@ -386,7 +386,7 @@ def apply_event(  # noqa: PLR0912, PLR0915 — dispatch table over the StageEven
                 continue
             try:
                 value = int(row.extra[outcome])
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             metrics.stage_outcomes_total.labels(
                 stage=row.stage, outcome=outcome, run_uuid=run
@@ -519,7 +519,7 @@ def _tail_step(metrics: PipelineMetrics, sidecar_path: Path, state: _TailState) 
         try:
             data = _json.loads(line)
             ts = _dt.fromisoformat(data["ts"].replace("Z", "+00:00"))
-        except (ValueError, KeyError):
+        except ValueError, KeyError:
             continue
         row = StageEventRow(
             ts=ts,

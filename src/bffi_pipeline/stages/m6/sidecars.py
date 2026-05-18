@@ -158,7 +158,7 @@ def _load_checkpoint(path: Path) -> JudgeCheckpoint | None:
         return None
     try:
         return JudgeCheckpoint.from_json(path.read_text(encoding="utf-8"))
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return None
 
 

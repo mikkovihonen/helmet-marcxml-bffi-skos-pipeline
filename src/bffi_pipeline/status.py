@@ -119,7 +119,7 @@ def parse_sidecar(
             continue
         try:
             ts = datetime.fromisoformat(data["ts"].replace("Z", "+00:00"))
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             continue
         if since is not None and ts < since:
             continue

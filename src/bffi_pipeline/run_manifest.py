@@ -281,7 +281,7 @@ def discover_runs(runs_root: Path) -> list[DiscoveredRun]:
             continue
         try:
             manifest = read_manifest(manifest_path)
-        except (ValueError, OSError):
+        except ValueError, OSError:
             # Corrupt or unreadable manifest — skip with no fanfare;
             # the operator can ``runs info <uuid>`` for the per-run
             # diagnostic.
