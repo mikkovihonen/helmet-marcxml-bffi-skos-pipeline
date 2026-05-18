@@ -12,8 +12,8 @@
 - Phase C.2 (pytest 8 → 9 + pytest-asyncio 0 → 1): `699d57f`
 - Phase C.3 (langchain-openai 0 → 1): `aef2790`
 - Phase C.4 (sentence-transformers 3 → 5): `0c50274`
-- Phase C.5 (lxml 5 → 6): `<unfilled>` (this commit)
-- Phase C.6 (python-ulid 2 → 3): `<unfilled>`
+- Phase C.5 (lxml 5 → 6): `2ed2cf6`
+- Phase C.6 (python-ulid 2 → 3): `<unfilled>` (this commit)
 
 **Owner**: TBD.
 **Estimated wall-time**: ~1 day for Phase A; ~half a day for Phase B; ~0.5-1 day for Phase C, dominated by the mypy 2.x audit and the langchain-openai 1.x call-site rewrite. LLM eval (`make eval`) runs locally on the M5 Max per `CLAUDE.md` § "Workflow rules" — never in CI.
