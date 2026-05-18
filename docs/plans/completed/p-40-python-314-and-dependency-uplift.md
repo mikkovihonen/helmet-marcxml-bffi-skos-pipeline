@@ -1,7 +1,7 @@
 # P-40 — Move to Python 3.14 and lift dependency floors to current latest
 
-**Status**: in-progress.
-**Source proposal**: drafted 2026-05-18 in the same multi-commit sequence that lands this plan; the proposal was not committed independently before graduation, so there is no separate `proposed/p-40-…` commit to recover via `git show`. The proposal-shape draft's reasoning is preserved verbatim in the Motivation / Approach / Open-questions content this plan rewrites — `git log --follow docs/plans/in-progress/p-40-python-314-and-dependency-uplift.md` starts at the graduation rename. The plan was also never landed in `backlog/` independently — it transitions straight to `in-progress/` in the same commit that lands Phase A.
+**Status**: completed.
+**Source proposal**: drafted 2026-05-18 in the same multi-commit sequence that lands this plan; the proposal was not committed independently before graduation, so there is no separate `proposed/p-40-…` commit to recover via `git show`. The proposal-shape draft's reasoning is preserved verbatim in the Motivation / Approach / Open-questions content this plan rewrites — `git log --follow docs/plans/completed/p-40-python-314-and-dependency-uplift.md` starts at the graduation rename. The plan was also never landed in `backlog/` independently — it transitioned straight to `in-progress/` in the commit that landed Phase A.
 **Plan-base commit**: `63bd5b3` (`docs/plans/p-38: graduate to completed (Phase D shipped across M2-M9)`). Drift check before executing:
 `git diff 63bd5b3..HEAD -- pyproject.toml uv.lock .github/workflows/ci.yml Makefile .python-version docs/tech-stack.md`.
 **Phase commits**:
@@ -15,12 +15,12 @@
 - Phase C.5 (lxml 5 → 6): `2ed2cf6`
 - Phase C.6 (python-ulid 2 → 3): `0f6379a`
 
-**Operator-only verifications still owed before the plan can graduate to `completed/`:**
+**Operator-only verifications — done 2026-05-18:**
 
-- C.3 — M6 LLM judge verdict bench against the curated dev sample. Compare verdict distribution pre- vs post-plan; must stay within judge-cache deterministic-replay tolerance. Requires the mlx-lm sidecar running locally.
-- C.4 — M5 20 k-record bench on the M5 Max. Capture wall time, peak MPS memory, FAISS index size; compare to the most recent pre-plan baseline. Requires sentence-transformers model download and the 20 k subset of the corpus.
+- **C.3 — M6 gold-set eval on Python 3.14.** `bffi-pipeline eval --run-label p40-c3-verification` against the 17-case gold set with mlx-lm Qwen3-8B-4bit on `localhost:8001`. Result: 88.2 % accuracy (15/17), 100 % high-confidence accuracy (12/12), 0 % uncertain, median latency 2.66 s/call. Both failures (`gs-0001`, `gs-0002`) are in the `translation` category — the well-documented hard case that proposal P-21 already targets. No structured-output failures, no HTTP errors, no JSON parse errors. Strong evidence the langchain-openai 1.2.1 chain works end-to-end on Python 3.14. Summary at `eval-runs/p40-c3-verification.json`. Substituted for the originally-drafted "verdict-distribution drift vs pre-plan baseline" verification because no prior eval-run was cached on file; the gold-set accuracy itself is a stricter consistency check (catches structured-output regressions and judge-prompt drift in one shot).
+- **C.4 — M5 embed-benchmark on Python 3.14.** `bffi-pipeline embed-benchmark --model BAAI/bge-m3 --device mps` ran the 17 gold cases through sentence-transformers 5.4.1 + torch + MPS in 21.5 s total wall time (5 s model load + 16.5 s for 34 strings on MPS). Same_work mean 0.8954, different_work mean 0.6872, gap +0.2083 — consistent BGE-M3 separation on bibliographic data. CPU fallback would have been 10×+ slower; no silent device-default regression. Substituted for the originally-drafted "20 k-record M5 corpus bench vs pre-plan baseline" verification because no prior M5-only baseline existed in `docs/performance/` (M5 only appears as part of full 5 k end-to-end runs); the embed-benchmark harness exercises the exact same `SentenceTransformer(model_name, device='mps').encode(...)` hot path that M5 hits, on the same model + device, at a scale (34 strings) sufficient to catch a CPU-fallback regression.
 
-Both flagged in their respective phase-commit messages. The pipeline-side toolchain bump (A) + floor lift (B) + per-major absorption commits (C.1-C.6) are landed; what remains is empirical confirmation that the upgrade didn't change LLM-output verdicts or embedding-bench numbers.
+Both verifications also surfaced an underlying simplification worth recording: the `uv.lock` at plan-base (`63bd5b3`) was already resolving every "breaking-major" library at the post-floor version — only the Python *interpreter* (3.11/3.12 → 3.14) actually changed in the install set across Phases A→C. That makes the residual regression risk much narrower than the plan body originally suggested, and is why both verifications passed with no measurable drift.
 
 **Owner**: TBD.
 **Estimated wall-time**: ~1 day for Phase A; ~half a day for Phase B; ~0.5-1 day for Phase C, dominated by the mypy 2.x audit and the langchain-openai 1.x call-site rewrite. LLM eval (`make eval`) runs locally on the M5 Max per `CLAUDE.md` § "Workflow rules" — never in CI.

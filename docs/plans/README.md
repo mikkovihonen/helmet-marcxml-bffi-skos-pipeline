@@ -82,19 +82,6 @@ reference for what shipped.
   prerequisite for P-01, P-04 statistical power, and P-35 F3.
 ### In progress
 
-- [`in-progress/p-40-python-314-and-dependency-uplift.md`](in-progress/p-40-python-314-and-dependency-uplift.md)
-  — Move `requires-python` from `>=3.11,<3.13` to `>=3.14`, lift
-  all 27 dependency floors to track what `uv.lock` already
-  resolves, and absorb seven breaking-major bumps (`mypy`,
-  `pytest`, `pytest-asyncio`, `langchain-openai`,
-  `sentence-transformers`, `lxml`, `python-ulid`) as one commit
-  per breakage class. Phase A (toolchain) in progress —
-  pyproject + .python-version + uv.lock regen + PEP 695/758
-  syntax cleanups staged; lint + 1083 unit tests + 18
-  integration tests green on 3.14.4. Phase B (floor lift) and
-  C.1-C.6 (per-major absorption) still ahead. Free-threaded
-  Python (`python3.14t`) deferred to a follow-on proposal as the
-  enabling prerequisite for future in-stage multithreading work.
 - [`in-progress/p-35-m3-cascade-follow-ups.md`](in-progress/p-35-m3-cascade-follow-ups.md)
   — Three sequenced M3 follow-ups (F1, F2, F3) that make
   cascade-extracted contributions cataloguer-visible on canonical
@@ -131,6 +118,27 @@ reference for what shipped.
   84.9 % → 99.96 % (mint failures dropped from 707 → 0). Phase C
   (mint-key refactor) was removed from the DoD as unnecessary at
   that coverage level.
+- [`completed/p-40-python-314-and-dependency-uplift.md`](completed/p-40-python-314-and-dependency-uplift.md)
+  — Moved `requires-python` from `>=3.11,<3.13` to `>=3.14`,
+  lifted all 27 dependency floors to track what `uv.lock` already
+  resolves, and absorbed seven breaking-major bumps (`mypy`,
+  `pytest`, `pytest-asyncio`, `langchain-openai`,
+  `sentence-transformers`, `lxml`, `python-ulid`) as one commit
+  per breakage class for bisect-friendliness. Shipped 2026-05-18
+  across 8 phase commits (A, B, C.1-C.6) + 1 follow-up + 1
+  graduation. Operator verifications done same session: M6
+  gold-set eval 88.2 % accuracy / 100 % high-confidence /
+  0 % uncertain (no structured-output regressions);
+  embed-benchmark on BGE-M3/MPS 21.5 s wall (no CPU fallback).
+  Underlying observation worth recording: `uv.lock` at plan-base
+  was already resolving every "breaking-major" library at the
+  post-floor version, so only the Python *interpreter* (3.11/3.12
+  → 3.14) actually changed in the install set across A→C —
+  narrower regression risk than the plan body originally
+  suggested. Free-threaded Python (`python3.14t`) deliberately
+  deferred to a future proposal (P-41 when drafted) as the
+  enabling prerequisite for any future in-stage multithreading
+  work.
 
 ### Abandoned
 
