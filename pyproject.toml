@@ -8,43 +8,43 @@ requires-python = ">=3.14"
 readme = "README.md"
 
 dependencies = [
-    "typer>=0.12",
-    "pydantic>=2.7",
-    "pydantic-settings>=2.3",
-    "python-dotenv>=1.0",
-    "rdflib>=7.0",
-    "pymarc>=5.1",
-    "lxml>=5.2",
-    "pyshacl>=0.26",
+    "typer>=0.25",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.14",
+    "python-dotenv>=1.2",
+    "rdflib>=7.6",
+    "pymarc>=5.3",
+    "lxml>=6",
+    "pyshacl>=0.31",
     "skosify>=2.3",
     "SPARQLWrapper>=2.0",
-    "langchain-openai>=0.1",
-    "sentence-transformers>=3.0",
-    "faiss-cpu>=1.8",
-    "python-ulid>=2.7",
+    "langchain-openai>=1",
+    "sentence-transformers>=5",
+    "faiss-cpu>=1.13",
+    "python-ulid>=3",
     "jinja2>=3.1",
-    "httpx>=0.27",
-    "requests>=2.32",
-    "lingua-language-detector>=2.0",
+    "httpx>=0.28",
+    "requests>=2.33",
+    "lingua-language-detector>=2.2",
     # P-11 Phase D: local-only Prometheus exporter for the
     # ``bffi-pipeline serve-metrics`` subcommand. The dep is pulled in
     # only when the operator runs serve-metrics; pipeline stages never
     # import it. Outbound-telemetry-free — the exporter just exposes a
     # local ``/metrics`` endpoint that the operator's own Prometheus
     # container scrapes. See docs/proposals/prop-11-structured-observability.md.
-    "prometheus-client>=0.20",
+    "prometheus-client>=0.25",
     # `marcxml_export_pipeline.sierra` — Sierra Postgres replica → MARCXML
     # export, migrated from the (now-archived) helmet-sierra-data-tools repo.
     "sqlalchemy[asyncio]>=2.0",
-    "asyncpg>=0.29",
+    "asyncpg>=0.31",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.2",
-    "pytest-asyncio>=0.23",
-    "ruff>=0.5",
-    "mypy>=1.10",
+    "pytest>=9",
+    "pytest-asyncio>=1",
+    "ruff>=0.15",
+    "mypy>=2",
     "types-requests",
     "lxml-stubs",
 ]

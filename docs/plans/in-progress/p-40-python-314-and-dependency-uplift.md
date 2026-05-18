@@ -6,8 +6,8 @@
 `git diff 63bd5b3..HEAD -- pyproject.toml uv.lock .github/workflows/ci.yml Makefile .python-version docs/tech-stack.md`.
 **Phase commits**:
 
-- Phase A (Python 3.14 toolchain): `<unfilled>`
-- Phase B (dependency floor lift): `<unfilled>`
+- Phase A (Python 3.14 toolchain): `ebf6c11`
+- Phase B (dependency floor lift): `<unfilled>` (this commit)
 - Phase C.1 (mypy 1 → 2): `<unfilled>`
 - Phase C.2 (pytest 8 → 9 + pytest-asyncio 0 → 1): `<unfilled>`
 - Phase C.3 (langchain-openai 0 → 1): `<unfilled>`
