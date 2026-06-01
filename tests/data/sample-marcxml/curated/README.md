@@ -1,10 +1,12 @@
 # Curated MARCXML — real Helmet records
 
 These are **real** Helmet bibliographic records hand-picked by Helmet
-cataloguers in response to **Ask 1** in `docs/external-dependencies.md`
-(received 2026-05-09). Filenames are the Helmet bib IDs as supplied by
-cataloguers; contents are unmodified MARCXML from
-`helmet-sierra-data-tools/output/marcxml/`.
+cataloguers in response to **Ask 1** in `docs/external-dependencies.md`.
+Initial batch received 2026-05-09 (13 records covering 11 slots); second
+batch received 2026-06-01 closed the unfilled slots 2/10/11 with four
+more records (1354066, 1353996, 2394080, 1109760). Filenames are the
+Helmet bib IDs as supplied by cataloguers; contents are unmodified
+MARCXML from `helmet-sierra-data-tools/output/marcxml/`.
 
 ## Why a subdirectory and not flat alongside the synthetic set?
 
@@ -21,7 +23,7 @@ path explicitly.
 | Slot | Case from Ask 1 | Bib ID | Notes on what the record exercises |
 |------|-----------------|--------|------------------------------------|
 | 1 | Simple Finnish-language original monograph, single creator | `2628274` | Liisa Louhela, *Mies joka kantoi aurinkoa sylissään* (Otava 2026). KANTO `$0` on author, full RDA 336/337/338, kauno/fin + slm/fin + yso subjects. |
-| 2 | Same Finnish original ↔ Swedish translation (different record) | — | **UNFILLED.** Need to request a paired bib ID. |
+| 2 | Same Finnish original ↔ Swedish translation (different record) | `1354066` + `1353996` | Mauri & Tarja Kunnas, *Koirien Kalevala* (fi, 1992) ↔ *Hundarnas Kalevala* (swe, 1994). 1353996 carries `240 10 $a Koirien Kalevala, $l svenska` pointing at the Finnish original; `041 1 $a swe $h fin`; Lars Huldén in `700 $e översättare`. Both records have `100 $a Kunnas, Mauri` with no KANTO `$0` (pre-RDA in the 1994 record; the 1992 record adds `$e taiteilija, $e kirjoittaja` but still no `$0` — useful for exercising the no-KANTO branch). |
 | 3 | Russian-original translated into Finnish (transliteration) | `2371438` | Pushkin, *Aatelisrosvo Dubrovskij + Laukaus ym. kertomuksia* — `041 1` `a:fin h:rus`, transliterated author (Puškin) and four transliterated work titles in `700 $i "Sisältää (teos):"`, two translators. |
 | 4 | English-original translated into Finnish | `2372028` | Kate Morton, *Kellontekijän tytär* — `041 1` `a:fin h:eng`, `240 $l suomi`, two co-translators (Pekkanen). |
 | 5 | Common-title collision pair (same author, different works) | — | **UNFILLED.** Need a paired bib ID. |
@@ -29,8 +31,8 @@ path explicitly.
 | 7 | Abridgement of a longer work | `2360958` | *Sagor från Mumindalen* — children's book "after 3 stories by Tove Jansson", with `700 $i "Verk baserat på:"` to two source Jansson novels and `700 $i "Innehåller (verk):"` for the constituent stories. |
 | 8 | Music recording (sound) | `2452306` | Steven Wilson, *Get all you deserve* — Leader byte 6 = `j`, 2 CDs + Blu-ray, performer in `100`, many `730` track-level analytical entries. |
 | 9 | Sheet music / score | `2616222` | Mozart, *Meisterwerke am Klavier* (Edition Peters) — Leader byte 6 = `c`, `041 a:zxx`, single piano score, MUSO-style uniform titles in `730` (Sonaatit/Menuetit/Muunnelmat with KV numbers). |
-| 10 | Cartographic resource | — | **UNFILLED.** Need a map record. |
-| 11 | Serial / continuing resource | — | **UNFILLED.** Need a serial record (Leader byte 7 = `s`). |
+| 10 | Cartographic resource | `2394080` | *Abisko - Kebnekaise: Kungsleden karta & guide* (Calazo, 2019). Leader byte 6 = `e`, RDA `336 cri / 337 n / 338 nb`, parallel `041 0 $a swe $a eng`, no main entry, `710 2 $a Calazo förlag` publisher, two `740` variant titles. Subjects mix `yso/fin`, `yso/swe`, `allars`, `ysa`, `slm/fin`, `slm/swe` — the only record in the set exercising the bilingual fi/swe subject-vocabulary cluster simultaneously. |
+| 11 | Serial / continuing resource | `1109760` | *Tekniikan maailma* (Vantaa, 1974–). Leader byte 7 = `s`, `008` date-type `c` with `19749999fi` (ongoing), no main entry, `710 2 $a Otavamedia` publisher, seven `650 7 yso/fin` subject headings. Only ongoing-serial record in the set; no `776`/`780`/`785` continuation chain (single-record serial, not a title-change cluster). |
 | 12 | Corporate body as creator | `2484550` | Big Country, *Out beyond the river* — `110 2 Big Country, esittäjä` (corporate body main entry), 5-CD anthology, `710 2 2 ... $t` linking to two child works. |
 | 13 | Multiple co-creators of equal billing | `1059592` *(secondary)* | *Leivän tähden* — three editors of equal billing in `700` (no `100`), legacy `ysa` subjects (predates yso URIs). Filled here as a secondary tag because the cataloguer-supplied list does not include a clean three-author monograph; the primary slot for `1059592` is 14. |
 | 14 | Aggregate work / collection | `2620193` | Dickens, *Kävelyretkiä Lontoon kaduilla* — `240 1 0 Novellit. Valikoima. Suomi`, eight `700 $i "Sisältää (ekspressio):"` links to component expressions, all carrying KANTO `$0`. Cleanest aggregate test in the set. |
@@ -46,15 +48,26 @@ These are useful for the spec/tests even though they were not explicit asks:
 - **KANTO `$0` on names**: `2628274` (author), `2372028` (publisher), `2620193` (author + translator + publisher), `1059592` (none — pre-RDA legacy), `2628274`/`2484550` partial.
 - **Aggregate-work modelling via `700 $i "Sisältää (teos|ekspressio):"`**: `2620193`, `2371438`, `2360958`.
 - **Adaptation/derivation via `700 $i "perustuu / baserat på / Elokuvaversion perustana":`**: `2564382`, `2360958`.
-- **Legacy non-yso vocabularies (`ysa`, `kaunokki`, `bella`, `local`)** — useful for testing the YSO migration path: `1059592`, `2452306`, `2484550`, `2360958`, `2620193`, `2628274`.
+- **Legacy non-yso vocabularies (`ysa`, `kaunokki`, `bella`, `local`, `allars`)** — useful for testing the YSO migration path: `1059592`, `2452306`, `2484550`, `2360958`, `2620193`, `2628274`, `2394080`.
+- **Multi-relator on a single `100 $e`**: `1354066` (`$e taiteilija, $e kirjoittaja`). The Slot 7 `2360958` does this too; `1354066` adds an artist-first author-second variant. Both records are also no-KANTO-`$0` on the main entry — useful for the unreconciled-agent path.
+- **Pre-RDA legacy with no relator at all on `100`**: `1353996` (`100 1 $a Kunnas, Mauri` without `$e`). Tests the relator-inference / default-to-`author` fallback when the source MARC predates the RDA `$e` convention.
 
 ## Unfilled slots (follow-up requests for cataloguers)
 
-The 13 records cover 11 of the 15 slots. Outstanding: **2** (Finnish↔Swedish
-translation pair), **5** (common-title collision pair), **10**
-(cartographic), and **11** (serial). Slots 2 and 5 each require **two**
-related bib IDs to be useful. These should be added to a follow-up
-request to Helmet cataloguers before M5 gold-set construction.
+A second batch from cataloguers on 2026-06-01 closed three of the four
+previously outstanding slots: **2** (Kunnas, fi↔swe translation pair),
+**10** (Kungsleden cartographic), and **11** (*Tekniikan maailma*
+serial). The set now covers 14 of the 15 slots; outstanding is **5**
+(common-title collision pair).
+
+Slot 5 has a plausible candidate from the same 2026-06-01 batch —
+`1497063` + `2262433`, both *Runot* by Kaarlo Sarkia, the 2016 record an
+aggregate of four constituent works via `700 $i "Sisältää teos:"`
+(*Kahlittu*, *Velka elämälle*, *Unen kaivo*, *Kohtalon vaaka*). This is
+tighter than the original Slot 5 framing because the *aggregate vs
+selection* axis sits on top of the title-collision axis; confirm with
+cataloguers whether that is the collision they had in mind before
+committing those records.
 
 ## Per-record case-note request (open)
 
