@@ -46,13 +46,34 @@ contribution.
 
 ### Side-case — multi-relator `$e $e` on a single MARC entry
 
-| Bib ID | Title | MARC entry for Jansson | Expected BFFI shape |
-|--------|-------|------------------------|---------------------|
-| `2347992` | Näkymätön lapsi ja muita kertomuksia (2018) | `100 1# $a Jansson, Tove, $e kirjoittaja, $e kuvittaja. $0 (FI-ASTERI-N)000045590` | **Two** `bf:Contribution` nodes on the Work — author and illustrator — both referencing the same agent. Not one Contribution with two roles. |
+| Bib ID | Title | MARC entry | Expected BFFI shape |
+|--------|-------|------------|---------------------|
+| `2347992` | Näkymätön lapsi ja muita kertomuksia (Jansson, 2018) | `100 1# $a Jansson, Tove, $e kirjoittaja, $e kuvittaja. $0 (FI-ASTERI-N)000045590` | Two `bf:Contribution` nodes on the Work — author and illustrator — both referencing the same agent. Not one Contribution with two roles. |
+| `2495433` | Ruiskumestarin talo (Jäppinen, 2014) | `100 1# $a Jäppinen, Jere, $e kirjoittaja, $e toimittaja. $0 (FI-ASTERI-N)000100912` + `700 1# $a Lindqvist, Mikko, $e kirjoittaja. $0 (FI-ASTERI-N)000117973` | `100`-side multi-relator (author + editor) + a `700` co-author with separate KANTO. The Work also has bilingual original cataloguing (`041 1# $a fin $a swe $h fin`) — exercises **`041` multi-`$a` parallel-language** on top of the role split. |
+| `2569592` | Hyvästejä jättämättä (Meri, 2023) | `100 1# $a Meri, Tapio, $e kirjoittaja, $e kustantaja. $0 (FI-ASTERI-N)000215129` | Same person as author **and** publisher on the same Work — a self-publishing case. Forces M3 to express one agent in both a `bf:Contribution` (author) and an instance-level `bf:provisionActivity` (publisher), without collapsing them. |
+| `2578080` | Concerti per una vita (Langlois de Swarte, 2024) | `100 1# $a Langlois de Swarte, Théotime, $e viulu, $e johtaja.` **+** `700 1# $a Langlois de Swarte, Théotime, $e johtaja.` **+** `700 1# $a Langlois de Swarte, Théotime, $e viulu.` | **Same agent encoded TWO ways within one record**: once as multi-relator on `100`, then again as **two separate `700` entries** (one per role) for the same person. The merge logic must recognise this as one agent with role-set `{viulu, johtaja}`, not three separate agents. No KANTO `$0` on any of the three appearances — exercises the no-KANTO branch of the merge. Audio recording (leader6=`j`). |
+
+The four records together exercise:
+
+- multi-relator on `100` (author+illustrator, author+editor, author+publisher, performer+conductor)
+- the same multi-role encoded as `100 $e $e` **and** as separate `700` entries
+  in the same record (`2578080`)
+- self-contribution where the agent plays both creative and publishing
+  roles (`2569592`)
+- multi-relator coexisting with `041 $a $a` parallel-language originals
+  (`2495433`)
+- audio-recording (leader6=`j`) and text-monograph variants of the
+  same shape
 
 This is the round-trip case for Skosmos role facets: collapsing into a
 single Contribution-with-many-roles loses the per-role facet at the
-Skosmos surface. The fixture pins the expected expansion.
+Skosmos surface. The fixtures pin the expected expansion.
+
+### Cross-language reach of the same agent — 1990s KANTO-era Polish translation
+
+| Bib ID | Title | MARC entry for Jansson | Year | Notes |
+|--------|-------|------------------------|------|-------|
+| `2541420` | *Opowiadania z Doliny Muminków* (Polish translation of *Det osynliga barnet*) | `100 1# $a Jansson, Tove, $e kirjoittaja, $e taiteilija. $0 (FI-ASTERI-N)000045590` | 1997 | Polish-language target (`041 1# $a pol $h swe`). Same KANTO-bound Jansson agent (`(FI-ASTERI-N)000045590`) that participates in the role-divergence pair `1316900` / `2302793` here also participates in this Polish-language Expression of the *Näkymätön lapsi* Work. Extends the agent's reach across **fi / swe / eng / pol** in the fixture pool, with KANTO present in every appearance — the cleanest "same agent across many language Expressions" case in the set. Also the only 1990s-era record in `role-divergence/`, partial mitigation of the otherwise-2010s-and-later temporal bias. |
 
 ### Known data-quality gap pinned by this set
 
