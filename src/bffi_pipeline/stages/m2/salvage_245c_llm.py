@@ -65,10 +65,13 @@ SALVAGE_CONNECTION_BACKOFF_SECONDS: Final[tuple[float, ...]] = (5.0, 30.0, 120.0
 #: 120s leaves headroom while still bounding wedged calls.
 SALVAGE_REQUEST_TIMEOUT_SECONDS: Final[float] = 120.0
 
-#: Per-cascade default model. Mirrors contrib_extract's choice for the
-#: same reason — short, structured 245$c → personal-name task is well-
-#: served by an 8B model and avoids the 32B cold-start cost on the
-#: tail of records this cascade runs against.
+#: Fallback model identifier when ``Settings.llm_model_primary`` is
+#: empty. The 8B model is well-suited to the short, structured
+#: 245$c → personal-name task and avoids the 32B cold-start cost
+#: on the tail of records this cascade runs against. Production
+#: reads the actual mlx-lm model path from
+#: ``Settings.llm_model_primary``; this constant is a defensive
+#: stub for environments where the env var is unset.
 DEFAULT_SALVAGE_MODEL: Final[str] = "qwen3:8b-q4_K_M"
 
 #: Confidence cap for LLM-tier hits. Per P-41 Phase B.2 — synthesised
@@ -437,9 +440,16 @@ class LangChainSalvageExtractor:
         if self.chain is not None:
             return self.chain
         settings = get_settings()
+        # Resolution order: constructor arg → Settings.llm_model_primary
+        # (the mlx-lm model path from .env) → DEFAULT_SALVAGE_MODEL
+        # (defensive fallback for unset env).
+        model_name = self.model_name or settings.llm_model_primary or DEFAULT_SALVAGE_MODEL
+        # Prefer the primary mlx-lm server URL when set; the cascade
+        # cares about one model so the fallback URL stays unused.
+        base_url = settings.llm_base_url_primary or settings.llm_base_url
         return _build_chain(
-            model_name=self.model_name or DEFAULT_SALVAGE_MODEL,
-            base_url=settings.llm_base_url,
+            model_name=model_name,
+            base_url=base_url,
             api_key=settings.llm_api_key,
         )
 

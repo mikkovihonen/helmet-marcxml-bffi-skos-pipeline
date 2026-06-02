@@ -138,8 +138,12 @@ class PipelineRunSummary:
         return "\n".join(lines)
 
 
-def _dispatch_m2(*, input_dir: Path, force: bool) -> None:
-    marc_to_bf_command(input_dir=input_dir, force=force)
+def _dispatch_m2(*, input_dir: Path, force: bool, llm_salvage_cascade: bool = False) -> None:
+    marc_to_bf_command(
+        input_dir=input_dir,
+        force=force,
+        llm_salvage_cascade=llm_salvage_cascade,
+    )
 
 
 def _dispatch_m3(*, force: bool) -> None:
@@ -222,7 +226,13 @@ _DISPATCHERS: Final[dict[str, Callable[..., None]]] = {
 }
 
 
-def _call_dispatcher(stage: str, *, input_dir: Path | None, force: bool) -> None:
+def _call_dispatcher(
+    stage: str,
+    *,
+    input_dir: Path | None,
+    force: bool,
+    llm_salvage_cascade: bool = False,
+) -> None:
     """Resolve + call the dispatch function for ``stage``.
 
     Per-stage kwargs are filtered to what each dispatcher accepts so the
@@ -235,7 +245,7 @@ def _call_dispatcher(stage: str, *, input_dir: Path | None, force: bool) -> None
     if stage == "m2":
         if input_dir is None:
             raise ValueError("m2 dispatch requires input_dir (MARCXML source directory).")
-        dispatcher(input_dir=input_dir, force=force)
+        dispatcher(input_dir=input_dir, force=force, llm_salvage_cascade=llm_salvage_cascade)
     elif stage in {"m3", "m5", "m6", "skosify"}:
         dispatcher(force=force)
     else:  # m8, m9, load, export
@@ -250,6 +260,7 @@ def run_pipeline(
     force_stages: frozenset[str] = frozenset(),
     description: str = "",
     from_stage: str | None = None,
+    llm_salvage_cascade: bool = False,
 ) -> PipelineRunSummary:
     """Run the canonical pipeline chain in one Python process.
 
@@ -305,6 +316,7 @@ def run_pipeline(
             from_stage=from_stage,
             summary=summary,
             overall_start=overall_start,
+            llm_salvage_cascade=llm_salvage_cascade,
         )
     finally:
         summary.total_elapsed_seconds = time.monotonic() - overall_start
@@ -321,6 +333,7 @@ def _run_stages(
     from_stage: str | None,
     summary: PipelineRunSummary,
     overall_start: float,
+    llm_salvage_cascade: bool = False,
 ) -> None:
     """Inner loop extracted so :func:`run_pipeline` can wrap it in the
     exporter context without indenting the entire body twice."""
@@ -344,7 +357,12 @@ def _run_stages(
 
         stage_start = time.monotonic()
         try:
-            _call_dispatcher(stage, input_dir=input_dir, force=(stage in force_stages))
+            _call_dispatcher(
+                stage,
+                input_dir=input_dir,
+                force=(stage in force_stages),
+                llm_salvage_cascade=llm_salvage_cascade,
+            )
         except BaseException as exc:
             elapsed = time.monotonic() - stage_start
             error_type = type(exc).__name__

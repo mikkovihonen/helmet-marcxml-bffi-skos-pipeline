@@ -1217,10 +1217,39 @@ def marc_to_bf_command(
             help="Reconvert records whose output is already newer than the input.",
         ),
     ] = False,
+    llm_salvage_cascade: Annotated[
+        bool,
+        typer.Option(
+            "--llm-salvage-cascade/--no-llm-salvage-cascade",
+            help=(
+                "P-41 Phase B.2: enable the LLM-cascade fallback for "
+                "245$c creator salvage. Fires between the deterministic "
+                "regex tier and the publisher / sentinel tiers when "
+                "regex doesn't extract a clean personal-name agent. "
+                "Off by default — opt in once mlx-lm is up on the "
+                "configured LLM_BASE_URL_PRIMARY."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Convert MARCXML to BIBFRAME RDF/XML (M2)."""
     target = output_dir or get_settings().data_dir
-    summary = m2.run(input_dir, output_dir=target, force=force)
+    salvage_extractor: object | None = None
+    if llm_salvage_cascade:
+        from bffi_pipeline.stages.m2.salvage_245c_llm import (
+            LangChainSalvageExtractor,
+            SalvageCache,
+            default_synth_cache_path,
+        )
+
+        cache = SalvageCache(default_synth_cache_path())
+        salvage_extractor = LangChainSalvageExtractor(cache=cache)
+    summary = m2.run(
+        input_dir,
+        output_dir=target,
+        force=force,
+        llm_extractor=salvage_extractor,
+    )
     typer.echo(summary.render())
     # Partial-failure exit policy: non-zero only when *nothing* made
     # progress (no successes, no idempotent skips). 800 k-record
@@ -1722,6 +1751,18 @@ def run_command(
             ),
         ),
     ] = "",
+    llm_salvage_cascade: Annotated[
+        bool,
+        typer.Option(
+            "--llm-salvage-cascade/--no-llm-salvage-cascade",
+            help=(
+                "P-41 Phase B.2: enable the LLM-cascade fallback for M2's "
+                "creator salvage. Fires between the deterministic regex tier "
+                "and the publisher / sentinel tiers when 245$c can't be "
+                "parsed cleanly. Requires mlx-lm up on LLM_BASE_URL_PRIMARY."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run the canonical pipeline chain (M2 → M3 → M5 → M6 → M8 → M9 → Skosify → Load).
 
@@ -1758,6 +1799,7 @@ def run_command(
         force_stages=force_set,
         description=description,
         from_stage=from_stage,
+        llm_salvage_cascade=llm_salvage_cascade,
     )
     typer.echo(summary.render())
 
