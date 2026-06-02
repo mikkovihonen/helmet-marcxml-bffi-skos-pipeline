@@ -334,6 +334,35 @@ What we *can* claim from this bench: **without P-41's salvage layer, 1 754 recor
 2. **Leading ISBD punctuation in role-marker detection.** MARC 245$c re-imported from display form sometimes carries leading `" / "` or `"(by X)"`. Pre-fix the strict `startswith` check missed role markers in these shapes. Fix applies the existing `_LEAD_PUNCT_RE` before each pass of the recursive role-marker loop.
 3. **Surname-first reformat for B1-synthesised names.** B1 took `"Mika Waltari"` verbatim from 245$c (first-last form), but cataloguer-typed MARC 100$a uses surname-first (`"Waltari, Mika,"`). The blocking key derivation picked `"mika"` as the surname, so synthesised records couldn't cluster with cataloguer-typed records of the same author at M5/M6. New `_to_surname_first` helper reformats 2-3-token names when the algorithm is unambiguous (skips names with commas, particles like `de` / `van` / `von`, or 4+ tokens). Applies to both B1 regex and B1-LLM tiers. The method tag carries `+surname-first` when it fires so the audit trail records the transformation. Integration fixture 10000007's blocking key moves from `mika|p41|txt` to the cataloguer-convention `waltari|p41|txt`.
 
+**B.8 5 k bench RUN3 — 2026-06-02, post all defence-in-depth fixes.** Run UUID `773054c2fe1e4a4fa9981f252914ce46`, wall-time **346.0 s**. Same record outcomes as RUN1 + RUN2 (3 889 succeeded / 1 111 failed — deterministic).
+
+| Tier | RUN1 TSV | RUN2 TSV | RUN3 TSV | Δ RUN2→RUN3 |
+|---|---:|---:|---:|---|
+| B1 regex | 16 | 25 | **28** | +3 (2 records moved B1-LLM→B1 from new markers; +1 from und/et split on bib 1000072) |
+| B1-LLM | 28 | 49 | **47** | −2 (records now matched by B1 regex after the recursive role-marker pass + new markers) |
+| B3 sentinel | 599 | 599 | 599 | unchanged |
+| **Total** | **643** | **673** | **674** | +1 |
+
+**Production-load verification:**
+
+- **TSV row count = provenance Activity count = 674.** Dedup contract holds.
+- **Surname-first reformat fired on 70 of 75 non-B3 agents (93 %).** The 5 that didn't reformat carry particles (`de` / `van` / `von`) or 4+ tokens — conservative skip by design.
+- **bib 1000072 now produces 4 agents** (`"Richter, L.,"`, `"Marschner, S.,"`, `"Docci, F.,"`, `"Jürgens, U.,"`), up from 3 in RUN2 (Docci + und + Jürgens were collapsed). All four reformatted to surname-first.
+- **Zero role-marker leakage** across all 674 agent names (grep returned empty).
+- **Zero degenerate agents** (no stopword, no single-char, no role-marker prefix).
+- **TSV diff RUN2 → RUN3**: 604 rows identical (verbatim names that were already clean), 69 rows changed (reformats), 70 rows added (the changed forms + 1 from und/et split). 69 + 1 = 70 — arithmetic checks out.
+
+**Sample of cleaned-up agent names** (RUN2 → RUN3, same bib):
+
+| bib | RUN2 form | RUN3 form |
+|---|---|---|
+| 1000072 | `"F. Docci und U. Jürgens"` (single 5-token) | `"Docci, F.,"` + `"Jürgens, U.,"` (split, surname-first) |
+| 1000092 | `"Igor Hudadoff"`, `"Charles Spire"` | `"Hudadoff, Igor,"`, `"Spire, Charles,"` |
+| 1000314-6 | `"Peter Evans"`, `"Peter Lavender"` (3 records, same names) | `"Evans, Peter,"`, `"Lavender, Peter,"` × 3 |
+| 1003207 | `"BYRON MIKELLIDES"` (already cleaned in RUN2) | `"MIKELLIDES, BYRON,"` (now also surname-first) |
+
+The salvage layer is now production-ready: every synthesised name carries the cataloguer-convention MARC 100$a / 700$a shape, blocks correctly against cataloguer-typed records of the same author, and resists the degenerate-LLM-response surface.
+
 What is **operator-pending** (cannot be verified from this session):
 - **Cataloguer Ask 5** — sentinel label confirmation (`Tekijä tuntematon` / `Okänd upphovsman` / `Unknown author` ship as the default; the labels are env-var-configurable, no code change needed when the answer arrives).
 - **Cataloguer Ask 6** — B2 leader/06 set. B2 ships behind a feature flag default-off; flipping `BFFI_CREATOR_SALVAGE_B2_PUBLISHER_ENABLED=true` and populating `BFFI_CREATOR_SALVAGE_B2_LEADER06="a,e,g,m"` (or whichever subset the cataloguer team confirms) activates the tier with no code change.
