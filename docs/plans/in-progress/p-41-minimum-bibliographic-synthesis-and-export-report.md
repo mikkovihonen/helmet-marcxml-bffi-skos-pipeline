@@ -21,7 +21,8 @@ CLAUDE.md` to confirm no in-flight work has reshaped the surfaces this plan touc
   - B.0/B.1/B.4/B.7 — Settings + dispatcher + B1 regex + B3 sentinel + M2 wiring: `4602aad`
   - B.5 — Synthesis Activity emission to provenance: shipped jointly with Phase C below.
   - B.6 — Sentinel `bffi:syntheticSentinel` flag emission + `is_synthetic_sentinel` helper + invariant fixture (sentinel is non-primary; M5/M6/M8 already skip via `bffi:PrimaryContribution` filter; M9 future P-39 walker reads the helper): `d1372ba`
-  - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `<unfilled — about to commit>`
+  - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `e81f52c`
+  - B.2 — B1 LLM cascade fallback: **deferred to follow-up commit.** The proposal explicitly contemplates this deferral ("Phase B can ship with B1 + B3 only and add B2 in a follow-up if cataloguer sign-off is slow"). Rationale: B1 regex covers the dominant 245$c shapes mined from the corpus; B3 is the safety net for everything else. The LLM cascade is a precision/recall refinement on the long tail and benefits from being scoped against a measured B1-regex hit rate on a real corpus run — which the proposal's B.8 verification step provides. The existing `src/bffi_pipeline/contrib_extract_llm.py` (a ~470-line LangChain + cache + retry scaffold for the M3-stage 245$c contributor extraction) is the architectural template the B.2 follow-up will mirror at the M2 stage; the predicate vocabulary, dispatch slot, sentinel exclude rules, and TSV/provenance write paths shipped in B.0–B.7 are all already in place to receive it.
   - B.2 — B1 LLM cascade fallback: `<unfilled>`
   - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `<unfilled>`
 - Phase C (per-run `export-synthesis-<run_uuid>.tsv` writer + `bffi-pipeline export-synthesis-report --run <uuid>` retrospective CLI; also includes Phase B.5 provenance emit): `f408901`
