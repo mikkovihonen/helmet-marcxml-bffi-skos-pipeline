@@ -22,7 +22,7 @@ CLAUDE.md` to confirm no in-flight work has reshaped the surfaces this plan touc
   - B.5 — Synthesis Activity emission to provenance: shipped jointly with Phase C below.
   - B.6 — Sentinel `bffi:syntheticSentinel` flag emission + `is_synthetic_sentinel` helper + invariant fixture (sentinel is non-primary; M5/M6/M8 already skip via `bffi:PrimaryContribution` filter; M9 future P-39 walker reads the helper): `d1372ba`
   - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `e81f52c`
-  - B.2 — B1 LLM cascade fallback (`prompts/salvage-245c-v1.txt` + `salvage_245c_llm.py` with LangChain ChatOpenAI + SQLite cache + verbatim-substring post-processor + retry stack + dispatcher wiring): `<unfilled — about to commit>`
+  - B.2 — B1 LLM cascade fallback (`prompts/salvage-245c-v1.txt` + `salvage_245c_llm.py` with LangChain ChatOpenAI + SQLite cache + verbatim-substring post-processor + retry stack + dispatcher wiring): `b4dced1`
   - B.2 — B1 LLM cascade fallback: `<unfilled>`
   - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `<unfilled>`
 - Phase C (per-run `export-synthesis-<run_uuid>.tsv` writer + `bffi-pipeline export-synthesis-report --run <uuid>` retrospective CLI; also includes Phase B.5 provenance emit): `f408901`
