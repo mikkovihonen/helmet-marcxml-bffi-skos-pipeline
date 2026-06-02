@@ -98,9 +98,13 @@ _ROLE_MARKERS: Final[tuple[tuple[str, str], ...]] = (
 
 #: Conjunctions / separators that split a multi-author 245$c into
 #: individual names. ``"ja"`` is Finnish "and"; ``"och"`` is Swedish;
-#: ``"&"`` and ``"and"`` are common. Order-insensitive (we split on any).
+#: ``"und"`` is German; ``"et"`` is French; ``"&"`` and ``"and"`` are
+#: common. Order-insensitive (we split on any). German ``und`` added
+#: 2026-06-02 after the P-41 B.8 5 k rerun bench surfaced bib 1000072
+#: where ``"F. Docci und U. Jürgens"`` was parsed as a single 5-token
+#: name rather than two agents.
 _SEPARATORS_RE: Final[re.Pattern[str]] = re.compile(
-    r"\s+(?:ja|och|and|&)\s+|\s*,\s*",
+    r"\s+(?:ja|och|and|und|et|&)\s+|\s*,\s*",
     flags=re.IGNORECASE,
 )
 

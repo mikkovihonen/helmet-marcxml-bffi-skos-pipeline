@@ -111,6 +111,30 @@ class TestMultiAuthorSplits:
             ParsedAgent(name="Alice Munro", role="author", confidence=0.7),
         ]
 
+    def test_german_und_separator_splits_multi_author(self) -> None:
+        """Regression test for the 2026-06-02 P-41 B.8 5 k re-run
+        bench: bib 1000072 had 245$c
+        ``"herausgegeben von L. Richter, S. Marschner, F. Docci und U. Jürgens"``
+        — four editors. The pre-fix parser stripped the German role
+        marker correctly, split on commas, and produced three
+        candidates — but the third candidate
+        ``"F. Docci und U. Jürgens"`` was accepted as a single
+        5-token name because ``"und"`` wasn't a separator. The fix
+        adds German ``und`` (and French ``et``) to the separator
+        regex."""
+        agents = parse_245c("F. Docci und U. Jürgens")
+        assert agents == [
+            ParsedAgent(name="F. Docci", role="unknown", confidence=0.5),
+            ParsedAgent(name="U. Jürgens", role="unknown", confidence=0.5),
+        ]
+
+    def test_french_et_separator_splits_multi_author(self) -> None:
+        agents = parse_245c("Marie Curie et Pierre Curie")
+        assert agents == [
+            ParsedAgent(name="Marie Curie", role="unknown", confidence=0.5),
+            ParsedAgent(name="Pierre Curie", role="unknown", confidence=0.5),
+        ]
+
 
 class TestCorporateRejection:
     """B1 is the personal-name tier; corporate authors fall through to
