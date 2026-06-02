@@ -11,7 +11,7 @@ so it stays cheap to import from any stage.
 
 from __future__ import annotations
 
-from rdflib import Namespace, URIRef
+from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, RDFS, XSD
 
 # --- Namespaces -----------------------------------------------------------
@@ -143,6 +143,30 @@ syntheticSentinel: URIRef = BFFI.syntheticSentinel
 #: surfacing.
 SENTINEL_AGENT_UNKNOWN: URIRef = URIRef("http://urn.fi/URN:NBN:fi:bib:agent:unknown")
 
+
+def is_synthetic_sentinel(graph: Graph, resource: URIRef) -> bool:
+    """P-41 Phase B.6 — return True if ``resource`` carries
+    ``bffi:syntheticSentinel "true"``.
+
+    Downstream stages call this to decide whether to skip a resource:
+
+    - M5 / M6 / M8 already skip via the ``bffi:PrimaryContribution``
+      filter (the B3 salvage emits MARC 710 → non-primary), so the
+      sentinel is naturally excluded from union-find keying.
+    - **P-39's M9 walker** for non-primary contribution reconciliation
+      is the explicit consumer — it walks every non-primary
+      contribution and would otherwise submit ``Tekijä tuntematon``
+      to KANTO. The walker calls this helper to short-circuit.
+
+    Returns False on any non-True value (including missing predicate,
+    explicit "false", non-boolean literal).
+    """
+    for o in graph.objects(resource, syntheticSentinel):
+        if isinstance(o, Literal) and str(o).lower() == "true":
+            return True
+    return False
+
+
 # --- BFFI-side AdminMetadata predicates added by M9 ----------------------
 
 sourceConsulted: URIRef = BFFI.sourceConsulted
@@ -239,6 +263,7 @@ __all__ = [
     "generationProcess",
     "helmetBibId",
     "inputLiteral",
+    "is_synthetic_sentinel",
     "lastCompactedAt",
     "lexicalSimilarity",
     "matchingField",

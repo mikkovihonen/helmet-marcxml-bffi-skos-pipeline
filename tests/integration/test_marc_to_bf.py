@@ -15,6 +15,7 @@ from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.provenance.vocab import is_synthetic_sentinel
 from bffi_pipeline.stages.m2 import (
     ConversionErrorRow,
     ConversionSummary,
@@ -25,9 +26,14 @@ from bffi_pipeline.stages.m2 import (
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"
 #: ``10000007`` is the P-41 Phase B salvage smoke fixture — record
 #: with no 1XX/7XX + a parseable ``245$c "kirjoittanut Mika Waltari"``.
-#: M2's creator-salvage layer rescues it; the resulting BIBFRAME
+#: M2's creator-salvage layer rescues it via B1; the resulting BIBFRAME
 #: carries a synthesised personal-name agent (Mika Waltari) lifted
 #: from the statement of responsibility.
+#: ``10000008`` is the P-41 Phase B.3 sentinel smoke fixture — record
+#: with no 1XX/7XX and no parseable 245$c. M2 falls through to B3
+#: and links the record to the shared sentinel agent at
+#: ``http://urn.fi/URN:NBN:fi:bib:agent:unknown`` with the
+#: ``bffi:syntheticSentinel "true"`` flag attached.
 VALID_IDS = {
     "10000001",
     "10000002",
@@ -36,6 +42,7 @@ VALID_IDS = {
     "10000005",
     "10000006",
     "10000007",
+    "10000008",
 }
 EXPECTED_FAILURES: dict[str, str] = {
     "99999900.xml": "marcxml-encoding",
@@ -175,6 +182,31 @@ def test_synthesis_activity_present_on_salvaged_record(
     g_clean = Graph()
     g_clean.parse(out / "bibframe" / "10000001.rdf", format="xml")
     assert list(g_clean.subjects(RDF.type, V.Synthesis)) == []
+
+
+def test_b3_sentinel_carries_synthetic_sentinel_flag(
+    conversion: tuple[Path, ConversionSummary],
+) -> None:
+    """P-41 Phase B.6 — the B3 salvage fixture (10000008) routes
+    through to the shared sentinel agent. The BFFI graph must carry
+    ``bffi:syntheticSentinel "true"^^xsd:boolean`` on the sentinel
+    agent URI so :func:`is_synthetic_sentinel` returns True (and
+    P-39's M9 walker can short-circuit on it without wasting a
+    KANTO call). The Synthesis Activity carries tier=B3 and
+    ``method="anonymous-by-convention"``."""
+    out, _ = conversion
+    g = Graph()
+    g.parse(out / "bibframe" / "10000008.rdf", format="xml")
+
+    sentinel = URIRef("http://urn.fi/URN:NBN:fi:bib:agent:unknown")
+    assert is_synthetic_sentinel(g, sentinel), "sentinel agent missing syntheticSentinel flag"
+
+    synth_activities = list(g.subjects(RDF.type, V.Synthesis))
+    assert len(synth_activities) == 1
+    synth = synth_activities[0]
+    assert (synth, V.syntheticTier, Literal("B3")) in g
+    assert (synth, V.syntheticMethod, Literal("anonymous-by-convention")) in g
+    assert (synth, V.syntheticMarcSource, Literal("(none)")) in g
 
 
 def test_admin_metadata_block_present(conversion: tuple[Path, ConversionSummary]) -> None:

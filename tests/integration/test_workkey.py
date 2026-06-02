@@ -25,17 +25,16 @@ from bffi_pipeline.uris import mint_raw_work_uri
 
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"
 
-#: ``10000007`` is the P-41 Phase B salvage smoke fixture. The B1
-#: deterministic parser extracts "Mika Waltari" from
-#: ``245$c "kirjoittanut Mika Waltari"`` and promotes it to MARC 100
-#: (primary author). The blocking key uses the first token of the
-#: surname-first MARC 100$a form — cataloguer-typed names are
-#: "Waltari, Mika," (surname-first) and yield ``waltari``; the
-#: salvage tier emits "Mika Waltari" (first-last) verbatim from
-#: 245$c so the blocking key falls out as ``mika``. The name-order
-#: difference is a known quality gap on synthesised creators;
-#: P-39's KANTO reconciliation will normalise to surname-first
-#: when it can resolve the synthesised name to an authority record.
+#: ``10000007`` is the P-41 B1 salvage smoke fixture (245$c parse →
+#: MARC 100 → ``mika|p41|txt`` via verbatim first-last name).
+#: ``10000008`` is the P-41 B3 sentinel fixture — no primary
+#: contribution, the sentinel agent lives on MARC 710 (non-primary),
+#: so the blocking creator slot is ``None`` and the work key falls
+#: out as ``anon|p41|txt``. **This is load-bearing** for the B.6
+#: exclude invariant: two B3 records share the sentinel agent URI
+#: but the blocking key's "anon" creator slot means M5 keys them
+#: by title alone, so distinct anonymous works don't accidentally
+#: collapse via the shared sentinel URI.
 _EXPECTED_KEYS = {
     "10000001": "tolstoy|sota|txt",
     "10000002": "linna|tuntematon|txt",
@@ -44,6 +43,7 @@ _EXPECTED_KEYS = {
     "10000005": "oksanen|puhdistus|txt",
     "10000006": "helsingin|tieteessä|txt",
     "10000007": "mika|p41|txt",
+    "10000008": "anon|p41|txt",
 }
 
 
@@ -58,10 +58,15 @@ def corpus_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def test_extracts_creator_title_and_content_for_each_work(corpus_path: Path) -> None:
     g = load_corpus(corpus_path)
     by_work = {entry.work_uri: entry for entry in extract_blocking_inputs(g)}
+    # ``10000008`` is the B3 sentinel fixture — no primary contribution
+    # by design, so the creator slot is None. Every other fixture must
+    # carry a non-None creator (cataloguer-typed or B1-salvaged).
+    creator_optional_bibs = {"10000008"}
     for bib_id, expected_key in _EXPECTED_KEYS.items():
         work_uri = mint_raw_work_uri(f"http://urn.fi/URN:NBN:fi:bib:raw/{bib_id}#Work")
         entry = by_work[work_uri]
-        assert entry.creator, f"missing creator for {bib_id}"
+        if bib_id not in creator_optional_bibs:
+            assert entry.creator, f"missing creator for {bib_id}"
         assert entry.title, f"missing title for {bib_id}"
         assert entry.content_type, f"missing content type for {bib_id}"
         actual_key = compute_blocking_key(

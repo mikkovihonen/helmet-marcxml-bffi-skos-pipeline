@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from lxml import etree
-from rdflib import Graph, URIRef
+from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDFS
 
 from bffi_pipeline.config import get_settings
@@ -190,6 +190,21 @@ def _emit_synthesis_audit_trail(
             confidence=record.confidence,
             activity_uri=str(synthesis_activity),
         )
+        # P-41 Phase B.6: tag the B3 sentinel agent in the BFFI graph
+        # so downstream stages (and P-39's future M9 walker) can
+        # filter it via :func:`bffi_pipeline.provenance.vocab.is_synthetic_sentinel`.
+        # B1 / B2 records synthesise real-name agents that downstream
+        # stages should keep reading; only B3 carries the sentinel
+        # flag.
+        if record.tier == "B3":
+            sentinel_uri = URIRef(record.synthesised_value)
+            g.add(
+                (
+                    sentinel_uri,
+                    V.syntheticSentinel,
+                    Literal(True, datatype=V.XSD.boolean),
+                )
+            )
 
 
 def _is_output_fresh(input_path: Path, output_path: Path) -> bool:
