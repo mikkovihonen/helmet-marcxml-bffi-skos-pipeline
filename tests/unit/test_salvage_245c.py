@@ -78,6 +78,23 @@ class TestRoleMarkedShapes:
         agents = parse_245c("ed. by John Smith")
         assert agents == [ParsedAgent(name="John Smith", role="editor", confidence=0.8)]
 
+    def test_leading_isbd_slash_does_not_block_role_marker(self) -> None:
+        """Defence-in-depth: MARC 245$c sometimes carries leading
+        ``" / "`` ISBD punctuation when re-imported from a display-
+        format string. Pre-fix, ``_split_role_prefix`` did a strict
+        ``startswith`` check and missed the role marker. Now leading
+        punctuation is stripped before the marker match."""
+        agents = parse_245c("/ by Margaret Atwood")
+        assert agents == [ParsedAgent(name="Margaret Atwood", role="author", confidence=0.8)]
+
+    def test_leading_paren_does_not_block_role_marker(self) -> None:
+        agents = parse_245c("(by Margaret Atwood)")
+        assert agents == [ParsedAgent(name="Margaret Atwood", role="author", confidence=0.8)]
+
+    def test_leading_whitespace_does_not_block_role_marker(self) -> None:
+        agents = parse_245c("   by Margaret Atwood")
+        assert agents == [ParsedAgent(name="Margaret Atwood", role="author", confidence=0.8)]
+
 
 class TestUnmarkedShapes:
     """245$c often carries just a bare name (Finnish convention)."""

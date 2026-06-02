@@ -221,6 +221,15 @@ def _split_role_prefix(text: str) -> tuple[str, str]:
     )
     remainder = text
     for _ in range(_MAX_ROLE_PREFIX_PASSES):
+        # Defence-in-depth (2026-06-02): strip leading ISBD punctuation
+        # + whitespace before attempting the role-marker match. MARC
+        # 245$c sometimes carries a leading ``" / "`` (separates $a/$b
+        # from $c in display form) or ``"(by X)"`` parenthetical when
+        # the cataloguer's tool re-imported a display-format string;
+        # a strict ``startswith`` check would miss the role marker
+        # and treat the whole string as a name. Personal names don't
+        # start with these characters, so the strip is safe.
+        remainder = _LEAD_PUNCT_RE.sub("", remainder)
         lowered = remainder.lower()
         matched = False
         for marker, tag in _ROLE_MARKERS:

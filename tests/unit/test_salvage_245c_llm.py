@@ -112,6 +112,52 @@ class TestVerbatimSubstringEnforcement:
         assert len(agents) == 1
         assert agents[0].name == "Mika Waltari"
 
+    def test_stopword_substring_match_is_rejected(self) -> None:
+        """Defence-in-depth: a degenerate LLM response could return
+        a stopword that's a verbatim substring of the 245$c. The
+        ``_is_plausible_name`` shape check rejects English / Finnish /
+        Swedish / German / French articles + prepositions even when
+        they pass the substring filter."""
+        decision = SalvageDecision(
+            agents=[
+                LlmAgent(name="the", role="author", verbatim_substring=True),
+                LlmAgent(name="and", role="author", verbatim_substring=True),
+                LlmAgent(name="by", role="author", verbatim_substring=True),
+            ],
+            rationale="Pathological LLM output — three stopwords as agents.",
+        )
+        agents = _enforce_verbatim_substring(
+            decision, c_subfield="the book and the cover, by the author"
+        )
+        assert agents == []
+
+    def test_single_char_name_is_rejected(self) -> None:
+        decision = SalvageDecision(
+            agents=[LlmAgent(name="X", role="author", verbatim_substring=True)],
+            rationale="Single-character name that wouldn't survive any plausibility check.",
+        )
+        agents = _enforce_verbatim_substring(decision, c_subfield="X is a book")
+        assert agents == []
+
+    def test_legitimate_mononym_still_passes(self) -> None:
+        """Aboriginal single-name artists (``"Blanasi"``, ``"David"``)
+        clear both the substring check and the plausibility check —
+        they're ≥ 2 chars and not in the stopword list. Pinned as a
+        regression test so a future tightening of the filter doesn't
+        accidentally block them. Bib 1002610 in the 5 k bench
+        exercised this case."""
+        decision = SalvageDecision(
+            agents=[
+                LlmAgent(name="Blanasi", role="unknown", verbatim_substring=True),
+                LlmAgent(name="David", role="unknown", verbatim_substring=True),
+            ],
+            rationale="Two legitimate single-name artists, Aboriginal performers.",
+        )
+        agents = _enforce_verbatim_substring(
+            decision, c_subfield="Djoli Laiwanga, David, Blanasi, Dick Plummer"
+        )
+        assert {a.name for a in agents} == {"Blanasi", "David"}
+
 
 # --- Stub extractor -------------------------------------------------------
 

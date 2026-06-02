@@ -117,6 +117,10 @@ class TestB1Path:
     author role) or 700 (added entry for editor / translator / etc.)."""
 
     def test_b1_synthesises_100_for_author_role(self) -> None:
+        """The synthesised MARC 100$a is reformatted to surname-first
+        (``"Waltari, Mika,"``) so it blocks correctly against
+        cataloguer-typed records following the MARC convention.
+        See ``_to_surname_first`` for the rules."""
         tree = _marc_record(title_subfield_c="kirjoittanut Mika Waltari")
         outcome = try_salvage_minimum_content(tree, bib_id="b003", settings=_settings())
         assert outcome is not None
@@ -124,15 +128,16 @@ class TestB1Path:
         assert len(outcome.records) == 1
         record = outcome.records[0]
         assert record.bib_id == "b003"
-        assert record.synthesised_value == "Mika Waltari"
+        assert record.synthesised_value == "Waltari, Mika,"
         assert record.tier == "B1"
         assert record.marc_source == "245$c"
         assert record.confidence == 0.8
         assert "marc=100" in record.method
+        assert "surname-first" in record.method
 
         added = _datafields_by_tag(tree, "100")
         assert len(added) == 1
-        assert _subfield_text(added[0], "a") == "Mika Waltari"
+        assert _subfield_text(added[0], "a") == "Waltari, Mika,"
         assert _subfield_text(added[0], "e") == "tekijä"
         assert _subfield_text(added[0], "5") == SYNTH_MARKER
 
@@ -144,7 +149,7 @@ class TestB1Path:
         assert "marc=700" in outcome.records[0].method
         added = _datafields_by_tag(tree, "700")
         assert len(added) == 1
-        assert _subfield_text(added[0], "a") == "Helena Ruuska"
+        assert _subfield_text(added[0], "a") == "Ruuska, Helena,"
         assert _subfield_text(added[0], "e") == "toimittaja"
         # And no 100 was emitted — an editor isn't the primary creator.
         assert _datafields_by_tag(tree, "100") == []
@@ -155,15 +160,27 @@ class TestB1Path:
         assert outcome is not None
         assert outcome.tier == "B1"
         assert {r.synthesised_value for r in outcome.records} == {
-            "Liisa Louhela",
-            "Pekka Halonen",
+            "Louhela, Liisa,",
+            "Halonen, Pekka,",
         }
         primary = _datafields_by_tag(tree, "100")
         added = _datafields_by_tag(tree, "700")
         assert len(primary) == 1
         assert len(added) == 1
-        assert _subfield_text(primary[0], "a") == "Liisa Louhela"
-        assert _subfield_text(added[0], "a") == "Pekka Halonen"
+        assert _subfield_text(primary[0], "a") == "Louhela, Liisa,"
+        assert _subfield_text(added[0], "a") == "Halonen, Pekka,"
+
+    def test_b1_skips_surname_first_reformat_when_name_has_particle(self) -> None:
+        """Names with particles ("de", "von") stay verbatim — the
+        last-token-is-surname heuristic isn't safe for them. The
+        synthesised 100$a is the input form, not reformatted."""
+        tree = _marc_record(title_subfield_c="Robin de Smeet")
+        outcome = try_salvage_minimum_content(tree, bib_id="b005p", settings=_settings())
+        assert outcome is not None
+        assert outcome.tier == "B1"
+        record = outcome.records[0]
+        assert record.synthesised_value == "Robin de Smeet"
+        assert "surname-first" not in record.method
 
 
 class TestB1LlmCascadeTier:
@@ -199,7 +216,8 @@ class TestB1LlmCascadeTier:
         assert outcome.tier == "B1-LLM"
         assert len(outcome.records) == 1
         record = outcome.records[0]
-        assert record.synthesised_value == "Helena Ruuska"
+        # Surname-first reformat applies to LLM-tier names too.
+        assert record.synthesised_value == "Ruuska, Helena,"
         assert record.tier == "B1-LLM"
         assert "llm" in record.method
         assert record.confidence == LLM_CONFIDENCE_CAP

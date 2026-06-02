@@ -104,6 +104,54 @@ _VALID_ROLES: Final[frozenset[str]] = frozenset(
     {"author", "editor", "translator", "illustrator", "compiler", "unknown"}
 )
 
+#: Defence-in-depth (2026-06-02): minimum name length the verbatim-
+#: substring filter accepts. The B1 regex tier enforces ≥ 2 tokens;
+#: the LLM tier is intentionally more permissive (catches single-name
+#: artists like Aboriginal performers) but anything shorter than this
+#: is almost certainly a fragment or stopword extraction.
+_MIN_LLM_NAME_CHARS: Final[int] = 2
+
+#: Defence-in-depth (2026-06-02): names the post-processor rejects
+#: even when they're verbatim substrings of the 245$c. The risk: a
+#: degenerate LLM response returns a stopword or article (``"the"``,
+#: ``"and"``, ``"by"``) that happens to be in the 245$c. The verbatim-
+#: substring check alone would accept it. This list catches the
+#: highest-risk cases case-insensitively without rejecting legitimate
+#: single-name artists. Add to it if production surfaces new
+#: hallucination shapes.
+_LLM_REJECT_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        # English articles + prepositions + conjunctions.
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "by",
+        "with",
+        "for",
+        # Finnish particles.
+        "ja",
+        "tai",
+        # Swedish.
+        "och",
+        # German.
+        "und",
+        "von",
+        # French / Italian / Spanish.
+        "et",
+        "de",
+        "del",
+        "el",
+        "la",
+        "le",
+        "du",
+        "da",
+        "di",
+    }
+)
+
 
 # --- Pydantic schema ------------------------------------------------------
 
@@ -374,6 +422,32 @@ def default_synth_cache_path() -> Path:
 # --- Post-processor -------------------------------------------------------
 
 
+def _is_plausible_name(name: str) -> bool:
+    """Defence-in-depth shape check for B1-LLM agents.
+
+    The verbatim-substring filter ensures the name is in the 245$c,
+    but a degenerate LLM response could return a stopword or article
+    that happens to be there too (``"the"``, ``"and"``, ``"by"``).
+    This function returns False for those cases without rejecting
+    legitimate single-name artists (e.g. Aboriginal performers like
+    ``"Blanasi"``, ``"David"`` — both ≥ 5 chars, neither in the
+    reject list).
+
+    Three checks:
+
+    1. Length ≥ :data:`_MIN_LLM_NAME_CHARS` (≥ 2 chars after strip).
+    2. Lowercased name not in :data:`_LLM_REJECT_NAMES`.
+    3. Contains at least one letter (rejects pure punctuation /
+       digits the LLM might pick up from the 245$c).
+    """
+    stripped = name.strip()
+    if len(stripped) < _MIN_LLM_NAME_CHARS:
+        return False
+    if stripped.lower() in _LLM_REJECT_NAMES:
+        return False
+    return any(c.isalpha() for c in stripped)
+
+
 def _enforce_verbatim_substring(
     decision: SalvageDecision,
     *,
@@ -386,6 +460,11 @@ def _enforce_verbatim_substring(
     loudly in the rationale that gets logged to provenance via the
     method tag.
 
+    A secondary :func:`_is_plausible_name` shape check rejects
+    stopwords / articles / single-char fragments that pass the
+    substring test but aren't plausible agent names. Legitimate
+    mononyms (``"Blanasi"``, ``"David"``) clear both filters.
+
     Roles outside :data:`_VALID_ROLES` are reduced to ``"unknown"``.
     Confidence is capped at :data:`LLM_CONFIDENCE_CAP`.
     """
@@ -395,6 +474,10 @@ def _enforce_verbatim_substring(
             # Hallucinated name — drop without caching, without
             # synthesising, without raising. The dispatcher falls
             # through to the next tier.
+            continue
+        if not _is_plausible_name(agent.name):
+            # Substring match but obvious stopword / fragment.
+            # Same silent-drop semantics as the hallucination case.
             continue
         # ``agent.role`` is already typed as the same Literal alias via the
         # LlmAgent schema, but a defence-in-depth check against

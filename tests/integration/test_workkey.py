@@ -26,7 +26,10 @@ from bffi_pipeline.uris import mint_raw_work_uri
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"
 
 #: ``10000007`` is the P-41 B1 salvage smoke fixture (245$c parse →
-#: MARC 100 → ``mika|p41|txt`` via verbatim first-last name).
+#: MARC 100). Post-2026-06-02 surname-first reformat, the synthesised
+#: 100$a is ``"Waltari, Mika,"`` (cataloguer convention) so the
+#: blocking key picks the surname token ``waltari``, matching how
+#: cataloguer-typed records of the same author would block.
 #: ``10000008`` is the P-41 B3 sentinel fixture — no primary
 #: contribution, the sentinel agent lives on MARC 710 (non-primary),
 #: so the blocking creator slot is ``None`` and the work key falls
@@ -42,7 +45,7 @@ _EXPECTED_KEYS = {
     "10000004": "sibelius|finlandia|ntm",
     "10000005": "oksanen|puhdistus|txt",
     "10000006": "helsingin|tieteessä|txt",
-    "10000007": "mika|p41|txt",
+    "10000007": "waltari|p41|txt",
     "10000008": "anon|p41|txt",
 }
 

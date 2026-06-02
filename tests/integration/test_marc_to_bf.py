@@ -170,7 +170,10 @@ def test_synthesis_activity_present_on_salvaged_record(
     confidence_value = next(g_salvaged.objects(synth, V.syntheticConfidence))
     assert float(str(confidence_value)) >= 0.5
     value_value = next(g_salvaged.objects(synth, V.syntheticValue))
-    assert str(value_value) == "Mika Waltari"
+    # Post-2026-06-02 surname-first reformat: B1 emits "Waltari, Mika,"
+    # in the synthesised 100$a (cataloguer convention) so the agent
+    # blocks correctly with cataloguer-typed records of the same author.
+    assert str(value_value) == "Waltari, Mika,"
     marc_source_value = next(g_salvaged.objects(synth, V.syntheticMarcSource))
     assert str(marc_source_value) == "245$c"
 

@@ -173,6 +173,102 @@ _RELATOR_TERMS: Final[dict[str, str]] = {
     "unknown": "tekijä",
 }
 
+#: Defence-in-depth (2026-06-02): name particles whose presence
+#: indicates that the simple "last token is surname" heuristic
+#: can't be trusted. ``Robin de Smeet`` → MARC convention is
+#: ``Smeet, Robin de`` (particle to the right of the forename),
+#: not ``Smeet, Robin`` or ``de Smeet, Robin``. Detecting particles
+#: reliably across languages is a hard cataloguing problem the
+#: project doesn't try to solve in B1; instead, names containing
+#: any of these particles skip the surname-first reformat and stay
+#: verbatim. Conservative — the M5 blocking key will pick the
+#: wrong surname token on these records, but synthesis with a
+#: known-correct verbatim name is more honest than guessing.
+_NAME_PARTICLES: Final[frozenset[str]] = frozenset(
+    {
+        # Germanic.
+        "von",
+        "van",
+        "der",
+        "den",
+        "te",
+        # Romance.
+        "de",
+        "del",
+        "della",
+        "di",
+        "da",
+        "do",
+        "dos",
+        "du",
+        "el",
+        "la",
+        "le",
+        # Arabic.
+        "al",
+        "el-",
+        "abu",
+        "ibn",
+        # Scandinavian.
+        "af",
+    }
+)
+
+
+def _to_surname_first(name: str) -> str | None:
+    """Reformat ``"First Last"`` → ``"Last, First,"`` (MARC 100$a
+    convention) when the algorithm is unambiguous. Returns the
+    reformatted string on hit, or ``None`` when the name should
+    stay verbatim.
+
+    Defence-in-depth (2026-06-02): B1 synthesises names verbatim
+    from 245$c, which is first-last form. Cataloguer-typed MARC
+    100$a is surname-first. The mismatch broke M5 blocking on the
+    synthesised records' surname token (key picked the forename
+    instead). Reformatting brings synthesised records into the
+    same blocking-key namespace as cataloguer-typed ones.
+
+    Conservative rules:
+
+    - Skip if name already contains a comma (assume surname-first).
+    - Skip if any token is in :data:`_NAME_PARTICLES` ("Robin de
+      Smeet", "Hans von Goethe" — particles' placement is a
+      cataloguing-policy judgement the algorithm can't make
+      reliably).
+    - Skip if name has fewer than 2 or more than 3 tokens. The
+      3-token case ("Hans Christian Andersen") assumes
+      Finnish/English/Swedish convention where the last token is
+      the surname; languages that put the family name first
+      (Hungarian, some Chinese transliterations) would be
+      mis-reformatted. Per the 5 k bench: the corpus is dominantly
+      first-last form and 2-3 tokens are the common shape; 4+
+      tokens are usually compound names where the algorithm is
+      unreliable.
+    """
+    name = name.strip()
+    if "," in name:
+        return None
+    tokens = name.split()
+    if not (_MIN_NAME_TOKENS <= len(tokens) <= _MAX_REFORMAT_TOKENS):
+        return None
+    if any(token.lower() in _NAME_PARTICLES for token in tokens):
+        return None
+    surname = tokens[-1]
+    forename = " ".join(tokens[:-1])
+    return f"{surname}, {forename},"
+
+
+#: Lower bound for surname-first reformat token count — same as the
+#: B1-regex minimum, surfaced here so both call sites stay aligned.
+_MIN_NAME_TOKENS: Final[int] = 2
+
+#: Upper bound for surname-first reformat. 4+ tokens are usually
+#: compound titles or multi-part Asian/African names where the
+#: last-token-is-surname heuristic is unreliable. The 3-token case
+#: ("Hans Christian Andersen") IS reformatted because the corpus is
+#: dominantly Western first-last names.
+_MAX_REFORMAT_TOKENS: Final[int] = 3
+
 
 def _build_personal_creator(name: str, role: str, *, primary: bool) -> etree._Element:
     """Build a synthesised personal-creator MARC datafield. ``primary``
@@ -214,7 +310,15 @@ def _build_records_for_b1_or_b1_llm(
     """Shared body for B1 regex + B1 LLM cascade hits — same routing
     rules (first author-role → MARC 100, rest → MARC 700), same
     SynthesisRecord shape; only the ``method`` tag and ``tier`` ID
-    differ between the two paths."""
+    differ between the two paths.
+
+    Names are reformatted from ``"First Last"`` to ``"Last, First,"``
+    when :func:`_to_surname_first` returns non-None (see that
+    function's docstring for the conservative rules). The method
+    tag carries ``"+surname-first"`` when the reformat fires so the
+    audit trail records what happened; the SynthesisRecord's
+    ``synthesised_value`` matches the BIBFRAME 100$a/700$a output.
+    """
     records: list[SynthesisRecord] = []
     primary_assigned = False
     for agent in agents:
@@ -224,16 +328,21 @@ def _build_records_for_b1_or_b1_llm(
         is_primary = (not primary_assigned) and agent.role in _PRIMARY_CREATOR_ROLES
         if is_primary:
             primary_assigned = True
-        df = _build_personal_creator(agent.name, agent.role, primary=is_primary)
+        # Surname-first reformat where unambiguous.
+        reformatted = _to_surname_first(agent.name)
+        emitted_name = reformatted if reformatted is not None else agent.name
+        df = _build_personal_creator(emitted_name, agent.role, primary=is_primary)
         _append_datafield(record, df)
         marc_tag = "100" if is_primary else "700"
         method = method_template.format(role=agent.role, marc=marc_tag)
+        if reformatted is not None:
+            method = method + ", surname-first"
         records.append(
             SynthesisRecord(
                 bib_id=bib_id,
                 field="bf:contribution/bf:agent",
                 marc_source="245$c",
-                synthesised_value=agent.name,
+                synthesised_value=emitted_name,
                 tier=tier,
                 method=method,
                 confidence=agent.confidence,

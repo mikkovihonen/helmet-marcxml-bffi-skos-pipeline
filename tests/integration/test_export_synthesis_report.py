@@ -45,7 +45,8 @@ def test_regen_reads_synthesis_activities_from_per_record_graphs(
     b1 = by_bib["10000007"]
     assert b1["field"] == "bf:contribution/bf:agent"
     assert b1["marc_source"] == "245$c"
-    assert b1["synthesised_value"] == "Mika Waltari"
+    # Post-2026-06-02 surname-first reformat — see test_salvage.py.
+    assert b1["synthesised_value"] == "Waltari, Mika,"
     assert b1["tier"] == "B1"
     assert "creator-from-245c" in b1["method"]
     assert b1["confidence"] == "0.8000"
