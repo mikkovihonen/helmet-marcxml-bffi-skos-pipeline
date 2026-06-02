@@ -47,6 +47,11 @@ from lxml import etree
 
 from bffi_pipeline.config import Settings
 from bffi_pipeline.stages.m2.salvage_245c import parse_245c
+from bffi_pipeline.stages.m2.salvage_publisher import (
+    B2_CONFIDENCE,
+    build_publisher_datafield,
+    try_promote_publisher,
+)
 from bffi_pipeline.stages.m2.salvage_sentinel import build_sentinel_datafield
 
 _MARC_NS: Final[str] = "http://www.loc.gov/MARC21/slim"
@@ -246,6 +251,31 @@ def _try_b1(record: etree._Element, *, bib_id: str) -> SalvageOutcome | None:
     return SalvageOutcome(tier="B1", records=tuple(records))
 
 
+def _try_b2(record: etree._Element, *, bib_id: str, settings: Settings) -> SalvageOutcome | None:
+    """B2 — publisher-as-corporate-creator. Returns a SalvageOutcome
+    on hit or ``None`` to fall through to the next tier. Feature-
+    flagged off by default — see :mod:`bffi_pipeline.stages.m2.salvage_publisher`."""
+    promotion = try_promote_publisher(record, settings=settings)
+    if promotion is None:
+        return None
+    df = build_publisher_datafield(promotion, marker=SYNTH_MARKER)
+    _append_datafield(record, df)
+    return SalvageOutcome(
+        tier="B2",
+        records=(
+            SynthesisRecord(
+                bib_id=bib_id,
+                field="bf:contribution/bf:agent",
+                marc_source=promotion.marc_source,
+                synthesised_value=promotion.publisher,
+                tier="B2",
+                method=f"publisher-as-corporate-creator (from {promotion.marc_source})",
+                confidence=B2_CONFIDENCE,
+            ),
+        ),
+    )
+
+
 def _try_b3(record: etree._Element, *, bib_id: str, settings: Settings) -> SalvageOutcome:
     """B3 — anonymous-by-convention sentinel. The safety net: always
     returns a SalvageOutcome (this is why the function isn't
@@ -302,8 +332,12 @@ def try_salvage_minimum_content(
     outcome = _try_b1(record, bib_id=bib_id)
     if outcome is not None:
         return outcome
-    # B2 lives behind its own feature flag and is implemented in
-    # ``salvage_publisher.py``; absent here until B.3 ships.
+    # B2 — publisher-as-corporate-creator. Returns ``None`` when the
+    # feature flag is off (default), the leader/06 isn't in the
+    # cataloguer-confirmed set, or the record has no 260$b/264$b.
+    outcome = _try_b2(record, bib_id=bib_id, settings=settings)
+    if outcome is not None:
+        return outcome
     # B3 — sentinel safety net.
     return _try_b3(record, bib_id=bib_id, settings=settings)
 

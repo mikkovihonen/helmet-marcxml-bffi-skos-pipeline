@@ -20,7 +20,8 @@ CLAUDE.md` to confirm no in-flight work has reshaped the surfaces this plan touc
 - Phase B (creator-gap salvage at M2 repair layer):
   - B.0/B.1/B.4/B.7 — Settings + dispatcher + B1 regex + B3 sentinel + M2 wiring: `4602aad`
   - B.5 — Synthesis Activity emission to provenance: shipped jointly with Phase C below.
-  - B.6 — Sentinel `bffi:syntheticSentinel` flag emission + `is_synthetic_sentinel` helper + invariant fixture (sentinel is non-primary; M5/M6/M8 already skip via `bffi:PrimaryContribution` filter; M9 future P-39 walker reads the helper): `<unfilled — about to commit>`
+  - B.6 — Sentinel `bffi:syntheticSentinel` flag emission + `is_synthetic_sentinel` helper + invariant fixture (sentinel is non-primary; M5/M6/M8 already skip via `bffi:PrimaryContribution` filter; M9 future P-39 walker reads the helper): `d1372ba`
+  - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `<unfilled — about to commit>`
   - B.2 — B1 LLM cascade fallback: `<unfilled>`
   - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `<unfilled>`
 - Phase C (per-run `export-synthesis-<run_uuid>.tsv` writer + `bffi-pipeline export-synthesis-report --run <uuid>` retrospective CLI; also includes Phase B.5 provenance emit): `f408901`

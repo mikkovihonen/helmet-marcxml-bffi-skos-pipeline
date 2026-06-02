@@ -161,6 +161,49 @@ class TestB1Path:
         assert _subfield_text(added[0], "a") == "Pekka Halonen"
 
 
+class TestB2PublisherTier:
+    """B2 fires between B1 and B3 when the feature flag is enabled
+    AND the leader/06 is in the cataloguer-confirmed set. Default
+    settings keep it off; the safety net is B3."""
+
+    def test_b2_disabled_by_default_falls_through_to_b3(self) -> None:
+        # Record has 260$b "Otava" but no 245$c → B1 misses; B2
+        # disabled by default → B3 fires.
+        tree = _marc_record()
+        root = tree.getroot()
+        df = etree.SubElement(
+            root,
+            f"{{{_MARC_NS}}}datafield",
+            attrib={"tag": "260", "ind1": " ", "ind2": " "},
+        )
+        b = etree.SubElement(df, f"{{{_MARC_NS}}}subfield", attrib={"code": "b"})
+        b.text = "Otava"
+        outcome = try_salvage_minimum_content(tree, bib_id="b020", settings=_settings())
+        assert outcome is not None
+        assert outcome.tier == "B3", "B2 should be off by default → B3 catches"
+
+    def test_b2_enabled_with_matching_leader_06_fires(self) -> None:
+        tree = _marc_record(leader="00000nam a2200000 a 4500")  # leader/06 = 'a'
+        root = tree.getroot()
+        df = etree.SubElement(
+            root,
+            f"{{{_MARC_NS}}}datafield",
+            attrib={"tag": "260", "ind1": " ", "ind2": " "},
+        )
+        b = etree.SubElement(df, f"{{{_MARC_NS}}}subfield", attrib={"code": "b"})
+        b.text = "Otava"
+        settings = Settings(  # type: ignore[call-arg]
+            BFFI_CREATOR_SALVAGE_B2_PUBLISHER_ENABLED="true",
+            BFFI_CREATOR_SALVAGE_B2_LEADER06="a",
+        )
+        outcome = try_salvage_minimum_content(tree, bib_id="b021", settings=settings)
+        assert outcome is not None
+        assert outcome.tier == "B2"
+        assert outcome.records[0].synthesised_value == "Otava"
+        # The MARC 710 (corporate added entry) was added.
+        assert len(_datafields_by_tag(tree, "710")) == 1
+
+
 class TestB3SentinelFallthrough:
     """When B1 can't parse 245$c (or 245 is absent / empty), B3 fires."""
 
