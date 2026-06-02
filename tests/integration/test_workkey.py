@@ -25,6 +25,17 @@ from bffi_pipeline.uris import mint_raw_work_uri
 
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"
 
+#: ``10000007`` is the P-41 Phase B salvage smoke fixture. The B1
+#: deterministic parser extracts "Mika Waltari" from
+#: ``245$c "kirjoittanut Mika Waltari"`` and promotes it to MARC 100
+#: (primary author). The blocking key uses the first token of the
+#: surname-first MARC 100$a form — cataloguer-typed names are
+#: "Waltari, Mika," (surname-first) and yield ``waltari``; the
+#: salvage tier emits "Mika Waltari" (first-last) verbatim from
+#: 245$c so the blocking key falls out as ``mika``. The name-order
+#: difference is a known quality gap on synthesised creators;
+#: P-39's KANTO reconciliation will normalise to surname-first
+#: when it can resolve the synthesised name to an authority record.
 _EXPECTED_KEYS = {
     "10000001": "tolstoy|sota|txt",
     "10000002": "linna|tuntematon|txt",
@@ -32,6 +43,7 @@ _EXPECTED_KEYS = {
     "10000004": "sibelius|finlandia|ntm",
     "10000005": "oksanen|puhdistus|txt",
     "10000006": "helsingin|tieteessä|txt",
+    "10000007": "mika|p41|txt",
 }
 
 

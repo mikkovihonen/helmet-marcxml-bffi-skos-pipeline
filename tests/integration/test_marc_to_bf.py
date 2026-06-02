@@ -23,7 +23,20 @@ from bffi_pipeline.stages.m2 import (
 )
 
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"
-VALID_IDS = {"10000001", "10000002", "10000003", "10000004", "10000005", "10000006"}
+#: ``10000007`` is the P-41 Phase B salvage smoke fixture — record
+#: with no 1XX/7XX + a parseable ``245$c "kirjoittanut Mika Waltari"``.
+#: M2's creator-salvage layer rescues it; the resulting BIBFRAME
+#: carries a synthesised personal-name agent (Mika Waltari) lifted
+#: from the statement of responsibility.
+VALID_IDS = {
+    "10000001",
+    "10000002",
+    "10000003",
+    "10000004",
+    "10000005",
+    "10000006",
+    "10000007",
+}
 EXPECTED_FAILURES: dict[str, str] = {
     "99999900.xml": "marcxml-encoding",
     "99999901.xml": "marcxml-xsd-validation",

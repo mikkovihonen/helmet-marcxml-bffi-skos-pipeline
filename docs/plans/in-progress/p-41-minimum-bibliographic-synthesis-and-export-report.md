@@ -16,7 +16,7 @@ CLAUDE.md` to confirm no in-flight work has reshaped the surfaces this plan touc
 
 **Phase commits**:
 
-- Phase A (spec + `bffi-prov:Synthesis` Activity + unify existing synth markers): `<unfilled>`
+- Phase A (spec + `bffi-prov:Synthesis` Activity + unify existing synth markers): `96a8b37`
 - Phase B (creator-gap salvage at M2 repair layer — B1 regex + B1 LLM cascade + B2 publisher (feature-flagged off) + B3 sentinel + exclude-rule wiring + dispatch glue): `<unfilled>`
 - Phase C (per-run `export-synthesis-<run_uuid>.tsv` writer + `bffi-pipeline export-synthesis-report --run <uuid>` retrospective CLI): `<unfilled>`
 

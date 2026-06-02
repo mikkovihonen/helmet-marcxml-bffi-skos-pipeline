@@ -27,6 +27,7 @@ from lxml import etree
 from rdflib import Graph, URIRef
 from rdflib.namespace import RDFS
 
+from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m2.marcxml_repair import (
     _sanitize_language_tags,
@@ -40,11 +41,25 @@ from bffi_pipeline.stages.m2.provenance import (
     _find_root_resources,
     _utc_now,
 )
+from bffi_pipeline.stages.m2.salvage import (
+    SalvageOutcome,
+    try_salvage_minimum_content,
+)
 from bffi_pipeline.stages.m2.schemas import HelmetMapRow
 from bffi_pipeline.stages.m2.sidecars import _atomic_write_bytes
 from bffi_pipeline.stages.m2.xslt import _xslt, marc2bibframe2_version
 from bffi_pipeline.validation.bibframe import assert_conforms
-from bffi_pipeline.validation.marcxml import validate
+from bffi_pipeline.validation.marcxml import (
+    MarcXmlValidationError,
+    ValidatedMarcXml,
+    helmet_bib_id_from_filename,
+    parse_xml,
+    validate,
+    validate_filename,
+    validate_minimum_content,
+    validate_utf8,
+    validate_xsd,
+)
 
 
 def _run_xslt(tree: etree._ElementTree, helmet_id: str) -> etree._ElementTree:
@@ -124,6 +139,46 @@ def _iter_xml_files(input_dir: Path) -> Iterator[Path]:
     yield from sorted(input_dir.glob("*.xml"))
 
 
+def _validate_with_salvage(
+    input_path: Path,
+) -> tuple[ValidatedMarcXml, SalvageOutcome | None]:
+    """P-41 Phase B.7 — run the Boundary-1 validation chain; if
+    ``validate_minimum_content`` raises for the missing-creator case,
+    dispatch the salvage layer and re-validate.
+
+    Returns ``(ValidatedMarcXml, SalvageOutcome | None)``. The outcome
+    is non-None when salvage fired; downstream stages (provenance
+    writer, TSV writer) consume it. Other Boundary-1 failure modes
+    (filename, encoding, XML syntax, XSD, minimum-content failures
+    that salvage can't address) re-raise the original
+    :class:`MarcXmlValidationError` untouched.
+    """
+    try:
+        return validate(input_path), None
+    except MarcXmlValidationError as exc:
+        if exc.error_type != "marcxml-content-minimum":
+            raise
+        # The four structural validations (filename, utf8, xml-syntax,
+        # xsd) already passed before validate_minimum_content raised,
+        # so re-parsing is safe. The minimum-content checker doesn't
+        # mutate the tree, so we could re-use validate()'s tree if it
+        # returned one on failure — it doesn't, so re-parse.
+        validate_filename(input_path)
+        raw = validate_utf8(input_path)
+        tree = parse_xml(input_path, raw)
+        validate_xsd(input_path, tree)
+        bib_id = helmet_bib_id_from_filename(input_path)
+        outcome = try_salvage_minimum_content(tree, bib_id=bib_id, settings=get_settings())
+        if outcome is None:
+            raise
+        # Salvage mutated the tree; re-run minimum-content to confirm
+        # the synthesised datafield(s) cleared the bar. If the record
+        # was missing creator AND something else (e.g. 245), the
+        # re-run raises the typed error per the existing contract.
+        validate_minimum_content(input_path, tree)
+        return ValidatedMarcXml(helmet_bib_id=bib_id, tree=tree), outcome
+
+
 def _convert_one(
     input_path: Path,
     output_dir: Path,
@@ -134,8 +189,17 @@ def _convert_one(
     ``"ok"``, ``"skipped"``; raises typed errors on failure.
 
     The caller catches errors and routes them to ``_errors.jsonl``.
+
+    P-41 Phase B.7: validation is now ``_validate_with_salvage`` —
+    records missing 1XX/7XX (creator) that previously raised
+    ``marcxml-content-minimum`` go through the creator-salvage layer
+    instead and emerge with a synthesised 700 / 710 datafield. The
+    salvage outcome is available downstream as ``_salvage_outcome``
+    on the caller's request; today only the per-record success path
+    consumes it (provenance write happens later when Phase B.5 lands
+    the Synthesis Activity emitter).
     """
-    validated = validate(input_path)
+    validated, _salvage_outcome = _validate_with_salvage(input_path)
     helmet_id = validated.helmet_bib_id
     out = _output_path_for(output_dir, helmet_id)
     if not force and _is_output_fresh(input_path, out):

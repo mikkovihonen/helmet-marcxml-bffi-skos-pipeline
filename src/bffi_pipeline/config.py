@@ -323,6 +323,65 @@ class Settings(BaseSettings):
     eval_dir: Path = Field(default=Path("./eval-runs"), alias="BFFI_EVAL_DIR")
     config_dir: Path = Field(default=Path("./config"), alias="BFFI_CONFIG_DIR")
 
+    # --- P-41 Phase B creator-salvage tiers ---------------------------------
+    # Master switch for the M2 salvage layer that fires when a record
+    # is missing 1XX/7XX (creator) and would otherwise drop on
+    # ``marcxml-content-minimum``. Setting this to ``False`` restores
+    # the pre-P-41 drop-on-missing-creator behaviour without code
+    # revert — useful for benching and for the rollback procedure in
+    # ``docs/plans/in-progress/p-41-...md``.
+    creator_salvage_enabled: bool = Field(
+        default=True,
+        alias="BFFI_CREATOR_SALVAGE_ENABLED",
+    )
+    # B1 LLM cascade fallback — fires when B1's deterministic regex
+    # parser can't extract a verbatim name from 245$c. Reuses the
+    # existing local-mlx-lm cascade. Disable to ship B1-regex-only.
+    creator_salvage_b1_llm_cascade_enabled: bool = Field(
+        default=True,
+        alias="BFFI_CREATOR_SALVAGE_B1_LLM_ENABLED",
+    )
+    # B2 publisher-as-corporate-creator promotion. **Defaults to
+    # off** pending cataloguer leader/06 sign-off (see
+    # ``docs/external-dependencies.md`` Ask 6). Activation is this
+    # flag + a non-empty ``creator_salvage_b2_leader_06_codes``.
+    creator_salvage_b2_publisher_promotion_enabled: bool = Field(
+        default=False,
+        alias="BFFI_CREATOR_SALVAGE_B2_PUBLISHER_ENABLED",
+    )
+    # Comma-separated MARC leader/06 record-type codes where
+    # publisher-as-corporate-creator promotion is RDA-acceptable.
+    # Empty default — the feature flag above is the safety belt,
+    # this set is the explicit sign-off the cataloguer team
+    # provides. Parsed as a frozenset of single-character strings.
+    creator_salvage_b2_leader_06_codes: str = Field(
+        default="",
+        alias="BFFI_CREATOR_SALVAGE_B2_LEADER06",
+    )
+    # B3 anonymous-by-convention sentinel agent URI. Committed
+    # identifier per ``CLAUDE.md`` § "Committed identifiers";
+    # changing requires a vocabulary decision, not a config edit.
+    creator_salvage_sentinel_agent_uri: str = Field(
+        default="http://urn.fi/URN:NBN:fi:bib:agent:unknown",
+        alias="BFFI_CREATOR_SALVAGE_SENTINEL_URI",
+    )
+    # B3 sentinel labels. Defaults pending cataloguer confirmation
+    # via ``docs/external-dependencies.md`` Ask 5. Cataloguer
+    # changes the labels by overriding these env vars — no code
+    # edit required.
+    creator_salvage_sentinel_label_fi: str = Field(
+        default="Tekijä tuntematon",
+        alias="BFFI_CREATOR_SALVAGE_SENTINEL_LABEL_FI",
+    )
+    creator_salvage_sentinel_label_sv: str = Field(
+        default="Okänd upphovsman",
+        alias="BFFI_CREATOR_SALVAGE_SENTINEL_LABEL_SV",
+    )
+    creator_salvage_sentinel_label_en: str = Field(
+        default="Unknown author",
+        alias="BFFI_CREATOR_SALVAGE_SENTINEL_LABEL_EN",
+    )
+
     @model_validator(mode="after")
     def _resolve_run_identity(self) -> Settings:
         """P-32 Phase E: derive ``data_dir`` from ``runs_root / run_uuid`` by default.

@@ -20,7 +20,20 @@ from bffi_pipeline.stages.m3 import run as run_m3
 from bffi_pipeline.uris import mint_raw_expression_uri, mint_raw_work_uri
 
 FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"
-VALID_IDS = {"10000001", "10000002", "10000003", "10000004", "10000005", "10000006"}
+#: ``10000007`` is the P-41 Phase B salvage smoke fixture — record
+#: with no 1XX/7XX + parseable 245$c, rescued at M2 with a synthesised
+#: 700 personal-name agent. Flows through M3 normally because the
+#: synthesised 700 looks identical to a cataloguer-typed one once M2
+#: is done.
+VALID_IDS = {
+    "10000001",
+    "10000002",
+    "10000003",
+    "10000004",
+    "10000005",
+    "10000006",
+    "10000007",
+}
 
 
 @pytest.fixture(scope="module")
