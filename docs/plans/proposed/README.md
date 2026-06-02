@@ -318,7 +318,31 @@ _(P-41 — minimum bibliographic synthesis + per-run synthesis TSV —
 graduated proposal → in-progress plan on 2026-06-02 without a
 proposal-shape commit; the proposal-shape version lived only in
 the working tree before graduation. The plan-shape document is at
-[`../in-progress/p-41-minimum-bibliographic-synthesis-and-export-report.md`](../in-progress/p-41-minimum-bibliographic-synthesis-and-export-report.md).)_
+[`../completed/p-41-minimum-bibliographic-synthesis-and-export-report.md`](../completed/p-41-minimum-bibliographic-synthesis-and-export-report.md).)_
+
+- [`p-42-universal-salvage-regex.md`](p-42-universal-salvage-regex.md)
+  — `proposed`. P-41 Phase B.1 shipped a salvage regex backed by
+  **7 hand-curated lookup tables across 3 files**, each indexed by
+  language / culture / role enum, with non-uniform matching shapes
+  (startswith / lowered-substring / regex-alternation / token-set).
+  The 2026-06-02 5 k bench cycle surfaced **6 distinct rule-coverage
+  gaps** in a single afternoon — each requiring its own commit
+  (`0e0d554`, `2d2f79d`, `57a7da5`, `cee4d21`). Adding French today
+  means edits in 5 of those 7 files; adding Estonian / Russian /
+  Polish / Korean as the corpus expands would multiply the same
+  fan-out. Proposes three phases — A: consolidate the seven tables
+  into one YAML/TOML config keyed by language (no logic change;
+  RUN3-byte-identical success criterion); B: replace the ad-hoc
+  matching with a clearly-staged tokenize → tag → extract cascade,
+  and widen the role enum from 6 tags to the ~20 MARC relator
+  codes the M3 contrib-extract cascade already uses; C: evaluate
+  three alternatives — probabilistic NER tier (spaCy multilingual),
+  authority-driven matching against KANTO / VIAF, or dropping the
+  regex tier entirely in favour of B1-LLM + B3. Composes with P-09
+  (library-agnostic source) — both decouple FI-locale assumptions
+  to unblock other Finnish libraries. **Decision threshold:** if
+  the corpus expands to new languages within 6 months, P-42 is on
+  the critical path; otherwise Phase A alone is plenty.
 _(P-15 and P-16 graduated to plans on 2026-05-13 and shipped
 in the same session; see
 [`../completed/p-15-preserve-authority-uris-at-m3.md`](../completed/p-15-preserve-authority-uris-at-m3.md)
