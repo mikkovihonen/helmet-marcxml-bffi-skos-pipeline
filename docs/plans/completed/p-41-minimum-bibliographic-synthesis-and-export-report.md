@@ -1,6 +1,6 @@
 # P-41 — Synthesise the minimum bibliographic field set for every exported record + per-run synthesis TSV
 
-**Status**: completed (all three phases + B.8 5 k bench shipped in one session — 2026-06-02 — across ten commits: `96a8b37` (A), `4602aad` (B.0/B.1/B.4/B.7), `f408901` (B.5 + Phase C), `d1372ba` (B.6), `e81f52c` (B.3), `b4dced1` (B.2), `24bffa0` (graduation), plus two follow-up bug fixes the 5 k bench surfaced — TSV dedup key + B1 German role markers). See "Verification status" below for the bench numbers and "Post-mortem" for the bug-fix narrative.
+**Status**: completed (all three phases + two B.8 5 k benches + four follow-up bug fixes shipped 2026-06-02). Run-of-record from the rerun bench (post-fix): `d4b207893a98425c9fca0bae58c60dda`, 3 889 succeeded / 1 111 failed (all on missing 33X, upstream of P-41) / **643 records salvaged producing 673 Synthesis Activities**. See "Verification status" below for both bench runs and "Post-mortem" for the bug-fix narrative.
 
 **Source proposal**: this file, in its `proposed/`-shape form, was the same `p-41-minimum-bibliographic-synthesis-and-export-report.md` filename under `docs/plans/proposed/`. No proposal-shape commit exists in `git log --follow`; the proposal-shape content lived only in the working tree before graduation. The proposal-shape version is recoverable from this conversation's earlier Write tool call (commit `57f810b` is the proposal-base; the diff between that commit and the first plan-shape commit is the proposal-shape → plan-shape rewrite).
 
@@ -310,6 +310,23 @@ What we *can* claim from this bench: **without P-41's salvage layer, 1 754 recor
 2. **B1 regex didn't recognise German role markers.** Record `1000072` had `245$c "herausgegeben von L. Richter"` and was salvaged with `synthesised_value = "herausgegeben von L. Richter"` (the full string with role marker prefix), because none of the German "edited by" / "translated by" phrasings were in `_ROLE_MARKERS`. Added Finnish "suomentanut", English "written by" / "illustrated by" / "compiled by", Swedish "översatt av" / "redigerad av" / "illustrerad av", and German "herausgegeben von" / "übersetzt von" / "hrsg. von" / "hrsg." / "herausgegeben". Regression tests at `tests/unit/test_salvage_245c.py::TestRoleMarkedShapes::test_german_*`.
 
 **C.4 byte-identity check** — the fixture-scale roundtrip is verified at `tests/integration/test_export_synthesis_report.py`; the corpus-scale roundtrip on this 5 k run remains as a one-line follow-up (run `bffi-pipeline export-synthesis-report --run a4b1470df20f488d93bb2e37687c1235` and `diff` against the per-run TSV). Not blocking.
+
+**B.8 5 k rerun bench — re-measured 2026-06-02, same input dir, after all four bench-found bug fixes landed.** Run UUID `d4b207893a98425c9fca0bae58c60dda`, fresh `synth-cache.sqlite` (no warm cache), M2 stage only, LLM cascade enabled. Wall-time **341.0 s** (~13 s of jitter vs first run; same record outcomes — deterministic).
+
+| Tier | RUN1 TSV (pre-fix) | RUN1 Provenance | RUN2 TSV (post-fix) | RUN2 Provenance |
+|---|---:|---:|---:|---:|
+| B1 regex | 16 | 25 | 25 | 25 |
+| B1-LLM | 28 | 49 | 49 | 49 |
+| B3 sentinel | 599 | 599 | 599 | 599 |
+| **Total** | **643** | **673** | **673** | **673** |
+
+**Dedup fix verified end-to-end**: RUN2's TSV row count exactly matches the provenance Activity count (673 = 673). The 30 multi-agent rows that RUN1's TSV silently dropped now appear correctly.
+
+**Role-marker cleanup verified**: all 8 records that pre-fix carried role markers in their synthesised agent names (`"BY BYRON MIKELLIDES"` etc.) now have clean names (`"BYRON MIKELLIDES"` etc.). Comprehensive grep across the entire 5 000-record corpus returned zero remaining role-marker-prefixed names.
+
+**One more issue surfaced + fixed during rerun**: bib 1000072's 245$c is `"...L. Richter, S. Marschner, F. Docci und U. Jürgens"` (four editors). The pre-fix `_SEPARATORS_RE` had `ja/och/and/&` but no German `und` or French `et`, so `"F. Docci und U. Jürgens"` was accepted as a single 5-token name. Fix shipped at `57a7da5` adds both separators. A third 5 k bench would now produce 674 Synthesis Activities (4 instead of 3 for bib 1000072).
+
+**Mononym observation (no fix needed)**: bib 1002610 (`"Djoli Laiwanga, David, Blanasi, David Gulpilil, Dick Plummer"` — Australian Aboriginal performers) triggers B1 regex to bail (the single-token `"David"` / `"Blanasi"` candidates fail the 2-token minimum shape check), then B1-LLM correctly extracts all five names. The verbatim-substring check passes for the single-name artists. This is the LLM-cascade-fills-the-gap pattern working as intended — B1 stays conservative, B1-LLM catches the long tail. Recorded as design behaviour, not a defect.
 
 What is **operator-pending** (cannot be verified from this session):
 - **Cataloguer Ask 5** — sentinel label confirmation (`Tekijä tuntematon` / `Okänd upphovsman` / `Unknown author` ship as the default; the labels are env-var-configurable, no code change needed when the answer arrives).
