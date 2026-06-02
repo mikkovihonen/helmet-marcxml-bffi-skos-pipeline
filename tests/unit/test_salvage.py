@@ -13,6 +13,11 @@ from bffi_pipeline.stages.m2.salvage import (
     SalvageOutcome,
     try_salvage_minimum_content,
 )
+from bffi_pipeline.stages.m2.salvage_245c import ParsedAgent, parse_245c
+from bffi_pipeline.stages.m2.salvage_245c_llm import (
+    LLM_CONFIDENCE_CAP,
+    StubSalvageExtractor,
+)
 
 _MARC_NS: Final[str] = "http://www.loc.gov/MARC21/slim"
 
@@ -159,6 +164,103 @@ class TestB1Path:
         assert len(added) == 1
         assert _subfield_text(primary[0], "a") == "Liisa Louhela"
         assert _subfield_text(added[0], "a") == "Pekka Halonen"
+
+
+class TestB1LlmCascadeTier:
+    """The LLM cascade fires when B1 regex misses, the feature flag is
+    on, and an extractor is supplied. Sits between B1 regex and B2."""
+
+    def test_b1_llm_fires_when_regex_misses_and_extractor_returns_agent(self) -> None:
+        # 245$c shape the deterministic regex can't parse (the
+        # "(toim.)" parenthetical role marker isn't in B1's regex
+        # palette, and the comma-then-parens combo breaks the
+        # candidate split) — LLM stub returns the agent.
+        unusual = "Helena Ruuska (toim.)"
+        tree = _marc_record(title_subfield_c=unusual)
+        # Confirm B1 regex doesn't pick this up before invoking the
+        # dispatcher — if it does, the test is no-op.
+        if parse_245c(unusual):  # pragma: no cover — guards test premise.
+            pytest.skip("B1 regex matched this shape; test premise no longer holds")
+
+        stub = StubSalvageExtractor(
+            decisions={
+                unusual: [
+                    ParsedAgent(name="Helena Ruuska", role="editor", confidence=LLM_CONFIDENCE_CAP)
+                ]
+            }
+        )
+        outcome = try_salvage_minimum_content(
+            tree,
+            bib_id="b030",
+            settings=_settings(),
+            llm_extractor=stub,
+        )
+        assert outcome is not None
+        assert outcome.tier == "B1-LLM"
+        assert len(outcome.records) == 1
+        record = outcome.records[0]
+        assert record.synthesised_value == "Helena Ruuska"
+        assert record.tier == "B1-LLM"
+        assert "llm" in record.method
+        assert record.confidence == LLM_CONFIDENCE_CAP
+        # Editor role → MARC 700 (not primary).
+        assert _datafields_by_tag(tree, "700") != []
+        assert _datafields_by_tag(tree, "100") == []
+
+    def test_b1_llm_skipped_when_no_extractor_provided(self) -> None:
+        unusual = "Helena Ruuska (toim.)"
+        tree = _marc_record(title_subfield_c=unusual)
+        # Without an extractor → B1-LLM is bypassed → B3 catches.
+        outcome = try_salvage_minimum_content(
+            tree,
+            bib_id="b031",
+            settings=_settings(),
+            llm_extractor=None,
+        )
+        assert outcome is not None
+        assert outcome.tier == "B3"
+
+    def test_b1_llm_skipped_when_feature_flag_off(self) -> None:
+        unusual = "Helena Ruuska (toim.)"
+        tree = _marc_record(title_subfield_c=unusual)
+        settings = Settings(BFFI_CREATOR_SALVAGE_B1_LLM_ENABLED="false")  # type: ignore[call-arg]
+        stub = StubSalvageExtractor(
+            decisions={
+                unusual: [
+                    ParsedAgent(name="Helena Ruuska", role="editor", confidence=LLM_CONFIDENCE_CAP)
+                ]
+            }
+        )
+        outcome = try_salvage_minimum_content(
+            tree,
+            bib_id="b032",
+            settings=settings,
+            llm_extractor=stub,
+        )
+        assert outcome is not None
+        assert outcome.tier == "B3", "feature flag off → LLM skipped → B3 catches"
+
+    def test_b1_llm_skipped_when_b1_regex_already_matched(self) -> None:
+        """If the regex tier hits, the LLM is never asked — short-
+        circuit the cascade so we don't waste an LLM call on
+        records the cheap tier already handled."""
+        tree = _marc_record(title_subfield_c="kirjoittanut Mika Waltari")
+        stub_calls: list[str] = []
+
+        class _RecordingStub:
+            def extract(self, *, c_subfield: str) -> list[ParsedAgent]:
+                stub_calls.append(c_subfield)
+                return []
+
+        outcome = try_salvage_minimum_content(
+            tree,
+            bib_id="b033",
+            settings=_settings(),
+            llm_extractor=_RecordingStub(),
+        )
+        assert outcome is not None
+        assert outcome.tier == "B1"  # regex tier hit.
+        assert stub_calls == []  # LLM never called.
 
 
 class TestB2PublisherTier:

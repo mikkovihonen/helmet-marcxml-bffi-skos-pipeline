@@ -30,7 +30,10 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final, cast
+
+if TYPE_CHECKING:
+    from bffi_pipeline.stages.m2.salvage_245c_llm import SalvageExtractor
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.observability.events import emit_if_active, get_active_emitter
@@ -108,8 +111,18 @@ def run(
     *,
     output_dir: Path | None = None,
     force: bool = False,
+    llm_extractor: object | None = None,
 ) -> ConversionSummary:
-    """Convert every ``*.xml`` file in ``input_dir`` and return a summary."""
+    """Convert every ``*.xml`` file in ``input_dir`` and return a summary.
+
+    ``llm_extractor`` enables the P-41 Phase B.2 LLM cascade fallback
+    for 245$c parsing — pass a
+    :class:`bffi_pipeline.stages.m2.salvage_245c_llm.SalvageExtractor`
+    instance (typed as ``object`` here to avoid hot-path import of the
+    LangChain stack) to opt in. The default ``None`` skips the LLM
+    tier; B1 regex + B3 sentinel still rescue records via the existing
+    deterministic paths.
+    """
     output_dir = output_dir or get_settings().data_dir
     summary = ConversionSummary()
     helmet_map_path = output_dir / "helmet-map.jsonl"
@@ -142,7 +155,12 @@ def run(
                 },
             )
         try:
-            map_row, status = _convert_one(xml_path, output_dir, force=force)
+            map_row, status = _convert_one(
+                xml_path,
+                output_dir,
+                force=force,
+                llm_extractor=cast("SalvageExtractor | None", llm_extractor),
+            )
         except MarcXmlValidationError as exc:
             row = ConversionErrorRow(
                 helmet_bib_id=xml_path.stem if xml_path.stem.isdigit() else None,

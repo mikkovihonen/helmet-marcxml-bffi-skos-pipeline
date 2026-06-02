@@ -47,6 +47,7 @@ from bffi_pipeline.stages.m2.salvage import (
     SalvageOutcome,
     try_salvage_minimum_content,
 )
+from bffi_pipeline.stages.m2.salvage_245c_llm import SalvageExtractor
 from bffi_pipeline.stages.m2.schemas import HelmetMapRow
 from bffi_pipeline.stages.m2.sidecars import _atomic_write_bytes
 from bffi_pipeline.stages.m2.xslt import _xslt, marc2bibframe2_version
@@ -221,6 +222,8 @@ def _iter_xml_files(input_dir: Path) -> Iterator[Path]:
 
 def _validate_with_salvage(
     input_path: Path,
+    *,
+    llm_extractor: SalvageExtractor | None = None,
 ) -> tuple[ValidatedMarcXml, SalvageOutcome | None]:
     """P-41 Phase B.7 — run the Boundary-1 validation chain; if
     ``validate_minimum_content`` raises for the missing-creator case,
@@ -232,6 +235,11 @@ def _validate_with_salvage(
     (filename, encoding, XML syntax, XSD, minimum-content failures
     that salvage can't address) re-raise the original
     :class:`MarcXmlValidationError` untouched.
+
+    The optional ``llm_extractor`` enables the B1 LLM cascade tier
+    between B1 regex and B2 publisher; production wires
+    :class:`LangChainSalvageExtractor`, tests inject
+    :class:`StubSalvageExtractor`, ``None`` skips the tier entirely.
     """
     try:
         return validate(input_path), None
@@ -248,7 +256,12 @@ def _validate_with_salvage(
         tree = parse_xml(input_path, raw)
         validate_xsd(input_path, tree)
         bib_id = helmet_bib_id_from_filename(input_path)
-        outcome = try_salvage_minimum_content(tree, bib_id=bib_id, settings=get_settings())
+        outcome = try_salvage_minimum_content(
+            tree,
+            bib_id=bib_id,
+            settings=get_settings(),
+            llm_extractor=llm_extractor,
+        )
         if outcome is None:
             raise
         # Salvage mutated the tree; re-run minimum-content to confirm
@@ -264,6 +277,7 @@ def _convert_one(
     output_dir: Path,
     *,
     force: bool,
+    llm_extractor: SalvageExtractor | None = None,
 ) -> tuple[HelmetMapRow | None, str]:
     """Convert one record. Returns ``(map_row, status)`` where status is one of
     ``"ok"``, ``"skipped"``; raises typed errors on failure.
@@ -279,7 +293,7 @@ def _convert_one(
     MarcConversion Activity, and the per-run TSV row lands at
     ``<BFFI_DATA_DIR>/export-synthesis-<run_uuid>.tsv``.
     """
-    validated, salvage_outcome = _validate_with_salvage(input_path)
+    validated, salvage_outcome = _validate_with_salvage(input_path, llm_extractor=llm_extractor)
     helmet_id = validated.helmet_bib_id
     out = _output_path_for(output_dir, helmet_id)
     if not force and _is_output_fresh(input_path, out):

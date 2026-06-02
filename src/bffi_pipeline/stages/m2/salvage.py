@@ -46,7 +46,8 @@ from typing import Final
 from lxml import etree
 
 from bffi_pipeline.config import Settings
-from bffi_pipeline.stages.m2.salvage_245c import parse_245c
+from bffi_pipeline.stages.m2.salvage_245c import ParsedAgent, parse_245c
+from bffi_pipeline.stages.m2.salvage_245c_llm import SalvageExtractor
 from bffi_pipeline.stages.m2.salvage_publisher import (
     B2_CONFIDENCE,
     build_publisher_datafield,
@@ -202,6 +203,45 @@ def _build_personal_creator(name: str, role: str, *, primary: bool) -> etree._El
     return df
 
 
+def _build_records_for_b1_or_b1_llm(
+    record: etree._Element,
+    *,
+    agents: list[ParsedAgent],
+    bib_id: str,
+    method_template: str,
+    tier: str,
+) -> SalvageOutcome:
+    """Shared body for B1 regex + B1 LLM cascade hits — same routing
+    rules (first author-role → MARC 100, rest → MARC 700), same
+    SynthesisRecord shape; only the ``method`` tag and ``tier`` ID
+    differ between the two paths."""
+    records: list[SynthesisRecord] = []
+    primary_assigned = False
+    for agent in agents:
+        # First author-role (or unknown-role, which we treat as
+        # probably-author) agent gets the 1XX slot; later agents
+        # and non-author roles stay in 7XX.
+        is_primary = (not primary_assigned) and agent.role in _PRIMARY_CREATOR_ROLES
+        if is_primary:
+            primary_assigned = True
+        df = _build_personal_creator(agent.name, agent.role, primary=is_primary)
+        _append_datafield(record, df)
+        marc_tag = "100" if is_primary else "700"
+        method = method_template.format(role=agent.role, marc=marc_tag)
+        records.append(
+            SynthesisRecord(
+                bib_id=bib_id,
+                field="bf:contribution/bf:agent",
+                marc_source="245$c",
+                synthesised_value=agent.name,
+                tier=tier,
+                method=method,
+                confidence=agent.confidence,
+            )
+        )
+    return SalvageOutcome(tier=tier, records=tuple(records))
+
+
 def _try_b1(record: etree._Element, *, bib_id: str) -> SalvageOutcome | None:
     """B1 — deterministic 245$c parse. Returns a SalvageOutcome on hit
     or ``None`` to fall through to the next tier.
@@ -223,32 +263,49 @@ def _try_b1(record: etree._Element, *, bib_id: str) -> SalvageOutcome | None:
     agents = parse_245c(text_245c)
     if not agents:
         return None
+    return _build_records_for_b1_or_b1_llm(
+        record,
+        agents=agents,
+        bib_id=bib_id,
+        method_template="creator-from-245c (regex, role={role}, marc={marc})",
+        tier="B1",
+    )
 
-    records: list[SynthesisRecord] = []
-    primary_assigned = False
-    for agent in agents:
-        # First author-role (or unknown-role, which we treat as
-        # probably-author) agent gets the 1XX slot; later agents
-        # and non-author roles stay in 7XX.
-        is_primary = (not primary_assigned) and agent.role in _PRIMARY_CREATOR_ROLES
-        if is_primary:
-            primary_assigned = True
-        df = _build_personal_creator(agent.name, agent.role, primary=is_primary)
-        _append_datafield(record, df)
-        marc_tag = "100" if is_primary else "700"
-        method = f"creator-from-245c (regex, role={agent.role}, marc={marc_tag})"
-        records.append(
-            SynthesisRecord(
-                bib_id=bib_id,
-                field="bf:contribution/bf:agent",
-                marc_source="245$c",
-                synthesised_value=agent.name,
-                tier="B1",
-                method=method,
-                confidence=agent.confidence,
-            )
-        )
-    return SalvageOutcome(tier="B1", records=tuple(records))
+
+def _try_b1_llm(
+    record: etree._Element,
+    *,
+    bib_id: str,
+    extractor: SalvageExtractor,
+) -> SalvageOutcome | None:
+    """B1 LLM cascade — runs the local-mlx-lm cascade against 245$c
+    when the deterministic regex tier (:func:`_try_b1`) returned no
+    agents. The extractor's verbatim-substring post-processor has
+    already rejected any hallucinated names by the time the agents
+    list reaches us; confidence is capped at
+    :data:`LLM_CONFIDENCE_CAP <bffi_pipeline.stages.m2.salvage_245c_llm.LLM_CONFIDENCE_CAP>`
+    (0.7) so synthesised creators always land in M6's fallback gating
+    tier per P-16.
+
+    Routing rules are identical to B1 regex (first author/unknown →
+    MARC 100, rest → MARC 700); only the ``tier`` ID and the method
+    tag differ.
+    """
+    if not _has_245(record):
+        return None
+    text_245c = _read_245c(record)
+    if text_245c is None:
+        return None
+    agents = extractor.extract(c_subfield=text_245c)
+    if not agents:
+        return None
+    return _build_records_for_b1_or_b1_llm(
+        record,
+        agents=agents,
+        bib_id=bib_id,
+        method_template="creator-from-245c (llm, role={role}, marc={marc})",
+        tier="B1-LLM",
+    )
 
 
 def _try_b2(record: etree._Element, *, bib_id: str, settings: Settings) -> SalvageOutcome | None:
@@ -304,6 +361,7 @@ def try_salvage_minimum_content(
     *,
     bib_id: str,
     settings: Settings,
+    llm_extractor: SalvageExtractor | None = None,
 ) -> SalvageOutcome | None:
     """Try the salvage tiers in order. Returns the first hit's
     outcome (with the tree already mutated to carry the synthesised
@@ -316,6 +374,13 @@ def try_salvage_minimum_content(
     is therefore "does the record already have a creator?" — if so,
     nothing to do.
 
+    Tier order is **B1 regex → B1 LLM cascade → B2 publisher → B3
+    sentinel**. The LLM cascade fires only when
+    ``Settings.creator_salvage_b1_llm_cascade_enabled`` is true AND
+    an ``llm_extractor`` is supplied. Tests inject a
+    :class:`StubSalvageExtractor`; production wires
+    :class:`LangChainSalvageExtractor` via the M2 runner.
+
     The master flag :attr:`Settings.creator_salvage_enabled` is the
     opt-out lever for the rollback procedure; flipping it to False
     short-circuits this function to ``None``, restoring the pre-P-41
@@ -324,22 +389,26 @@ def try_salvage_minimum_content(
     if not settings.creator_salvage_enabled:
         return None
     record = _first_record(tree)
-    if record is None:
+    if record is None or _has_creator(record):
         return None
-    if _has_creator(record):
-        return None
-    # B1 — 245$c regex parse.
+    # Tier cascade. The first hit wins; B3 always returns a value, so
+    # the cascade is guaranteed to terminate.
+    # B1 — 245$c regex parse (cheap, deterministic).
+    # B1-LLM — LLM cascade fallback (gated on the feature flag AND a
+    #          concrete extractor; production wires one, tests inject
+    #          a stub, ``None`` skips the tier).
+    # B2 — publisher-as-corporate-creator (default-off feature flag).
+    # B3 — anonymous-by-convention sentinel (always returns a value).
     outcome = _try_b1(record, bib_id=bib_id)
-    if outcome is not None:
-        return outcome
-    # B2 — publisher-as-corporate-creator. Returns ``None`` when the
-    # feature flag is off (default), the leader/06 isn't in the
-    # cataloguer-confirmed set, or the record has no 260$b/264$b.
-    outcome = _try_b2(record, bib_id=bib_id, settings=settings)
-    if outcome is not None:
-        return outcome
-    # B3 — sentinel safety net.
-    return _try_b3(record, bib_id=bib_id, settings=settings)
+    if outcome is None and (
+        settings.creator_salvage_b1_llm_cascade_enabled and llm_extractor is not None
+    ):
+        outcome = _try_b1_llm(record, bib_id=bib_id, extractor=llm_extractor)
+    if outcome is None:
+        outcome = _try_b2(record, bib_id=bib_id, settings=settings)
+    if outcome is None:
+        outcome = _try_b3(record, bib_id=bib_id, settings=settings)
+    return outcome
 
 
 __all__ = [
