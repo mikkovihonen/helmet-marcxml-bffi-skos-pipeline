@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 import typer
-from rdflib import Graph, URIRef
+from rdflib import Graph, Literal, URIRef
 
 from bffi_pipeline.cli import _parse_age_spec
 from bffi_pipeline.provenance import logger as P
@@ -182,6 +182,57 @@ def test_log_review_chains_via_was_informed_by() -> None:
     assert str(V.HumanReview) in types
     assert (review, V.PROV.wasInformedBy, decision) in g
     assert any(g.triples((review, V.reviewNote, None)))
+
+
+# --- Synthesis vocabulary (P-41 Phase A.2) -------------------------------
+
+
+def test_synthesis_activity_terms_round_trip_via_turtle(tmp_path: Path) -> None:
+    """P-41 Phase A.2 — the four ``synthetic*`` predicates + the
+    Synthesis Activity class + the ``bffi:syntheticSentinel`` flag +
+    the ``SENTINEL_AGENT_UNKNOWN`` URI must survive a Turtle write/read
+    cycle without rdflib mangling. This guards the vocabulary contract
+    Phase B + C consume."""
+    g = Graph()
+    activity = URIRef("http://urn.fi/URN:NBN:fi:bib:activity/synthesis-test-1")
+    source_marc = URIRef("http://urn.fi/URN:NBN:fi:bib:activity/marc-conv-test-1")
+    contribution = URIRef("http://urn.fi/URN:NBN:fi:bib:contribution/test-1")
+    g.add((activity, V.RDF.type, V.PROV.Activity))
+    g.add((activity, V.RDF.type, V.Synthesis))
+    g.add((activity, V.PROV.used, source_marc))
+    g.add((activity, V.PROV.generated, contribution))
+    g.add((activity, V.syntheticField, Literal("bf:contribution/bf:agent")))
+    g.add((activity, V.syntheticMethod, Literal("creator-from-245c (regex)")))
+    g.add((activity, V.syntheticTier, Literal("B1")))
+    g.add((activity, V.syntheticConfidence, Literal("0.65", datatype=V.XSD.decimal)))
+    g.add((V.SENTINEL_AGENT_UNKNOWN, V.syntheticSentinel, Literal("true", datatype=V.XSD.boolean)))
+
+    out = tmp_path / "synthesis.ttl"
+    out.write_text(g.serialize(format="turtle"), encoding="utf-8")
+    reloaded = Graph()
+    reloaded.parse(str(out), format="turtle")
+
+    types = {str(o) for _, _, o in reloaded.triples((activity, V.RDF.type, None))}
+    assert str(V.PROV.Activity) in types
+    assert str(V.Synthesis) in types
+    assert (activity, V.PROV.used, source_marc) in reloaded
+    assert (activity, V.PROV.generated, contribution) in reloaded
+    assert any(reloaded.triples((activity, V.syntheticField, None)))
+    assert any(reloaded.triples((activity, V.syntheticMethod, None)))
+    tier_value = next(reloaded.objects(activity, V.syntheticTier))
+    assert str(tier_value) == "B1"
+    confidence_value = next(reloaded.objects(activity, V.syntheticConfidence))
+    assert float(str(confidence_value)) == pytest.approx(0.65)
+    sentinel_value = next(reloaded.objects(V.SENTINEL_AGENT_UNKNOWN, V.syntheticSentinel))
+    assert str(sentinel_value).lower() == "true"
+
+
+def test_sentinel_agent_unknown_uri_matches_committed_identifier() -> None:
+    """P-41 Phase A.4 — the sentinel agent URI is a committed identifier
+    (see ``CLAUDE.md`` § "Committed identifiers"). Pin its value here
+    so a refactor that touches the namespace surfacing won't silently
+    rename it without surfacing the change."""
+    assert str(V.SENTINEL_AGENT_UNKNOWN) == "http://urn.fi/URN:NBN:fi:bib:agent:unknown"
 
 
 # --- ProvenanceWriter -----------------------------------------------------

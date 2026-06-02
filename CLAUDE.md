@@ -6,6 +6,7 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 
 - `docs/tech-stack.md` — consolidated toolchain reference (languages, RDF tooling, inference stack, vocabularies, services). Start here for "what does this project use for X?".
 - `docs/validation-strategy.md` — five validation boundaries (MARCXML → BIBFRAME → BFFI → judge → post-load).
+- `docs/bibliographic-minimum.md` — the minimum bibliographic field set every exported record must carry + the full synthesis-policy table (which fields the pipeline synthesises, where, with what marker, at what confidence). Source-of-truth for P-41 Phase B's salvage tiers and the `bffi-prov:Synthesis` Activity contract.
 - `docs/local-inference.md` — Apple Silicon / mlx-lm setup, model choice, throughput, cascade strategy.
 - `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` — original end-to-end technical specification (archived). Section-level back-references from older commits, plans, and source comments still point here; live successors are listed at the top of that document.
 - `docs/external-dependencies.md` — records and confirmations to request from Helmet cataloguers.
@@ -29,6 +30,7 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - Named-graph base for Fuseki: `http://urn.fi/URN:NBN:fi:bib:graph:`
 - `bffi-prov` namespace: `http://urn.fi/URN:NBN:fi:schema:bffi-prov#` (provenance vocabulary — Activity classes, decision/confidence/rationale predicates, stage tags). Full `bffi-prov:stage` enum and Activity class list live in `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` § 8 (archived spec; treat enum additions as code changes — extend `STAGE_*` constants in `src/bffi_pipeline/stages/judge.py` and document the new value in the relevant active plan).
 - `bffi:adminMetadata` linking property: `http://urn.fi/URN:NBN:fi:schema:bffi:adminMetadata` (`owl:equivalentProperty` of `bf:adminMetadata`). Every canonical `bffi:Work` and `bffi:Expression` carries one `bffi:adminMetadata` triple to a `bffi:AdminMetadata` block summarising administrative state. The AdminMetadata view is layered alongside the PROV-O graph (not a replacement); see archived spec § 8.
+- Sentinel agent URI: `http://urn.fi/URN:NBN:fi:bib:agent:unknown` (P-41 Phase B B3 — anonymous-by-convention salvage). One shared URI for all records the M2 creator-salvage tier resolves through B3; carries `bffi:syntheticSentinel "true"^^xsd:boolean`. Excluded from M5 embedding agent-name vectors, M6 LLM judge pair escalation, M8 union-find keying, and M9 KANTO/Finto reconciliation — multiple records sharing this URI is the property "no known author," not the claim of being by the same person. Defined at `bffi_pipeline.provenance.vocab.SENTINEL_AGENT_UNKNOWN`.
 - Authority priority: KANTO → VIAF (persons / corporate bodies); YSO (subjects); KAUNO (fiction genre/form); MUSO (music).
 - Display language priority for `skos:prefLabel`: `fi`, `sv`, `en`.
 - Documentation language: English throughout.

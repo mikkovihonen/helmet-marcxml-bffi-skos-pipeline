@@ -313,6 +313,12 @@ Operational sequence:
   veto: when exactly one record's title contains an anthology marker
   ("complete", "selected", "kootut", "samlade", "œuvres"), demote
   from `auto-merge` to `escalate`.
+
+_(P-41 — minimum bibliographic synthesis + per-run synthesis TSV —
+graduated proposal → in-progress plan on 2026-06-02 without a
+proposal-shape commit; the proposal-shape version lived only in
+the working tree before graduation. The plan-shape document is at
+[`../in-progress/p-41-minimum-bibliographic-synthesis-and-export-report.md`](../in-progress/p-41-minimum-bibliographic-synthesis-and-export-report.md).)_
 _(P-15 and P-16 graduated to plans on 2026-05-13 and shipped
 in the same session; see
 [`../completed/p-15-preserve-authority-uris-at-m3.md`](../completed/p-15-preserve-authority-uris-at-m3.md)

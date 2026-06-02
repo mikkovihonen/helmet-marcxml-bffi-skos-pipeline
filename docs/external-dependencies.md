@@ -106,6 +106,36 @@ Before publishing to a public-facing Skosmos instance, explicit confirmation fro
 - No specific records or record categories must be excluded from the production publish.
 - The license for the published RDF data is settled (CC0 to match Finto conventions; confirm).
 
+## Ask 5 — Confirm the no-author sentinel label (P-41 Phase B; BLOCKING for pilot-scale ramp-up, non-blocking for code review)
+
+P-41 introduces a salvage layer at M2 that synthesises a creator (1XX/7XX) for records that would otherwise drop on `marcxml-content-minimum`. The lowest-confidence tier (B3) attaches the records to a single shared sentinel agent URI carrying a "no known author" label.
+
+Default labels shipped in `Settings.creator_salvage` (configurable without code change):
+
+- Finnish: `Tekijä tuntematon`
+- Swedish: `Okänd upphovsman`
+- English: `Unknown author`
+
+Alternatives considered (none chosen pending cataloguer input):
+
+- `Tuntematon tekijä` — alternative Finnish ordering.
+- RDA-aligned `(Tekijää ei ole ilmoitettu)` — closer to the formal RDA phrasing.
+
+Please confirm one set of three labels (one per language), or propose alternatives that the cataloguer team prefers. The sentinel URI itself (`http://urn.fi/URN:NBN:fi:bib:agent:unknown`) is a committed identifier and is not affected by the label choice.
+
+## Ask 6 — Confirm the B2 publisher-as-corporate-creator leader/06 set (P-41 Phase B; BLOCKING for B2 activation, non-blocking for Phase B merge)
+
+P-41 Phase B includes a salvage tier (B2) that promotes the MARC 260$b / 264$b publisher literal to a synthetic MARC 710$a corporate creator when the record carries no individual author and the MARC leader/06 record-type code identifies it as a content type where publisher-as-creator is RDA-acceptable. B2 ships behind a feature flag default-off because the answer is cataloguing-policy-dependent and we'd rather not mis-attribute corporate authorship at corpus scale.
+
+Codes under consideration:
+
+- `a` — language material
+- `e` — cartographic
+- `g` — projected medium
+- `m` — computer file
+
+Please confirm which of these (if any) warrant publisher-as-corporate-creator promotion, and add any others not on the list. Activation is a single config edit (`Settings.creator_salvage.b2_leader_06_codes` + flipping the `b2_publisher_promotion_enabled` flag) once the set is confirmed.
+
 ## Notice — RDA 336/337/338 synthesis at Sierra export time
 
 Pre-RDA records (broadly: anything catalogued before Helmet adopted

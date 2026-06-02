@@ -29,6 +29,15 @@ MarcConversion: URIRef = BFFI_PROV.MarcConversion
 WorkMergeDecision: URIRef = BFFI_PROV.WorkMergeDecision
 HumanReview: URIRef = BFFI_PROV.HumanReview
 Reconciliation: URIRef = BFFI_PROV.Reconciliation
+#: P-41 Phase A — sibling of :data:`MarcConversion`. Emitted when M2's
+#: salvage layer synthesises a field to make a record meet
+#: :func:`bffi_pipeline.validation.marcxml.validate_minimum_content`.
+#: Carries one ``prov:used`` link to the source MarcConversion Activity
+#: for the same record, so the audit chain is traversable from a
+#: synthesised triple back to its MARC input. Predicate set documented
+#: in :mod:`bffi_pipeline.provenance.vocab` below
+#: (``synthetic*`` predicates).
+Synthesis: URIRef = BFFI_PROV.Synthesis
 
 # --- bffi-prov predicates emitted by M2 -----------------------------------
 
@@ -81,6 +90,47 @@ MINT_ANCHOR_FIRST_CONTRIBUTOR: URIRef = BIB["auth/first-contributor-anchored"]
 #: anchored on (title, content-type, language). See P-34 plan's
 #: "Phase B" section for the MARC-input contract.
 MINT_ANCHOR_ANONYMOUS_WORK: URIRef = BIB["auth/anonymous-work-anchored"]
+
+# --- bffi-prov predicates emitted by M2 salvage (Synthesis) --------------
+# P-41 Phase A. Every Synthesis Activity carries the four below.
+
+#: The BFFI field synthesised, e.g. ``"bf:contribution/bf:agent"`` for
+#: a creator salvaged by P-41 Phase B. Free-text; the value is the
+#: graph path the consumer should look at, not a URI.
+syntheticField: URIRef = BFFI_PROV.syntheticField
+#: Human-readable method tag, e.g. ``"creator-from-245c (regex)"`` or
+#: ``"anonymous-by-convention"``. Used in the per-run TSV's ``method``
+#: column verbatim.
+syntheticMethod: URIRef = BFFI_PROV.syntheticMethod
+#: Phase B tier ID — ``"B1"`` (245$c parse), ``"B2"`` (publisher-as-
+#: corporate-creator), ``"B3"`` (anonymous sentinel). Future plans
+#: extending the salvage taxonomy reuse the same predicate with a
+#: distinct tier string.
+syntheticTier: URIRef = BFFI_PROV.syntheticTier
+#: Confidence in the synthesised value, 0.0 to 1.0. Tier-specific
+#: bands documented in ``docs/bibliographic-minimum.md``. B1 regex
+#: emits 0.5-0.8; B1 LLM cascade caps at 0.7; B2 emits 0.3; B3 emits 0.1.
+syntheticConfidence: URIRef = BFFI_PROV.syntheticConfidence
+
+# --- BFFI-side predicates added by M2 salvage (P-41) ---------------------
+
+#: P-41 Phase B — boolean flag marking synthetic-sentinel resources
+#: (Agents, Works) that downstream stages must NOT key on. The B3
+#: sentinel agent at :data:`SENTINEL_AGENT_UNKNOWN` carries this
+#: triple. M5/M6/M8/M9 honour it via the exclude rules wired in
+#: P-41 Phase B.6.
+syntheticSentinel: URIRef = BFFI.syntheticSentinel
+
+# --- Stable sentinel URIs (P-41 Phase A.4 — committed identifiers) -------
+
+#: P-41 Phase B — single shared sentinel agent URI for B3
+#: (anonymous-by-convention) salvages. Multiple records sharing this
+#: URI is correct — they share the property "no known author", not
+#: the claim of being by the same person. Carries the
+#: :data:`syntheticSentinel` flag. Committed identifier per
+#: ``CLAUDE.md`` § "Committed identifiers"; do not change without
+#: surfacing.
+SENTINEL_AGENT_UNKNOWN: URIRef = URIRef("http://urn.fi/URN:NBN:fi:bib:agent:unknown")
 
 # --- BFFI-side AdminMetadata predicates added by M9 ----------------------
 
@@ -148,12 +198,14 @@ __all__ = [
     "RDF",
     "RDFS",
     "RECORDING_SOURCE_HELMET",
+    "SENTINEL_AGENT_UNKNOWN",
     "SKOS",
     "XSD",
     "AdminMetadata",
     "HumanReview",
     "MarcConversion",
     "Reconciliation",
+    "Synthesis",
     "WorkMergeDecision",
     "adminMetadata",
     "adminMetadataFor",
@@ -194,5 +246,10 @@ __all__ = [
     "sourceMetadata",
     "sourceVocabulary",
     "stage",
+    "syntheticConfidence",
+    "syntheticField",
+    "syntheticMethod",
+    "syntheticSentinel",
+    "syntheticTier",
     "temperature",
 ]

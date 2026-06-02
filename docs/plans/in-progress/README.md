@@ -28,6 +28,28 @@ If the plan is dropped before completion, `git mv` it to
   contributions for KANTO reconciliation) still backlog; F3
   pre-gated on `gold/contrib.jsonl` reaching 30-50
   cataloguer-vetted cases (tracked under P-06).
+- [`p-41-minimum-bibliographic-synthesis-and-export-report.md`](p-41-minimum-bibliographic-synthesis-and-export-report.md)
+  — Graduated from `proposed/` on 2026-06-02; all three phases
+  scheduled in the same implementation session. **Motivation:**
+  M2's `marcxml-content-minimum` validator drops records missing
+  1XX/7XX (creator) — 91 / 5 000 (1.82 %) on the 2026-05-14 5 k
+  sample, ~14 500 records projected to the 800 k corpus.
+  **Phase A** specs the "minimum exportable" contract + adds the
+  `bffi-prov:Synthesis` Activity class with four `synthetic*`
+  predicates. **Phase B** adds a tiered salvage layer at
+  `marcxml_repair.py`: B1 = 245$c parse (regex + LLM cascade with
+  verbatim-substring constraint + `synth-cache.sqlite`); B2 =
+  publisher-as-corporate-creator (code lands behind a feature flag
+  default-off pending cataloguer leader/06 sign-off); B3 =
+  anonymous-by-convention sentinel agent
+  `http://urn.fi/URN:NBN:fi:bib:agent:unknown` with the
+  `bffi:syntheticSentinel` flag wired into M5/M6/M8/M9 exclude rules.
+  **Phase C** adds the per-run `export-synthesis-<run_uuid>.tsv`
+  writer + the retrospective `bffi-pipeline export-synthesis-report
+  --run <uuid>` CLI that re-derives the TSV from `data/provenance.ttl`.
+  **P-39 integration:** Phase B.6 emits the `bffi:syntheticSentinel`
+  flag that P-39's M9 walker amendment skips on — single-predicate
+  contract between the two plans.
 
 P-32 (Run lifecycle management) graduated to
 [`../completed/`](../completed/) at `fdae706` (Phase D — final phase).
