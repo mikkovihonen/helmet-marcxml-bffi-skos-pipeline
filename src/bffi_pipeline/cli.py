@@ -1895,6 +1895,7 @@ def embed_command(
 app.command("embed-benchmark")(_evaluation_commands.embed_benchmark_command)
 app.command("eval")(_evaluation_commands.eval_command)
 app.command("grow-gold")(_evaluation_commands.grow_gold_command)
+app.command("grow-gold-contrib")(_evaluation_commands.grow_gold_contrib_command)
 app.command("embed-stats")(_evaluation_commands.embed_stats_command)
 
 

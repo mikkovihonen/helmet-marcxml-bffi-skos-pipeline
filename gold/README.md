@@ -77,6 +77,61 @@ M12 growth pipeline (`src/bffi_pipeline/eval/grow.py`, currently a
 stub) will surface candidates from the "humans overrode the LLM"
 SPARQL query against Fuseki — that lands once M6 + M10 are in.
 
+### Growing `gold/contrib.jsonl` from M3 contrib-extract cascade output
+
+P-39 (M9 reconciles non-primary contributions against KANTO) is gated
+on `gold/contrib.jsonl` reaching ≥ 30 cataloguer-vetted rows. The
+candidate-generation tool `bffi-pipeline grow-gold-contrib` walks
+M2's BIBFRAME output, runs the same heuristic + LLM cascade M3 runs
+internally, and writes a JSONL of candidates the cataloguer reviews:
+
+```bash
+# Cost projection — measure heuristic-fire rate without LLM calls.
+uv run bffi-pipeline grow-gold-contrib \
+    --bibframe-dir runs/<run-uuid>/bibframe \
+    --output-path /tmp/contrib-candidates-dryrun.jsonl \
+    --no-llm-cascade
+
+# Live run — invokes the Qwen3 8B mlx-lm cascade per heuristic-fire.
+# Each call ~10 s warm; full 5 k corpus is ~10-15 min.
+uv run bffi-pipeline grow-gold-contrib \
+    --bibframe-dir runs/<run-uuid>/bibframe \
+    --output-path gold/grow-candidates-contrib.jsonl
+
+# Smoke against the first 100 BIBFRAME files.
+uv run bffi-pipeline grow-gold-contrib \
+    --bibframe-dir runs/<run-uuid>/bibframe \
+    --output-path /tmp/contrib-candidates-smoke.jsonl \
+    --limit 100
+```
+
+The tool dedups against `gold/contrib.jsonl` by `helmet_bib_id`, so
+re-runs don't re-ask the cataloguer to re-vet cases already merged.
+
+**Cataloguer review workflow:**
+
+1. Open `gold/grow-candidates-contrib.jsonl` (one JSON object per line).
+2. For each row decide: keep / discard / edit.
+3. Fill in `category` — overwrite the tool's auto-suggestion (one of
+   `pure-new-agent` / `role-classification` / `transliteration` /
+   `ambiguous-multi-shape`) with the canonical label from the
+   bootstrap set (`pure-new-agent`, `role-classification`,
+   `within-record-typo`, `cyrillic-latin-transliteration`, or a new
+   one if the bootstrap set isn't expressive enough).
+4. Fix any LLM mistakes in `expected_contributions` — the most
+   common defects mined from the 2026-06-02 5 k corpus run were:
+   role marker kept in name (`"Editor Carol Cuellar"` instead of
+   `"Carol Cuellar"`), wrong `transliteration_of` target when the
+   agent is genuinely new, hallucinated relator code.
+5. Replace the placeholder `id: "cg-pending-NNNN"` with the next
+   sequential `cg-NNNN` (look at `gold/contrib.jsonl`'s tail).
+6. Set `holdout` per the stratification audit (per-category min-2).
+7. Move the row to `gold/contrib.jsonl` via a PR.
+
+The tool's `added_by: "grow-gold-contrib"` field stays on the row
+so the bootstrap / cataloguer / tool sources stay distinguishable
+across the gold set's history.
+
 ## What's NOT done yet
 
 - `make eval` target (depends on M6 LLM judge).

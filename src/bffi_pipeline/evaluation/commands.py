@@ -31,6 +31,7 @@ import typer
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.eval import embed_benchmark
 from bffi_pipeline.eval import grow as eval_grow
+from bffi_pipeline.eval import grow_contrib as eval_grow_contrib
 from bffi_pipeline.eval import harness as eval_harness
 from bffi_pipeline.stages import m5
 
@@ -170,6 +171,109 @@ def grow_gold_command(
         output_path=output_path,
     )
     typer.echo(result.render())
+
+
+def grow_gold_contrib_command(
+    bibframe_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--bibframe-dir",
+            help=(
+                "Directory of M2's per-record BIBFRAME RDF/XML files; "
+                "defaults to <BFFI_DATA_DIR>/bibframe."
+            ),
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-path",
+            help=(
+                "Where to write the candidate JSONL; defaults to "
+                "gold/grow-candidates-contrib.jsonl in the repo."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            "--limit",
+            help=(
+                "Max number of BIBFRAME files to scan. Useful for "
+                "cost-bounded smoke runs — each cascade hit is one "
+                "Qwen3 8B call (~10 s warm)."
+            ),
+        ),
+    ] = None,
+    llm_cascade: Annotated[
+        bool,
+        typer.Option(
+            "--llm-cascade/--no-llm-cascade",
+            help=(
+                "Run the LLM contrib-extract cascade. With --no-llm-cascade "
+                "the tool walks the corpus + measures heuristic-fire rate "
+                "without spending LLM time (cost projection)."
+            ),
+        ),
+    ] = True,
+    dedup_against_gold: Annotated[
+        bool,
+        typer.Option(
+            "--dedup-against-gold/--no-dedup-against-gold",
+            help=(
+                "Skip records whose helmet_bib_id is already in "
+                "gold/contrib.jsonl. Re-runs don't re-ask the cataloguer "
+                "to re-vet cases they already merged."
+            ),
+        ),
+    ] = True,
+) -> None:
+    """Grow ``gold/contrib.jsonl`` from M3 contrib-extract cascade decisions.
+
+    Walks ``<bibframe-dir>/*.rdf`` and runs the same heuristic + LLM
+    cascade M3 runs internally. For every decision with ≥ 1
+    contribution, writes a candidate row the cataloguer reviews,
+    fills in ``category``, optionally flips ``holdout``, and merges
+    into ``gold/contrib.jsonl`` by hand.
+
+    P-39 (M9 reconciles non-primary contributions against KANTO) is
+    gated on this gold file reaching ≥ 30 cataloguer-vetted rows.
+    """
+    settings = get_settings()
+    bibframe_path = bibframe_dir or (settings.data_dir / "bibframe")
+    target = output_path or eval_grow_contrib.DEFAULT_CONTRIB_CANDIDATES_PATH
+
+    extractor: object | None = None
+    if llm_cascade:
+        # Lazy-import the LangChain stack so --no-llm-cascade runs don't
+        # pull in the LLM dependencies.
+        from bffi_pipeline.contrib_extract_llm import LangChainContribExtractor  # noqa: PLC0415
+
+        extractor = LangChainContribExtractor()
+
+    gold_path: Path | None = None
+    if dedup_against_gold:
+        gold_path = Path(__file__).resolve().parents[2] / "gold" / "contrib.jsonl"
+
+    from bffi_pipeline.contrib_extract_llm import ContribExtractor  # noqa: PLC0415
+
+    summary = eval_grow_contrib.generate_candidates(
+        bibframe_dir=bibframe_path,
+        output_path=target,
+        extractor=extractor,  # type: ignore[arg-type]
+        limit=limit,
+        existing_gold_path=gold_path,
+    )
+    typer.echo(summary.render())
+    # Quiet unused-import — kept for the type alias used in the module signature.
+    _ = ContribExtractor
 
 
 def embed_stats_command(

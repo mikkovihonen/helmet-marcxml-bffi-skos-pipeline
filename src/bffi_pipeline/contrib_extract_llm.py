@@ -389,9 +389,16 @@ class LangChainContribExtractor:
         if self.chain is not None:
             return self.chain
         settings = get_settings()
+        # Resolution order: constructor arg → Settings.llm_model_primary
+        # (the mlx-lm model path from .env) → DEFAULT_CONTRIB_MODEL
+        # (defensive fallback for unset env). Mirrors the salvage
+        # extractor's resolution shape (P-41 commit c9cd079) so the
+        # post-mlx-lm-migration model identifier reaches the LLM.
+        model_name = self.model_name or settings.llm_model_primary or DEFAULT_CONTRIB_MODEL
+        base_url = settings.llm_base_url_primary or settings.llm_base_url
         return _build_chain(
-            model_name=self.model_name or DEFAULT_CONTRIB_MODEL,
-            base_url=settings.llm_base_url,
+            model_name=model_name,
+            base_url=base_url,
             api_key=settings.llm_api_key,
         )
 
