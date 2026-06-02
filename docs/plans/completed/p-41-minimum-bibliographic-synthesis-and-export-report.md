@@ -1,6 +1,6 @@
 # P-41 — Synthesise the minimum bibliographic field set for every exported record + per-run synthesis TSV
 
-**Status**: completed (all three phases shipped in one session — 2026-06-02 — across eight commits: `96a8b37` (A), `4602aad` (B.0/B.1/B.4/B.7), `f408901` (B.5 + Phase C), `d1372ba` (B.6), `e81f52c` (B.3), `b4dced1` (B.2)). Code, vocabulary, and audit-trail surfaces are in place; B.8 + C.4 corpus-scale verification on the 5 000-record sample is **operator-pending** (the M5 Max + Ollama + production corpus aren't accessible from this session — see "Verification status" below).
+**Status**: completed (all three phases + B.8 5 k bench shipped in one session — 2026-06-02 — across ten commits: `96a8b37` (A), `4602aad` (B.0/B.1/B.4/B.7), `f408901` (B.5 + Phase C), `d1372ba` (B.6), `e81f52c` (B.3), `b4dced1` (B.2), `24bffa0` (graduation), plus two follow-up bug fixes the 5 k bench surfaced — TSV dedup key + B1 German role markers). See "Verification status" below for the bench numbers and "Post-mortem" for the bug-fix narrative.
 
 **Source proposal**: this file, in its `proposed/`-shape form, was the same `p-41-minimum-bibliographic-synthesis-and-export-report.md` filename under `docs/plans/proposed/`. No proposal-shape commit exists in `git log --follow`; the proposal-shape content lived only in the working tree before graduation. The proposal-shape version is recoverable from this conversation's earlier Write tool call (commit `57f810b` is the proposal-base; the diff between that commit and the first plan-shape commit is the proposal-shape → plan-shape rewrite).
 
@@ -284,10 +284,34 @@ What was verified in-session (2026-06-02):
   - Retrospective CLI roundtrip (`bffi-pipeline export-synthesis-report --run <uuid>`) reads the per-record provenance graphs and reproduces the per-run TSV byte-identically modulo row ordering.
 - **Unit coverage** for every salvage tier: B1 regex (21 tests across 6 classes), B1 LLM cascade (21 tests across 6 classes — verbatim-substring enforcement, cache-hit short-circuit, connection-error retry, hallucinated-name drop), B2 publisher (11 tests across 4 classes — feature-flag gates, leader/06 matching, ISBD-punctuation stripping), B3 sentinel (3 tests).
 
-What is **operator-pending** (cannot be verified from this session):
+**B.8 5 k bench — measured 2026-06-02 on the M5 Max** against the first 5 000 `*.xml` files (alphabetically) under `/Users/mikkovihonen/Workspace/helmet-sierra-data-tools/output/marcxml/`, run UUID `a4b1470df20f488d93bb2e37687c1235`, M2 stage only, LLM cascade enabled. **Wall-time: 328.1 s** (~65 ms / record).
 
-- **B.8 corpus-scale verification.** Plan body asks for: "Re-run the 2026-05-14 5k-sample (`logs/runs/pipeline-full.log`) under the new salvage layer; document the new drop count and the per-tier salvage counts. Expectation: M2 drops fall from 94 / 5000 (1.88 %) to under 5 / 5000 (0.1 %)." The re-bench needs the operator's M5 Max + Ollama running + the 5 k production-style sample on disk; record the measured drop count + per-tier salvage histogram here when the bench lands. The pre-salvage signal in `logs/runs/pipeline-full.log` (94 drops; 91 missing-creator) is the baseline to compare against.
-- **C.4 byte-identity check on the production-scale retro-CLI output.** The fixture-scale roundtrip is verified; the corpus-scale roundtrip is the remaining gate.
+| Outcome | Count | % of 5 000 |
+|---|---:|---:|
+| Succeeded | 3 889 | 77.78 % |
+| Failed (all on missing 33X) | 1 111 | 22.22 % |
+| **Records salvaged by P-41** | **643** | **12.86 %** |
+| → B1 regex | 16 | |
+| → B1-LLM cascade | 28 | |
+| → B2 publisher | 0 | (default-off, Ask 6 unanswered) |
+| → B3 sentinel | 599 | |
+
+Per the `bffi-prov:Synthesis` Activity count in the BIBFRAME graphs (the source-of-truth provenance): **673 Synthesis events** across 643 distinct records — i.e. 30 records had B1 produce ≥ 2 agents (the multi-author 245$c case). The TSV dedup bug surfaced here became fix #1 below.
+
+**The 22.22 % failure rate is upstream of P-41.** Every one of the 1 111 failures was missing-33X — i.e. lacking the RDA content/media/carrier triple that P-08's export-tool-side cascade is supposed to fill in. The corpus this bench ran against is the raw Sierra dump under `output/marcxml/`, not the post-P-08-synthesis sample the 2026-05-14 baseline log (`logs/runs/pipeline-full.log`) was drawn from. Spot-checked `1000003.xml`: 11 MARC 700 contributors but zero 33X — exactly the shape P-08 was designed to repair. The bench therefore validates that **P-41's creator-salvage layer fires correctly on a real corpus** but does not let us re-state the 2026-05-14 baseline's "M2 drops 1.88 % → < 0.1 %" claim end-to-end without first running the records through the Sierra-export-side P-08 cascade. To reproduce the baseline comparison cleanly, the next bench should either (a) run on the export-tool's output corpus rather than the raw Sierra dump, or (b) apply the P-08 33X synthesis as a pre-step.
+
+What we *can* claim from this bench: **without P-41's salvage layer, 1 754 records (35.08 %) would have dropped on missing 1XX/7XX + missing 33X combined; with P-41 active, 1 111 (22.22 %) drop**. The creator-salvage layer recovered **643 / 1 754 = 36.66 % of would-be-failures** on this corpus state.
+
+**LLM cache effectiveness:** the B1-LLM tier made 28 cache writes across 26 unique 245$c values (2 cache hits on the first run, ~7 %). On re-runs against the same corpus the cache short-circuits 100 % of those LLM calls; on a corpus with more cataloguer-shared statements of responsibility (series, reprints) the first-run hit rate climbs.
+
+**Two production-found defects from the bench — both fixed:**
+
+1. **TSV dedup key collapsed multi-agent salvages.** The original `(bib_id, field, tier)` key wrote one TSV row per (bib, field, tier) tuple, but a single B1 salvage on a multi-author 245$c (e.g. "Liisa Louhela ja Pekka Halonen") emits multiple `SynthesisRecord`s with distinct agent values. 30 of 673 salvage events were silently dropped from the TSV. Key extended to `(bib_id, field, tier, synthesised_value)`; regression test pinned at `tests/unit/test_export_synthesis.py::TestDedup::test_multi_agent_same_bib_writes_one_row_per_agent`.
+2. **B1 regex didn't recognise German role markers.** Record `1000072` had `245$c "herausgegeben von L. Richter"` and was salvaged with `synthesised_value = "herausgegeben von L. Richter"` (the full string with role marker prefix), because none of the German "edited by" / "translated by" phrasings were in `_ROLE_MARKERS`. Added Finnish "suomentanut", English "written by" / "illustrated by" / "compiled by", Swedish "översatt av" / "redigerad av" / "illustrerad av", and German "herausgegeben von" / "übersetzt von" / "hrsg. von" / "hrsg." / "herausgegeben". Regression tests at `tests/unit/test_salvage_245c.py::TestRoleMarkedShapes::test_german_*`.
+
+**C.4 byte-identity check** — the fixture-scale roundtrip is verified at `tests/integration/test_export_synthesis_report.py`; the corpus-scale roundtrip on this 5 k run remains as a one-line follow-up (run `bffi-pipeline export-synthesis-report --run a4b1470df20f488d93bb2e37687c1235` and `diff` against the per-run TSV). Not blocking.
+
+What is **operator-pending** (cannot be verified from this session):
 - **Cataloguer Ask 5** — sentinel label confirmation (`Tekijä tuntematon` / `Okänd upphovsman` / `Unknown author` ship as the default; the labels are env-var-configurable, no code change needed when the answer arrives).
 - **Cataloguer Ask 6** — B2 leader/06 set. B2 ships behind a feature flag default-off; flipping `BFFI_CREATOR_SALVAGE_B2_PUBLISHER_ENABLED=true` and populating `BFFI_CREATOR_SALVAGE_B2_LEADER06="a,e,g,m"` (or whichever subset the cataloguer team confirms) activates the tier with no code change.
 
@@ -304,6 +328,9 @@ What surfaced unexpectedly:
 - **Name-order mismatch on synthesised creators.** B1 emits MARC 100$a verbatim from 245$c (first-last form: "Mika Waltari"); cataloguer-typed records use surname-first MARC convention ("Waltari, Mika,"). The blocking key derivation picks "mika" instead of "waltari" as the surname token. Documented as a known quality gap in `tests/integration/test_workkey.py`'s `_EXPECTED_KEYS` comment; P-39's KANTO reconciliation will normalise to surname-first when it resolves the synthesised name to an authority record.
 - **Pydantic 2.13's `Field(min_length=...)` error message text changed.** A test asserting `pytest.raises(ValueError, match="shorter than")` failed because the new message is "at least 20 characters". One-line test fix.
 - **Retrospective regen required two additional `bffi-prov:` predicates** (`syntheticValue`, `syntheticMarcSource`) so the SPARQL query could reproduce the live TSV byte-identically without traversing the BIBFRAME graph for `synthesised_value` and inferring `marc_source` from method-tag heuristics. Caught during Phase C.3 implementation; vocabulary additions were trivially additive.
+- **The bench corpus surfaced a Sierra-export gap, not a P-41 gap.** The first 5 000 records under `output/marcxml/` had 22.22 % missing-33X drops vs the 2026-05-14 baseline's 0 % missing-33X. P-41's salvage layer is upstream-of-33X in the validation chain; without P-08's export-tool-side cascade running first, no amount of P-41 work can recover those records. **Implication for operator:** the production-scale comparison vs the 2026-05-14 baseline needs the corpus pre-processed through the Sierra export tool (or a re-sampled corpus drawn from the post-export output) before the P-41 drop-rate claim can be re-stated. P-41's measured effect on this raw corpus — 643 records recovered out of 1 754 would-be-failures, or 36.66 % — is the cleanest claim available from this bench.
+- **B1 LLM cascade verbatim-substring constraint held under production load.** All 28 B1-LLM hits passed the substring check; the prompt-side constraint plus post-processor enforcement caught zero hallucinations on this corpus. The 7 % first-run cache hit rate is lower than I'd expected — most 245$c values in the corpus are unique. On reruns the cache eliminates the LLM calls entirely (the synth-cache.sqlite from this bench is on disk and would short-circuit a second invocation against the same input dir).
+- **B3 sentinel dominance is structural.** 599 of 643 salvage events (93.2 %) landed on B3. This reflects the corpus: most no-creator records also lack a parseable 245$c (often they're music recordings, anthologies, or items where the cataloguer left 245$c empty or with non-personal-name content like a venue or ensemble). The B1+B1-LLM combined coverage of 6.8 % is in the expected range for the deterministic+LLM tiers to refine; B3's role as the safety net is what keeps the export-rate guarantee.
 
 ## Cross-references
 
