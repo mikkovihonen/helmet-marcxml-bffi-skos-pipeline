@@ -80,6 +80,20 @@ _ROLE_MARKERS: Final[tuple[tuple[str, str], ...]] = (
     ("herausgegeben", "editor"),
     ("hrsg. von", "editor"),
     ("hrsg.", "editor"),
+    # Music / multimedia role markers added 2026-06-02 after the
+    # P-41 B.8 5 k bench surfaced 5 records where these prefixes
+    # leaked into the synthesised agent name. ``"arranged by"`` and
+    # ``"recordings by"`` are mapped to ``"unknown"`` because the
+    # salvage role enum (author/editor/translator/illustrator/
+    # compiler/unknown) doesn't carry an arranger or
+    # recording-engineer tag and the downstream BIBFRAME conversion
+    # only consumes the relator term in ``$e`` — a generic
+    # ``tekijä`` is more honest than a wrong-role tag.
+    ("arranged by", "unknown"),
+    ("recordings by", "unknown"),
+    ("ed. by", "editor"),
+    ("comp. by", "compiler"),
+    ("arr. by", "unknown"),
 )
 
 #: Conjunctions / separators that split a multi-author 245$c into
@@ -169,15 +183,54 @@ def _looks_corporate(candidate: str) -> bool:
     return any(marker in lowered for marker in _CORPORATE_MARKERS)
 
 
+#: Max recursion depth for role-marker stripping. The 2026-06-02 5 k
+#: bench surfaced records with nested role markers like
+#: ``"ED. BY BYRON MIKELLIDES"`` where the parser only stripped the
+#: first marker (``"ed."``) and left ``"BY BYRON MIKELLIDES"`` as the
+#: synthesised agent name. Recursive stripping handles arbitrary
+#: nesting (``"ed. and trans. by"`` etc.) with a sane depth cap so a
+#: pathological input can't infinite-loop. ``2`` covers every nesting
+#: depth observed in the corpus to date; raise if production surfaces
+#: deeper chains.
+_MAX_ROLE_PREFIX_PASSES: Final[int] = 2
+
+
 def _split_role_prefix(text: str) -> tuple[str, str]:
     """Detach a leading role marker from the body. Returns
-    ``(role_tag, remainder)``. The role marker is case-insensitive;
-    a missing marker yields ``("unknown", text)``."""
-    lowered = text.lower()
-    for marker, tag in _ROLE_MARKERS:
-        if lowered.startswith(marker + " ") or lowered.startswith(marker + "\t"):
-            return (tag, text[len(marker) :].lstrip())
-    return ("unknown", text)
+    ``(role_tag, remainder)``. The role marker check is case-
+    insensitive; a missing marker yields ``("unknown", text)``.
+
+    Iterative: re-checks for role markers after each successful strip
+    so nested markers like ``"ED. BY X"`` (first ``"ed."``, then
+    ``"by"``) are fully consumed. The role tag returned is the
+    LAST marker stripped (the outermost is typically the more
+    specific role — e.g. ``"ed."`` says editor, the inner ``"by"``
+    just generalises to author — and the outer wins on first match
+    but if there are nested markers the inner role might be the
+    actual one MARC intends). For the common ``"ed. by"`` case the
+    first iteration matches ``"ed."`` → editor; the second iteration
+    matches ``"by"`` → author but we keep the more-specific
+    ``"editor"`` tag from the first match.
+    """
+    role: Literal["author", "editor", "translator", "illustrator", "compiler", "unknown"] = (
+        "unknown"
+    )
+    remainder = text
+    for _ in range(_MAX_ROLE_PREFIX_PASSES):
+        lowered = remainder.lower()
+        matched = False
+        for marker, tag in _ROLE_MARKERS:
+            if lowered.startswith(marker + " ") or lowered.startswith(marker + "\t"):
+                remainder = remainder[len(marker) :].lstrip()
+                # First-match-wins on the role tag: the outer marker
+                # (usually more specific) is kept across recursion.
+                if role == "unknown":
+                    role = tag  # type: ignore[assignment]
+                matched = True
+                break
+        if not matched:
+            break
+    return (role, remainder)
 
 
 def _clean_candidate(candidate: str) -> str:

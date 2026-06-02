@@ -40,6 +40,44 @@ class TestRoleMarkedShapes:
         agents = parse_245c("übersetzt von Hans Müller")
         assert agents == [ParsedAgent(name="Hans Müller", role="translator", confidence=0.8)]
 
+    def test_nested_role_markers_are_fully_stripped(self) -> None:
+        """Regression test for the 2026-06-02 P-41 B.8 5 k-bench
+        finding: ``"ED. BY BYRON MIKELLIDES"`` (corpus bib 1003207)
+        was salvaged with ``synthesised_value = "BY BYRON MIKELLIDES"``
+        because the parser only ran a single role-marker pass —
+        ``"ed."`` was stripped, ``"by "`` survived as part of the
+        name. Recursive stripping now handles nested markers; the
+        first-matched role tag (``"editor"`` from ``"ed."``) wins
+        over the secondary ``"by"`` (author)."""
+        agents = parse_245c("ED. BY BYRON MIKELLIDES")
+        assert agents == [ParsedAgent(name="BYRON MIKELLIDES", role="editor", confidence=0.8)]
+
+    def test_arranged_by_marker_strips_correctly(self) -> None:
+        """Regression test for 2026-06-02 bench bib 1000369:
+        ``"Arranged by Steve Tayton"`` had the marker leak into the
+        synthesised name pre-fix. The ``"arranged by"`` role maps
+        to ``"unknown"`` because the salvage role enum lacks an
+        ``"arranger"`` tag and a generic ``tekijä`` relator term is
+        more honest than mis-labelling as compiler / author.
+        Confidence is 0.6 because ``"unknown"`` is the role tag —
+        the recognised marker tells us this is a contribution but
+        not which kind, and the confidence formula treats unknown
+        roles as low-confidence regardless of marker presence."""
+        agents = parse_245c("Arranged by Steve Tayton")
+        assert agents == [ParsedAgent(name="Steve Tayton", role="unknown", confidence=0.6)]
+
+    def test_recordings_by_marker_strips_correctly(self) -> None:
+        agents = parse_245c("Recordings by Roberto Leydi")
+        assert agents == [ParsedAgent(name="Roberto Leydi", role="unknown", confidence=0.6)]
+
+    def test_ed_dot_by_compound_marker_strips_correctly(self) -> None:
+        """Both belt-and-braces paths cover this: ``"ed. by"`` is in
+        ``_ROLE_MARKERS`` as a single phrase (matched first because
+        of longest-first ordering), AND recursive stripping would
+        handle the case even without the explicit entry."""
+        agents = parse_245c("ed. by John Smith")
+        assert agents == [ParsedAgent(name="John Smith", role="editor", confidence=0.8)]
+
 
 class TestUnmarkedShapes:
     """245$c often carries just a bare name (Finnish convention)."""
