@@ -137,6 +137,46 @@ def test_marc_conversion_activity_present(
     assert (instance, V.PROV.wasGeneratedBy, activity) in g
 
 
+def test_synthesis_activity_present_on_salvaged_record(
+    conversion: tuple[Path, ConversionSummary],
+) -> None:
+    """P-41 Phase B.5 + C.2 — the salvage smoke fixture (10000007)
+    produces a bffi-prov:Synthesis Activity in its BIBFRAME RDF with
+    all six synthetic* predicates populated (field, method, tier,
+    confidence, value, marc_source) + prov:used → MarcConversion chain.
+    The non-salvaged fixture (10000001) emits NO Synthesis Activity."""
+    out, _ = conversion
+
+    # Salvaged record carries the Synthesis Activity.
+    g_salvaged = Graph()
+    g_salvaged.parse(out / "bibframe" / "10000007.rdf", format="xml")
+    synth_activities = list(g_salvaged.subjects(RDF.type, V.Synthesis))
+    assert len(synth_activities) == 1, "expected one Synthesis Activity on salvaged record"
+    synth = synth_activities[0]
+
+    # All six synthetic* predicates populated.
+    assert (synth, V.syntheticField, Literal("bf:contribution/bf:agent")) in g_salvaged
+    tier_value = next(g_salvaged.objects(synth, V.syntheticTier))
+    assert str(tier_value) == "B1"
+    method_value = next(g_salvaged.objects(synth, V.syntheticMethod))
+    assert "creator-from-245c" in str(method_value)
+    confidence_value = next(g_salvaged.objects(synth, V.syntheticConfidence))
+    assert float(str(confidence_value)) >= 0.5
+    value_value = next(g_salvaged.objects(synth, V.syntheticValue))
+    assert str(value_value) == "Mika Waltari"
+    marc_source_value = next(g_salvaged.objects(synth, V.syntheticMarcSource))
+    assert str(marc_source_value) == "245$c"
+
+    # prov:used chains to a MarcConversion Activity.
+    used = next(g_salvaged.objects(synth, V.PROV.used))
+    assert (used, RDF.type, V.MarcConversion) in g_salvaged
+
+    # Non-salvaged record has NO Synthesis Activity.
+    g_clean = Graph()
+    g_clean.parse(out / "bibframe" / "10000001.rdf", format="xml")
+    assert list(g_clean.subjects(RDF.type, V.Synthesis)) == []
+
+
 def test_admin_metadata_block_present(conversion: tuple[Path, ConversionSummary]) -> None:
     out, _ = conversion
     g = Graph()

@@ -1,0 +1,35 @@
+# P-41 Phase C.3 — retrospective regen of the per-run
+# export-synthesis TSV from provenance.ttl alone.
+#
+# Reads every bffi-prov:Synthesis Activity and joins through
+# prov:used to its source bffi-prov:MarcConversion Activity to
+# recover the bib_id. Output rows match the per-run TSV's column
+# order from src/bffi_pipeline/export_synthesis.py exactly so the
+# CLI can write a byte-identical TSV (after numeric formatting).
+#
+# Run scoping is by helmetBibId presence on the MarcConversion
+# Activity; the CLI filters in Python by walking only rows whose
+# source Activity matches the requested run_uuid. Today the
+# MarcConversion Activity itself does not carry a run_uuid
+# predicate — when P-32's run-manifest predicate lands on each
+# Activity, this query gains a FILTER on it; until then the CLI
+# accepts every Synthesis row in the provenance graph and the
+# caller is expected to point at a per-run provenance.ttl.
+
+PREFIX prov:      <http://www.w3.org/ns/prov#>
+PREFIX bffi-prov: <http://urn.fi/URN:NBN:fi:schema:bffi-prov#>
+PREFIX xsd:       <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?bib_id ?field ?marc_source ?value ?tier ?method ?confidence ?activity
+WHERE {
+  ?activity a bffi-prov:Synthesis ;
+            prov:used ?marcConv ;
+            bffi-prov:syntheticField ?field ;
+            bffi-prov:syntheticMethod ?method ;
+            bffi-prov:syntheticTier ?tier ;
+            bffi-prov:syntheticConfidence ?confidence ;
+            bffi-prov:syntheticValue ?value ;
+            bffi-prov:syntheticMarcSource ?marc_source .
+  ?marcConv bffi-prov:helmetBibId ?bib_id .
+}
+ORDER BY ?bib_id ?tier

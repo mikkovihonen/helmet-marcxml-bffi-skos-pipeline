@@ -244,10 +244,72 @@ def log_reconciliation(
     return activity
 
 
+def log_synthesis(
+    g: Graph,
+    *,
+    used_activity: URIRef,
+    generated: URIRef | None,
+    synthetic_field: str,
+    synthetic_method: str,
+    synthetic_tier: str,
+    synthetic_confidence: float,
+    synthetic_value: str,
+    synthetic_marc_source: str,
+    started_at: datetime | None = None,
+    ended_at: datetime | None = None,
+    activity_uri: URIRef | None = None,
+) -> URIRef:
+    """P-41 Phase B.5 — mint a ``bffi-prov:Synthesis`` Activity.
+
+    Emitted by M2's salvage layer once per (record, synthesised field)
+    tuple. ``used_activity`` is the source MarcConversion Activity for
+    the same record — the audit trail traverses ``prov:used`` from
+    this Activity back to the MarcConversion to recover the run
+    context (run_uuid, helmet_bib_id, etc.). ``generated`` is the
+    synthesised resource (typically a ``bf:Contribution`` blank node
+    URI) or ``None`` for cases where the synthesis manifests purely
+    as a MARC datafield without a stable resource URI yet (the M3
+    BIBFRAME conversion mints the contribution URI after this
+    Activity is logged).
+
+    ``synthetic_value`` and ``synthetic_marc_source`` are persisted as
+    literals so the Phase C.3 retrospective TSV-regen CLI can rebuild
+    the per-run TSV byte-identically from ``provenance.ttl`` alone.
+
+    Returns the activity URI so the Phase C TSV writer can record it
+    in the ``activity_uri`` column.
+    """
+    activity = activity_uri or V.BIB[f"synthesis/{ULID()}"]
+    started = started_at or _now()
+    ended = ended_at or started
+
+    g.add((activity, V.RDF.type, V.PROV.Activity))
+    g.add((activity, V.RDF.type, V.Synthesis))
+    g.add((activity, V.PROV.startedAtTime, Literal(started.isoformat(), datatype=V.XSD.dateTime)))
+    g.add((activity, V.PROV.endedAtTime, Literal(ended.isoformat(), datatype=V.XSD.dateTime)))
+    g.add((activity, V.PROV.used, used_activity))
+    if generated is not None:
+        g.add((activity, V.PROV.generated, generated))
+    g.add((activity, V.syntheticField, Literal(synthetic_field)))
+    g.add((activity, V.syntheticMethod, Literal(synthetic_method)))
+    g.add((activity, V.syntheticTier, Literal(synthetic_tier)))
+    g.add(
+        (
+            activity,
+            V.syntheticConfidence,
+            Literal(synthetic_confidence, datatype=V.XSD.decimal),
+        )
+    )
+    g.add((activity, V.syntheticValue, Literal(synthetic_value)))
+    g.add((activity, V.syntheticMarcSource, Literal(synthetic_marc_source)))
+    return activity
+
+
 __all__ = [
     "log_merge_decision",
     "log_reconciliation",
     "log_review",
     "log_software_agent",
+    "log_synthesis",
     "model_agent_uri",
 ]

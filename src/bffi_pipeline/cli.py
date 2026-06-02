@@ -2624,6 +2624,63 @@ def export_command(
     typer.echo(summary.render())
 
 
+@app.command("export-synthesis-report")
+def export_synthesis_report_command(
+    run_uuid: Annotated[
+        str,
+        typer.Option(
+            "--run",
+            help=(
+                "Run UUID whose synthesis events should be re-derived. The "
+                "per-run data directory is resolved as <BFFI_RUNS_ROOT>/<run-uuid>. "
+                "Use ``bffi-pipeline runs list`` to find the UUID."
+            ),
+        ),
+    ],
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "Where to write the regenerated TSV. Defaults to "
+                "<BFFI_DATA_DIR>/export-synthesis-<run-uuid>.tsv (overwriting "
+                "the live emitter's output)."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """P-41 Phase C.3 — rebuild the per-run export-synthesis TSV from
+    ``data/provenance.ttl`` (or the per-record BIBFRAME graphs the
+    pipeline already wrote). The output is byte-identical to the live
+    emitter's TSV modulo row ordering (the regen sorts by bib_id+tier;
+    the live emitter writes in M2 per-record loop order).
+
+    Useful when an operator deletes the live TSV but keeps the
+    BIBFRAME graphs, or wants to re-derive the TSV from a partial run
+    the dashboard can't fully recover from.
+    """
+    from bffi_pipeline.release.export_synthesis_report import (
+        regen_export_synthesis_report,
+    )
+
+    settings = get_settings()
+    data_dir = settings.runs_root / run_uuid
+    if not data_dir.is_dir():
+        typer.echo(
+            f"[bffi-pipeline] run dir not found: {data_dir}. "
+            "Use `bffi-pipeline runs list` to find the right UUID.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    target = output_path or (data_dir / f"export-synthesis-{run_uuid}.tsv")
+    rows = regen_export_synthesis_report(data_dir=data_dir, output_path=target)
+    typer.echo(f"[bffi-pipeline] regenerated {rows} synthesis rows → {target}")
+
+
 def _maybe_clear_fuseki_before_load(
     *,
     fuseki_url: str,

@@ -111,6 +111,17 @@ syntheticTier: URIRef = BFFI_PROV.syntheticTier
 #: bands documented in ``docs/bibliographic-minimum.md``. B1 regex
 #: emits 0.5-0.8; B1 LLM cascade caps at 0.7; B2 emits 0.3; B3 emits 0.1.
 syntheticConfidence: URIRef = BFFI_PROV.syntheticConfidence
+#: The literal or URI now in the synthesised resource — for B1/B2 the
+#: agent name, for B3 the sentinel URI. Persisted on the Synthesis
+#: Activity so the Phase C.3 retrospective CLI can rebuild the TSV's
+#: ``synthesised_value`` column byte-identically without traversing
+#: the BIBFRAME graph.
+syntheticValue: URIRef = BFFI_PROV.syntheticValue
+#: The MARC source field(s) the salvage tier read — ``"245$c"`` for
+#: B1, ``"260$b/264$b"`` for B2, ``"(none)"`` for B3. Persisted on
+#: the Synthesis Activity so the retrospective CLI doesn't have to
+#: infer this from the method tag.
+syntheticMarcSource: URIRef = BFFI_PROV.syntheticMarcSource
 
 # --- BFFI-side predicates added by M2 salvage (P-41) ---------------------
 
@@ -248,8 +259,10 @@ __all__ = [
     "stage",
     "syntheticConfidence",
     "syntheticField",
+    "syntheticMarcSource",
     "syntheticMethod",
     "syntheticSentinel",
     "syntheticTier",
+    "syntheticValue",
     "temperature",
 ]

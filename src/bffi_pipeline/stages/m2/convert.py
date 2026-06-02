@@ -28,6 +28,8 @@ from rdflib import Graph, URIRef
 from rdflib.namespace import RDFS
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.export_synthesis import append_synthesis_row
+from bffi_pipeline.provenance import logger as P
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m2.marcxml_repair import (
     _sanitize_language_tags,
@@ -86,11 +88,21 @@ def post_process(
     helmet_id: str,
     source_file: Path,
     converted_at: str | None = None,
+    salvage_outcome: SalvageOutcome | None = None,
 ) -> tuple[URIRef, URIRef]:
     """Add Helmet identifiers, conversion provenance, and AdminMetadata blocks.
 
     Returns ``(work_uri, instance_uri)`` for the side-effect graph. Mutates
     ``g`` in place.
+
+    P-41 Phase B.5 + C.2: when ``salvage_outcome`` is non-None, also
+    writes one ``bffi-prov:Synthesis`` Activity per synthesis record to
+    the graph (linked to the MarcConversion Activity via ``prov:used``)
+    AND appends one row per synthesis record to the per-run export-
+    synthesis TSV. The Synthesis Activity and the TSV row come from
+    the same source-of-truth :class:`SynthesisRecord`, so the
+    retrospective ``bffi-pipeline export-synthesis-report`` CLI can
+    rebuild the TSV from the provenance graph byte-identically.
     """
     converted_at = converted_at or _utc_now()
     work, instance = _find_root_resources(g)
@@ -118,6 +130,13 @@ def post_process(
         activity=activity,
         converted_at=converted_at,
     )
+    if salvage_outcome is not None:
+        _emit_synthesis_audit_trail(
+            g,
+            outcome=salvage_outcome,
+            used_activity=activity,
+            generated=work,
+        )
     g.bind("bf", V.BF)
     g.bind("bffi", V.BFFI)
     g.bind("bffi-prov", V.BFFI_PROV)
@@ -125,6 +144,52 @@ def post_process(
     g.bind("prov", V.PROV)
     g.bind("rdfs", RDFS)
     return work, instance
+
+
+def _emit_synthesis_audit_trail(
+    g: Graph,
+    *,
+    outcome: SalvageOutcome,
+    used_activity: URIRef,
+    generated: URIRef,
+) -> None:
+    """P-41 Phase B.5 + C.2 — emit the Synthesis Activity (in
+    ``g``) and the per-run TSV row for every SynthesisRecord in
+    ``outcome.records``.
+
+    The MarcConversion Activity (passed as ``used_activity``) is the
+    ``prov:used`` link — traversing it recovers the run context.
+    ``generated`` is the raw Work URI; the synthesised contribution's
+    blank-node URI is not stable until M3 expands the BIBFRAME, so we
+    point ``prov:generated`` at the Work for now (the link is at the
+    coarser granularity of "this Work has synthesised contributions",
+    not "this specific contribution blank node was synthesised"). A
+    future plan that needs the finer link can reify per-contribution
+    URIs at M3 and add them as additional ``prov:generated`` edges
+    on the same Activity.
+    """
+    for record in outcome.records:
+        synthesis_activity = P.log_synthesis(
+            g,
+            used_activity=used_activity,
+            generated=generated,
+            synthetic_field=record.field,
+            synthetic_method=record.method,
+            synthetic_tier=record.tier,
+            synthetic_confidence=record.confidence,
+            synthetic_value=record.synthesised_value,
+            synthetic_marc_source=record.marc_source,
+        )
+        append_synthesis_row(
+            bib_id=record.bib_id,
+            field=record.field,
+            marc_source=record.marc_source,
+            synthesised_value=record.synthesised_value,
+            tier=record.tier,
+            method=record.method,
+            confidence=record.confidence,
+            activity_uri=str(synthesis_activity),
+        )
 
 
 def _is_output_fresh(input_path: Path, output_path: Path) -> bool:
@@ -190,16 +255,16 @@ def _convert_one(
 
     The caller catches errors and routes them to ``_errors.jsonl``.
 
-    P-41 Phase B.7: validation is now ``_validate_with_salvage`` —
-    records missing 1XX/7XX (creator) that previously raised
+    P-41 Phase B.7 + B.5 + C.2: validation is ``_validate_with_salvage``
+    — records missing 1XX/7XX (creator) that previously raised
     ``marcxml-content-minimum`` go through the creator-salvage layer
-    instead and emerge with a synthesised 700 / 710 datafield. The
-    salvage outcome is available downstream as ``_salvage_outcome``
-    on the caller's request; today only the per-record success path
-    consumes it (provenance write happens later when Phase B.5 lands
-    the Synthesis Activity emitter).
+    instead and emerge with a synthesised 100/700/710 datafield. The
+    salvage outcome is forwarded into :func:`post_process` so the
+    Synthesis Activity lands in the provenance graph alongside the
+    MarcConversion Activity, and the per-run TSV row lands at
+    ``<BFFI_DATA_DIR>/export-synthesis-<run_uuid>.tsv``.
     """
-    validated, _salvage_outcome = _validate_with_salvage(input_path)
+    validated, salvage_outcome = _validate_with_salvage(input_path)
     helmet_id = validated.helmet_bib_id
     out = _output_path_for(output_dir, helmet_id)
     if not force and _is_output_fresh(input_path, out):
@@ -226,6 +291,7 @@ def _convert_one(
         helmet_id=helmet_id,
         source_file=input_path,
         converted_at=converted_at,
+        salvage_outcome=salvage_outcome,
     )
     assert_conforms(g, source_path=input_path)
 
