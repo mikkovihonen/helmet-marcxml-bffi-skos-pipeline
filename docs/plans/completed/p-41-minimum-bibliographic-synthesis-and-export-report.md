@@ -1,6 +1,6 @@
 # P-41 — Synthesise the minimum bibliographic field set for every exported record + per-run synthesis TSV
 
-**Status**: in-progress (graduated from `proposed/` 2026-06-02; Phase A starts immediately, Phases B + C follow in the same session).
+**Status**: completed (all three phases shipped in one session — 2026-06-02 — across eight commits: `96a8b37` (A), `4602aad` (B.0/B.1/B.4/B.7), `f408901` (B.5 + Phase C), `d1372ba` (B.6), `e81f52c` (B.3), `b4dced1` (B.2)). Code, vocabulary, and audit-trail surfaces are in place; B.8 + C.4 corpus-scale verification on the 5 000-record sample is **operator-pending** (the M5 Max + Ollama + production corpus aren't accessible from this session — see "Verification status" below).
 
 **Source proposal**: this file, in its `proposed/`-shape form, was the same `p-41-minimum-bibliographic-synthesis-and-export-report.md` filename under `docs/plans/proposed/`. No proposal-shape commit exists in `git log --follow`; the proposal-shape content lived only in the working tree before graduation. The proposal-shape version is recoverable from this conversation's earlier Write tool call (commit `57f810b` is the proposal-base; the diff between that commit and the first plan-shape commit is the proposal-shape → plan-shape rewrite).
 
@@ -18,13 +18,11 @@ CLAUDE.md` to confirm no in-flight work has reshaped the surfaces this plan touc
 
 - Phase A (spec + `bffi-prov:Synthesis` Activity + unify existing synth markers): `96a8b37`
 - Phase B (creator-gap salvage at M2 repair layer):
-  - B.0/B.1/B.4/B.7 — Settings + dispatcher + B1 regex + B3 sentinel + M2 wiring: `4602aad`
-  - B.5 — Synthesis Activity emission to provenance: shipped jointly with Phase C below.
+  - B.0 / B.1 / B.4 / B.7 — Settings + dispatcher + B1 regex + B3 sentinel + M2 wiring: `4602aad`
+  - B.5 — Synthesis Activity emission to provenance: shipped jointly with Phase C below at `f408901`.
   - B.6 — Sentinel `bffi:syntheticSentinel` flag emission + `is_synthetic_sentinel` helper + invariant fixture (sentinel is non-primary; M5/M6/M8 already skip via `bffi:PrimaryContribution` filter; M9 future P-39 walker reads the helper): `d1372ba`
-  - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `e81f52c`
+  - B.3 — B2 publisher-as-corporate-creator (feature-flagged off pending cataloguer Ask 6 — leader/06 sign-off): `e81f52c`
   - B.2 — B1 LLM cascade fallback (`prompts/salvage-245c-v1.txt` + `salvage_245c_llm.py` with LangChain ChatOpenAI + SQLite cache + verbatim-substring post-processor + retry stack + dispatcher wiring): `b4dced1`
-  - B.2 — B1 LLM cascade fallback: `<unfilled>`
-  - B.3 — B2 publisher-as-corporate-creator (feature-flagged off): `<unfilled>`
 - Phase C (per-run `export-synthesis-<run_uuid>.tsv` writer + `bffi-pipeline export-synthesis-report --run <uuid>` retrospective CLI; also includes Phase B.5 provenance emit): `f408901`
 
 **Owner**: TBD.
@@ -274,6 +272,38 @@ WHERE  { ?activity a bffi-prov:Synthesis ;
 Phase C is pure observability (TSV + CLI); rollback is `git revert`. The per-run TSVs already on disk stay as historical record; operators can delete the files manually if desired.
 
 The sentinel agent URI `http://urn.fi/URN:NBN:fi:bib:agent:unknown`, once committed to `CLAUDE.md` § "Committed identifiers", is by definition not rolled back without surfacing — the URI is part of the project's external contract. Removing it requires a separate decision recorded in `CLAUDE.md`.
+
+## Verification status
+
+What was verified in-session (2026-06-02):
+
+- `make lint && make test` green at every phase commit. Final state: **1167 tests passing**, mypy --strict clean, ruff clean.
+- **End-to-end M2 → BIBFRAME → M3** for the salvage path verified via fixture-driven integration tests:
+  - `tests/data/sample-marcxml/10000007.xml` (B1 fixture — `245$c "kirjoittanut Mika Waltari"`) flows through M2 with a synthesised MARC 100, emerges in BIBFRAME with a `bffi-prov:Synthesis` Activity carrying all six `synthetic*` predicates + `prov:used` → MarcConversion.
+  - `tests/data/sample-marcxml/10000008.xml` (B3 sentinel fixture — no parseable 245$c) flows through M2 with the shared sentinel agent at `http://urn.fi/URN:NBN:fi:bib:agent:unknown` carrying `bffi:syntheticSentinel "true"^^xsd:boolean`.
+  - Retrospective CLI roundtrip (`bffi-pipeline export-synthesis-report --run <uuid>`) reads the per-record provenance graphs and reproduces the per-run TSV byte-identically modulo row ordering.
+- **Unit coverage** for every salvage tier: B1 regex (21 tests across 6 classes), B1 LLM cascade (21 tests across 6 classes — verbatim-substring enforcement, cache-hit short-circuit, connection-error retry, hallucinated-name drop), B2 publisher (11 tests across 4 classes — feature-flag gates, leader/06 matching, ISBD-punctuation stripping), B3 sentinel (3 tests).
+
+What is **operator-pending** (cannot be verified from this session):
+
+- **B.8 corpus-scale verification.** Plan body asks for: "Re-run the 2026-05-14 5k-sample (`logs/runs/pipeline-full.log`) under the new salvage layer; document the new drop count and the per-tier salvage counts. Expectation: M2 drops fall from 94 / 5000 (1.88 %) to under 5 / 5000 (0.1 %)." The re-bench needs the operator's M5 Max + Ollama running + the 5 k production-style sample on disk; record the measured drop count + per-tier salvage histogram here when the bench lands. The pre-salvage signal in `logs/runs/pipeline-full.log` (94 drops; 91 missing-creator) is the baseline to compare against.
+- **C.4 byte-identity check on the production-scale retro-CLI output.** The fixture-scale roundtrip is verified; the corpus-scale roundtrip is the remaining gate.
+- **Cataloguer Ask 5** — sentinel label confirmation (`Tekijä tuntematon` / `Okänd upphovsman` / `Unknown author` ship as the default; the labels are env-var-configurable, no code change needed when the answer arrives).
+- **Cataloguer Ask 6** — B2 leader/06 set. B2 ships behind a feature flag default-off; flipping `BFFI_CREATOR_SALVAGE_B2_PUBLISHER_ENABLED=true` and populating `BFFI_CREATOR_SALVAGE_B2_LEADER06="a,e,g,m"` (or whichever subset the cataloguer team confirms) activates the tier with no code change.
+
+## Post-mortem
+
+What went better than expected:
+
+- **B.6 sentinel exclude rules required almost no new code.** The existing M5/M6/M8 filtering on `bffi:PrimaryContribution` (a pre-P-41 convention) naturally excluded the B3 sentinel agent because it lives on MARC 710 → `bffi:Contribution` (non-primary). The work reduced to emitting the `bffi:syntheticSentinel` flag for P-39's future M9 walker + a defensive `is_synthetic_sentinel` helper + an invariant fixture pinning the property.
+- **B.5 + Phase C composed cleanly.** The Synthesis Activity emit and the per-run TSV write both consume the same `SynthesisRecord` source-of-truth, so the byte-identity contract between the live TSV and the retrospective regen was a one-tuple invariant rather than a parallel write-path to keep in sync.
+- **B.2 LLM cascade architecture mirrored `contrib_extract_llm.py` exactly.** The existing 470-line M3-stage 245$c contributor extraction was the template; B.2 is roughly the same line count with the same retry stack, the same Pydantic schema shape, the same lazy-import-langchain pattern, and a verbatim-substring post-processor adapted for the salvage use case.
+
+What surfaced unexpectedly:
+
+- **Name-order mismatch on synthesised creators.** B1 emits MARC 100$a verbatim from 245$c (first-last form: "Mika Waltari"); cataloguer-typed records use surname-first MARC convention ("Waltari, Mika,"). The blocking key derivation picks "mika" instead of "waltari" as the surname token. Documented as a known quality gap in `tests/integration/test_workkey.py`'s `_EXPECTED_KEYS` comment; P-39's KANTO reconciliation will normalise to surname-first when it resolves the synthesised name to an authority record.
+- **Pydantic 2.13's `Field(min_length=...)` error message text changed.** A test asserting `pytest.raises(ValueError, match="shorter than")` failed because the new message is "at least 20 characters". One-line test fix.
+- **Retrospective regen required two additional `bffi-prov:` predicates** (`syntheticValue`, `syntheticMarcSource`) so the SPARQL query could reproduce the live TSV byte-identically without traversing the BIBFRAME graph for `synthesised_value` and inferring `marc_source` from method-tag heuristics. Caught during Phase C.3 implementation; vocabulary additions were trivially additive.
 
 ## Cross-references
 
