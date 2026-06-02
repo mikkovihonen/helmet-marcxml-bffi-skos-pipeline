@@ -93,6 +93,9 @@ class TestHeader:
 
 class TestDedup:
     def test_same_key_writes_one_row(self, emit_to: Path) -> None:
+        """Re-entering the salvage path for the same
+        (bib, field, tier, value) tuple — e.g. a re-run — collapses
+        to one TSV row."""
         for _ in range(3):
             append_synthesis_row(
                 bib_id="b001",
@@ -106,6 +109,30 @@ class TestDedup:
             )
         # 1 header + 1 data row (other two were deduped).
         assert len(_read_lines(emit_to)) == 2
+
+    def test_multi_agent_same_bib_writes_one_row_per_agent(self, emit_to: Path) -> None:
+        """Regression test for the 2026-06-02 5k-bench finding: a
+        single B1 salvage that produces multiple agents (e.g. parsing
+        "Liisa Louhela ja Pekka Halonen") must emit one TSV row per
+        agent, not collapse to one row. Pre-fix, the
+        (bib, field, tier) dedup key silently dropped 30 of 673
+        salvage events on the 5k bench."""
+        for name in ("Liisa Louhela", "Pekka Halonen"):
+            append_synthesis_row(
+                bib_id="b001",
+                field="bf:contribution/bf:agent",
+                marc_source="245$c",
+                synthesised_value=name,
+                tier="B1",
+                method="creator-from-245c (regex, role=unknown, marc=100)",
+                confidence=0.5,
+                activity_uri=f"http://urn.fi/URN:NBN:fi:bib:synthesis/{name}",
+            )
+        # 1 header + 2 data rows (one per agent).
+        lines = _read_lines(emit_to)
+        assert len(lines) == 3
+        data_rows = [line.split("\t") for line in lines[1:]]
+        assert {row[3] for row in data_rows} == {"Liisa Louhela", "Pekka Halonen"}
 
     def test_distinct_tier_with_same_bib_field_writes_two_rows(self, emit_to: Path) -> None:
         # Hypothetical: a record where B1 contributes a primary creator

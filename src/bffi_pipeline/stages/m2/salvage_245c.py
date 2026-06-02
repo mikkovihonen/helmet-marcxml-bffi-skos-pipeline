@@ -36,24 +36,50 @@ from typing import Final, Literal
 #: is either ``First Last`` or ``Last, First``. The regexes below split
 #: on those markers + boundaries.
 
-#: Finnish + Swedish + English role markers, mapped to the role tag we
-#: emit on the synthesised 700$e. Order matters in the alternation —
-#: longer phrases first so ``"kirjoittanut"`` doesn't get partial-
-#: matched as ``"toim."``.
+#: Finnish + Swedish + English + German role markers, mapped to the role
+#: tag we emit on the synthesised 7XX$e. Order matters in the
+#: alternation — longer phrases first so ``"kirjoittanut"`` doesn't
+#: get partial-matched as ``"toim."`` and ``"herausgegeben von"``
+#: gets stripped as the full phrase rather than leaving ``"von"`` as a
+#: lone token that would corrupt the parsed name. German markers were
+#: added 2026-06-02 after the P-41 B.8 5k bench found B1 mis-parsing
+#: ``"herausgegeben von L. Richter"`` as a 4-token name (synthesised
+#: value = the full string with role marker prefix). The corpus has
+#: enough German-source records that the additional coverage moves
+#: real volume from B3 sentinel to B1 regex.
 _ROLE_MARKERS: Final[tuple[tuple[str, str], ...]] = (
+    # Finnish.
     ("kirjoittanut", "author"),
     ("toimittanut", "editor"),
     ("toim.", "editor"),
     ("kääntänyt", "translator"),
+    ("suomentanut", "translator"),
     ("käänt.", "translator"),
     ("kuvittanut", "illustrator"),
     ("kuv.", "illustrator"),
-    ("by", "author"),
-    ("av", "author"),
-    ("edited by", "editor"),
-    ("ed.", "editor"),
+    # English.
+    ("written by", "author"),
     ("translated by", "translator"),
+    ("edited by", "editor"),
+    ("illustrated by", "illustrator"),
+    ("compiled by", "compiler"),
     ("trans.", "translator"),
+    ("ed.", "editor"),
+    ("by", "author"),
+    # Swedish.
+    ("översatt av", "translator"),
+    ("redigerad av", "editor"),
+    ("illustrerad av", "illustrator"),
+    ("av", "author"),
+    # German. ``"herausgegeben von"`` must be matched as the full
+    # phrase to strip both the role verb and the German nobility /
+    # family-name particle ``"von"`` that legitimately appears
+    # mid-name in other contexts (e.g. "Johann Wolfgang von Goethe").
+    ("herausgegeben von", "editor"),
+    ("übersetzt von", "translator"),
+    ("herausgegeben", "editor"),
+    ("hrsg. von", "editor"),
+    ("hrsg.", "editor"),
 )
 
 #: Conjunctions / separators that split a multi-author 245$c into

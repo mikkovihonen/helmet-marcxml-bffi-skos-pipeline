@@ -52,11 +52,17 @@ _HEADER: Final[tuple[str, ...]] = (
 #: Per-process dedup state. Module-level singletons by design — one
 #: pipeline invocation = one process = one set of dedup keys. Tests
 #: reset via :func:`_reset_for_tests`. Key is
-#: ``(bib_id, field, tier)``: a record that synthesised two distinct
-#: fields (e.g. creator AND a future-tier 008-date) gets two rows;
-#: re-entering the salvage path for the same (bib, field, tier)
-#: produces one row.
-_seen: set[tuple[str, str, str]] = set()
+#: ``(bib_id, field, tier, synthesised_value)``: a record that
+#: synthesised two distinct fields (e.g. creator AND a future-tier
+#: 008-date) gets two rows; a multi-agent B1 salvage (e.g.
+#: "Liisa Louhela ja Pekka Halonen" → 2 agents) also gets two
+#: rows, one per agent. Re-entering the salvage path for the same
+#: (bib, field, tier, value) — which only happens on a retry of
+#: the same record — produces one row. Pre-2026-06-02 bench surfaced
+#: that the prior 3-tuple key collapsed multi-agent salvages
+#: silently: 673 Synthesis Activities in the provenance graph vs
+#: 643 rows in the TSV.
+_seen: set[tuple[str, str, str, str]] = set()
 _header_written = False
 
 
@@ -100,7 +106,7 @@ def append_synthesis_row(
         return
     path, _run_uuid = resolved
 
-    key = (bib_id, field, tier)
+    key = (bib_id, field, tier, synthesised_value)
     if key in _seen:
         return
     _seen.add(key)

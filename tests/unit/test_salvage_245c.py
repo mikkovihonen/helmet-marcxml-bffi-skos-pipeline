@@ -27,6 +27,19 @@ class TestRoleMarkedShapes:
         agents = parse_245c("by Margaret Atwood")
         assert agents == [ParsedAgent(name="Margaret Atwood", role="author", confidence=0.8)]
 
+    def test_german_herausgegeben_von_marker_strips_full_phrase(self) -> None:
+        """Regression test for the 2026-06-02 P-41 B.8 5k-bench
+        finding: pre-fix, B1 regex didn't recognise German role
+        markers, so ``"herausgegeben von L. Richter"`` (corpus
+        bib 1000072) was synthesised as a 4-token name (the full
+        string) rather than stripped to ``"L. Richter"``."""
+        agents = parse_245c("herausgegeben von L. Richter")
+        assert agents == [ParsedAgent(name="L. Richter", role="editor", confidence=0.8)]
+
+    def test_german_uebersetzt_von_marker_strips_full_phrase(self) -> None:
+        agents = parse_245c("übersetzt von Hans Müller")
+        assert agents == [ParsedAgent(name="Hans Müller", role="translator", confidence=0.8)]
+
 
 class TestUnmarkedShapes:
     """245$c often carries just a bare name (Finnish convention)."""
