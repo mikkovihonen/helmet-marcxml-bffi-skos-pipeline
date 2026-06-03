@@ -1763,6 +1763,19 @@ def run_command(
             ),
         ),
     ] = False,
+    llm_contrib_cascade: Annotated[
+        bool,
+        typer.Option(
+            "--llm-contrib-cascade/--no-llm-contrib-cascade",
+            help=(
+                "Enable M3's 245$c contributor-extraction cascade. Each fire "
+                "is one Qwen3 8B call (~10 s warm); fire rate ~13 % of "
+                "records. Required for the ``cataloguer-bundle`` stage to "
+                "produce a non-empty bundle — the bundle stage reads the "
+                "audit log this cascade writes."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run the canonical pipeline chain (M2 → M3 → M5 → M6 → M8 → M9 → Skosify → Load).
 
@@ -1800,6 +1813,7 @@ def run_command(
         description=description,
         from_stage=from_stage,
         llm_salvage_cascade=llm_salvage_cascade,
+        llm_contrib_cascade=llm_contrib_cascade,
     )
     typer.echo(summary.render())
 
@@ -1896,6 +1910,8 @@ app.command("embed-benchmark")(_evaluation_commands.embed_benchmark_command)
 app.command("eval")(_evaluation_commands.eval_command)
 app.command("grow-gold")(_evaluation_commands.grow_gold_command)
 app.command("grow-gold-contrib")(_evaluation_commands.grow_gold_contrib_command)
+app.command("review-bundle-build")(_evaluation_commands.review_bundle_build_command)
+app.command("review-bundle-import")(_evaluation_commands.review_bundle_import_command)
 app.command("embed-stats")(_evaluation_commands.embed_stats_command)
 
 

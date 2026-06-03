@@ -120,6 +120,7 @@ def _convert_one(
     llm_detector: object | None = None,
     contrib_extractor: object | None = None,
     variants_sidecar_path: Path | None = None,
+    audit_log_path: Path | None = None,
     now: datetime | None = None,
 ) -> Graph:
     source = Graph()
@@ -143,6 +144,7 @@ def _convert_one(
         llm_detector=llm_detector,
         contrib_extractor=contrib_extractor,
         variants_sidecar_path=variants_sidecar_path,
+        audit_log_path=audit_log_path,
         now=now,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)

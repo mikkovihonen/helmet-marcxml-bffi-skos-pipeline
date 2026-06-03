@@ -83,6 +83,7 @@ CANONICAL_STAGES: Final[tuple[str, ...]] = (
     "skosify",
     "load",
     "export",
+    "cataloguer-bundle",
 )
 
 #: Phase declarations per stage — feeds the ``stage_phases`` extra on the
@@ -106,6 +107,7 @@ STAGE_PHASES: Final[dict[str, tuple[str, ...]]] = {
     "skosify": ("_",),
     "load": ("_",),
     "export": ("_",),
+    "cataloguer-bundle": ("_",),
 }
 
 
@@ -146,8 +148,8 @@ def _dispatch_m2(*, input_dir: Path, force: bool, llm_salvage_cascade: bool = Fa
     )
 
 
-def _dispatch_m3(*, force: bool) -> None:
-    bf_to_bffi_command(force=force)
+def _dispatch_m3(*, force: bool, llm_contrib_cascade: bool = False) -> None:
+    bf_to_bffi_command(force=force, llm_contrib_cascade=llm_contrib_cascade)
 
 
 def _dispatch_m5(*, force: bool) -> None:
@@ -211,6 +213,65 @@ def _dispatch_export() -> None:
     export_command()
 
 
+def _dispatch_cataloguer_bundle() -> None:
+    """Build a cataloguer-review zip from whichever per-stage audit
+    logs this run produced, drop it into ``runs/<uuid>/cataloguer-review/``
+    next to a copy of the HTML reviewer.
+
+    Auto-discovers stages by walking ``STAGE_REGISTRY``: for each
+    handler whose ``<run_dir>/<audit_filename>`` exists and is
+    non-empty, include that stage in the bundle. Stages whose audit
+    log is absent (heuristic-only / skipped / didn't run) are
+    silently skipped — no operator-side flags needed.
+
+    No-ops with a clear message when zero stages have populated
+    audit logs (heuristic-only contrib + M6 skipped, for instance).
+    """
+    import shutil  # noqa: PLC0415
+
+    from bffi_pipeline.eval import review_bundle  # noqa: PLC0415
+    from bffi_pipeline.eval.review_bundle.stages import STAGE_REGISTRY  # noqa: PLC0415
+
+    settings = get_settings()
+    run_dir = settings.data_dir
+
+    schemas_with_audit: list[str] = []
+    pool_overrides: dict[str, Path] = {}
+    for schema, handler in STAGE_REGISTRY.items():
+        audit = run_dir / handler.audit_filename
+        if audit.is_file() and audit.stat().st_size > 0:
+            schemas_with_audit.append(schema)
+            pool_overrides[schema] = audit
+
+    if not schemas_with_audit:
+        # Nothing to bundle. Print rather than raise: a heuristic-only
+        # run with no M6 is a legitimate operator choice.
+        registered = ", ".join(f"{h.stage_id}={h.audit_filename}" for h in STAGE_REGISTRY.values())
+        print(
+            f"[cataloguer-bundle] No populated audit logs found under {run_dir}. "
+            f"Registered: {registered}. Skipping bundle build."
+        )
+        return
+
+    bundle_dir = run_dir / "cataloguer-review"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / "bundle.zip"
+    result = review_bundle.build_bundle(
+        output_path=bundle_path,
+        operator=f"pipeline-run:{settings.run_uuid}",
+        stage_schemas=schemas_with_audit,
+        per_category=25,
+        seed=settings.run_uuid,
+        pool_overrides=pool_overrides,
+    )
+    shutil.copy2(
+        review_bundle.bundle.HTML_REVIEWER_PATH,
+        bundle_dir / "cataloguer-review.html",
+    )
+    print(result.render())
+    print(f"[cataloguer-bundle] HTML reviewer at {bundle_dir / 'cataloguer-review.html'}")
+
+
 #: Module-level dispatch table — lets tests monkeypatch a single stage's
 #: invocation without monkeypatching the entire CLI module.
 _DISPATCHERS: Final[dict[str, Callable[..., None]]] = {
@@ -223,6 +284,7 @@ _DISPATCHERS: Final[dict[str, Callable[..., None]]] = {
     "skosify": _dispatch_skosify,
     "load": _dispatch_load,
     "export": _dispatch_export,
+    "cataloguer-bundle": _dispatch_cataloguer_bundle,
 }
 
 
@@ -232,6 +294,7 @@ def _call_dispatcher(
     input_dir: Path | None,
     force: bool,
     llm_salvage_cascade: bool = False,
+    llm_contrib_cascade: bool = False,
 ) -> None:
     """Resolve + call the dispatch function for ``stage``.
 
@@ -246,9 +309,11 @@ def _call_dispatcher(
         if input_dir is None:
             raise ValueError("m2 dispatch requires input_dir (MARCXML source directory).")
         dispatcher(input_dir=input_dir, force=force, llm_salvage_cascade=llm_salvage_cascade)
-    elif stage in {"m3", "m5", "m6", "skosify"}:
+    elif stage == "m3":
+        dispatcher(force=force, llm_contrib_cascade=llm_contrib_cascade)
+    elif stage in {"m5", "m6", "skosify"}:
         dispatcher(force=force)
-    else:  # m8, m9, load, export
+    else:  # m8, m9, load, export, cataloguer-bundle
         dispatcher()
 
 
@@ -261,6 +326,7 @@ def run_pipeline(
     description: str = "",
     from_stage: str | None = None,
     llm_salvage_cascade: bool = False,
+    llm_contrib_cascade: bool = False,
 ) -> PipelineRunSummary:
     """Run the canonical pipeline chain in one Python process.
 
@@ -317,6 +383,7 @@ def run_pipeline(
             summary=summary,
             overall_start=overall_start,
             llm_salvage_cascade=llm_salvage_cascade,
+            llm_contrib_cascade=llm_contrib_cascade,
         )
     finally:
         summary.total_elapsed_seconds = time.monotonic() - overall_start
@@ -334,6 +401,7 @@ def _run_stages(
     summary: PipelineRunSummary,
     overall_start: float,
     llm_salvage_cascade: bool = False,
+    llm_contrib_cascade: bool = False,
 ) -> None:
     """Inner loop extracted so :func:`run_pipeline` can wrap it in the
     exporter context without indenting the entire body twice."""
@@ -362,6 +430,7 @@ def _run_stages(
                 input_dir=input_dir,
                 force=(stage in force_stages),
                 llm_salvage_cascade=llm_salvage_cascade,
+                llm_contrib_cascade=llm_contrib_cascade,
             )
         except BaseException as exc:
             elapsed = time.monotonic() - stage_start

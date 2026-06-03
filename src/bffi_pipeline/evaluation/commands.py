@@ -29,7 +29,7 @@ from typing import Annotated
 import typer
 
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.eval import embed_benchmark
+from bffi_pipeline.eval import embed_benchmark, review_bundle
 from bffi_pipeline.eval import grow as eval_grow
 from bffi_pipeline.eval import grow_contrib as eval_grow_contrib
 from bffi_pipeline.eval import harness as eval_harness
@@ -305,3 +305,201 @@ def embed_stats_command(
     target = output_dir or get_settings().data_dir
     stats = m5.query_candidates(target, top_k=top_k, cross_block=cross_block)
     typer.echo(stats.render())
+
+
+def _default_bundle_output() -> Path:
+    """Today's bundle path under ``<repo>/scratchpad/`` (gitignored).
+
+    The bundle is per-day ephemera the operator emails to the
+    cataloguer, not a checked-in artefact.
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    today = datetime.now(UTC).date().isoformat()
+    return Path(__file__).resolve().parents[2] / "scratchpad" / f"review-batch-{today}.zip"
+
+
+def review_bundle_build_command(
+    operator: Annotated[
+        str,
+        typer.Option(
+            "--operator",
+            help="Operator name recorded in the bundle manifest.",
+        ),
+    ],
+    stages: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--stage",
+            help=(
+                "Stage schema id to include (e.g. 'contrib-candidate/1'). "
+                "Pass multiple times. Defaults to every registered stage."
+            ),
+        ),
+    ] = None,
+    per_category: Annotated[
+        int,
+        typer.Option(
+            "--per-category",
+            help="Per-category candidate count for the stratified sample.",
+        ),
+    ] = 25,
+    seed: Annotated[
+        str | None,
+        typer.Option(
+            "--seed",
+            help=(
+                "Sampling seed (any string). Default: today's UTC date so "
+                "two operators on the same day generate the same batch."
+            ),
+        ),
+    ] = None,
+    marc_dir: Annotated[
+        Path,
+        typer.Option(
+            "--marc-dir",
+            help=(
+                "Source directory of Helmet MARCXML files (one <bib>.xml "
+                "per record). Defaults to the operator-machine path."
+            ),
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = review_bundle.bundle.DEFAULT_HELMET_MARC_DIR,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            help="Output zip path. Defaults to scratchpad/review-batch-<date>.zip.",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+    from_run: Annotated[
+        str | None,
+        typer.Option(
+            "--from-run",
+            help=(
+                "Build the bundle from a specific pipeline run's contrib-cascade "
+                "audit log (runs/<uuid>/contrib-candidates.jsonl) instead of the "
+                "corpus-wide pool. Output defaults to "
+                "runs/<uuid>/cataloguer-review/bundle.zip and the HTML reviewer "
+                "is copied alongside it so the run dir is self-contained for "
+                "cataloguer hand-off."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Build a cataloguer-review zip bundle.
+
+    Bundle layout: manifest.json + per-stage candidates.jsonl + per-row
+    MARCXML sidecars. The cataloguer opens it in
+    gold/cataloguer-review.html, reviews, and emails back a results zip
+    in the same shape.
+
+    With ``--from-run <uuid>``, the bundle samples from that run's own
+    contrib-cascade audit log (cheaper + run-specific) and the produced
+    bundle + a copy of the HTML reviewer land under
+    ``runs/<uuid>/cataloguer-review/``. Without it, the bundle samples
+    from the corpus-wide candidate pool.
+    """
+    import shutil  # noqa: PLC0415
+
+    pool_overrides: dict[str, Path] = {}
+    target: Path
+    html_copy_dir: Path | None = None
+    if from_run is not None:
+        runs_root = get_settings().runs_root
+        run_dir = runs_root / from_run
+        if not run_dir.is_dir():
+            preview_n = 5
+            existing = sorted(p.name for p in runs_root.iterdir() if p.is_dir())
+            preview = ", ".join(existing[:preview_n])
+            more = " …" if len(existing) > preview_n else ""
+            raise typer.BadParameter(
+                f"--from-run: run dir {run_dir} does not exist. Available runs: {preview}{more}"
+            )
+        audit = run_dir / "contrib-candidates.jsonl"
+        if not audit.is_file():
+            raise typer.BadParameter(
+                f"--from-run: {audit} not found. Did M3 run with the contrib "
+                "cascade enabled? The audit log is only written when "
+                "--llm-contrib-cascade is on."
+            )
+        pool_overrides["contrib-candidate/1"] = audit
+        target = output if output is not None else (run_dir / "cataloguer-review" / "bundle.zip")
+        html_copy_dir = target.parent
+    else:
+        target = output if output is not None else _default_bundle_output()
+
+    result = review_bundle.build_bundle(
+        output_path=target,
+        operator=operator,
+        stage_schemas=stages,
+        per_category=per_category,
+        seed=seed,
+        marc_dir=marc_dir,
+        pool_overrides=pool_overrides or None,
+    )
+
+    if html_copy_dir is not None:
+        html_dst = html_copy_dir / "cataloguer-review.html"
+        shutil.copy2(review_bundle.bundle.HTML_REVIEWER_PATH, html_dst)
+        typer.echo(f"HTML reviewer copied to {html_dst}")
+
+    typer.echo(result.render())
+
+
+def review_bundle_import_command(
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "--input",
+            help=(
+                "Results zip the cataloguer exported from "
+                "gold/cataloguer-review.html. Mirrors the build-side "
+                "bundle layout with <stage>/results.jsonl files."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            exists=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ],
+    contrib_gold: Annotated[
+        Path | None,
+        typer.Option(
+            "--contrib-gold",
+            help=(
+                "Override the contrib stage's gold file path. Defaults to "
+                "gold/contrib.jsonl in the repo. Useful for dry-runs and "
+                "tests; production imports leave this unset."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ] = None,
+) -> None:
+    """Import a cataloguer's results zip.
+
+    Dispatches each stage's results.jsonl to its registered handler.
+    For contrib, KEEP rows are validated and appended to
+    gold/contrib.jsonl with sequential cg-NNNN ids; DISCARD rows are
+    dropped; SKIP-FOR-NOW rows surface in the summary.
+
+    P-39's M9 reconciliation work is gated on gold/contrib.jsonl
+    reaching ≥ 30 vetted rows; the contrib summary reports the gap.
+    """
+    overrides: dict[str, Path] = {}
+    if contrib_gold is not None:
+        overrides["contrib-candidate/1"] = contrib_gold
+    result = review_bundle.import_results(
+        input_path=input_path,
+        gold_overrides=overrides or None,
+    )
+    typer.echo(result.render())

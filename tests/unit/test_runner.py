@@ -102,10 +102,15 @@ def test_run_pipeline_dispatches_export_at_tail_of_canonical_chain(
     active_emitter: StageEventEmitter,
     tmp_path: Path,
 ) -> None:
-    """``export`` is the last stage of ``CANONICAL_STAGES`` — every
-    finished run produces a ``bffi-export-<run_uuid>.tar.gz``. Verify
-    the runner dispatches it and that ``STAGE_PHASES`` carries an
-    entry so the dashboard's pending bar fires."""
+    """``export`` is the BFFI-publishing tail of the canonical chain
+    — every finished run produces a ``bffi-export-<run_uuid>.tar.gz``.
+    Verify the runner dispatches it and that ``STAGE_PHASES`` carries
+    an entry so the dashboard's pending bar fires.
+
+    ``cataloguer-bundle`` follows export and is the LLM-review tail
+    (produces ``cataloguer-review/bundle.zip`` from this run's M3
+    contrib audit log); export remains the *publishing* tail.
+    """
     calls: list[str] = []
 
     def make_stub(stage_name: str):
@@ -125,7 +130,11 @@ def test_run_pipeline_dispatches_export_at_tail_of_canonical_chain(
     )
     assert "export" in calls
     assert "export" in runner_module.STAGE_PHASES
-    assert runner_module.CANONICAL_STAGES[-1] == "export"
+    # Both export and cataloguer-bundle live at the chain's tail —
+    # cataloguer-bundle runs after export but only when M3's contrib
+    # audit log is non-empty (otherwise it no-ops).
+    assert runner_module.CANONICAL_STAGES[-2:] == ("export", "cataloguer-bundle")
+    assert "cataloguer-bundle" in runner_module.STAGE_PHASES
 
 
 def test_run_pipeline_plan_event_includes_stage_phases_for_m9(
@@ -219,8 +228,11 @@ def test_force_stages_passes_force_only_to_supporting_dispatchers(
         force_stages=frozenset({"m3", "m6", "m8"}),
     )
 
-    # Force-supporting stages received force=True.
-    assert stub_all_stages["m3"][0] == {"force": True}
+    # Force-supporting stages received force=True. M3 also carries
+    # llm_contrib_cascade in its dispatcher signature (defaults to
+    # False), which the runner threads through whether or not the
+    # operator passed it.
+    assert stub_all_stages["m3"][0] == {"force": True, "llm_contrib_cascade": False}
     assert stub_all_stages["m6"][0] == {"force": True}
     # m8 has no force kwarg — dispatcher called with no kwargs regardless.
     assert stub_all_stages["m8"][0] == {}

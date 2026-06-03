@@ -36,6 +36,7 @@ def post_process(
     llm_detector: object | None = None,
     contrib_extractor: object | None = None,
     variants_sidecar_path: Path | None = None,
+    audit_log_path: Path | None = None,
     now: datetime | None = None,
 ) -> Graph:
     """Mutate ``bffi_graph`` in place: tag prefLabels, denormalise Helmet
@@ -47,7 +48,9 @@ def post_process(
     cascade. Either / both can be ``None`` to keep that stage
     graph-only. ``variants_sidecar_path`` is where the cascade
     appends one row per detected transliteration variant; M8's
-    binding pass reads the same file.
+    binding pass reads the same file. ``audit_log_path`` is where
+    the cascade appends one row per fire (used by the
+    cataloguer-review bundle build to avoid re-running the cascade).
     """
     candidates = _candidate_languages(source)
     if candidates:
@@ -57,6 +60,7 @@ def post_process(
         source,
         contrib_extractor=contrib_extractor,
         variants_sidecar_path=variants_sidecar_path,
+        audit_log_path=audit_log_path,
         now=now,
     )
     bffi_graph.bind("bf", V.BF)

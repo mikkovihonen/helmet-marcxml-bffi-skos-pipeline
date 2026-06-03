@@ -26,6 +26,11 @@ from bffi_pipeline.contrib_variants import (
     append_variant_claims,
 )
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.m3.contrib_audit import (
+    append_audit_rows,
+    flatten_decision_contributions,
+    suggest_category,
+)
 from bffi_pipeline.uris import mint_raw_expression_uri, mint_raw_work_uri
 
 
@@ -51,6 +56,7 @@ def _emit_extracted_contributions(
     *,
     contrib_extractor: object | None = None,
     variants_sidecar_path: Path | None = None,
+    audit_log_path: Path | None = None,
     now: datetime | None = None,
 ) -> None:
     """Run the heuristic + optional LLM cascade for MARC 245$c extraction.
@@ -115,6 +121,24 @@ def _emit_extracted_contributions(
 
         expr_uri = URIRef(mint_raw_expression_uri(str(work)))
         bib_id = _read_helmet_bib_id(source, work)
+
+        # Per-run audit log — one row per cascade fire, regardless of
+        # whether the cascade decision emits Contributions, variant
+        # claims, or a mix. Downstream tooling
+        # (``review-bundle-build --from-run``, the ``cataloguer-bundle``
+        # stage) consumes this instead of re-walking BIBFRAME, so we
+        # don't pay for the same LLM cascade twice.
+        if audit_log_path is not None and bib_id is not None:
+            flattened = flatten_decision_contributions(decision)
+            append_audit_rows(
+                audit_log_path,
+                helmet_bib_id=bib_id,
+                c_subfield=inputs.c_subfield,
+                existing_agents=inputs.existing_agent_labels,
+                contributions=flattened,
+                category=suggest_category(flattened),
+                now=now,
+            )
         for cand in decision.contributions:
             if cand.transliteration_of is not None:
                 # Variant pointer — record the binding decision in the

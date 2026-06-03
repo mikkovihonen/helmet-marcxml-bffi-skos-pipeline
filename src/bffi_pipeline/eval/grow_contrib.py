@@ -53,6 +53,12 @@ from bffi_pipeline.contrib_extract import (
 )
 from bffi_pipeline.contrib_extract_llm import ContribExtractor
 from bffi_pipeline.provenance import vocab as V
+from bffi_pipeline.stages.m3.contrib_audit import (
+    flatten_decision_contributions as _decision_to_contributions,
+)
+from bffi_pipeline.stages.m3.contrib_audit import (
+    suggest_category as _suggest_category,
+)
 from bffi_pipeline.stages.m3.contributions import _read_helmet_bib_id
 
 #: Default output path for the candidate JSONL — sits alongside
@@ -124,43 +130,16 @@ class GrowContribSummary:
 
 # --- Category suggestion --------------------------------------------------
 
-#: Auto-suggested categories the cataloguer can override on merge.
-#: Mirrors the categories present in the bootstrap rows + the broad
-#: shape of what the M3 cascade is asked to handle. The cataloguer is
-#: always free to overwrite this — the suggestion is a hint, not a
-#: classification.
+# Canonical implementation lives in
+# :mod:`bffi_pipeline.stages.m3.contrib_audit` so M3's per-fire audit
+# log and this corpus-mining path stamp the same labels when their
+# decision shapes match. ``_suggest_category`` is imported at the top
+# of the module; the legacy module-level category-name constants are
+# kept here for any callers that imported them directly.
 _CATEGORY_PURE_NEW_AGENT: Final[str] = "pure-new-agent"
 _CATEGORY_TRANSLITERATION: Final[str] = "transliteration"
 _CATEGORY_ROLE_CLASSIFICATION: Final[str] = "role-classification"
 _CATEGORY_AMBIGUOUS: Final[str] = "ambiguous-multi-shape"
-
-
-def _suggest_category(contributions: list[dict[str, Any]]) -> str:
-    """Heuristic category-suggestion for the cataloguer's review.
-
-    Looks at the LLM-decision shape:
-
-    - All entries have ``transliteration_of`` → ``"transliteration"``.
-    - All entries have ``relator_code`` and no transliteration → if a
-      single agent, suggest ``"role-classification"`` (the LLM is
-      mostly being asked "what's the role here?"); otherwise
-      ``"pure-new-agent"`` (multi-agent new extractions).
-    - Mixed (some variants + some new) → ``"ambiguous-multi-shape"``.
-
-    The cataloguer overrides on merge — the bootstrap categories
-    (``pure-new-agent`` / ``role-classification`` / ``within-record-typo``
-    / ``cyrillic-latin-transliteration``) are more nuanced than these
-    auto-suggestions can capture without context.
-    """
-    has_translit = any(c.get("transliteration_of") for c in contributions)
-    has_new = any(c.get("relator_code") and not c.get("transliteration_of") for c in contributions)
-    if has_translit and not has_new:
-        return _CATEGORY_TRANSLITERATION
-    if has_new and not has_translit:
-        if len(contributions) == 1:
-            return _CATEGORY_ROLE_CLASSIFICATION
-        return _CATEGORY_PURE_NEW_AGENT
-    return _CATEGORY_AMBIGUOUS
 
 
 # --- Candidate generation -------------------------------------------------
@@ -225,23 +204,10 @@ def _candidate_from_decision(
     )
 
 
-def _decision_to_contributions(decision: object) -> list[dict[str, Any]]:
-    """Flatten a :class:`ContribExtractDecision` into the JSON shape the
-    candidate row carries. ``transliteration_of`` and ``role_text``
-    are preserved when set; ``relator_code`` is preserved verbatim
-    (the cataloguer may want to see all hallucinated codes too —
-    surfacing them is the point of the review)."""
-    out: list[dict[str, Any]] = []
-    for cand in decision.contributions:  # type: ignore[attr-defined]
-        row: dict[str, Any] = {"name": cand.name}
-        if cand.relator_code is not None:
-            row["relator_code"] = cand.relator_code
-        if cand.transliteration_of is not None:
-            row["transliteration_of"] = cand.transliteration_of
-        if cand.role_text is not None:
-            row["role_text"] = cand.role_text
-        out.append(row)
-    return out
+# ``_decision_to_contributions`` is re-exported from
+# :mod:`bffi_pipeline.stages.m3.contrib_audit` at the top of the
+# module so audit-log rows and corpus-mined rows produce
+# byte-identical shape when their decisions match.
 
 
 def generate_candidates(

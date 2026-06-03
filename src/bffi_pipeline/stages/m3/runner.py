@@ -24,6 +24,7 @@ from bffi_pipeline.contrib_variants import (
     truncate_sidecar,
 )
 from bffi_pipeline.observability.events import emit_if_active, get_active_emitter
+from bffi_pipeline.stages.m3.contrib_audit import AUDIT_FILENAME, reset_audit_log
 from bffi_pipeline.validation.bffi import validate_graph
 
 _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
@@ -122,6 +123,7 @@ def run(
     llm_detector: object | None = None,
     contrib_extractor: object | None = None,
     variants_sidecar_path: Path | None = None,
+    audit_log_path: Path | None = None,
     now: datetime | None = None,
 ) -> BffiSummary:
     """Convert every ``<bibframe_dir>/<id>.rdf`` to a BFFI Turtle file.
@@ -136,16 +138,30 @@ def run(
     ``variants_sidecar_path`` defaults to
     ``<output_dir>/contrib-variants.jsonl`` and is the F2 sidecar
     where the contributor cascade persists transliteration claims.
-    On ``force=True`` the sidecar is truncated at the start of the
-    run so cascade re-runs don't accumulate stale rows.
+    ``audit_log_path`` defaults to ``<output_dir>/contrib-candidates.jsonl``
+    and is where the contrib cascade appends one row per fire — used
+    by the ``cataloguer-bundle`` post-stage to build a run-scoped
+    review zip without re-running the LLM. Both sidecars are
+    truncated at the start of the run when the contrib cascade is
+    active (so the file is coherent with this run's invocations and
+    doesn't carry stale rows from a previous run).
     """
     base = output_dir or get_settings().data_dir
     bibframe_dir = bibframe_dir or (base / "bibframe")
     summary = BffiSummary()
     validation_path = base / "bffi" / "_validation.jsonl"
     sidecar_path = variants_sidecar_path or (base / DEFAULT_SIDECAR_NAME)
+    audit_path = audit_log_path or (base / AUDIT_FILENAME)
     if force:
         truncate_sidecar(sidecar_path)
+    # Always reset the audit log when the contrib cascade will run —
+    # otherwise re-runs accumulate stale candidate rows and the
+    # cataloguer-bundle stage emits a confusing mix of this-run and
+    # last-run cases. When the cascade is off (contrib_extractor is
+    # None), leave any existing log alone — a heuristic-only re-run
+    # shouldn't wipe a previously-produced audit.
+    if contrib_extractor is not None:
+        reset_audit_log(audit_path)
 
     # P-12 Option B: include the active run_uuid on every validation
     # row so the exporter's error-tail loop attributes Boundary-3
@@ -193,6 +209,7 @@ def run(
                 llm_detector=llm_detector,
                 contrib_extractor=contrib_extractor,
                 variants_sidecar_path=sidecar_path,
+                audit_log_path=audit_path if contrib_extractor is not None else None,
                 now=now,
             )
         except Exception as exc:
