@@ -135,15 +135,27 @@ class FintoSkosmosClient:
         except ValueError:
             return []
 
+        # Finto's /search returns one row per matched lexical variant —
+        # an authority entry matched via both prefLabel and altLabel
+        # surfaces as two hits with the same URI. Dedupe by URI here so
+        # the cataloguer's picker view + the LLM prompt see each
+        # authority once. Keep the first occurrence: Finto orders by
+        # relevance, so the first hit's pref_label is the strongest
+        # match label.
         candidates: list[AuthorityCandidate] = []
+        seen_uris: set[str] = set()
         for item in payload.get("results", []):
             uri = item.get("uri")
             pref = item.get("prefLabel") or item.get("matchedPrefLabel") or ""
             if not uri:
                 continue
+            uri_str = str(uri)
+            if uri_str in seen_uris:
+                continue
+            seen_uris.add(uri_str)
             candidates.append(
                 _AuthorityCandidate(
-                    uri=str(uri),
+                    uri=uri_str,
                     pref_label=str(pref),
                     source_vocabulary=vocab,
                     lexical_similarity=_lexical_similarity(request.literal, str(pref)),
@@ -189,13 +201,19 @@ class ViafClient:
             payload = response.json()
         except ValueError:
             return []
+        # Dedupe by URI for the same reason as the Finto path: VIAF's
+        # AutoSuggest can surface one entity via multiple alias hits.
         candidates: list[AuthorityCandidate] = []
+        seen_uris: set[str] = set()
         for item in payload.get("result", []) or []:
             viaf_id = item.get("viafid") or item.get("id")
             term = item.get("term") or item.get("displayForm") or ""
             if not viaf_id:
                 continue
             uri = f"https://viaf.org/viaf/{viaf_id}"
+            if uri in seen_uris:
+                continue
+            seen_uris.add(uri)
             candidates.append(
                 _AuthorityCandidate(
                     uri=uri,

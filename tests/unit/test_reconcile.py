@@ -468,6 +468,46 @@ def test_finto_client_caches_results_per_query_per_day() -> None:
     assert calls["n"] == 1
 
 
+def test_finto_client_dedupes_repeated_uris_in_search_response() -> None:
+    """Finto's /search can surface one authority entry via multiple
+    alias hits (prefLabel + altLabel + hiddenLabel). The client must
+    dedupe by URI so the picker prompt + cataloguer-review tab see
+    each authority once. First occurrence wins (Finto orders by
+    relevance)."""
+    payload = {
+        "results": [
+            {
+                "uri": "http://urn.fi/URN:NBN:fi:au:finaf:000223029",
+                "prefLabel": "Hunter, Erin",
+                "vocab": "finaf",
+            },
+            {
+                # Same URI, different surface form (altLabel match).
+                "uri": "http://urn.fi/URN:NBN:fi:au:finaf:000223029",
+                "prefLabel": "Hunter, Erin",
+                "vocab": "finaf",
+            },
+            {
+                "uri": "http://urn.fi/URN:NBN:fi:au:finaf:000999000",
+                "prefLabel": "Hunter, Helen",
+                "vocab": "finaf",
+            },
+        ]
+    }
+    transport = _finto_handler(payload)
+    client = FintoSkosmosClient(http_client=httpx.Client(transport=transport))
+    request = EntityRequest(
+        work_uri="http://urn.fi/URN:NBN:fi:bib:work:abc",
+        literal="Hunter, Erin",
+        kind="person",
+    )
+    candidates = client.query(request=request)
+    uris = [c.uri for c in candidates]
+    assert len(uris) == len(set(uris))
+    assert candidates[0].uri.endswith("000223029")
+    assert candidates[1].uri.endswith("000999000")
+
+
 def test_finto_client_returns_empty_for_kinds_without_a_vocab_mapping() -> None:
     """The Protocol allows arbitrary kinds; uncovered ones short-circuit."""
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json={"results": []}))
