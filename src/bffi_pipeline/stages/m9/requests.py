@@ -28,7 +28,16 @@ from rdflib import Literal as RdfLiteral
 from rdflib.namespace import RDF
 
 from bffi_pipeline.provenance import vocab as V
-from bffi_pipeline.stages.m9.schemas import AuthorityKind, EntityRequest
+from bffi_pipeline.stages.m9.schemas import AuthorityKind, EntityRequest, WorkContext
+
+_SKOS_prefLabel: Final[URIRef] = URIRef("http://www.w3.org/2004/02/skos/core#prefLabel")
+
+#: Cap on context-fanout fields so the picker prompt stays well under
+#: the model's context window even on a Work with many subjects /
+#: contributors. The most disambiguating signal is usually the first
+#: handful of sibling subjects (high-similarity matches) — adding
+#: more dilutes the prompt without adding new evidence.
+_WORK_CONTEXT_FIELD_CAP: Final[int] = 12
 
 #: Maps the ``bf:source`` value that marc2bibframe2 emits on unresolved
 #: 6XX targets to the reconciliation kind that selects the right Finto
@@ -130,11 +139,79 @@ def _classify_subject_target(
     return _classify_subject_source(source)
 
 
+def _first_pref_label(graph: Graph, work: URIRef) -> tuple[str | None, str | None]:
+    """Return ``(title, language)`` from the Work's first ``skos:prefLabel``."""
+    for lit in graph.objects(work, _SKOS_prefLabel):
+        if isinstance(lit, RdfLiteral):
+            return str(lit), lit.language
+    return None, None
+
+
+def _collect_contributor_labels(graph: Graph, work: URIRef) -> list[str]:
+    """Walk every ``bffi:contribution`` chain for agent labels, capped."""
+    out: list[str] = []
+    for contrib in graph.objects(work, V.BFFI.contribution):
+        if len(out) >= _WORK_CONTEXT_FIELD_CAP:
+            break
+        for agent in graph.objects(contrib, V.BFFI.agent):
+            for lab in graph.objects(agent, V.RDFS.label):
+                if isinstance(lab, RdfLiteral):
+                    out.append(str(lab))
+                    break
+    return out
+
+
+def _collect_subject_labels(graph: Graph, work: URIRef) -> list[str]:
+    """Walk ``bffi:subject`` + ``bffi:genreForm`` target labels, capped."""
+    out: list[str] = []
+    for predicate in (V.BFFI.subject, V.BFFI.genreForm):
+        for target in graph.objects(work, predicate):
+            if len(out) >= _WORK_CONTEXT_FIELD_CAP:
+                return out
+            for lab in graph.objects(target, V.RDFS.label):
+                if isinstance(lab, RdfLiteral):
+                    out.append(str(lab))
+                    break
+    return out
+
+
+def _collect_work_context(graph: Graph, work: URIRef) -> WorkContext:
+    """Build the picker-prompt context for one canonical Work.
+
+    The fields come from triples already in ``canonical.ttl``:
+
+    - **title + language**: the Work's ``skos:prefLabel`` literal — M3
+      tagged the literal's BCP-47 language at retag time, so a single
+      lookup gives us both.
+    - **contributors**: every ``bffi:contribution → bffi:agent →
+      rdfs:label``. Useful when the literal the picker is reconciling
+      is a *subject* and we want to know who wrote the surrounding Work.
+    - **sibling_subjects**: every ``bffi:subject`` / ``bffi:genreForm``
+      target's ``rdfs:label``. Strongest disambiguating signal — "this
+      Work is about psychology" tells the picker to choose the
+      psychologist Koivisto over the zoologist Koivisto.
+
+    Walks are bounded to the first :data:`_WORK_CONTEXT_FIELD_CAP`
+    items per fanout so prompts stay sized for the model's context
+    window even on outlier Works.
+    """
+    title, language = _first_pref_label(graph, work)
+    return WorkContext(
+        title=title,
+        language=language,
+        contributors=tuple(_collect_contributor_labels(graph, work)),
+        sibling_subjects=tuple(_collect_subject_labels(graph, work)),
+    )
+
+
 def _iter_creator_requests(graph: Graph) -> Iterator[EntityRequest]:
     """Yield one creator-reconciliation request per canonical Work agent."""
     for work in graph.subjects(RDF.type, V.BFFI.Work):
         if not isinstance(work, URIRef):
             continue
+        # Resolve the Work's context once per Work — multiple
+        # contributions / subjects on the same Work share it.
+        work_context: WorkContext | None = None
         for contrib in graph.objects(work, V.BFFI.contribution):
             if V.BFFI.PrimaryContribution not in set(graph.objects(contrib, RDF.type)):
                 continue
@@ -143,10 +220,13 @@ def _iter_creator_requests(graph: Graph) -> Iterator[EntityRequest]:
                     continue
                 for label in graph.objects(agent, V.RDFS.label):
                     if isinstance(label, RdfLiteral):
+                        if work_context is None:
+                            work_context = _collect_work_context(graph, work)
                         yield EntityRequest(
                             work_uri=str(work),
                             literal=str(label),
                             kind="person",
+                            work_context=work_context,
                         )
                         break
 
@@ -186,6 +266,11 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
     for work in graph.subjects(RDF.type, V.BFFI.Work):
         if not isinstance(work, URIRef):
             continue
+        # Compute Work context lazily — only when we actually find an
+        # unresolved subject worth reconciling. Most canonical Works
+        # carry only pre-resolved YSO/KANTO URIs, so the work_context
+        # would otherwise be built and thrown away.
+        work_context: WorkContext | None = None
         for predicate in (V.BFFI.subject, V.BFFI.genreForm):
             for target in graph.objects(work, predicate):
                 # Skip URIs that already resolve to an authority graph
@@ -212,9 +297,12 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
                         break
                 target_uri = target if isinstance(target, URIRef) else None
                 literal_str = str(label_lit)
+                if work_context is None:
+                    work_context = _collect_work_context(graph, work)
                 yield EntityRequest(
                     work_uri=str(work),
                     literal=literal_str,
                     kind=_classify_subject_target(target_uri, source, literal_str),
                     predicate_uri=str(predicate),
+                    work_context=work_context,
                 )

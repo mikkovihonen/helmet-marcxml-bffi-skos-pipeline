@@ -28,6 +28,8 @@ from bffi_pipeline.observability.events import (
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.vocab import PROV
 from bffi_pipeline.stages.m9.local_concept_resolver import LocalConceptHit
+from bffi_pipeline.stages.m9.picker_prompt import _format_work_context_for_prompt
+from bffi_pipeline.stages.m9.requests import _collect_work_context
 from bffi_pipeline.stages.m9.runner import (
     ALL_AUTHORITY_KINDS,
     LEXICAL_DIRECT_THRESHOLD,
@@ -50,6 +52,7 @@ from bffi_pipeline.stages.m9.runner import (
     PickerDecision,
     StubAuthorityClient,
     StubPicker,
+    WorkContext,
     _decide_with_pick,
     _iter_subject_requests,
     _order_deferred_picker_queue,
@@ -795,6 +798,89 @@ def test_picker_prompt_text_contains_required_sections() -> None:
     assert "### USER" in text
     assert "{input_literal}" in text
     assert "{candidates}" in text
+    # v2 adds the Originating Work block.
+    assert "{work_context}" in text
+
+
+def test_picker_prompt_renders_work_context() -> None:
+    """A Work context with title + subjects + contributors renders as
+    indented one-line-per-field block. Empty/missing fields are
+    skipped — a Work with only a title doesn't produce placeholder
+    rows for everything else."""
+    ctx = WorkContext(
+        title="Kehityspsykologian perusteet",
+        language="fi",
+        contributors=("Koivisto, Ilkka",),
+        sibling_subjects=("psykologia", "kehityspsykologia"),
+    )
+    rendered = _format_work_context_for_prompt(ctx)
+    assert "title:" in rendered
+    assert "Kehityspsykologian perusteet" in rendered
+    assert "language: fi" in rendered
+    assert "psykologia" in rendered
+    assert "Koivisto, Ilkka" in rendered
+
+
+def test_picker_prompt_work_context_none_renders_marker() -> None:
+    """Test/legacy callers passing ``work_context=None`` get a short
+    marker rather than a stack trace."""
+    assert _format_work_context_for_prompt(None) == "  (no Work context supplied)"
+
+
+def test_picker_prompt_work_context_empty_renders_marker() -> None:
+    """A WorkContext where every field is empty (rare — a Work with
+    no title, subjects, contributors) renders a single explanatory
+    line rather than a blank block."""
+    rendered = _format_work_context_for_prompt(WorkContext())
+    assert "Work context was empty" in rendered
+
+
+def test_collect_work_context_extracts_title_language_subjects_contributors() -> None:
+    """``_collect_work_context`` walks a canonical Work graph for the
+    fields the picker prompt cares about. Title + language come from
+    the Work's ``skos:prefLabel`` literal; sibling subjects from
+    ``bffi:subject`` / ``bffi:genreForm`` target labels; contributors
+    from ``bffi:contribution → bffi:agent → rdfs:label`` chains."""
+    g = Graph()
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:work:test1")
+    skos_pref = URIRef("http://www.w3.org/2004/02/skos/core#prefLabel")
+    rdfs_label = V.RDFS.label
+
+    g.add((work, skos_pref, Literal("Kehityspsykologian perusteet", lang="fi")))
+
+    # Contributor chain: Work -> contribution (bnode) -> agent -> label
+    contribution = BNode()
+    agent = URIRef("http://example.org/agent/1")
+    g.add((work, V.BFFI.contribution, contribution))
+    g.add((contribution, V.BFFI.agent, agent))
+    g.add((agent, rdfs_label, Literal("Koivisto, Ilkka")))
+
+    # Subjects: two YSO targets each carrying rdfs:label
+    subj1 = URIRef("http://www.yso.fi/onto/yso/p1")
+    subj2 = URIRef("http://www.yso.fi/onto/yso/p2")
+    g.add((work, V.BFFI.subject, subj1))
+    g.add((work, V.BFFI.subject, subj2))
+    g.add((subj1, rdfs_label, Literal("psykologia")))
+    g.add((subj2, rdfs_label, Literal("kehityspsykologia")))
+
+    ctx = _collect_work_context(g, work)
+    assert ctx.title == "Kehityspsykologian perusteet"
+    assert ctx.language == "fi"
+    assert "Koivisto, Ilkka" in ctx.contributors
+    assert set(ctx.sibling_subjects) == {"psykologia", "kehityspsykologia"}
+
+
+def test_collect_work_context_handles_work_with_no_prefLabel() -> None:
+    """A Work missing ``skos:prefLabel`` (rare but possible — M3
+    failure-shape exit) gracefully returns ``WorkContext`` with
+    ``title=None`` and ``language=None`` instead of raising."""
+    g = Graph()
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:work:no-label")
+    ctx = _collect_work_context(g, work)
+    assert ctx.title is None
+    assert ctx.language is None
+    assert ctx.contributors == ()
+    assert ctx.sibling_subjects == ()
 
 
 # --- LangChainLLMPicker (with a scripted chain) ---------------------------
@@ -2361,6 +2447,108 @@ def test_picker_cache_key_diacritic_equivalent_literals_collide(tmp_path: Path) 
     assert key_a is not None
     assert key_b is not None
     assert key_a[0] == key_b[0]
+
+
+def test_picker_cache_key_work_context_differentiates(tmp_path: Path) -> None:
+    """Two requests with the same literal + candidates but different
+    Work contexts must hash to different cache keys — otherwise the
+    Phase-A disambiguation signal is silently masked by stale cache."""
+    candidates = [_candidate("http://kanto/a", "Koivisto, Ilkka", 1.0)]
+    psych_ctx = WorkContext(
+        title="Kehityspsykologian perusteet",
+        language="fi",
+        sibling_subjects=("psykologia", "kehityspsykologia"),
+    )
+    zoo_ctx = WorkContext(
+        title="Eläinten käyttäytyminen",
+        language="fi",
+        sibling_subjects=("eläintieteilijät", "eläinten käyttäytyminen"),
+    )
+
+    key_psych = compute_picker_cache_key(
+        request=EntityRequest(
+            work_uri="http://urn.fi/URN:NBN:fi:bib:work:psych",
+            literal="Koivisto, Ilkka",
+            kind="person",
+            work_context=psych_ctx,
+        ),
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "sha"},
+    )
+    key_zoo = compute_picker_cache_key(
+        request=EntityRequest(
+            work_uri="http://urn.fi/URN:NBN:fi:bib:work:zoo",
+            literal="Koivisto, Ilkka",
+            kind="person",
+            work_context=zoo_ctx,
+        ),
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "sha"},
+    )
+    assert key_psych is not None
+    assert key_zoo is not None
+    assert key_psych[0] != key_zoo[0]
+
+
+def test_picker_cache_key_work_context_none_matches_itself(tmp_path: Path) -> None:
+    """Two requests with no Work context (pre-Phase-A / test path)
+    must still produce a stable, reproducible cache key — the
+    ``"no-ctx"`` sentinel keeps legacy lookups self-consistent."""
+    candidates = [_candidate("http://kanto/a", "Tolstoy, L", 0.97)]
+    key_a = compute_picker_cache_key(
+        request=EntityRequest(work_uri="w", literal="Tolstoy", kind="person"),
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "sha"},
+    )
+    key_b = compute_picker_cache_key(
+        request=EntityRequest(work_uri="w", literal="Tolstoy", kind="person"),
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "sha"},
+    )
+    assert key_a is not None
+    assert key_b is not None
+    assert key_a[0] == key_b[0]
+
+
+def test_picker_cache_key_work_context_field_order_invariant() -> None:
+    """Two WorkContexts whose ``contributors`` / ``sibling_subjects``
+    tuples carry the same values in different orders fingerprint
+    identically — graph iteration order doesn't ripple into the
+    cache key."""
+    candidates = [_candidate("http://kanto/a", "X", 0.97)]
+    ctx_ab = WorkContext(
+        contributors=("A", "B"),
+        sibling_subjects=("eläintieteilijät", "kirjailijat"),
+    )
+    ctx_ba = WorkContext(
+        contributors=("B", "A"),
+        sibling_subjects=("kirjailijat", "eläintieteilijät"),
+    )
+    key_ab = compute_picker_cache_key(
+        request=EntityRequest(work_uri="w", literal="X", kind="person", work_context=ctx_ab),
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "sha"},
+    )
+    key_ba = compute_picker_cache_key(
+        request=EntityRequest(work_uri="w", literal="X", kind="person", work_context=ctx_ba),
+        candidates=candidates,
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={"finaf": "sha"},
+    )
+    assert key_ab is not None
+    assert key_ba is not None
+    assert key_ab[0] == key_ba[0]
 
 
 def test_picker_cache_cross_thread_writes_no_interface_error(tmp_path: Path) -> None:

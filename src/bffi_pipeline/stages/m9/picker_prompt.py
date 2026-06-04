@@ -17,11 +17,17 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final
 
-from bffi_pipeline.stages.m9.schemas import AuthorityCandidate
+from bffi_pipeline.stages.m9.schemas import AuthorityCandidate, WorkContext
 
 #: Picker prompt source. Hashed at startup so reconciliation provenance
 #: pins the exact prompt that produced each decision.
-PICKER_PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[4] / "prompts" / "picker_v1.txt"
+#:
+#: v2 (2026-06-04) adds an Originating-Work context block — Work title,
+#: language, contributors, sibling subjects — so the picker can
+#: disambiguate same-named authorities by topical match. The v1 prompt
+#: stays in tree for replay of historical decisions; the cache key
+#: includes the prompt SHA so cross-version decisions never collide.
+PICKER_PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[4] / "prompts" / "picker_v2.txt"
 _PICKER_SECTION_RE: Final[re.Pattern[str]] = re.compile(r"^### (\w+)\s*$", re.MULTILINE)
 
 
@@ -69,3 +75,32 @@ def _format_candidates_for_prompt(candidates: list[AuthorityCandidate]) -> str:
         f"lexical_similarity={c.lexical_similarity:.3f}"
         for i, c in enumerate(candidates, start=1)
     )
+
+
+def _format_work_context_for_prompt(work_context: WorkContext | None) -> str:
+    """Render the originating Work's context block for the picker prompt.
+
+    Returns one indented line per populated field. Empty / missing
+    fields are omitted so a Work with only a title doesn't render a
+    pile of placeholder rows. When ``work_context`` is ``None`` (test
+    requests, or pre-Phase-A callers building EntityRequest directly),
+    returns a short marker so the prompt still parses cleanly.
+    """
+    if work_context is None:
+        return "  (no Work context supplied)"
+    lines: list[str] = []
+    if work_context.title:
+        lines.append(f"  title: {work_context.title!r}")
+    if work_context.language:
+        lines.append(f"  language: {work_context.language}")
+    if work_context.contributors:
+        lines.append(f"  contributors: {list(work_context.contributors)!r}")
+    if work_context.sibling_subjects:
+        lines.append(f"  other subjects on this Work: {list(work_context.sibling_subjects)!r}")
+    if work_context.classification:
+        lines.append(f"  classification: {list(work_context.classification)!r}")
+    if work_context.year:
+        lines.append(f"  year: {work_context.year}")
+    if not lines:
+        return "  (Work context was empty — no title / subjects / contributors)"
+    return "\n".join(lines)

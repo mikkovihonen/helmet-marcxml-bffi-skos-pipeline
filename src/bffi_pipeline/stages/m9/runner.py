@@ -197,6 +197,7 @@ from bffi_pipeline.stages.m9.schemas import (
     ReconciliationOutcome,
     ReconciliationStage,
     ReconciliationSummary,
+    WorkContext,
     _finto_search_query,  # noqa: F401
 )
 
@@ -246,6 +247,7 @@ __all__ = [
     "StubAuthorityClient",
     "StubPicker",
     "ViafClient",
+    "WorkContext",
     "apply_reconciliation",
     "compute_finto_shas",
     "compute_picker_cache_key",

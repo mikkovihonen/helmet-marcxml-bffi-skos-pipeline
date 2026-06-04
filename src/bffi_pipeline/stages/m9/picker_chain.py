@@ -28,6 +28,7 @@ from bffi_pipeline.stages.m9.picker import (
 )
 from bffi_pipeline.stages.m9.picker_prompt import (
     _format_candidates_for_prompt,
+    _format_work_context_for_prompt,
     _parse_picker_prompt_sections,
 )
 from bffi_pipeline.stages.m9.schemas import AuthorityCandidate, EntityRequest
@@ -185,6 +186,7 @@ class LangChainLLMPicker:
             "input_literal": request.literal,
             "source_vocabulary": candidates[0].source_vocabulary,
             "candidates": _format_candidates_for_prompt(candidates),
+            "work_context": _format_work_context_for_prompt(request.work_context),
         }
 
         connection_attempts = 0

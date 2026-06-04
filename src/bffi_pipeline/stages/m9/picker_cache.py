@@ -35,7 +35,11 @@ from bffi_pipeline.stages.m9.authority_clients import VOCAB_VIAF
 
 if TYPE_CHECKING:
     from bffi_pipeline.stages.m9.picker import PickerDecision
-    from bffi_pipeline.stages.m9.schemas import AuthorityCandidate, EntityRequest
+    from bffi_pipeline.stages.m9.schemas import (
+        AuthorityCandidate,
+        EntityRequest,
+        WorkContext,
+    )
 
 #: Default filename. Mirrors M6's ``judge-cache.sqlite`` naming.
 PICKER_CACHE_FILENAME: Final[str] = "reconcile-cache.sqlite"
@@ -100,10 +104,19 @@ def compute_picker_cache_key(
     .. code-block:: text
 
         fold(literal) | sorted(candidate.uri) | prompt_hash |
-        model_name | vocab:finto_sha
+        model_name | vocab:finto_sha | work_context_fingerprint
 
     ``fold(literal)`` uses :func:`bffi_pipeline.blocking.fold_label`
     so diacritic-equivalent literals hit the same cached decision.
+
+    ``work_context_fingerprint`` is a SHA-256 prefix of the request's
+    :class:`WorkContext` fields (title + sibling subjects +
+    contributors + language). Without it two records with the same
+    literal + candidates but different Work contexts would share a
+    cache entry — and post-Phase-A the right pick may differ between
+    them. ``None`` ``work_context`` (pre-Phase-A / test requests)
+    folds to a sentinel ``"no-ctx"`` so legacy entries keep matching
+    themselves.
     """
     candidate_list = list(candidates)
     if not candidate_list:
@@ -121,10 +134,32 @@ def compute_picker_cache_key(
             prompt_hash_value,
             model_name,
             f"{vocab}:{finto_sha}",
+            _work_context_fingerprint(request.work_context),
         )
     )
     key = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return key, vocab, finto_sha
+
+
+def _work_context_fingerprint(work_context: WorkContext | None) -> str:
+    """Stable, order-independent fingerprint of a :class:`WorkContext`.
+
+    Tuples are sorted before hashing so two requests that yield the
+    same context (regardless of graph iteration order) hash to the
+    same fingerprint. Returns ``"no-ctx"`` when the request carries
+    no work_context — keeps legacy cache lookups self-consistent.
+    """
+    if work_context is None:
+        return "no-ctx"
+    parts = (
+        f"title={work_context.title or ''}",
+        f"lang={work_context.language or ''}",
+        f"year={work_context.year or ''}",
+        "contribs=" + ",".join(sorted(work_context.contributors)),
+        "subjects=" + ",".join(sorted(work_context.sibling_subjects)),
+        "classification=" + ",".join(sorted(work_context.classification)),
+    )
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass(frozen=True)

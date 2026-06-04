@@ -139,6 +139,31 @@ def _finto_search_query(literal: str) -> str:
 
 
 @dataclass(frozen=True)
+class WorkContext:
+    """Disambiguating context the picker prompt sees about the
+    originating Work. Carries enough signal for the LLM to choose
+    between two same-named authorities by matching topical area
+    (e.g. two persons named "Koivisto, Ilkka" — one a psychologist,
+    one a zoologist — distinguished by the Work's other subjects /
+    classification / contributors).
+
+    All fields are optional. The builder fills what's present in
+    the canonical graph; missing fields render as empty in the
+    prompt rather than failing the request.
+
+    Tuples + ``frozen=True`` per project convention so instances
+    are hashable for cache-key composition.
+    """
+
+    title: str | None = None
+    language: str | None = None
+    contributors: tuple[str, ...] = ()
+    sibling_subjects: tuple[str, ...] = ()
+    classification: tuple[str, ...] = ()
+    year: str | None = None
+
+
+@dataclass(frozen=True)
 class EntityRequest:
     """One reconciliation input drawn from a canonical Work.
 
@@ -148,12 +173,19 @@ class EntityRequest:
     chose the predicate at M2 conversion time, and reconciliation must
     preserve it. Creator requests leave it ``None``; the creator linker
     rewrites ``bffi:contribution`` instead.
+
+    ``work_context`` carries the originating Work's title, sibling
+    subjects, classification, etc. — the picker prompt uses it to
+    disambiguate shared-name authorities. ``None`` for requests built
+    by tests or earlier-tier paths that don't need it; the picker
+    falls back to its pre-context behaviour.
     """
 
     work_uri: str
     literal: str
     kind: AuthorityKind
     predicate_uri: str | None = None
+    work_context: WorkContext | None = None
 
 
 @dataclass(frozen=True)
