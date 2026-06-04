@@ -20,7 +20,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Protocol
 
-from bffi_pipeline.eval.review_bundle.stages import contrib, judge
+from bffi_pipeline.eval.review_bundle.stages import (
+    contrib,
+    judge,
+    picker,
+    salvage,
+    title_lang,
+)
 
 
 class _SampleFn(Protocol):
@@ -85,7 +91,24 @@ class StageHandler:
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[5]
 
 
+# Insertion order = pipeline-stage order (M2 → M3 → M6 → M9). The
+# bundle builder and the in-chain dispatcher both iterate this dict, so
+# the order here is what determines the HTML reviewer's tab order.
 STAGE_REGISTRY: Final[dict[str, StageHandler]] = {
+    "salvage-candidate/1": StageHandler(
+        stage_id="salvage",
+        label="M2 salvage",
+        audit_filename=salvage.AUDIT_FILENAME,
+        sample=salvage.sample_stratified,
+        import_results=salvage.import_results,
+        bib_ids_for_marc=salvage.bib_ids_for_marc,
+        default_gold_path=_REPO_ROOT / "gold" / "salvage.jsonl",
+        # Per-run only — M2's salvage cascade writes per-fire audit
+        # rows when --llm-salvage-cascade is on. The cataloguer-bundle
+        # dispatcher auto-discovers the audit log via
+        # ``audit_filename`` = salvage-candidates.jsonl.
+        default_pool_path=None,
+    ),
     "contrib-candidate/1": StageHandler(
         stage_id="contrib",
         label="M3 contrib extraction",
@@ -95,6 +118,18 @@ STAGE_REGISTRY: Final[dict[str, StageHandler]] = {
         bib_ids_for_marc=contrib.bib_ids_for_marc,
         default_gold_path=_REPO_ROOT / "gold" / "contrib.jsonl",
         default_pool_path=_REPO_ROOT / "gold" / "grow-candidates-contrib.jsonl",
+    ),
+    "title-lang-decision/1": StageHandler(
+        stage_id="title-lang",
+        label="M3 title-language",
+        audit_filename=title_lang.AUDIT_FILENAME,
+        sample=title_lang.sample_stratified,
+        import_results=title_lang.import_results,
+        bib_ids_for_marc=title_lang.bib_ids_for_marc,
+        default_gold_path=_REPO_ROOT / "gold" / "title-lang.jsonl",
+        # Per-run only — M3's title-lang LLM cascade writes audit
+        # rows when --llm-title-cascade is on (which is the default).
+        default_pool_path=None,
     ),
     "judge-pair/1": StageHandler(
         stage_id="judge",
@@ -107,6 +142,19 @@ STAGE_REGISTRY: Final[dict[str, StageHandler]] = {
         # Per-run only — no corpus-wide aggregator. The cataloguer-bundle
         # dispatcher resolves this stage's pool to
         # runs/<uuid>/judge-decisions.jsonl at run time.
+        default_pool_path=None,
+    ),
+    "picker-choice/1": StageHandler(
+        stage_id="picker",
+        label="M9 picker",
+        audit_filename=picker.AUDIT_FILENAME,
+        sample=picker.sample_stratified,
+        import_results=picker.import_results,
+        bib_ids_for_marc=picker.bib_ids_for_marc,
+        default_gold_path=_REPO_ROOT / "gold" / "picker.jsonl",
+        # Per-run only — like judge. The audit log lives at
+        # runs/<uuid>/picker-decisions.jsonl and the cataloguer-bundle
+        # dispatcher auto-discovers it via ``audit_filename``.
         default_pool_path=None,
     ),
 }

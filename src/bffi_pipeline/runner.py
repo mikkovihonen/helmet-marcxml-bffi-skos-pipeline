@@ -213,7 +213,7 @@ def _dispatch_export() -> None:
     export_command()
 
 
-def _dispatch_cataloguer_bundle() -> None:
+def _dispatch_cataloguer_bundle(*, input_dir: Path | None = None) -> None:
     """Build a cataloguer-review zip from whichever per-stage audit
     logs this run produced, drop it into ``runs/<uuid>/cataloguer-review/``
     next to a copy of the HTML reviewer.
@@ -223,6 +223,15 @@ def _dispatch_cataloguer_bundle() -> None:
     non-empty, include that stage in the bundle. Stages whose audit
     log is absent (heuristic-only / skipped / didn't run) are
     silently skipped — no operator-side flags needed.
+
+    ``input_dir`` is the run's M2 MARCXML source directory (threaded
+    through from the ``--input-dir`` runner flag). When provided, the
+    bundle's MARC sidecars are looked up from there so the lookup is
+    always rooted at the actual input the audit logs were generated
+    against. When ``None`` (resumed-from-M3 runs with no input flag),
+    ``build_bundle`` falls back to its ``DEFAULT_HELMET_MARC_DIR`` so
+    runs originating from the canonical Helmet corpus keep working
+    without any operator config.
 
     No-ops with a clear message when zero stages have populated
     audit logs (heuristic-only contrib + M6 skipped, for instance).
@@ -256,6 +265,9 @@ def _dispatch_cataloguer_bundle() -> None:
     bundle_dir = run_dir / "cataloguer-review"
     bundle_dir.mkdir(parents=True, exist_ok=True)
     bundle_path = bundle_dir / "bundle.zip"
+    marc_kwargs: dict[str, Path] = {}
+    if input_dir is not None:
+        marc_kwargs["marc_dir"] = input_dir
     result = review_bundle.build_bundle(
         output_path=bundle_path,
         operator=f"pipeline-run:{settings.run_uuid}",
@@ -263,6 +275,7 @@ def _dispatch_cataloguer_bundle() -> None:
         per_category=25,
         seed=settings.run_uuid,
         pool_overrides=pool_overrides,
+        **marc_kwargs,
     )
     shutil.copy2(
         review_bundle.bundle.HTML_REVIEWER_PATH,
@@ -313,7 +326,13 @@ def _call_dispatcher(
         dispatcher(force=force, llm_contrib_cascade=llm_contrib_cascade)
     elif stage in {"m5", "m6", "skosify"}:
         dispatcher(force=force)
-    else:  # m8, m9, load, export, cataloguer-bundle
+    elif stage == "cataloguer-bundle":
+        # Forward input_dir so the bundle's MARC sidecars are rooted
+        # at the run's actual source dir (matches the audit logs'
+        # MARC-001-verbatim bib ids). Falls back to the bundle
+        # builder's default when input_dir is None (resumed runs).
+        dispatcher(input_dir=input_dir)
+    else:  # m8, m9, load, export
         dispatcher()
 
 

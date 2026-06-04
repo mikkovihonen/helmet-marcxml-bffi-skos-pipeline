@@ -41,6 +41,7 @@ Phase B.5 provenance writer and the Phase C TSV writer.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 from lxml import etree
@@ -386,6 +387,7 @@ def _try_b1_llm(
     *,
     bib_id: str,
     extractor: SalvageExtractor,
+    audit_log_path: Path | None = None,
 ) -> SalvageOutcome | None:
     """B1 LLM cascade — runs the local-mlx-lm cascade against 245$c
     when the deterministic regex tier (:func:`_try_b1`) returned no
@@ -399,6 +401,14 @@ def _try_b1_llm(
     Routing rules are identical to B1 regex (first author/unknown →
     MARC 100, rest → MARC 700); only the ``tier`` ID and the method
     tag differ.
+
+    When ``audit_log_path`` is set, one row is appended to
+    ``salvage-candidates.jsonl`` per call — *whether or not* the
+    LLM returned agents, and whether the underlying decision came
+    from a fresh LLM call or the persistent cache. The cataloguer
+    reviews these rows via the salvage tab of the cataloguer-bundle.
+    The extractor surfaces ``_last_call`` telemetry (rationale +
+    cache_hit flag) for the audit row.
     """
     if not _has_245(record):
         return None
@@ -406,6 +416,19 @@ def _try_b1_llm(
     if text_245c is None:
         return None
     agents = extractor.extract(c_subfield=text_245c)
+    if audit_log_path is not None:
+        from bffi_pipeline.stages.m2.salvage_audit import (  # noqa: PLC0415
+            append_audit_row,
+        )
+
+        telemetry = getattr(extractor, "_last_call", None)
+        append_audit_row(
+            audit_log_path,
+            helmet_bib_id=bib_id,
+            c_subfield=text_245c,
+            salvaged_agents=agents,
+            telemetry=telemetry,
+        )
     if not agents:
         return None
     return _build_records_for_b1_or_b1_llm(
@@ -471,6 +494,7 @@ def try_salvage_minimum_content(
     bib_id: str,
     settings: Settings,
     llm_extractor: SalvageExtractor | None = None,
+    audit_log_path: Path | None = None,
 ) -> SalvageOutcome | None:
     """Try the salvage tiers in order. Returns the first hit's
     outcome (with the tree already mutated to carry the synthesised
@@ -512,7 +536,12 @@ def try_salvage_minimum_content(
     if outcome is None and (
         settings.creator_salvage_b1_llm_cascade_enabled and llm_extractor is not None
     ):
-        outcome = _try_b1_llm(record, bib_id=bib_id, extractor=llm_extractor)
+        outcome = _try_b1_llm(
+            record,
+            bib_id=bib_id,
+            extractor=llm_extractor,
+            audit_log_path=audit_log_path,
+        )
     if outcome is None:
         outcome = _try_b2(record, bib_id=bib_id, settings=settings)
     if outcome is None:

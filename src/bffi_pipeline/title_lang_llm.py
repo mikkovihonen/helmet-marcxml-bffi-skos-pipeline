@@ -324,7 +324,24 @@ class LangChainTitleLangDetector:
         )
 
     def detect(self, *, title: str, candidates: frozenset[str]) -> TitleLangDecision:
-        """Invoke the chain with retries; constrain output to ``candidates``."""
+        """Invoke the chain with retries; constrain output to ``candidates``.
+
+        Side-channel telemetry: each successful call sets
+        ``self._last_call`` to a
+        :class:`~bffi_pipeline.stages.m3.title_lang_audit.TitleLangCallTelemetry`
+        carrying the title + candidate set + decision segments +
+        rationale. The audit writer in
+        ``stages/m3/language_detect.py`` reads it after each
+        ``tag_title`` returns to write the per-fire audit row. The
+        attribute is cleared at the top of each call so stale state
+        from a previous record can't leak into the next audit row.
+        """
+        from bffi_pipeline.stages.m3.title_lang_audit import (
+            TitleLangCallTelemetry,
+            telemetry_from_decision,
+        )
+
+        self._last_call: TitleLangCallTelemetry | None = None
         title = title.strip()
         if not title:
             return _fallthrough_decision(title, "empty title")
@@ -376,7 +393,14 @@ class LangChainTitleLangDetector:
                 )
                 break
 
-            return _filter_to_candidates(decision, candidates)
+            filtered = _filter_to_candidates(decision, candidates)
+            self._last_call = telemetry_from_decision(
+                title=title,
+                candidates=candidates,
+                segments=[(s.text, s.lang) for s in filtered.segments],
+                rationale=filtered.rationale,
+            )
+            return filtered
 
         return _fallthrough_decision(title, last_error)
 

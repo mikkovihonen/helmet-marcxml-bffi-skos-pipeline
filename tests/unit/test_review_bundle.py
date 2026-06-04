@@ -211,10 +211,16 @@ class TestBuildBundle:
             )
 
     def test_missing_pool_file_raises(self, tmp_path: Path) -> None:
+        # Scope the build to a single stage so the iteration doesn't hit
+        # a per-run-only stage (salvage / judge / picker / title-lang,
+        # all default_pool_path=None) first and surface that error
+        # instead. The test is about a bad pool path, not the
+        # per-run-only branch.
         with pytest.raises(BundleBuildError, match=r"pool file not found"):
             build_bundle(
                 output_path=tmp_path / "x.zip",
                 operator="Tester",
+                stage_schemas=["contrib-candidate/1"],
                 pool_overrides={"contrib-candidate/1": tmp_path / "does-not-exist.jsonl"},
             )
 
@@ -323,10 +329,14 @@ class TestImportResults:
                     "marc_missing": [],
                 },
                 {
-                    "id": "picker",
-                    "label": "M9 picker (future)",
-                    "candidates": "picker/candidates.jsonl",
-                    "schema": "picker-choice/1",
+                    # An imagined future stage with a schema id we haven't
+                    # registered. ``title-lang-decision/1`` is now real — pick a
+                    # schema that's still unknown so the dispatcher's
+                    # unknown-stage path is what we actually test.
+                    "id": "kanto-promote",
+                    "label": "KANTO promotion (future)",
+                    "candidates": "kanto-promote/candidates.jsonl",
+                    "schema": "kanto-promote/1",
                     "marc_missing": [],
                 },
             ],
@@ -337,14 +347,14 @@ class TestImportResults:
                 "contrib/results.jsonl",
                 json.dumps(_result_row(row_id="cg-pending-0001", bib="b001")) + "\n",
             )
-            zf.writestr("picker/results.jsonl", "{}\n")
+            zf.writestr("kanto-promote/results.jsonl", "{}\n")
 
         dispatch = import_results(
             input_path=zip_path,
             gold_overrides={"contrib-candidate/1": gold},
         )
         assert "contrib" in dispatch.per_stage_summaries
-        assert dispatch.unknown_stages == ["picker-choice/1"]
+        assert dispatch.unknown_stages == ["kanto-promote/1"]
         assert dispatch.per_stage_summaries["contrib"].kept == 1
 
     def test_missing_results_jsonl_raises(self, tmp_path: Path) -> None:

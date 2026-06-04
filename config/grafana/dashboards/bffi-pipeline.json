@@ -1649,7 +1649,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Run `${active_run}`\n\n- <a href=\"/files/${active_run}/\" target=\"_blank\">Browse all run artifacts</a>\n"
+        "content": "Run `${active_run}`\n\n- <a href=\"/files/${active_run}/\" target=\"_blank\">Browse all run artifacts</a>\n- <a href=\"/files/${active_run}/cataloguer-review/cataloguer-review.html\" target=\"_blank\">Open cataloguer review</a> (if M3 contrib cascade or M6 produced an audit log)\n- <a href=\"/files/${active_run}/cataloguer-review/bundle.zip\">Download cataloguer-review bundle</a>"
       }
     },
     {

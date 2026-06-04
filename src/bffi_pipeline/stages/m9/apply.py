@@ -239,8 +239,24 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     # review row carries member_bib_ids — cataloguers use those to
     # locate the source MARC and estimate the bug's severity (a wrong
     # cluster spanning two famous authors is more impactful than one
-    # between two obscure ones).
+    # between two obscure ones). The map doubles as the work_uri →
+    # bib_id lookup the picker audit log uses to attach MARC sidecars
+    # for the cataloguer-review bundle.
     canonical_bib_ids = _load_canonical_bib_ids(settings.data_dir / "canonical-map.jsonl")
+
+    # M9 picker audit log: one row per LLM fire, consumed by the
+    # cataloguer-bundle stage to build a picker review queue without
+    # re-running the cascade. Reset at stage start so re-runs produce
+    # a coherent log instead of appending duplicates.
+    from bffi_pipeline.stages.m9.picker_audit import (
+        audit_log_path as _picker_audit_path,
+    )
+    from bffi_pipeline.stages.m9.picker_audit import (
+        reset_audit_log as _reset_picker_audit,
+    )
+
+    picker_audit_log_path = _picker_audit_path(settings.data_dir)
+    _reset_picker_audit(picker_audit_log_path)
     # P-12 Phase D: cadence is operator-tunable via BFFI_M9_PROGRESS_CADENCE
     # so short benches can crank it down (e.g. 50) for a livelier dashboard.
     # Default 200 matches the pre-P-12 module-level constant.
@@ -523,6 +539,8 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 lexical_fallback_floor=lexical_fallback_floor,
                 lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
                 disable_fallback=disable_fallback,
+                audit_log_path=picker_audit_log_path,
+                canonical_bib_ids=canonical_bib_ids,
             )
         else:
             assert picker_factory is not None  # narrow; validated above
@@ -538,6 +556,8 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
                 lexical_fallback_floor=lexical_fallback_floor,
                 lexical_fallback_floor_per_vocab=lexical_fallback_floor_per_vocab,
                 disable_fallback=disable_fallback,
+                audit_log_path=picker_audit_log_path,
+                canonical_bib_ids=canonical_bib_ids,
             )
 
     # P-10 Phase B: stash write-back data per idx — Phase 3 reads it

@@ -25,6 +25,12 @@ from bffi_pipeline.contrib_variants import (
 )
 from bffi_pipeline.observability.events import emit_if_active, get_active_emitter
 from bffi_pipeline.stages.m3.contrib_audit import AUDIT_FILENAME, reset_audit_log
+from bffi_pipeline.stages.m3.title_lang_audit import (
+    AUDIT_FILENAME as TITLE_LANG_AUDIT_FILENAME,
+)
+from bffi_pipeline.stages.m3.title_lang_audit import (
+    reset_audit_log as reset_title_lang_audit_log,
+)
 from bffi_pipeline.validation.bffi import validate_graph
 
 _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
@@ -124,6 +130,7 @@ def run(
     contrib_extractor: object | None = None,
     variants_sidecar_path: Path | None = None,
     audit_log_path: Path | None = None,
+    title_lang_audit_log_path: Path | None = None,
     now: datetime | None = None,
 ) -> BffiSummary:
     """Convert every ``<bibframe_dir>/<id>.rdf`` to a BFFI Turtle file.
@@ -152,16 +159,18 @@ def run(
     validation_path = base / "bffi" / "_validation.jsonl"
     sidecar_path = variants_sidecar_path or (base / DEFAULT_SIDECAR_NAME)
     audit_path = audit_log_path or (base / AUDIT_FILENAME)
+    title_lang_audit_path = title_lang_audit_log_path or (base / TITLE_LANG_AUDIT_FILENAME)
     if force:
         truncate_sidecar(sidecar_path)
-    # Always reset the audit log when the contrib cascade will run —
-    # otherwise re-runs accumulate stale candidate rows and the
-    # cataloguer-bundle stage emits a confusing mix of this-run and
-    # last-run cases. When the cascade is off (contrib_extractor is
-    # None), leave any existing log alone — a heuristic-only re-run
-    # shouldn't wipe a previously-produced audit.
+    # Always reset the audit log when the cascade will run — otherwise
+    # re-runs accumulate stale candidate rows and the cataloguer-bundle
+    # stage emits a confusing mix of this-run and last-run cases. When
+    # the cascade is off, leave any existing log alone — a heuristic-
+    # only re-run shouldn't wipe a previously-produced audit.
     if contrib_extractor is not None:
         reset_audit_log(audit_path)
+    if llm_detector is not None:
+        reset_title_lang_audit_log(title_lang_audit_path)
 
     # P-12 Option B: include the active run_uuid on every validation
     # row so the exporter's error-tail loop attributes Boundary-3
@@ -210,6 +219,9 @@ def run(
                 contrib_extractor=contrib_extractor,
                 variants_sidecar_path=sidecar_path,
                 audit_log_path=audit_path if contrib_extractor is not None else None,
+                title_lang_audit_log_path=(
+                    title_lang_audit_path if llm_detector is not None else None
+                ),
                 now=now,
             )
         except Exception as exc:

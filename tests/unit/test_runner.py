@@ -10,6 +10,8 @@ import pytest
 
 from bffi_pipeline import runner as runner_module
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.eval import review_bundle
+from bffi_pipeline.eval.review_bundle.stages import STAGE_REGISTRY
 from bffi_pipeline.observability.events import (
     StageEventEmitter,
     set_active_emitter,
@@ -374,3 +376,78 @@ def test_stage_outcome_records_elapsed_seconds_for_completed(
     assert summary.outcomes[0].stage == "m2"
     assert summary.outcomes[0].status == "completed"
     assert summary.outcomes[0].elapsed_seconds >= 0
+
+
+def test_cataloguer_bundle_receives_input_dir_kwarg(
+    stub_all_stages: dict[str, list[dict]],
+    active_emitter: StageEventEmitter,
+    tmp_path: Path,
+) -> None:
+    """The bundle dispatcher receives ``input_dir`` so it can root MARC
+    sidecar lookup at the run's actual source dir (matching the audit
+    logs' MARC-001-verbatim bib ids). Without this, sidecars 404 on
+    inputs whose 001 format differs from the canonical-corpus default
+    (e.g. the curated ``marcxml/samples/helmet/500/marcxml/`` set whose
+    001 fields carry a ``b`` prefix)."""
+    run_pipeline(input_dir=tmp_path)
+    assert stub_all_stages["cataloguer-bundle"][0] == {"input_dir": tmp_path}
+
+
+def test_cataloguer_bundle_receives_input_dir_none_on_resumed_run(
+    stub_all_stages: dict[str, list[dict]],
+    active_emitter: StageEventEmitter,
+) -> None:
+    """When the operator resumes mid-chain without ``--input-dir`` the
+    dispatcher still runs but with ``input_dir=None``; the bundle
+    builder then falls back to its ``DEFAULT_HELMET_MARC_DIR``."""
+    run_pipeline(input_dir=None, from_stage="m3")
+    assert stub_all_stages["cataloguer-bundle"][0] == {"input_dir": None}
+
+
+def test_dispatch_cataloguer_bundle_forwards_input_dir_as_marc_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The dispatcher forwards ``input_dir`` to ``build_bundle`` as
+    ``marc_dir`` only when set; when ``None`` it omits the kwarg so the
+    bundle builder's default applies."""
+    # Seed a populated audit log for the first registered stage so the
+    # dispatcher actually reaches the build_bundle call.
+    first_schema, first_handler = next(iter(STAGE_REGISTRY.items()))
+    settings = get_settings()
+    run_dir = settings.data_dir
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / first_handler.audit_filename).write_text(
+        '{"id":"cg-pending-0001"}\n', encoding="utf-8"
+    )
+
+    # Make the HTML-copy step a no-op — the test isn't about file copy.
+    monkeypatch.setattr(
+        runner_module.shutil if hasattr(runner_module, "shutil") else __import__("shutil"),
+        "copy2",
+        lambda *_a, **_k: None,
+    )
+
+    captured: list[dict] = []
+
+    def _fake_build_bundle(**kwargs):
+        captured.append(kwargs)
+
+        class _Result:
+            def render(self) -> str:
+                return "fake-bundle-summary"
+
+        return _Result()
+
+    monkeypatch.setattr(review_bundle, "build_bundle", _fake_build_bundle)
+
+    # With input_dir set: marc_dir flows through.
+    marc_src = tmp_path / "marc-source"
+    marc_src.mkdir()
+    runner_module._dispatch_cataloguer_bundle(input_dir=marc_src)
+    assert captured[-1].get("marc_dir") == marc_src
+
+    # With input_dir=None: marc_dir is omitted so the builder's default kicks in.
+    runner_module._dispatch_cataloguer_bundle(input_dir=None)
+    assert "marc_dir" not in captured[-1]
+    assert first_schema in captured[-1]["stage_schemas"]

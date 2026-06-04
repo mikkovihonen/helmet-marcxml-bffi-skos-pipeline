@@ -165,7 +165,11 @@ def build_bundle(
     written atomically (temp file + rename) per the project
     idempotency convention.
     """
-    schemas = stage_schemas or sorted(STAGE_REGISTRY)
+    # Preserve registry insertion order (pipeline-stage order: M2 → M3
+    # → M6 → M9) rather than sorting alphabetically, so the HTML
+    # reviewer's tabs land in logical chain order regardless of which
+    # path built the bundle (in-chain dispatcher vs. operator CLI).
+    schemas = stage_schemas if stage_schemas else list(STAGE_REGISTRY)
     pool_overrides = pool_overrides or {}
 
     stage_entries: list[StageEntry] = []

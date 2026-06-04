@@ -224,6 +224,7 @@ def _validate_with_salvage(
     input_path: Path,
     *,
     llm_extractor: SalvageExtractor | None = None,
+    audit_log_path: Path | None = None,
 ) -> tuple[ValidatedMarcXml, SalvageOutcome | None]:
     """P-41 Phase B.7 — run the Boundary-1 validation chain; if
     ``validate_minimum_content`` raises for the missing-creator case,
@@ -261,6 +262,7 @@ def _validate_with_salvage(
             bib_id=bib_id,
             settings=get_settings(),
             llm_extractor=llm_extractor,
+            audit_log_path=audit_log_path,
         )
         if outcome is None:
             raise
@@ -278,6 +280,7 @@ def _convert_one(
     *,
     force: bool,
     llm_extractor: SalvageExtractor | None = None,
+    audit_log_path: Path | None = None,
 ) -> tuple[HelmetMapRow | None, str]:
     """Convert one record. Returns ``(map_row, status)`` where status is one of
     ``"ok"``, ``"skipped"``; raises typed errors on failure.
@@ -293,7 +296,11 @@ def _convert_one(
     MarcConversion Activity, and the per-run TSV row lands at
     ``<BFFI_DATA_DIR>/export-synthesis-<run_uuid>.tsv``.
     """
-    validated, salvage_outcome = _validate_with_salvage(input_path, llm_extractor=llm_extractor)
+    validated, salvage_outcome = _validate_with_salvage(
+        input_path,
+        llm_extractor=llm_extractor,
+        audit_log_path=audit_log_path,
+    )
     helmet_id = validated.helmet_bib_id
     out = _output_path_for(output_dir, helmet_id)
     if not force and _is_output_fresh(input_path, out):

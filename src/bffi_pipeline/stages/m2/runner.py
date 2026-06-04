@@ -112,6 +112,7 @@ def run(
     output_dir: Path | None = None,
     force: bool = False,
     llm_extractor: object | None = None,
+    audit_log_path: Path | None = None,
 ) -> ConversionSummary:
     """Convert every ``*.xml`` file in ``input_dir`` and return a summary.
 
@@ -122,11 +123,32 @@ def run(
     LangChain stack) to opt in. The default ``None`` skips the LLM
     tier; B1 regex + B3 sentinel still rescue records via the existing
     deterministic paths.
+
+    ``audit_log_path`` defaults to
+    ``<output_dir>/salvage-candidates.jsonl`` when the LLM extractor
+    is active, and is reset at stage start so re-runs produce a
+    coherent log. The cataloguer-bundle stage auto-discovers this
+    file by convention and packs a salvage tab into the bundle.
     """
     output_dir = output_dir or get_settings().data_dir
     summary = ConversionSummary()
     helmet_map_path = output_dir / "helmet-map.jsonl"
     errors_path = output_dir / "bibframe" / "_errors.jsonl"
+
+    # M2 salvage audit log — same pattern as M3 contrib + M9 picker.
+    # Reset only when the LLM cascade will actually run (no
+    # extractor → no audit writes → don't wipe a previously-produced
+    # log from a heuristic-only re-run).
+    from bffi_pipeline.stages.m2.salvage_audit import (  # noqa: PLC0415
+        audit_log_path as _salvage_audit_path,
+    )
+    from bffi_pipeline.stages.m2.salvage_audit import (  # noqa: PLC0415
+        reset_audit_log as _reset_salvage_audit,
+    )
+
+    salvage_audit_log_path = audit_log_path or _salvage_audit_path(output_dir)
+    if llm_extractor is not None:
+        _reset_salvage_audit(salvage_audit_log_path)
 
     # P-12 Option B: include the active run_uuid on every error row so
     # the exporter's error-tail loop can attribute each typed failure
@@ -160,6 +182,7 @@ def run(
                 output_dir,
                 force=force,
                 llm_extractor=cast("SalvageExtractor | None", llm_extractor),
+                audit_log_path=salvage_audit_log_path if llm_extractor is not None else None,
             )
         except MarcXmlValidationError as exc:
             row = ConversionErrorRow(

@@ -10,7 +10,9 @@ on the conversion orchestration. No logic change — moves only.
 
 from __future__ import annotations
 
-from typing import Final, cast
+import contextlib
+from pathlib import Path
+from typing import Any, Final, cast
 
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF
@@ -110,6 +112,7 @@ def _retag_pref_labels(
     candidates: frozenset[str],
     *,
     llm_detector: object | None = None,
+    audit_log_path: Path | None = None,
 ) -> None:
     """Replace untagged ``skos:prefLabel`` literals with split + per-language ones.
 
@@ -126,7 +129,6 @@ def _retag_pref_labels(
     venäläinen tšarkka = russkaja tšarka"). The detector's
     per-segment assignment overrides Lingua's verdict.
     """
-    from bffi_pipeline.title_lang import tag_title
     from bffi_pipeline.title_lang_llm import TitleLangDetector
 
     # The Protocol isn't runtime-checkable; trust the caller to pass the
@@ -144,31 +146,111 @@ def _retag_pref_labels(
     if len(candidates) == 1:
         declared_only = next(iter(candidates))
 
-    to_remove: list[tuple[URIRef, URIRef, Literal]] = []
-    to_add: list[tuple[URIRef, URIRef, Literal]] = []
+    # Lazy imports for the audit-log helper + bib-id resolver — keep
+    # the M3 hot path free of unused module imports when the
+    # llm_detector is None (heuristic-only runs).
+    audit_helpers: object | None = None
+    if audit_log_path is not None and typed_detector is not None:
+        from bffi_pipeline.stages.m3 import title_lang_audit as _tla
+        from bffi_pipeline.stages.m3.contributions import (
+            _read_helmet_bib_id,
+        )
+
+        audit_helpers = (_tla, _read_helmet_bib_id)
+
+    # Group untagged-prefLabel triples by literal text. BIBFRAME emits
+    # the same title on multiple subjects per record (the bffi:Work and
+    # at least one bffi:Expression — both carry the same prefLabel
+    # literal). Detecting language per unique text saves the redundant
+    # LLM calls and produces one audit row per unique title instead of
+    # one per (subject, title) pair.
+    by_text: dict[str, list[tuple[URIRef, Literal]]] = {}
     for s, _, o in graph.triples((None, SKOS_prefLabel, None)):
         if not isinstance(o, Literal) or o.language or not isinstance(s, URIRef):
             continue
-        text = str(o)
-        if declared_only and not any(sep in text for sep in _RDA_PARALLEL_SEPARATORS):
-            to_remove.append((s, SKOS_prefLabel, o))
-            to_add.append((s, SKOS_prefLabel, Literal(text, lang=declared_only)))
-            continue
-        # Detector-driven path: only fi/sv/en/ru get disambiguated.
-        # When ``candidates`` contains codes outside that set (e.g. de),
-        # ``tag_title`` intersects internally and returns nothing →
-        # this label stays untagged. That's intentional: we don't
-        # claim per-segment language for a parallel German/French
-        # title we can't actually disambiguate.
-        detectable = candidates & _DETECTABLE_LANGS
-        tagged = tag_title(text, detectable, llm_detector=typed_detector)
-        if not tagged:
-            continue
-        to_remove.append((s, SKOS_prefLabel, o))
-        for seg in tagged:
-            literal = Literal(seg.text, lang=seg.lang) if seg.lang else Literal(seg.text)
-            to_add.append((s, SKOS_prefLabel, literal))
+        by_text.setdefault(str(o), []).append((s, o))
+
+    to_remove: list[tuple[URIRef, URIRef, Literal]] = []
+    to_add: list[tuple[URIRef, URIRef, Literal]] = []
+    for text, occurrences in by_text.items():
+        _retag_one_text(
+            text=text,
+            occurrences=occurrences,
+            candidates=candidates,
+            declared_only=declared_only,
+            typed_detector=typed_detector,
+            audit_helpers=audit_helpers,
+            audit_log_path=audit_log_path,
+            graph=graph,
+            to_remove=to_remove,
+            to_add=to_add,
+        )
     for triple in to_remove:
         graph.remove(triple)
     for triple in to_add:
         graph.add(triple)
+
+
+def _retag_one_text(
+    *,
+    text: str,
+    occurrences: list[tuple[URIRef, Literal]],
+    candidates: frozenset[str],
+    declared_only: str | None,
+    typed_detector: Any,  # TitleLangDetector | None (Protocol — lazy-import in caller)
+    audit_helpers: Any,  # (title_lang_audit_module, _read_helmet_bib_id_fn) | None
+    audit_log_path: Path | None,
+    graph: Graph,
+    to_remove: list[tuple[URIRef, URIRef, Literal]],
+    to_add: list[tuple[URIRef, URIRef, Literal]],
+) -> None:
+    """Retag every (subject, original_literal) occurrence of one
+    untagged prefLabel literal. The LLM fires at most once per unique
+    literal text, regardless of how many subjects carry it in the
+    record's BIBFRAME graph (typically two: bffi:Work + bffi:Expression).
+    """
+    from bffi_pipeline.title_lang import tag_title
+
+    if declared_only and not any(sep in text for sep in _RDA_PARALLEL_SEPARATORS):
+        for s, o in occurrences:
+            to_remove.append((s, SKOS_prefLabel, o))
+            to_add.append((s, SKOS_prefLabel, Literal(text, lang=declared_only)))
+        return
+
+    # Detector-driven path: only fi/sv/en/ru get disambiguated. When
+    # ``candidates`` contains codes outside that set (e.g. de),
+    # ``tag_title`` intersects internally and returns nothing → this
+    # label stays untagged. That's intentional: we don't claim
+    # per-segment language for a parallel German/French title we
+    # can't actually disambiguate.
+    detectable = candidates & _DETECTABLE_LANGS
+    # Clear any stale telemetry from a prior text so we can tell
+    # whether the LLM fired this iteration.
+    if typed_detector is not None:
+        with contextlib.suppress(AttributeError):
+            typed_detector._last_call = None
+    tagged = tag_title(text, detectable, llm_detector=typed_detector)
+    if audit_helpers is not None and typed_detector is not None and audit_log_path is not None:
+        telemetry = getattr(typed_detector, "_last_call", None)
+        if telemetry is not None:
+            _tla, _read_helmet_bib_id = audit_helpers
+            # Use the first occurrence's subject for the audit row's
+            # work_uri — typically the bffi:Work URI since BIBFRAME
+            # emits Work before Expression. The cataloguer reviews
+            # per title, not per URI; MARC sidecar lookup uses
+            # helmet_bib_id (record-level).
+            first_subject = occurrences[0][0]
+            bib_id = _read_helmet_bib_id(graph, first_subject)
+            _tla.append_audit_row(
+                audit_log_path,
+                helmet_bib_id=bib_id,
+                work_uri=str(first_subject),
+                telemetry=telemetry,
+            )
+    if not tagged:
+        return
+    for s, o in occurrences:
+        to_remove.append((s, SKOS_prefLabel, o))
+        for seg in tagged:
+            literal = Literal(seg.text, lang=seg.lang) if seg.lang else Literal(seg.text)
+            to_add.append((s, SKOS_prefLabel, literal))

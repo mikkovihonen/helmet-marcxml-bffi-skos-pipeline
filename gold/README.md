@@ -287,6 +287,144 @@ The summary the importer prints calls out:
   follow-up; they stay in `judge-decisions.jsonl` for a future
   bundle.
 
+### M9 picker tab — entity-centric KANTO URI review
+
+The M9 reconciliation stage uses an LLM picker to choose a KANTO
+authority URI from a candidate list when the lexical-similarity
+tier can't commit. The picker writes
+`runs/<uuid>/picker-decisions.jsonl` per run (one row per fire),
+which the `cataloguer-bundle` stage auto-discovers and packs as
+the bundle's **third tab** alongside contrib + judge.
+
+The picker card is entity-centric, not record-centric:
+
+- **Header banner** — entity literal (e.g. "Henrik Lönnrot"),
+  entity kind chip (person / corporate_body / subject /
+  genre_form / music_form / fictional_character), outcome class
+  (`llm_pick` / `fallback` / `watchdog_aborted`), LLM
+  confidence + rationale.
+- **Originating record** — MARC view of the bib that originated
+  this entity reconciliation request.
+- **Candidate table** — every KANTO candidate the LLM saw:
+  prefLabel, source vocabulary (finaf / yso / kauno / muso /
+  viaf), lexical similarity score, URI (clickable). The LLM's
+  pick row is highlighted with a ★.
+- **6-way decision row**:
+  - **AGREE** (`A`) — keep the LLM's chosen URI as `expected_uri`.
+    For `fallback` / `watchdog_aborted` outcomes, AGREE means
+    "agree with the fallback's highest-lexical pick".
+  - **PICK CANDIDATE** (`P`) — enable an inline radio over the
+    candidate table; the chosen candidate becomes `expected_uri`.
+  - **NO-MATCH** (`N`) — lands a row with `expected_uri = null`.
+    Useful signal: the picker should have said "uncertain"
+    but didn't, or no KANTO entry exists for this entity. The
+    operator's summary calls these out as a follow-up class.
+  - **STILL-UNCERTAIN** (`U`) — cataloguer can't tell; doesn't
+    land in gold.
+  - **DISCARD** (`X`) — bad row.
+  - **SKIP-FOR-NOW** (`Z`).
+- **Notes textarea** + holdout checkbox.
+
+Imported KEEP rows land in `gold/picker.jsonl` with the schema:
+
+```json
+{
+  "id": "gp-NNNN",
+  "entity_kind": "person",
+  "entity_label": "Henrik Lönnrot",
+  "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000123" | null,
+  "originating_bib_id": "1002345",
+  "originating_work_uri": "http://urn.fi/URN:NBN:fi:bib:work:...",
+  "predicate_uri": "...",
+  "holdout": false,
+  "added": "2026-06-04",
+  "added_by": "cataloguer-m9:Maija Mäkinen",
+  "notes": "...",
+  "candidates_seen": [
+    {"uri": "...", "pref_label": "...",
+     "source_vocabulary": "finaf", "lexical_similarity": 0.85}
+  ]
+}
+```
+
+`candidates_seen` is preserved so an eval harness can re-run
+the picker against the historical candidate set and check
+whether picker output matches `expected_uri`.
+
+Sampling is **stratified by `entity_kind × outcome_stage ×
+confidence_band`** (low / mid / high), surfacing the most
+uncertain picks (where human judgement matters most) alongside
+high-confidence picks (for spotting over-confidence
+regressions).
+
+The picker tab's audit log is populated automatically whenever
+M9 runs in the canonical chain — no operator flag needed. The
+cataloguer-bundle stage's auto-discovery handles four audit
+logs simultaneously (`contrib-candidates.jsonl`,
+`judge-decisions.jsonl`, `picker-decisions.jsonl`,
+`salvage-candidates.jsonl`); runs that skipped a stage simply
+produce a bundle without that tab.
+
+### M2 salvage tab — bib-centric audit of LLM-extracted creators
+
+The M2 stage's LLM salvage cascade (P-41) extracts a creator
+from MARC 245$c when the deterministic regex tier can't parse
+it and the record has no 1XX/7XX. With `--llm-salvage-cascade`
+on, every salvage call writes to
+`runs/<uuid>/salvage-candidates.jsonl` — both fresh LLM calls
+and cache hits land in the audit log, with a `cache_hit: bool`
+flag so the cataloguer can tell them apart. (Cache hits matter
+because the decision still influenced this run's BIBFRAME
+graph, regardless of when the LLM call was originally made.)
+
+The salvage card is bib-centric like contrib:
+
+- **MARC view** — the originating record, 245 field highlighted
+- **LLM banner** — the LLM's free-text rationale + a "fresh
+  LLM" / "cache-hit" badge
+- **245$c text** (read-only) — the exact text the LLM parsed
+- **Expected agents** (editable) — name + role per agent. The
+  cataloguer can edit names in place, override roles
+  (author / editor / translator / illustrator / compiler /
+  unknown), add agents the LLM missed, or remove
+  hallucinations. **A name that doesn't appear verbatim in the
+  245$c text gets an amber-bordered input** with a tooltip
+  pointing to P-41's verbatim-substring constraint; editing
+  past the constraint is allowed (legitimate for typo-fixes)
+  but the cataloguer should note it.
+- **Decision row** (3 options, contrib-style): KEEP /
+  DISCARD / SKIP-FOR-NOW
+
+Imported KEEP rows land in `gold/salvage.jsonl` with the
+schema:
+
+```json
+{
+  "id": "sv-NNNN",
+  "helmet_bib_id": "1000123",
+  "c_subfield": "by John Smith",
+  "expected_agents": [
+    {"name": "John Smith", "role": "author"}
+  ],
+  "holdout": false,
+  "added": "2026-06-04",
+  "added_by": "cataloguer-m2:Maija Mäkinen",
+  "notes": "..."
+}
+```
+
+Sampling is **stratified by `cache_hit × agent_count_band`**
+(empty / single / multi), surfacing the multi-agent salvages
+where the LLM might have over-extracted from a capitalised
+list, alongside an even mix of fresh vs cached decisions.
+
+DISCARD is the right call when the LLM picked a non-creator
+(e.g. a publisher name from 260$b/264$b) or hallucinated an
+agent the cataloguer can't verify. The summary's
+`cache_hit_kept` count surfaces how many gold rows came from
+cache replays so the operator can spot stale-cache concerns
+across reviews.
+
 ## What's NOT done yet
 
 - `make eval` target (depends on M6 LLM judge).

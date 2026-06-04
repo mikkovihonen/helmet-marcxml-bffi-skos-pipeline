@@ -37,6 +37,7 @@ from bffi_pipeline.stages.m9.decisions import (
 )
 from bffi_pipeline.stages.m9.local_concept_resolver import LocalConceptResolver
 from bffi_pipeline.stages.m9.picker import LLMPicker
+from bffi_pipeline.stages.m9.picker_audit import append_audit_row
 from bffi_pipeline.stages.m9.schemas import (
     _M9_PROGRESS_CADENCE,
     LEXICAL_FLOOR,
@@ -290,6 +291,38 @@ def _emit_picker_progress(
     )
 
 
+def _write_picker_audit_row(
+    audit_log_path: Path | None,
+    outcome: ReconciliationOutcome,
+    canonical_bib_ids: Mapping[str, list[str]] | None,
+) -> None:
+    """Append one audit row to ``audit_log_path`` for a picker fire.
+
+    No-op when ``audit_log_path`` is None (audit disabled) or when
+    the outcome resolved at tier-0 / tier-1 (no picker call —
+    nothing to audit; see ``picker_audit._classify_outcome``).
+
+    The originating bib id is looked up from ``canonical_bib_ids``
+    by the outcome's ``request.work_uri``. M8's canonical map can
+    have multiple bib ids per canonical work (clustered records);
+    we pick the first for the MARC sidecar — the cataloguer sees
+    one representative MARCXML, sufficient context for the picker
+    review.
+    """
+    if audit_log_path is None:
+        return
+    bib_id: str | None = None
+    if canonical_bib_ids is not None:
+        bibs = canonical_bib_ids.get(outcome.request.work_uri) or []
+        if bibs:
+            bib_id = bibs[0]
+    append_audit_row(
+        audit_log_path,
+        outcome=outcome,
+        originating_bib_id=bib_id,
+    )
+
+
 def _picker_call_with_budget(
     *,
     picker: LLMPicker,
@@ -382,6 +415,8 @@ def _picker_phase_seq(
     lexical_fallback_floor: float = LEXICAL_FLOOR,
     lexical_fallback_floor_per_vocab: Mapping[str, float] | None = None,
     disable_fallback: bool = False,
+    audit_log_path: Path | None = None,
+    canonical_bib_ids: Mapping[str, list[str]] | None = None,
 ) -> list[tuple[int, ReconciliationOutcome]]:
     """Sequential (c=1) path: call the shared picker inline per field.
 
@@ -411,6 +446,7 @@ def _picker_phase_seq(
             disable_fallback=disable_fallback,
         )
         results.append((idx, outcome))
+        _write_picker_audit_row(audit_log_path, outcome, canonical_bib_ids)
         if outcome.was_watchdog_aborted:
             watchdog_aborted += 1
         if outcome.stage == STAGE_LLM:
@@ -455,6 +491,8 @@ def _picker_phase_pool(
     lexical_fallback_floor: float = LEXICAL_FLOOR,
     lexical_fallback_floor_per_vocab: Mapping[str, float] | None = None,
     disable_fallback: bool = False,
+    audit_log_path: Path | None = None,
+    canonical_bib_ids: Mapping[str, list[str]] | None = None,
 ) -> list[tuple[int, ReconciliationOutcome]]:
     """Concurrent (c>=2) path: thread-local pickers, parallel dispatch.
 
@@ -507,6 +545,7 @@ def _picker_phase_pool(
         for fut in concurrent.futures.as_completed(futures):
             idx, outcome = fut.result()
             results.append((idx, outcome))
+            _write_picker_audit_row(audit_log_path, outcome, canonical_bib_ids)
             if outcome.was_watchdog_aborted:
                 watchdog_aborted += 1
             if outcome.stage == STAGE_LLM:

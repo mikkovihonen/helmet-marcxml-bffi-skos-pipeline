@@ -537,6 +537,18 @@ class LangChainSalvageExtractor:
         )
 
     def extract(self, *, c_subfield: str) -> list[ParsedAgent]:
+        # Side-channel telemetry for the audit log writer in
+        # stages/m2/salvage_audit.py. The Protocol's return shape
+        # stays list[ParsedAgent]; the audit writer reads
+        # ``getattr(extractor, "_last_call", None)`` to stamp the
+        # row with the rationale + cache_hit flag. Cleared at the
+        # top of each call so a stub extractor's stale state can't
+        # leak into the next record's audit row.
+        from bffi_pipeline.stages.m2.salvage_audit import (  # noqa: PLC0415
+            SalvageCallTelemetry,
+        )
+
+        self._last_call: SalvageCallTelemetry | None = None
         c_subfield = (c_subfield or "").strip()
         if not c_subfield:
             return []
@@ -547,6 +559,10 @@ class LangChainSalvageExtractor:
         if self.cache is not None:
             cached = self.cache.get(cache_key)
             if cached is not None:
+                self._last_call = SalvageCallTelemetry(
+                    rationale=cached.rationale,
+                    cache_hit=True,
+                )
                 return _enforce_verbatim_substring(cached, c_subfield=c_subfield)
 
         chain = self._resolved_chain()
@@ -588,6 +604,10 @@ class LangChainSalvageExtractor:
                     model_name=self.model_name or DEFAULT_SALVAGE_MODEL,
                     prompt_hash_value=prompt_hash_value,
                 )
+            self._last_call = SalvageCallTelemetry(
+                rationale=decision.rationale,
+                cache_hit=False,
+            )
             return _enforce_verbatim_substring(decision, c_subfield=c_subfield)
 
 

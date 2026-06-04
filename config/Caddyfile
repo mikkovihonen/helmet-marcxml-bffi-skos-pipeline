@@ -24,15 +24,21 @@
 	# can drill from /files/ down to a specific run.
 	handle_path /files/* {
 		root * /srv
-		# Force a download dialog for actual files (paths that don't
-		# end in `/`) so TSV / TTL / JSONL artifacts open in Excel /
-		# VS Code instead of as raw text in a browser tab. Directory
-		# listings (paths ending in `/`) keep their HTML so operators
-		# can still browse from /files/ down to a specific run.
-		@file {
+		# Force a download dialog for non-HTML files (paths that don't
+		# end in `/` and aren't *.html) so TSV / TTL / JSONL artifacts
+		# open in Excel / VS Code instead of as raw text in a browser
+		# tab. Directory listings (paths ending in `/`) keep their
+		# native HTML for browsing. HTML files in run dirs — currently
+		# the cataloguer reviewer at
+		# /files/<run_uuid>/cataloguer-review/cataloguer-review.html —
+		# render in-browser so the link can be clicked from the
+		# Grafana dashboard's "Run artifacts" panel and the reviewer
+		# auto-loads its sibling bundle.zip.
+		@download {
 			not path */
+			not path *.html
 		}
-		header @file Content-Disposition attachment
+		header @download Content-Disposition attachment
 		file_server browse
 	}
 
