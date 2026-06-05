@@ -22,12 +22,50 @@ from bffi_pipeline.stages.m9.schemas import AuthorityCandidate, WorkContext
 #: Picker prompt source. Hashed at startup so reconciliation provenance
 #: pins the exact prompt that produced each decision.
 #:
-#: v2 (2026-06-04) adds an Originating-Work context block — Work title,
-#: language, contributors, sibling subjects — so the picker can
-#: disambiguate same-named authorities by topical match. The v1 prompt
-#: stays in tree for replay of historical decisions; the cache key
-#: includes the prompt SHA so cross-version decisions never collide.
-PICKER_PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[4] / "prompts" / "picker_v2.txt"
+#: v2 (2026-06-04) added an Originating-Work context block — Work
+#: title, language, contributors, sibling subjects — so the picker
+#: can disambiguate same-named authorities by topical match.
+#:
+#: v3 (2026-06-04) adds per-candidate context lines (definition,
+#: scope note, broader topics, occupations, life dates, alt labels)
+#: fetched from local Fuseki by
+#: :class:`bffi_pipeline.stages.m9.candidate_context.FusekiCandidateContextFetcher`.
+#: This is the central lever for shared-name disambiguation: the
+#: candidate side now tells the picker that "Koivisto, Ilkka" #1 is a
+#: psychologist while #2 is a zoologist.
+#:
+#: v4 (2026-06-04) was an attempt to add explicit confidence-
+#: calibration rules to fix v3's over-hedging. The smoke (run
+#: ``392823a160304676be614ab52952c21c``) showed needs_review jumped
+#: to 133 (vs v3's 40) — explicitly mentioning the "0.80 downstream
+#: gate" caused the LLM to mass-emit "uncertain". The 92-min M9 wall
+#: time on that run was later traced to a separate
+#: :class:`bffi_pipeline.stages.m9.candidate_context.FusekiCandidateContextFetcher`
+#: SPARQL bug (unbound-variable cartesian explosion against ~290k
+#: cross-graph prefLabels — fixed by the BOUND/isIRI guard +
+#: ``skos:inScheme`` anchor); the prompt change alone wouldn't have
+#: blown wall time up that dramatically. v4 stays in tree for replay
+#: only; the over-hedging fix lives in
+#: :data:`bffi_pipeline.stages.m9.schemas.LLM_CONFIDENCE_THRESHOLD`
+#: (lowered from 0.80 to 0.75 to match v3's more-realistically-
+#: calibrated confidence distribution).
+#:
+#: v5 (2026-06-05) adds a single "Confidence coherence" rule to the
+#: rule list: when decision="uncertain", confidence must be ≤ 0.5.
+#: Surfaced during the gemma-4-26B-A4B eval shootout on the 10-case
+#: eval-picker set — the model emitted ``{"decision":"uncertain",
+#: "confidence":1.0}`` on one case, which
+#: :class:`bffi_pipeline.stages.m9.picker.PickerDecision`'s pydantic
+#: validator rejects (the pair is structurally incoherent — high
+#: confidence with no chosen URI). The clarification is one line in
+#: the rule block, mirrors what the validator already enforces, and
+#: invalidates the picker cache by content-hash. No example changes;
+#: the v3 examples already follow this convention.
+#:
+#: Older prompts stay in tree for replay of historical decisions;
+#: the cache key includes the prompt SHA so cross-version decisions
+#: never collide.
+PICKER_PROMPT_PATH: Final[Path] = Path(__file__).resolve().parents[4] / "prompts" / "picker_v5.txt"
 _PICKER_SECTION_RE: Final[re.Pattern[str]] = re.compile(r"^### (\w+)\s*$", re.MULTILINE)
 
 
@@ -67,14 +105,58 @@ def _parse_picker_prompt_sections() -> dict[str, str]:
 
 
 def _format_candidates_for_prompt(candidates: list[AuthorityCandidate]) -> str:
-    """Render the candidate list in the line-by-line format the prompt expects."""
+    """Render the candidate list in the line-by-line format the prompt expects.
+
+    Each candidate's ``context`` (Phase B candidate-side enrichment)
+    renders as indented sub-lines beneath the prefLabel: scope notes,
+    broader topics, biographical fragments, occupation labels. Empty
+    sub-fields are omitted. Candidates with ``context=None`` render
+    in the pre-Phase-B prefLabel-only form — graceful degrade when
+    Fuseki has no entry for that URI.
+    """
     if not candidates:
         return "(no candidates were returned by the authority client)"
-    return "\n".join(
-        f"  {i}. uri={c.uri} prefLabel={c.pref_label!r} "
-        f"lexical_similarity={c.lexical_similarity:.3f}"
-        for i, c in enumerate(candidates, start=1)
-    )
+    parts: list[str] = []
+    for i, c in enumerate(candidates, start=1):
+        parts.append(
+            f"  {i}. uri={c.uri} prefLabel={c.pref_label!r} "
+            f"lexical_similarity={c.lexical_similarity:.3f}"
+        )
+        parts.extend(_format_candidate_context_lines(c.context))
+    return "\n".join(parts)
+
+
+def _format_candidate_context_lines(context: object) -> list[str]:
+    """Render one :class:`CandidateContext` as indented sub-lines beneath
+    its parent candidate row. Returns ``[]`` when ``context`` is ``None``
+    so callers can blindly extend without an empty-list guard.
+
+    Imports the dataclass lazily to keep this module's import graph
+    light — the picker prompt is in M9's hot path and the context
+    module pulls in httpx for the Fuseki client.
+    """
+    if context is None:
+        return []
+    from bffi_pipeline.stages.m9.candidate_context import CandidateContext  # noqa: PLC0415
+
+    if not isinstance(context, CandidateContext):
+        return []
+    out: list[str] = []
+    if context.definition:
+        out.append(f"     definition: {context.definition}")
+    if context.scope_note:
+        out.append(f"     scope note: {context.scope_note}")
+    if context.broader_labels:
+        out.append(f"     broader topics: {list(context.broader_labels)!r}")
+    if context.field_of_activity_labels:
+        out.append(f"     field of activity: {list(context.field_of_activity_labels)!r}")
+    if context.occupation_labels:
+        out.append(f"     occupations: {list(context.occupation_labels)!r}")
+    if context.birth_date or context.death_date:
+        out.append(f"     life dates: {context.birth_date or '?'}-{context.death_date or ''}")
+    if context.alt_labels:
+        out.append(f"     alt labels: {list(context.alt_labels)!r}")
+    return out
 
 
 def _format_work_context_for_prompt(work_context: WorkContext | None) -> str:

@@ -33,6 +33,7 @@ from bffi_pipeline.stages import (
     m8,
     m9,
 )
+from bffi_pipeline.stages.m9 import candidate_context as _m9_candidate_context
 from bffi_pipeline.stages.m9 import local_concept_resolver
 from bffi_pipeline.stages.m10 import load, load_finto, skosify_run
 
@@ -52,7 +53,9 @@ def _init_observability(settings: Settings) -> StageEventEmitter | None:
     - any other value: treated as a path.
 
     ``run_uuid`` resolution:
-    - empty (default): a fresh ``uuid4().hex`` per invocation.
+    - empty (default): a fresh timestamp-prefixed id per invocation
+      in the form ``YYYYMMDD-HHMM-<6hex>`` (UTC). Lexicographic sort
+      = chronological order so ``ls runs/`` lists newest at the bottom.
     - any other value: pinned (operator-controlled, useful for
       replay).
     """
@@ -1908,6 +1911,7 @@ def embed_command(
 # evaluation/commands.py.
 app.command("embed-benchmark")(_evaluation_commands.embed_benchmark_command)
 app.command("eval")(_evaluation_commands.eval_command)
+app.command("eval-picker")(_evaluation_commands.eval_picker_command)
 app.command("grow-gold")(_evaluation_commands.grow_gold_command)
 app.command("grow-gold-contrib")(_evaluation_commands.grow_gold_contrib_command)
 app.command("review-bundle-build")(_evaluation_commands.review_bundle_build_command)
@@ -2407,6 +2411,16 @@ def reconcile_command(
             else None
         )
 
+        # Phase B candidate-context enrichment: one Fuseki SPARQL per
+        # picker fire to attach scope notes / broader topics / life
+        # dates / occupations to each candidate. Re-uses the same
+        # ``http_client`` + ``fuseki_url`` the local concept resolver
+        # is already configured against.
+        candidate_context_fetcher = _m9_candidate_context.FusekiCandidateContextFetcher(
+            http_client=http_client,
+            fuseki_url=settings.fuseki_url,
+        )
+
         if provenance:
             with prov_writer.ProvenanceWriter(provenance_path) as writer:
                 summary, _outcomes = m9.apply_reconciliation(
@@ -2418,6 +2432,7 @@ def reconcile_command(
                     provenance_graph=writer.graph,
                     kinds=selected_kinds,
                     local_resolver=resolver,
+                    candidate_context_fetcher=candidate_context_fetcher,
                     concurrency=effective_concurrency,
                     field_timeout_seconds=effective_field_timeout,
                     watchdog_sidecar_path=watchdog_sidecar,
@@ -2437,6 +2452,7 @@ def reconcile_command(
                 picker_factory=picker_factory,
                 kinds=selected_kinds,
                 local_resolver=resolver,
+                candidate_context_fetcher=candidate_context_fetcher,
                 concurrency=effective_concurrency,
                 field_timeout_seconds=effective_field_timeout,
                 watchdog_sidecar_path=watchdog_sidecar,

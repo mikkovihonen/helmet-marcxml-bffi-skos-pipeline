@@ -135,10 +135,52 @@ def compute_picker_cache_key(
             model_name,
             f"{vocab}:{finto_sha}",
             _work_context_fingerprint(request.work_context),
+            _candidate_contexts_fingerprint(candidate_list),
         )
     )
     key = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return key, vocab, finto_sha
+
+
+def _candidate_contexts_fingerprint(candidates: list[AuthorityCandidate]) -> str:
+    """Order-independent fingerprint of the per-candidate context set.
+
+    Without this, a cached decision keyed on
+    ``(literal, candidates, prompt_hash)`` would silently survive a
+    KANTO refresh that added a scope note to one candidate's
+    authority entry — the LLM should re-pick under the new context.
+    Folding the per-URI context fingerprint into the key forces a
+    cache miss when context changes; the prompt-hash-only invariant
+    handles purely-prompt-level edits.
+    """
+    pairs = sorted((c.uri, _one_candidate_context_fingerprint(c.context)) for c in candidates)
+    if not pairs:
+        return "no-cand-ctx"
+    return hashlib.sha256("|".join(f"{uri}@{fp}" for uri, fp in pairs).encode("utf-8")).hexdigest()[
+        :16
+    ]
+
+
+def _one_candidate_context_fingerprint(context: object) -> str:
+    """Per-URI context fingerprint. ``None`` folds to ``"none"`` so
+    pre-Phase-B legacy decisions can be looked up self-consistently."""
+    if context is None:
+        return "none"
+    from bffi_pipeline.stages.m9.candidate_context import CandidateContext
+
+    if not isinstance(context, CandidateContext):
+        return "none"
+    parts = (
+        f"def={context.definition or ''}",
+        f"scope={context.scope_note or ''}",
+        f"birth={context.birth_date or ''}",
+        f"death={context.death_date or ''}",
+        "alts=" + ",".join(sorted(context.alt_labels)),
+        "broader=" + ",".join(sorted(context.broader_labels)),
+        "foa=" + ",".join(sorted(context.field_of_activity_labels)),
+        "occ=" + ",".join(sorted(context.occupation_labels)),
+    )
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
 def _work_context_fingerprint(work_context: WorkContext | None) -> str:

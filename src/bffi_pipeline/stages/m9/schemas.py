@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Final
 from typing import Literal as LiteralType
 
 if TYPE_CHECKING:
+    from bffi_pipeline.stages.m9.candidate_context import CandidateContext
     from bffi_pipeline.stages.m9.picker import PickerDecision
 
 #: P-11 Phase A progress cadence for M9. Phase 2 is LLM-picker-bound
@@ -44,7 +45,18 @@ _M9_HEALTH_PROBE_CADENCE: Final[int] = 1000
 #: plan amendment so policy changes stay visible in review.
 LEXICAL_DIRECT_THRESHOLD: Final[float] = 0.95
 LEXICAL_FLOOR: Final[float] = 0.70
-LLM_CONFIDENCE_THRESHOLD: Final[float] = 0.80
+#: Lowered from 0.80 → 0.75 on 2026-06-04 to match the more-realistic
+#: confidence distribution emitted by the Phase B prompt (picker_v3 +
+#: candidate-context fields). The original 0.80 was tuned against
+#: Phase A's prefLabel-only prompt where the LLM averaged 0.94
+#: confidence; adding candidate context made the LLM appropriately
+#: more cautious (avg 0.86), which the unchanged threshold then
+#: misread as "low-quality picks". The picks themselves were
+#: substantively correct (run f66cdae28 spot-checks confirmed);
+#: 0.75 catches the 0.72-0.78 single-candidate band that v3 emits
+#: while still gating below-0.75 picks (genuine uncertainty) into
+#: cataloguer review.
+LLM_CONFIDENCE_THRESHOLD: Final[float] = 0.75
 
 #: Spec-committed authority kinds. KANTO and VIAF cover persons +
 #: corporate bodies; YSO/KAUNO/MUSO cover subjects + genre/form. Phase 1
@@ -190,12 +202,27 @@ class EntityRequest:
 
 @dataclass(frozen=True)
 class AuthorityCandidate:
-    """One candidate URI returned by an authority lookup."""
+    """One candidate URI returned by an authority lookup.
+
+    ``context`` carries this candidate's own scope notes, broader
+    topics, biographical fragments — fetched from local Fuseki by the
+    Phase B candidate-context enricher
+    (:class:`bffi_pipeline.stages.m9.candidate_context.FusekiCandidateContextFetcher`).
+    ``None`` when context isn't enriched (test / heuristic-only paths,
+    or Fuseki returned no rows for the URI). The picker prompt's
+    formatter falls back to prefLabel-only render in that case.
+
+    The context is *not* part of the hash by default (frozen dataclass
+    equality compares fields, and two candidates with the same URI
+    but different context would compare unequal). The picker cache
+    key derives its own per-URI fingerprint instead.
+    """
 
     uri: str
     pref_label: str
     source_vocabulary: str
     lexical_similarity: float
+    context: CandidateContext | None = None
 
 
 # The PickerDecision Pydantic class lives in :mod:`picker` so the

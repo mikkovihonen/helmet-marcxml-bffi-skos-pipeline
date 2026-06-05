@@ -146,7 +146,8 @@ def sample_stratified(
     histogram: dict[str, int] = {}
     picked: list[dict[str, Any]] = []
     for (band, cand_count), rows in sorted(buckets.items()):
-        chosen = rng.sample(rows, min(per_category, len(rows)))
+        # ``per_category <= 0`` means "no cap" — see picker.py.
+        chosen = rows if per_category <= 0 else rng.sample(rows, min(per_category, len(rows)))
         histogram[f"{band}/{cand_count}cand"] = len(chosen)
         picked.extend(chosen)
 

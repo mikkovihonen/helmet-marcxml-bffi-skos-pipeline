@@ -1,0 +1,147 @@
+Picker eval — 10 cases, model=/Users/mikkovihonen/.mlx_models/Qwen3-8B-4bit, base_url=http://127.0.0.1:8001/v1
+
+{
+  "model": "/Users/mikkovihonen/.mlx_models/Qwen3-8B-4bit",
+  "base_url": "http://127.0.0.1:8001/v1",
+  "summary": {
+    "total": 10,
+    "decision_matches": 9,
+    "uri_matches": 8,
+    "confidently_wrong": 1,
+    "parse_failures": 0,
+    "avg_latency_seconds": 4.349987820899696,
+    "max_latency_seconds": 21.067183959006798
+  },
+  "results": [
+    {
+      "id": "hakala-tommi-baritone",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000195580",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000161310",
+      "confidence": 0.85,
+      "decision_match": true,
+      "uri_match": false,
+      "confidently_wrong": true,
+      "latency_seconds": 21.067183959006798,
+      "rationale": "Candidate 1's 'yleiskirurgia' field of activity aligns with the Work's 'kokoelmat' (collections) subject, suggesting a connection to music collections. The life dates 1972- match the input's implied timeframe. Candidate 2's 'taidemusiikki' and 'viihdemusiikki' fields are more aligned with the Work's 'oopperat' and 'baritoni' subjects, but the input specifically mentions 'Hakala, Tommi' without additional qualifiers, making Candidate 1's broader field of activity more directly relevant."
+    },
+    {
+      "id": "koivisto-ilkka-zoologist",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000066371",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000066371",
+      "confidence": 0.94,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 3.5139885419994243,
+      "rationale": "The input 'Koivisto, Ilkka' matches the preferred label of candidate 2 ('Koivisto, Ilkka, 1964-') with a lexical similarity of 0.810. Candidate 2's occupations 'eläintieteilijät' (animal scientists) and 'eläintarhanjohtajat' (zoo managers) align with the Work's title 'Eläinten käyttäytyminen' (Animal Behaviour) and subjects 'käyttäytyminen' (behaviour), 'eläimet' (animals), and 'eläintarhat' (zoos). Candidate 1 is a psychologist, which is orthogonal to the Work's animal-behaviour topic."
+    },
+    {
+      "id": "schubert-franz-composer",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000022001",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000022001",
+      "confidence": 0.94,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 2.828441749996273,
+      "rationale": "Candidate 1's prefLabel matches the input 'Schubert, Franz' with a lexical similarity of 0.94. The life dates 1797-1828 align with the Work's '1800-luku' subject. Candidate 1's field of activity 'taidemusiikki' and occupation 'säveltäjät' (composers) match the Work's 'sinfoniat' and 'klassinen musiikki' subjects, indicating a clear match with the musical context of the Originating Work."
+    },
+    {
+      "id": "virtanen-anna-uncertain",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "uncertain",
+      "actual_uri": null,
+      "confidence": 0.5,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 1.458212249999633,
+      "rationale": "Two KANTO entries share both surname and given name. Neither candidate's context carries an occupation or scope note, and the Work's literature/poetry subjects don't help disambiguate between two candidates with identical labels. Returning uncertain so a cataloguer can review."
+    },
+    {
+      "id": "single-candidate-exact-match",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000055555",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000055555",
+      "confidence": 1.0,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 2.4913223330004257,
+      "rationale": "The input 'Sibelius, Jean' matches the candidate's prefLabel exactly ('Sibelius, Jean, 1865-1957') with a lexical similarity of 1.000. The candidate's 'säveltäjät' occupation aligns with the Work's 'sinfoninen runo' and 'isänmaallinen musiikki' subjects, indicating a clear match with the originating work's thematic context."
+    },
+    {
+      "id": "suomi-country-vs-derivative",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "uncertain",
+      "actual_uri": null,
+      "confidence": 0.6,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 2.3933117499982473,
+      "rationale": "None of the candidate prefLabels exactly match the input 'Suomi' modulo case, whitespace, or foreign diacritics. The highest lexical similarity is 0.710 for 'suomirock', but this is a genre or subculture term rather than a country or nation. The Work's subjects include 'Suomi', 'historia', and '1800-luku', but none of the candidates directly match 'Suomi' as a national entity. The candidates' broader topics or scope notes are not provided to further disambiguate."
+    },
+    {
+      "id": "single-candidate-low-similarity",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "uncertain",
+      "actual_uri": null,
+      "confidence": 0.5,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 2.0405742920047487,
+      "rationale": "The input 'Smith, John' does not match the candidate's prefLabel 'Smithereen, Johanna, 1942-' in terms of name or lexical similarity. The lexical similarity score of 0.55 is low, indicating a weak match. There is no additional context or evidence to confirm that this candidate refers to the same entity as the input. The Originating Work's title and language do not provide further disambiguation."
+    },
+    {
+      "id": "williams-john-stoner-novelist",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "uncertain",
+      "actual_uri": null,
+      "confidence": 0.5,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 2.7018895839937613,
+      "rationale": "Multiple candidates share the surname and given name 'Williams, John' with similar lexical similarity scores. The Originating Work's title 'Stoner' and subjects include 'Stoner, William (fiktiivinen henkilö)', which suggests a fictional character. However, none of the candidates explicitly mention a fictional context or provide details about the character 'Stoner'. The candidates' scope notes, broader topics, or occupations do not align with the Work's thematic elements such as 'avioliitto', 'elämänkaari', and 'yksinäisyys'. Thus, the evidence is insufficient to confidently disambiguate between the candidates."
+    },
+    {
+      "id": "katt-swedish-no-real-candidate",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "chose",
+      "actual_uri": "http://www.yso.fi/onto/yso/p219170",
+      "confidence": 0.727,
+      "decision_match": false,
+      "uri_match": false,
+      "confidently_wrong": false,
+      "latency_seconds": 2.584245665995695,
+      "rationale": "The input 'katt' matches the candidate 'Kattila' (prefLabel) with a lexical similarity of 0.727. The Originating Work's subject 'katt' aligns with the candidate's prefLabel, and 'Kattila' is a plausible variant of 'katt' in the context of a Finnish or Swedish vocabulary. The candidate's broader topics and scope note are not explicitly provided, but the direct match to the input and the work's subject 'katt' supports this choice."
+    },
+    {
+      "id": "eduskunta-finnish-parliament",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000034982",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000034982",
+      "confidence": 0.72,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 2.420708083001955,
+      "rationale": "Candidate 1's prefLabel 'Suomi. Eduskunta' matches the input 'Eduskunta' modulo case and punctuation. The Originating Work's title and subjects include 'Eduskunta' and 'valtiopäiväasiakirjat', which align with the broader context of the Finnish Parliament. This candidate is the only one with a direct match to the input and is relevant to the Work's subject matter."
+    }
+  ]
+}

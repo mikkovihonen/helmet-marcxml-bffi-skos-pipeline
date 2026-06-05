@@ -241,10 +241,15 @@ def sample_stratified(
     histogram: dict[str, int] = {}
     for category in sorted(by_category):
         pool = by_category[category]
-        sample_size = min(per_category, len(pool))
-        sampled = rng.sample(pool, sample_size)
+        # ``per_category <= 0`` means "no cap" — see picker.py for the
+        # full-audit motivation.
+        if per_category <= 0:
+            sampled = pool
+        else:
+            sample_size = min(per_category, len(pool))
+            sampled = rng.sample(pool, sample_size)
         picked.extend(sampled)
-        histogram[category] = sample_size
+        histogram[category] = len(sampled)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as fh:

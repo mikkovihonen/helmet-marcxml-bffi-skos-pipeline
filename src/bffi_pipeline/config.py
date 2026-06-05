@@ -9,6 +9,7 @@ production publish.
 from __future__ import annotations
 
 import uuid as _uuid
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -394,10 +395,13 @@ class Settings(BaseSettings):
            "operator-supplied?" signal on subsequent inspection. The
            snapshot is what the CLI's startup-log echo reads to mark
            the canonical-vs-override case.
-        2. If ``run_uuid`` is empty (not set via env), generate fresh
-           ``uuid4().hex``. The CLI's ``_init_observability`` previously
-           did this; moving it here means the value is available before
-           the ``data_dir`` resolution runs.
+        2. If ``run_uuid`` is empty (not set via env), generate one
+           in the timestamp-prefixed format ``YYYYMMDD-HHMM-<6hex>``
+           (UTC). The format is lexicographically sortable so
+           ``ls runs/`` lists in chronological order, and it cross-
+           references ``stage-events.jsonl`` timestamps at a glance.
+           The 6-hex suffix gives 24-bit randomness per minute —
+           ample for the dev + production cadence.
         3. If ``data_dir`` wasn't explicitly provided, derive it as
            ``runs_root / run_uuid``.
 
@@ -409,7 +413,8 @@ class Settings(BaseSettings):
         run_uuid_was_explicit = bool(self.run_uuid.strip())
 
         if not run_uuid_was_explicit:
-            self.__dict__["run_uuid"] = _uuid.uuid4().hex
+            now = datetime.now(UTC)
+            self.__dict__["run_uuid"] = f"{now.strftime('%Y%m%d-%H%M')}-{_uuid.uuid4().hex[:6]}"
             self.model_fields_set.discard("run_uuid")
         if not data_dir_was_explicit:
             self.__dict__["data_dir"] = self.runs_root / self.run_uuid

@@ -57,6 +57,16 @@ FINTO_BASE_URL: Final[str] = "https://api.finto.fi/rest/v1"
 
 VOCAB_KANTO: Final[str] = "finaf"
 VOCAB_YSO: Final[str] = "yso"
+#: YSO-Paikat (places) and YSO-Aika (time periods) are SEPARATE Finto
+#: REST vocabularies even though they share the YSO concept namespace.
+#: A query like ``?vocab=yso&query=Suomi*`` returns derivative concepts
+#: like "Suomi-koulut" and "suomirock", NOT the country
+#: ``yso/p94426``. The country lives behind ``vocab=yso-paikat``;
+#: time periods behind ``vocab=yso-aika``. Subject reconciliation
+#: queries all three vocabs and merges results so place + temporal
+#: cataloguer literals get the right candidates.
+VOCAB_YSO_PAIKAT: Final[str] = "yso-paikat"
+VOCAB_YSO_AIKA: Final[str] = "yso-aika"
 VOCAB_KAUNO: Final[str] = "kauno"
 VOCAB_MUSO: Final[str] = "muso"
 VOCAB_VIAF: Final[str] = "viaf"
@@ -74,12 +84,18 @@ class AuthorityClient(Protocol):
         ...
 
 
-_KIND_TO_FINTO_VOCAB: Final[dict[str, str]] = {
-    "person": VOCAB_KANTO,
-    "corporate_body": VOCAB_KANTO,
-    "subject": VOCAB_YSO,
-    "genre_form": VOCAB_KAUNO,
-    "music_form": VOCAB_MUSO,
+#: Per ``AuthorityKind``, the tuple of Finto vocab ids to query and
+#: merge. Subject queries all three YSO sub-vocabularies because
+#: cataloguer 6XX subjects in Helmet routinely mix topical, place,
+#: and temporal forms with no ``$2`` discrimination — the merged
+#: candidate list lets the lexical-similarity + picker tiers pick
+#: the right one regardless of sub-vocab origin.
+_KIND_TO_FINTO_VOCABS: Final[dict[str, tuple[str, ...]]] = {
+    "person": (VOCAB_KANTO,),
+    "corporate_body": (VOCAB_KANTO,),
+    "subject": (VOCAB_YSO, VOCAB_YSO_PAIKAT, VOCAB_YSO_AIKA),
+    "genre_form": (VOCAB_KAUNO,),
+    "music_form": (VOCAB_MUSO,),
 }
 
 
@@ -105,13 +121,54 @@ class FintoSkosmosClient:
         request: EntityRequest,
         top_k: int = DEFAULT_TOP_K,
     ) -> list[AuthorityCandidate]:
-        """Hit Finto's ``/search`` endpoint for ``request.kind``-mapped vocab; cache by day."""
+        """Hit Finto's ``/search`` for each ``request.kind``-mapped
+        vocab; merge + dedup; cache per-vocab by day.
+
+        When the kind maps to multiple vocabs (e.g. ``subject`` →
+        ``yso + yso-paikat + yso-aika``), each vocab's call is cached
+        independently so YSO-Paikat lookups for a name like "Suomi"
+        survive across runs even when the corpus-wide YSO topical
+        cache wasn't useful. Per-vocab dedup is applied as in the
+        single-vocab path: same URI from different prefLabel surface
+        forms collapses to the first hit (Finto's relevance order).
+        """
+        vocabs = _KIND_TO_FINTO_VOCABS.get(request.kind)
+        if not vocabs:
+            return []
+        # Tag candidates with their source vocab via the
+        # ``source_vocabulary`` field. Per-vocab cache key so a fresh
+        # vocab download (load-finto) invalidates that slice cleanly.
+        merged: list[AuthorityCandidate] = []
+        seen_uris: set[str] = set()
+        for vocab in vocabs:
+            per_vocab_top_k = max(1, top_k)
+            for cand in self._query_one_vocab(
+                vocab=vocab,
+                literal=request.literal,
+                top_k=per_vocab_top_k,
+            ):
+                if cand.uri in seen_uris:
+                    continue
+                seen_uris.add(cand.uri)
+                merged.append(cand)
+                if len(merged) >= top_k:
+                    return merged
+        return merged
+
+    def _query_one_vocab(
+        self,
+        *,
+        vocab: str,
+        literal: str,
+        top_k: int,
+    ) -> list[AuthorityCandidate]:
+        """Hit a single Finto vocab's ``/search`` and return per-URI-
+        deduped candidates. Per-day in-memory cache per (vocab, literal)
+        so YSO + YSO-Paikat + YSO-Aika at three calls per request stay
+        amortised across the run."""
         from bffi_pipeline.stages.m9.schemas import AuthorityCandidate as _AuthorityCandidate
 
-        vocab = _KIND_TO_FINTO_VOCAB.get(request.kind)
-        if vocab is None:
-            return []
-        cache_key = (vocab, request.literal, self.today)
+        cache_key = (vocab, literal, self.today)
         if cache_key in self._cache:
             return self._cache[cache_key][:top_k]
         # Finto's `/search` endpoint defaults to exact-match against
@@ -121,7 +178,7 @@ class FintoSkosmosClient:
         # similarity gate downstream still filters spurious matches.
         params = {
             "vocab": vocab,
-            "query": _finto_search_query(request.literal),
+            "query": _finto_search_query(literal),
             "lang": "fi",
             "maxhits": str(top_k),
         }
@@ -158,7 +215,7 @@ class FintoSkosmosClient:
                     uri=uri_str,
                     pref_label=str(pref),
                     source_vocabulary=vocab,
-                    lexical_similarity=_lexical_similarity(request.literal, str(pref)),
+                    lexical_similarity=_lexical_similarity(literal, str(pref)),
                 )
             )
         self._cache[cache_key] = candidates

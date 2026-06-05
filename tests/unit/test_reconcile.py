@@ -27,8 +27,15 @@ from bffi_pipeline.observability.events import (
 )
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance.vocab import PROV
+from bffi_pipeline.stages.m9.candidate_context import (
+    CandidateContext,
+    FusekiCandidateContextFetcher,
+)
 from bffi_pipeline.stages.m9.local_concept_resolver import LocalConceptHit
-from bffi_pipeline.stages.m9.picker_prompt import _format_work_context_for_prompt
+from bffi_pipeline.stages.m9.picker_prompt import (
+    _format_candidates_for_prompt,
+    _format_work_context_for_prompt,
+)
 from bffi_pipeline.stages.m9.requests import _collect_work_context
 from bffi_pipeline.stages.m9.runner import (
     ALL_AUTHORITY_KINDS,
@@ -43,6 +50,7 @@ from bffi_pipeline.stages.m9.runner import (
     STAGE_LEXICAL,
     STAGE_LLM,
     STAGE_NO_CANDIDATE,
+    VOCAB_KANTO,
     AuthorityCandidate,
     AuthorityKind,
     EntityRequest,
@@ -3046,3 +3054,302 @@ def test_picker_phase_progress_flushes_final_when_misaligned(tmp_path: Path) -> 
     assert len(progress) == 3
     processed = [int(p["counters"]["processed"]) for p in progress]
     assert processed == [200, 400, 500]
+
+
+# --- Phase B: CandidateContext + prompt + cache fingerprint -----------
+
+
+def _candidate_context_sparql_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Wrap rows in the Fuseki ``application/sparql-results+json`` shape.
+
+    Each cell value may be either:
+
+    - a string → bound as a plain literal (default node type)
+    - a dict ``{"type": "uri", "value": "..."}`` → bound as a URI node
+
+    URI vs literal distinction matters because
+    :meth:`FusekiCandidateContextFetcher.fetch` aggregator decides at
+    parse time whether to use the binding directly (literal —
+    field-of-activity inline like KANTO's ``"yleiskirurgia"@fi``) or
+    to follow a sibling ``Label`` binding (URI — cross-graph
+    prefLabel of e.g. ``yso:p18434`` → ``"taidemusiikki"``).
+    """
+    bindings = []
+    for row in rows:
+        cells = {}
+        for k, v in row.items():
+            if isinstance(v, dict):
+                cells[k] = v
+            else:
+                cells[k] = {"value": v}
+        bindings.append(cells)
+    return {"results": {"bindings": bindings}}
+
+
+def test_fuseki_candidate_context_fetcher_returns_per_uri_dict() -> None:
+    """One SPARQL call returns context for all batched URIs. The
+    fetcher aggregates rows (one per (uri, altLabel) cartesian
+    product) into one CandidateContext per URI.
+
+    Covers both bindings shapes for ``occupation`` /
+    ``fieldOfActivity``:
+
+    - Hakala the surgeon (URI 1) has ``rdaa:P50100`` as the inline
+      literal ``"yleiskirurgia"`` — emitted as a string-valued
+      ``occupation`` binding.
+    - Hakala the baritone (URI 2) has ``rdaa:P50100`` as URIs
+      pointing into YSO; the cross-graph lookup carries the labels
+      in ``occupationLabel`` and the URI in ``occupation`` (rendered
+      ``{"type": "uri", "value": "yso:p18434"}``).
+    """
+    captured_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/sparql")
+        captured_queries.append(request.content.decode())
+        return httpx.Response(
+            200,
+            json=_candidate_context_sparql_payload(
+                [
+                    # URI 1 — inline literal "field of activity" (the
+                    # surgeon shape).
+                    {
+                        "uri": "http://urn.fi/URN:NBN:fi:au:finaf:1",
+                        "scopeNote": "psykologi",
+                        "occupation": "psykologit",
+                    },
+                    {
+                        "uri": "http://urn.fi/URN:NBN:fi:au:finaf:1",
+                        "scopeNote": "psykologi",
+                        "altLabel": "Koivisto, I.",
+                    },
+                    # URI 2 — URI-typed occupation with cross-graph
+                    # prefLabel (the baritone shape).
+                    {
+                        "uri": "http://urn.fi/URN:NBN:fi:au:finaf:2",
+                        "scopeNote": "eläintieteilijä",
+                        "occupation": {
+                            "type": "uri",
+                            "value": "http://www.yso.fi/onto/yso/p1234",
+                        },
+                        "occupationLabel": "eläintieteilijät",
+                    },
+                ]
+            ),
+        )
+
+    fetcher = FusekiCandidateContextFetcher(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030",
+    )
+    out = fetcher.fetch(
+        uris=[
+            "http://urn.fi/URN:NBN:fi:au:finaf:1",
+            "http://urn.fi/URN:NBN:fi:au:finaf:2",
+        ],
+        kind="person",
+    )
+    assert len(out) == 2
+    assert out["http://urn.fi/URN:NBN:fi:au:finaf:1"].scope_note == "psykologi"
+    assert out["http://urn.fi/URN:NBN:fi:au:finaf:1"].occupation_labels == ("psykologit",)
+    assert out["http://urn.fi/URN:NBN:fi:au:finaf:1"].alt_labels == ("Koivisto, I.",)
+    assert out["http://urn.fi/URN:NBN:fi:au:finaf:2"].occupation_labels == ("eläintieteilijät",)
+    # Exactly one SPARQL round-trip even though two URIs were batched.
+    assert len(captured_queries) == 1
+
+
+def test_fuseki_candidate_context_fetcher_captures_field_of_activity_literal() -> None:
+    """KANTO sometimes carries ``rdaa:P50100`` as an inline Finnish
+    literal — e.g. ``"yleiskirurgia"@fi`` for Hakala the surgeon.
+    The fetcher must surface that as ``field_of_activity_labels``."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_candidate_context_sparql_payload(
+                [
+                    {
+                        "uri": "http://urn.fi/URN:NBN:fi:au:finaf:000161310",
+                        "fieldOfActivity": "yleiskirurgia",
+                    },
+                ]
+            ),
+        )
+
+    fetcher = FusekiCandidateContextFetcher(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030",
+    )
+    out = fetcher.fetch(uris=["http://urn.fi/URN:NBN:fi:au:finaf:000161310"], kind="person")
+    ctx = out["http://urn.fi/URN:NBN:fi:au:finaf:000161310"]
+    assert ctx.field_of_activity_labels == ("yleiskirurgia",)
+
+
+def test_fuseki_candidate_context_fetcher_resolves_uri_field_via_cross_graph_label() -> None:
+    """When ``rdaa:P50100`` points to a URI in another graph (the
+    baritone shape — ``yso:p18434``), the fetcher must surface the
+    cross-graph prefLabel (``"taidemusiikki"``), not the URI."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_candidate_context_sparql_payload(
+                [
+                    {
+                        "uri": "http://urn.fi/URN:NBN:fi:au:finaf:000195580",
+                        "fieldOfActivity": {
+                            "type": "uri",
+                            "value": "http://www.yso.fi/onto/yso/p18434",
+                        },
+                        "fieldOfActivityLabel": "taidemusiikki",
+                    },
+                    {
+                        "uri": "http://urn.fi/URN:NBN:fi:au:finaf:000195580",
+                        "fieldOfActivity": {
+                            "type": "uri",
+                            "value": "http://www.yso.fi/onto/yso/p8434",
+                        },
+                        "fieldOfActivityLabel": "viihdemusiikki",
+                    },
+                ]
+            ),
+        )
+
+    fetcher = FusekiCandidateContextFetcher(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030",
+    )
+    out = fetcher.fetch(uris=["http://urn.fi/URN:NBN:fi:au:finaf:000195580"], kind="person")
+    ctx = out["http://urn.fi/URN:NBN:fi:au:finaf:000195580"]
+    assert "taidemusiikki" in ctx.field_of_activity_labels
+    assert "viihdemusiikki" in ctx.field_of_activity_labels
+    # URI values must NOT leak into the label tuple — only labels.
+    assert all("yso/onto" not in lab for lab in ctx.field_of_activity_labels)
+
+
+def test_fuseki_candidate_context_fetcher_caches_per_uri() -> None:
+    """A second call for the same URI doesn't re-issue the SPARQL."""
+    calls = {"n": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            200,
+            json=_candidate_context_sparql_payload(
+                [{"uri": "http://urn.fi/URN:NBN:fi:au:finaf:1", "scopeNote": "x"}]
+            ),
+        )
+
+    fetcher = FusekiCandidateContextFetcher(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030",
+    )
+    fetcher.fetch(uris=["http://urn.fi/URN:NBN:fi:au:finaf:1"], kind="person")
+    fetcher.fetch(uris=["http://urn.fi/URN:NBN:fi:au:finaf:1"], kind="person")
+    assert calls["n"] == 1
+
+
+def test_fuseki_candidate_context_fetcher_degrades_on_http_error() -> None:
+    """Fuseki down / 5xx → empty dict, caller falls back to
+    prefLabel-only render. Doesn't raise, doesn't abort the picker
+    call."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "boom"})
+
+    fetcher = FusekiCandidateContextFetcher(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030",
+    )
+    out = fetcher.fetch(uris=["http://urn.fi/URN:NBN:fi:au:finaf:1"], kind="person")
+    assert out == {}
+
+
+def test_candidate_prompt_render_includes_context_lines() -> None:
+    """When a candidate has a context attached, the prompt formatter
+    renders it as indented sub-lines beneath the prefLabel: scope
+    note, broader topics, life dates. Empty fields omitted."""
+    candidates = [
+        AuthorityCandidate(
+            uri="http://urn.fi/URN:NBN:fi:au:finaf:2",
+            pref_label="Koivisto, Ilkka, 1964-",
+            source_vocabulary=VOCAB_KANTO,
+            lexical_similarity=0.81,
+            context=CandidateContext(
+                scope_note="suomalainen eläintieteilijä",
+                broader_labels=("tieteilijät",),
+                occupation_labels=("eläintieteilijät",),
+                birth_date="1964",
+            ),
+        ),
+    ]
+    rendered = _format_candidates_for_prompt(candidates)
+    assert "Koivisto, Ilkka, 1964-" in rendered
+    assert "scope note:" in rendered
+    assert "eläintieteilijä" in rendered
+    assert "broader topics:" in rendered
+    assert "tieteilijät" in rendered
+    assert "occupations:" in rendered
+    assert "1964" in rendered
+
+
+def test_candidate_prompt_render_falls_back_without_context() -> None:
+    """Candidates with ``context=None`` render in the pre-Phase-B
+    one-line form — graceful degrade when Fuseki had no entry."""
+    candidates = [
+        AuthorityCandidate(
+            uri="http://urn.fi/URN:NBN:fi:au:finaf:1",
+            pref_label="Plain, Anna",
+            source_vocabulary=VOCAB_KANTO,
+            lexical_similarity=0.95,
+        ),
+    ]
+    rendered = _format_candidates_for_prompt(candidates)
+    assert "Plain, Anna" in rendered
+    # No context sub-lines present.
+    assert "scope note:" not in rendered
+    assert "broader topics:" not in rendered
+
+
+def test_picker_cache_key_candidate_context_differentiates(tmp_path: Path) -> None:
+    """Two requests with identical literal + Work context + candidate
+    URIs but where each URI's candidate-side context differs must
+    hash to different cache keys. Without this, a KANTO refresh that
+    added a scope note to a candidate would silently reuse the
+    pre-refresh cached decision."""
+    ctx_psych = CandidateContext(scope_note="psykologi", occupation_labels=("psykologit",))
+    ctx_zoo = CandidateContext(scope_note="eläintieteilijä")
+
+    a = AuthorityCandidate(
+        uri="http://urn.fi/URN:NBN:fi:au:finaf:1",
+        pref_label="Koivisto, Ilkka",
+        source_vocabulary=VOCAB_KANTO,
+        lexical_similarity=1.0,
+        context=ctx_psych,
+    )
+    b = AuthorityCandidate(
+        uri="http://urn.fi/URN:NBN:fi:au:finaf:1",
+        pref_label="Koivisto, Ilkka",
+        source_vocabulary=VOCAB_KANTO,
+        lexical_similarity=1.0,
+        context=ctx_zoo,
+    )
+
+    request = EntityRequest(work_uri="w", literal="Koivisto, Ilkka", kind="person")
+    key_a = compute_picker_cache_key(
+        request=request,
+        candidates=[a],
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={VOCAB_KANTO: "sha"},
+    )
+    key_b = compute_picker_cache_key(
+        request=request,
+        candidates=[b],
+        prompt_hash_value="sha256:ph",
+        model_name="qwen3-8b",
+        finto_shas={VOCAB_KANTO: "sha"},
+    )
+    assert key_a is not None
+    assert key_b is not None
+    assert key_a[0] != key_b[0]

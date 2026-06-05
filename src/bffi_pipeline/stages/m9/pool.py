@@ -28,6 +28,10 @@ from pathlib import Path
 from bffi_pipeline.observability.events import emit_if_active
 from bffi_pipeline.observability.watchdog import emit_watchdog_event
 from bffi_pipeline.stages.m9.authority_clients import AuthorityClient
+from bffi_pipeline.stages.m9.candidate_context import (
+    CandidateContext,
+    CandidateContextFetcher,
+)
 from bffi_pipeline.stages.m9.decisions import (
     _decide_before_picker,
     _decide_with_pick,
@@ -45,6 +49,7 @@ from bffi_pipeline.stages.m9.schemas import (
     STAGE_FALLBACK,
     STAGE_LLM,
     AuthorityCandidate,
+    AuthorityKind,
     EntityRequest,
     PickerOrdering,
     ReconciliationOutcome,
@@ -76,12 +81,15 @@ def _phase1_resolve_one(
     fallback_client: AuthorityClient | None,
     top_k: int,
     local_resolver: LocalConceptResolver | None,
+    candidate_context_fetcher: CandidateContextFetcher | None = None,
 ) -> _Phase1Result:
     """Run tier-0 + candidate query for one entity.
 
     Stateless worker — all dependencies passed in. Thread-safe given
-    that ``client``, ``fallback_client``, and ``local_resolver`` are
-    HTTP-client-backed and stateless.
+    that ``client``, ``fallback_client``, ``local_resolver`` and
+    ``candidate_context_fetcher`` are HTTP-client-backed and stateless
+    apart from per-instance in-memory caches that tolerate concurrent
+    reads / writes by virtue of CPython's GIL on dict assignment.
     """
     started = datetime.now(UTC)
     # Fictional-character marker short-circuit (tier-0 sibling).
@@ -108,6 +116,16 @@ def _phase1_resolve_one(
     candidates = client.query(request=request, top_k=top_k)
     if not candidates and fallback_client is not None:
         candidates = fallback_client.query(request=request, top_k=top_k)
+    # Phase B: enrich candidates with Fuseki-side context. Done here
+    # rather than at pick() time so the contexts are part of the
+    # candidate dataclass when the picker cache key is computed in
+    # apply.py — the cache key folds each candidate's context
+    # fingerprint, so post-enrichment is the only place the key is
+    # stable.
+    if candidate_context_fetcher is not None and candidates:
+        candidates = _attach_candidate_contexts(
+            candidates, fetcher=candidate_context_fetcher, kind=request.kind
+        )
     # Tier-1 short-circuit OR queue for picker dispatch.
     outcome_or_none, sorted_candidates = _decide_before_picker(
         request=request, candidates=candidates
@@ -129,6 +147,38 @@ def _phase1_resolve_one(
     )
 
 
+def _attach_candidate_contexts(
+    candidates: list[AuthorityCandidate],
+    *,
+    fetcher: CandidateContextFetcher,
+    kind: AuthorityKind,
+) -> list[AuthorityCandidate]:
+    """Return a new candidate list with ``.context`` attached.
+
+    Single SPARQL round-trip via the fetcher; immutable
+    :class:`AuthorityCandidate` dataclass means we rebuild instances
+    rather than mutate. ``None`` context for any URI the fetcher
+    didn't return preserves the prefLabel-only render path in the
+    prompt formatter.
+    """
+    if not candidates:
+        return candidates
+    uris = [c.uri for c in candidates]
+    contexts: dict[str, CandidateContext] = fetcher.fetch(uris=uris, kind=kind)
+    if not contexts:
+        return candidates
+    return [
+        AuthorityCandidate(
+            uri=c.uri,
+            pref_label=c.pref_label,
+            source_vocabulary=c.source_vocabulary,
+            lexical_similarity=c.lexical_similarity,
+            context=contexts.get(c.uri),
+        )
+        for c in candidates
+    ]
+
+
 def _phase1_seq(
     request_list: list[EntityRequest],
     *,
@@ -136,6 +186,7 @@ def _phase1_seq(
     fallback_client: AuthorityClient | None,
     top_k: int,
     local_resolver: LocalConceptResolver | None,
+    candidate_context_fetcher: CandidateContextFetcher | None = None,
 ) -> list[_Phase1Result]:
     """Sequential (``phase1_concurrency <= 1``) path through Phase 1."""
     return [
@@ -146,6 +197,7 @@ def _phase1_seq(
             fallback_client=fallback_client,
             top_k=top_k,
             local_resolver=local_resolver,
+            candidate_context_fetcher=candidate_context_fetcher,
         )
         for idx, request in enumerate(request_list)
     ]
@@ -159,14 +211,16 @@ def _phase1_pool(
     top_k: int,
     local_resolver: LocalConceptResolver | None,
     phase1_concurrency: int,
+    candidate_context_fetcher: CandidateContextFetcher | None = None,
 ) -> list[_Phase1Result]:
     """Concurrent (``phase1_concurrency >= 2``) path through Phase 1.
 
     Workers share the orchestrator's ``client`` / ``fallback_client`` /
-    ``local_resolver`` — all built on ``httpx.Client`` (thread-safe)
-    plus stateless SPARQL queries. Results are sorted by submission
-    index so downstream graph mutations + provenance emit
-    deterministically regardless of completion order.
+    ``local_resolver`` / ``candidate_context_fetcher`` — all built on
+    ``httpx.Client`` (thread-safe) plus stateless SPARQL queries.
+    Results are sorted by submission index so downstream graph
+    mutations + provenance emit deterministically regardless of
+    completion order.
     """
     results: list[_Phase1Result] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=phase1_concurrency) as pool:
@@ -179,6 +233,7 @@ def _phase1_pool(
                 fallback_client=fallback_client,
                 top_k=top_k,
                 local_resolver=local_resolver,
+                candidate_context_fetcher=candidate_context_fetcher,
             )
             for idx, request in enumerate(request_list)
         ]

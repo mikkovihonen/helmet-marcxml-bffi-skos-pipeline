@@ -307,6 +307,133 @@ def embed_stats_command(
     typer.echo(stats.render())
 
 
+def eval_picker_command(
+    cases_path: Annotated[
+        Path,
+        typer.Option(
+            "--cases",
+            help=(
+                "JSONL file of picker eval cases. See gold/picker-eval/cases.jsonl for the schema."
+            ),
+            file_okay=True,
+            dir_okay=False,
+            exists=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = Path("gold/picker-eval/cases.jsonl"),
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            help=(
+                "Override LLM_MODEL_PRIMARY for this eval run. Lets the operator "
+                "compare Qwen3-8B vs Qwen3-32B vs Qwen3.6-27B side-by-side without "
+                "touching .env. Default: the configured llm_model_primary."
+            ),
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            help="Score only the first N cases. 0 (default) = score all.",
+            min=0,
+        ),
+    ] = 0,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit JSON instead of the human-readable table.",
+        ),
+    ] = False,
+) -> None:
+    """Score the configured picker LLM against a fixed eval set.
+
+    Reuses :class:`bffi_pipeline.stages.m9.picker.LangChainLLMPicker`
+    verbatim so the eval tests the real prompt + JSON-mode setup.
+    Use it to compare models without running the 30-min full-chain
+    smoke, and to pin known-tricky cases (Hakala-the-baritone,
+    Koivisto-the-zoologist, Suomi-the-country) as regression tests.
+
+    Set ``LLM_BASE_URL`` in the environment to point at the model
+    server being tested. The ``--model`` flag overrides the model
+    name; the base URL stays env-driven so two different mlx-lm
+    instances on different ports can be compared by just changing
+    ``LLM_BASE_URL=http://localhost:8001/v1 ... eval-picker`` ↔
+    ``LLM_BASE_URL=http://localhost:8002/v1 ...``.
+    """
+    import json as _json  # noqa: PLC0415
+
+    from bffi_pipeline.eval.picker_eval import (  # noqa: PLC0415
+        load_cases,
+        render_table,
+        score_set,
+    )
+    from bffi_pipeline.stages.m9.picker_chain import LangChainLLMPicker  # noqa: PLC0415
+
+    cases = load_cases(cases_path)
+    if limit > 0:
+        cases = cases[:limit]
+
+    picker = LangChainLLMPicker(model_name=model)
+
+    settings = get_settings()
+    effective_model = model or settings.llm_model_primary
+    typer.echo(
+        f"Picker eval — {len(cases)} cases, model={effective_model}, "
+        f"base_url={settings.llm_base_url}"
+    )
+    typer.echo("")
+
+    results, summary = score_set(cases, picker)
+
+    if json_output:
+        payload = {
+            "model": effective_model,
+            "base_url": settings.llm_base_url,
+            "summary": {
+                "total": summary.total,
+                "decision_matches": summary.decision_matches,
+                "uri_matches": summary.uri_matches,
+                "confidently_wrong": summary.confidently_wrong,
+                "parse_failures": summary.parse_failures,
+                "avg_latency_seconds": summary.avg_latency,
+                "max_latency_seconds": summary.max_latency,
+            },
+            "results": [
+                {
+                    "id": r.case.id,
+                    "expected_decision": r.case.expected_decision,
+                    "expected_uri": r.case.expected_uri,
+                    "actual_decision": r.pick.decision,
+                    "actual_uri": r.pick.chosen_uri,
+                    "confidence": r.pick.confidence,
+                    "decision_match": r.decision_match,
+                    "uri_match": r.uri_match,
+                    "confidently_wrong": r.confidently_wrong,
+                    "latency_seconds": r.latency_seconds,
+                    "rationale": r.pick.rationale,
+                }
+                for r in results
+            ],
+        }
+        typer.echo(_json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    typer.echo(render_table(results))
+    typer.echo("")
+    typer.echo("Summary:")
+    typer.echo(summary.render())
+    if summary.confidently_wrong:
+        typer.echo("")
+        typer.echo(
+            f"  ⚠  {summary.confidently_wrong} confidently-wrong pick(s) — review the rationale; "
+            "this is the Hakala-class failure mode worth investigating before shipping."
+        )
+
+
 def _default_bundle_output() -> Path:
     """Today's bundle path under ``<repo>/scratchpad/`` (gitignored).
 
@@ -341,7 +468,14 @@ def review_bundle_build_command(
         int,
         typer.Option(
             "--per-category",
-            help="Per-category candidate count for the stratified sample.",
+            help=(
+                "Per-stratum candidate count for the stratified sample "
+                "(default 25). Pass ``0`` to disable the cap and emit "
+                "every row of every stage's audit log — used when "
+                "investigating a quality regression and the operator "
+                "wants the FULL set of LLM decisions in the bundle, "
+                "not a stratified sample."
+            ),
         ),
     ] = 25,
     seed: Annotated[
@@ -412,6 +546,8 @@ def review_bundle_build_command(
     target: Path
     html_copy_dir: Path | None = None
     if from_run is not None:
+        from bffi_pipeline.eval.review_bundle.stages import STAGE_REGISTRY  # noqa: PLC0415
+
         runs_root = get_settings().runs_root
         run_dir = runs_root / from_run
         if not run_dir.is_dir():
@@ -422,14 +558,27 @@ def review_bundle_build_command(
             raise typer.BadParameter(
                 f"--from-run: run dir {run_dir} does not exist. Available runs: {preview}{more}"
             )
-        audit = run_dir / "contrib-candidates.jsonl"
-        if not audit.is_file():
-            raise typer.BadParameter(
-                f"--from-run: {audit} not found. Did M3 run with the contrib "
-                "cascade enabled? The audit log is only written when "
-                "--llm-contrib-cascade is on."
-            )
-        pool_overrides["contrib-candidate/1"] = audit
+        # Auto-discover every stage's per-run audit log — mirrors
+        # the in-chain ``_dispatch_cataloguer_bundle`` behaviour.
+        # Stages whose audit log is empty / missing are silently
+        # skipped (heuristic-only / skipped-stage runs).
+        for schema, handler in STAGE_REGISTRY.items():
+            audit = run_dir / handler.audit_filename
+            if audit.is_file() and audit.stat().st_size > 0:
+                pool_overrides[schema] = audit
+        if "contrib-candidate/1" not in pool_overrides:
+            # Contrib uses a corpus-wide default pool when no per-run
+            # log exists, so its absence isn't an error — but the
+            # operator's --from-run intent presumes a per-run pool, so
+            # flag it loudly enough that they notice the empty contrib
+            # log + can re-enable --llm-contrib-cascade if needed.
+            audit = run_dir / "contrib-candidates.jsonl"
+            if not audit.is_file():
+                typer.echo(
+                    f"  note: {audit} absent — contrib stage will sample "
+                    "from the corpus-wide pool. (Re-enable --llm-contrib-cascade "
+                    "on a future run to get a per-run contrib audit log.)"
+                )
         target = output if output is not None else (run_dir / "cataloguer-review" / "bundle.zip")
         html_copy_dir = target.parent
     else:

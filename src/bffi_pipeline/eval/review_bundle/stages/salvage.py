@@ -159,7 +159,8 @@ def sample_stratified(
     histogram: dict[str, int] = {}
     picked: list[dict[str, Any]] = []
     for (cache_hit, band), rows in sorted(buckets.items()):
-        chosen = rng.sample(rows, min(per_category, len(rows)))
+        # ``per_category <= 0`` means "no cap" — see picker.py.
+        chosen = rows if per_category <= 0 else rng.sample(rows, min(per_category, len(rows)))
         cache_tag = "cache-hit" if cache_hit else "fresh"
         histogram[f"{cache_tag}/{band}"] = len(chosen)
         picked.extend(chosen)

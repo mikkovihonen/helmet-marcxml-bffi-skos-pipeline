@@ -1,0 +1,147 @@
+Picker eval — 10 cases, model=/Users/mikkovihonen/.mlx_models/gemma-4-31B-it-4bit, base_url=http://127.0.0.1:8001/v1
+
+{
+  "model": "/Users/mikkovihonen/.mlx_models/gemma-4-31B-it-4bit",
+  "base_url": "http://127.0.0.1:8001/v1",
+  "summary": {
+    "total": 10,
+    "decision_matches": 9,
+    "uri_matches": 9,
+    "confidently_wrong": 1,
+    "parse_failures": 0,
+    "avg_latency_seconds": 41.09201050810007,
+    "max_latency_seconds": 45.70471820799867
+  },
+  "results": [
+    {
+      "id": "hakala-tommi-baritone",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000195580",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000195580",
+      "confidence": 0.98,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 42.95122404099675,
+      "rationale": "Both candidates share the input's name, but the Originating Work's title ('Oopperan helmet — baritoniaariat') and subjects ('oopperat', 'aariat', 'baritoni') clearly relate to music. Candidate 2's field of activity ('taidemusiikki', 'viihdemusiikki') matches this musical context, whereas Candidate 1's field of activity ('yleiskirurgia') refers to general surgery."
+    },
+    {
+      "id": "koivisto-ilkka-zoologist",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000066371",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000066371",
+      "confidence": 0.98,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 40.94378275000054,
+      "rationale": "Both candidates share the input name, but the Work's title ('Eläinten käyttäytyminen') and subjects ('eläimet', 'eläintarhat') align perfectly with candidate 2's occupations ('eläintieteilijät', 'eläintarhanjohtajat') and scope note ('suomalainen eläintieteilijä, Korkeasaaren johtaja'). Candidate 1 is a psychologist, which does not match the animal-focused context of the Work."
+    },
+    {
+      "id": "schubert-franz-composer",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000022001",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000022001",
+      "confidence": 0.98,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 39.69592479100538,
+      "rationale": "Both candidates share the input's name, but Candidate 1's occupation ('säveltäjät') and field of activity ('taidemusiikki') align perfectly with the Work's title ('Sinfonia n:o 8') and subjects ('sinfoniat', 'klassinen musiikki'). Candidate 2 is associated with visual arts ('kuvataide'), which is orthogonal to the musical nature of the originating work."
+    },
+    {
+      "id": "virtanen-anna-uncertain",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "uncertain",
+      "actual_uri": null,
+      "confidence": 0.5,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 39.857974667000235,
+      "rationale": "Two candidates share the exact name 'Virtanen, Anna' but have different life dates (1950- and 1972-). The Originating Work's title ('Suomalainen runous') and subjects ('suomalainen kirjallisuus', 'lyriikka') do not provide enough information to distinguish between these two individuals."
+    },
+    {
+      "id": "single-candidate-exact-match",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000055555",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000055555",
+      "confidence": 0.99,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 44.032076499999675,
+      "rationale": "Candidate 1's prefLabel ('Sibelius, Jean, 1865-1957') is an exact match for the input name. The candidate's occupation ('säveltäjät') and field of activity ('taidemusiikki') align perfectly with the Originating Work's title ('Finlandia') and subjects ('sinfoninen runo', 'isänmaallinen musiikki')."
+    },
+    {
+      "id": "suomi-country-vs-derivative",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "uncertain",
+      "actual_uri": null,
+      "confidence": 0.5,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 38.77172891599912,
+      "rationale": "The input 'Suomi' does not match any of the candidate preferred labels ('suomirock', 'Suomi-kuva', 'Suomi-koulut') modulo case and whitespace. While the candidates share a common root, they represent distinct concepts (rock music, image of Finland, and Finnish schools) that do not equate to the entity 'Suomi' (Finland) implied by the Work's title and subjects."
+    },
+    {
+      "id": "single-candidate-low-similarity",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "uncertain",
+      "actual_uri": null,
+      "confidence": 0.5,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 34.56704695799999,
+      "rationale": "The input 'Smith, John' does not match the candidate's preferred label 'Smithereen, Johanna, 1942-'. The surname and given name are significantly different, and there is no evidence in the Originating Work to suggest they refer to the same entity."
+    },
+    {
+      "id": "williams-john-stoner-novelist",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000189216",
+      "confidence": 0.92,
+      "decision_match": false,
+      "uri_match": false,
+      "confidently_wrong": true,
+      "latency_seconds": 45.70471820799867,
+      "rationale": "The input 'Williams, John' is the author of the novel 'Stoner'. Candidate 5 (uri=http://urn.fi/URN:NBN:fi:au:finaf:000189216) with prefLabel 'Williams, John, 1929-2018' matches the identity of the American author John Williams who wrote 'Stoner'. Other candidates with the same name have different life dates or additional given names that do not align with the author of the originating work."
+    },
+    {
+      "id": "katt-swedish-no-real-candidate",
+      "expected_decision": "uncertain",
+      "expected_uri": null,
+      "actual_decision": "uncertain",
+      "actual_uri": null,
+      "confidence": 0.5,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 40.184875375001866,
+      "rationale": "The input 'katt' is a Swedish word for 'cat', which matches the Work's other subjects ('katt'). However, none of the YSO candidates match this meaning; the candidates refer to table setting ('kattaus'), margins ('katteet'), kettles ('Kattila'), or place names ('Kattelus'). No candidate's prefLabel matches the input modulo case and whitespace."
+    },
+    {
+      "id": "eduskunta-finnish-parliament",
+      "expected_decision": "chose",
+      "expected_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000034982",
+      "actual_decision": "chose",
+      "actual_uri": "http://urn.fi/URN:NBN:fi:au:finaf:000034982",
+      "confidence": 0.98,
+      "decision_match": true,
+      "uri_match": true,
+      "confidently_wrong": false,
+      "latency_seconds": 44.210752874998434,
+      "rationale": "The input 'Eduskunta' matches the core entity in Candidate 1's prefLabel 'Suomi. Eduskunta'. The Originating Work's title ('Valtiopäivät 1970') and other subjects ('valtiopäiväasiakirjat') refer to the Finnish Parliament, which aligns perfectly with the national legislative body represented by Candidate 1. Other candidates refer to specific working groups or delegations, which are too narrow for the general input."
+    }
+  ]
+}

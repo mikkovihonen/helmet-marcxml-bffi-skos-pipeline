@@ -30,6 +30,7 @@ from bffi_pipeline.cataloguer_review import append_target_row
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.observability.events import emit_if_active
 from bffi_pipeline.stages.m9.authority_clients import AuthorityClient
+from bffi_pipeline.stages.m9.candidate_context import CandidateContextFetcher
 from bffi_pipeline.stages.m9.decisions import (
     _decide_with_pick,
     _fictional_outcome,
@@ -160,6 +161,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
     now: datetime | None = None,
     kinds: set[AuthorityKind] | frozenset[AuthorityKind] | None = None,
     local_resolver: LocalConceptResolver | None = None,
+    candidate_context_fetcher: CandidateContextFetcher | None = None,
     concurrency: int = 1,
     field_timeout_seconds: int = 0,
     watchdog_sidecar_path: Path | None = None,
@@ -336,6 +338,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             fallback_client=fallback_client,
             top_k=top_k,
             local_resolver=local_resolver,
+            candidate_context_fetcher=candidate_context_fetcher,
         )
     else:
         phase1_results = _phase1_pool(
@@ -345,6 +348,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
             top_k=top_k,
             local_resolver=local_resolver,
             phase1_concurrency=phase1_concurrency,
+            candidate_context_fetcher=candidate_context_fetcher,
         )
 
     # Phase 1 result collation + per-cadence progress emission. We tally

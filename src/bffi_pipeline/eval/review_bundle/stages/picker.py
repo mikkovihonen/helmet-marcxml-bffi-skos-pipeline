@@ -211,7 +211,10 @@ def sample_stratified(
     histogram: dict[str, int] = {}
     picked: list[dict[str, Any]] = []
     for (kind, outcome, band), rows in sorted(buckets.items()):
-        chosen = rng.sample(rows, min(per_category, len(rows)))
+        # ``per_category <= 0`` means "no cap" — emit every audited
+        # row. Operator-driven full-audit review for quality regression
+        # investigation; default 25 stays for everyday cataloguer use.
+        chosen = rows if per_category <= 0 else rng.sample(rows, min(per_category, len(rows)))
         histogram[f"{kind}/{outcome}/{band}"] = len(chosen)
         picked.extend(chosen)
 

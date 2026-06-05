@@ -35,9 +35,10 @@ def test_settings_data_dir_defaults_to_runs_root_slash_uuid(
     # a legacy ``BFFI_DATA_DIR=./data`` line that pre-dates Phase E.)
     settings = Settings(_env_file=None)
 
-    # run_uuid was auto-generated (non-empty hex string).
+    # run_uuid was auto-generated (non-empty timestamp-prefixed
+    # ``YYYYMMDD-HHMM-<6hex>`` form: 20 chars).
     assert settings.run_uuid
-    assert len(settings.run_uuid) >= 16  # uuid4().hex is 32 chars
+    assert len(settings.run_uuid) >= 16
 
     # data_dir is the canonical derived path.
     assert settings.data_dir == tmp_path / settings.run_uuid
@@ -150,6 +151,14 @@ def test_settings_empty_run_uuid_env_still_triggers_fresh_generation(
     # the validator's behaviour cleanly. (The local .env may still have
     # a legacy ``BFFI_DATA_DIR=./data`` line that pre-dates Phase E.)
     settings = Settings(_env_file=None)
-    # Got a fresh uuid (32-hex-char uuid4 form).
-    assert len(settings.run_uuid) == 32
-    assert all(c in "0123456789abcdef" for c in settings.run_uuid)
+    # Got a fresh timestamp-prefixed uuid in the ``YYYYMMDD-HHMM-<6hex>``
+    # form (20 chars; chronologically sortable via plain ``ls``).
+    assert len(settings.run_uuid) == 20
+    # Layout: 8-digit YYYYMMDD + ``-`` + 4-digit HHMM + ``-`` + 6 hex.
+    parts = settings.run_uuid.split("-")
+    assert len(parts) == 3
+    date_part, time_part, hex_part = parts
+    assert len(date_part) == 8 and date_part.isdigit()
+    assert len(time_part) == 4 and time_part.isdigit()
+    assert len(hex_part) == 6
+    assert all(c in "0123456789abcdef" for c in hex_part)
