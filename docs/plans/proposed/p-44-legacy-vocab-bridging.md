@@ -10,7 +10,18 @@
 
 Helmet's ~800k MARC corpus spans decades. Pre-2019 records carry subject headings under the legacy Finnish thesauri (`$2 ysa`, `$2 allars`, `$2 musa`, `$2 cilla`); only newer records use YSO / ALLFO / SLM tags. M9 currently routes any `$2 ysa` literal into the YSO reconciliation chain because the 2014-2018 YSA→YSO merge brought YSA's prefLabels into YSO unchanged — most old literals resolve at tier-0 (exact prefLabel match in Fuseki) without anyone noticing they came from a legacy vocab.
 
-But ~4 % of subject literals slip through. The existing `bffi-pipeline ysa-disambiguation-report` diagnostic enumerates these as a CSV for human triage — the classic "bare YSA form not carried as YSO altLabel" case (`lapset` was split into `lapset (ikäryhmät)` and `lapset (perheenjäsenet)` in YSO, with neither bare form surviving as altLabel). Plus MUSA / CILLA terms that were never inherited.
+But ~4 % of subject literals slip through. These split into two failure modes:
+
+1. **Terminology evolution** — YSA used an older Finnish term; YSO renamed it during ontologisation. Examples surfaced from the post-load Fuseki graphs:
+   - `"mustalaismusiikki"` (now-offensive) → `yso:p19958 "romanimusiikki (viihdemusiikki)"`
+   - `"värilliset"` (outdated) → `yso:p9959 "POC-ihmiset"`
+   - `"sydämenhieronta"` → `yso:p10109 "paineluelvytys"` (CPR, modernised)
+   - `"elektroniset kirjastot"` → `yso:p22354 "digitaaliset kirjastot"`
+   - `"kasvainoppi"` → `yso:p12865 "onkologia"` (Finnish → Latin)
+   The cataloguer's literal matches the YSA prefLabel but NOT the YSO prefLabel — so YSO tier-0 misses. The YSA SKOS dump carries `skos:exactMatch` / `closeMatch` triples directly to YSO; the bridge tier follows them.
+2. **Vocabulary deprecation** — MUSA (music) and CILLA (visual arts, merged into MUSA in 2019) terms that were never renamed to YSO, but rather marked `dct:isReplacedBy` a YSA concept which IS bridged to YSO. The bridge needs to follow the two-hop chain.
+
+What the bridge does NOT close: cataloguer-typed bare forms that don't appear in any vocabulary's prefLabel at all (these are the cases `yso-marcbib` historically resolved via bundled lookup tables, separate from the SKOS RDF). Those remain manual-triage cases via the existing `ysa-disambiguation-report` diagnostic.
 
 At 800k records the diagnostic doesn't scale.
 
@@ -89,9 +100,13 @@ Untouched (intentionally):
 ## Verification
 
 1. **Unit-level** *(shipped)*: 27 tests in `tests/unit/test_local_concept_resolver.py` pass under `make test`. `mypy --strict` clean. 1361 total tests pass.
-2. **Live re-run**: trigger `bffi-pipeline load-finto` to pull the YSA + MUSA dumps. Verify graph counts in Fuseki increase by ~tens-of-thousands of YSA triples + ~thousands of MUSA triples.
-3. **Smoke comparison**: re-run the 500-record canonical chain. Compare `outcome_stage` counts vs the latest baseline (`runs/20260605-1507-49f66b/`). Expect: `llm_pick` count drops (legacy-mapping tier short-circuits cases that previously reached the LLM); `needs_review` count drops; new tier surfaces in audit row's `source_vocabulary` as one of the `via-*` tags.
-4. **Diagnostic**: re-run `bffi-pipeline ysa-disambiguation-report` on the new canonical graph. Expect: the "bare-YSA misses" count approaches zero.
+2. **Live re-run** *(shipped)*: `bffi-pipeline load-finto` pulled the YSA + MUSA dumps. Post-load Fuseki state:
+   - YSA: 433,048 triples (new graph at `http://www.yso.fi/onto/ysa/`)
+   - MUSA: 13,537 triples (new graph at `http://www.yso.fi/onto/musa/`)
+   - Bridge coverage: 36,420 YSA→YSO + 36,460 Allars→YSO + 946 MUSA→YSA→YSO concepts have mappings.
+   - End-to-end smoke against Fuseki: MUSA two-hop confirmed working (`"transkriptiot (musiikki)" → yso:p2759 "nuotinnokset"`).
+3. **Smoke comparison** *(pending)*: re-run the 500-record canonical chain. Compare `outcome_stage` counts vs the latest baseline (`runs/20260605-1507-49f66b/`). Expect: `llm_pick` count drops (legacy-mapping tier short-circuits terminology-evolution cases that previously reached the LLM); `needs_review` count drops; new tier surfaces in audit rows' `source_vocabulary` as one of the `via-*` tags.
+4. **Diagnostic** *(pending)*: re-run `bffi-pipeline ysa-disambiguation-report` on the new canonical graph. Expect: terminology-evolution misses (which the report does surface today) drop; the residual cases will be true bare-form cataloguer typos that no SKOS-based bridge can catch.
 
 ## What this plan deliberately doesn't do
 
