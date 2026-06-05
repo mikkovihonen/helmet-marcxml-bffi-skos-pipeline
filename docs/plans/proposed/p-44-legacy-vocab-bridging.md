@@ -105,7 +105,24 @@ Untouched (intentionally):
    - MUSA: 13,537 triples (new graph at `http://www.yso.fi/onto/musa/`)
    - Bridge coverage: 36,420 YSA→YSO + 36,460 Allars→YSO + 946 MUSA→YSA→YSO concepts have mappings.
    - End-to-end smoke against Fuseki: MUSA two-hop confirmed working (`"transkriptiot (musiikki)" → yso:p2759 "nuotinnokset"`).
-3. **Smoke comparison** *(pending)*: re-run the 500-record canonical chain. Compare `outcome_stage` counts vs the latest baseline (`runs/20260605-1507-49f66b/`). Expect: `llm_pick` count drops (legacy-mapping tier short-circuits terminology-evolution cases that previously reached the LLM); `needs_review` count drops; new tier surfaces in audit rows' `source_vocabulary` as one of the `via-*` tags.
+3. **Smoke comparison** *(shipped, run `20260605-1939-5ed1c4` vs baseline `20260605-1507-49f66b`)*:
+
+   | Metric | Gemma baseline | + Bridge | Δ |
+   |---|---|---|---|
+   | Picker calls (LLM tier-2) | 216 | 194 | -22 (-10%) |
+   | `llm_pick` | 196 | 186 | -10 |
+   | `fallback` / `needs_review` | **20** | **8** | **-12 (-60%)** |
+   | M9 wall time | 3266 s | **2246 s** | **-31%** |
+   | Bridge hits in `provenance.ttl` | n/a | **206** | 140 YSA + 50 MUSA + 16 Allärs |
+
+   All 206 bridge resolutions landed at `confidence=1.0` (deterministic), stage `reconciliation-local` — never reached the Finto API, never reached the LLM. Sample resolutions surfaced in the smoke (the legacy literal is the cataloguer's input, the YSO concept is what the bridge resolved to):
+
+   - **via-ysa** (140 hits, 34 distinct pairs): `Itävalta → yso:p105294`, `Yhdysvallat → yso:p105078`, `Kauniainen → yso:p94199`, `englanninkielinen kirjallisuus → yso:p11223`, `esteettömyys → yso:p16241`
+   - **via-musa → ysa → yso** (50 hits, 21 distinct): `heavy rock → yso:p15521`, `hip hop → yso:p14336`, `bassokitara → yso:p2666`, `baritoni → yso:p29854`, `joululaulut → yso:p16560`
+   - **via-allars** (16 hits, 12 distinct): `engelsk litteratur → yso:p11223`, `Esbo → yso:p94105`, `Vanda → yso:p94474`, `Grankulla → yso:p94199`, `miljöeffekter → yso:p9862`
+
+   Cross-language unification works as designed: `Grankulla` (Swedish) and `Kauniainen` (Finnish) both resolve to `yso:p94199`; `engelsk litteratur` and `englanninkielinen kirjallisuus` both to `yso:p11223`.
+
 4. **Diagnostic** *(pending)*: re-run `bffi-pipeline ysa-disambiguation-report` on the new canonical graph. Expect: terminology-evolution misses (which the report does surface today) drop; the residual cases will be true bare-form cataloguer typos that no SKOS-based bridge can catch.
 
 ## What this plan deliberately doesn't do
