@@ -49,6 +49,30 @@ VOCAB_ALLARS: Final[str] = "allars"
 VOCAB_KAUNOKKI: Final[str] = "kaunokki"
 VOCAB_CHILDRENS_SUBJECTS: Final[str] = "childrensSubjects"
 
+#: Legacy-bridge source-vocabulary tags surfaced on ``LocalConceptHit``
+#: when the resolved URI was reached by following mapping triples from
+#: a deprecated Finnish thesaurus into YSO. The tag identifies which
+#: legacy graph carried the matching prefLabel; the resolved URI itself
+#: lives in YSO. Provenance writers emit
+#: ``bffi-prov:via-legacy-mapping`` on hits whose ``source_vocabulary``
+#: starts with ``"via-"``.
+VOCAB_VIA_YSA: Final[str] = "via-ysa"
+VOCAB_VIA_MUSA: Final[str] = "via-musa"
+VOCAB_VIA_ALLARS: Final[str] = "via-allars"
+
+#: Set of all legacy-bridge tags, used by provenance code to test
+#: whether a hit's vocab tag indicates a legacy-mapping resolution.
+LEGACY_BRIDGE_VOCABS: Final[frozenset[str]] = frozenset(
+    {VOCAB_VIA_YSA, VOCAB_VIA_MUSA, VOCAB_VIA_ALLARS}
+)
+
+#: Named graph URIs for the legacy thesauri loaded by ``load-finto``.
+#: Used only by the legacy-mapping tier query.
+_LEGACY_GRAPH_YSA: Final[str] = "http://www.yso.fi/onto/ysa/"
+_LEGACY_GRAPH_MUSA: Final[str] = "http://www.yso.fi/onto/musa/"
+_LEGACY_GRAPH_ALLARS: Final[str] = "http://www.yso.fi/onto/allars/"
+_YSO_GRAPH_URI: Final[str] = "http://www.yso.fi/onto/yso/"
+
 #: Authority kind → (source-vocabulary tag, named-graph URI) tuples.
 #: Multiple entries per kind get tried in declaration order in a single
 #: SPARQL query via ``VALUES``. Declaration order disambiguates when the
@@ -171,6 +195,72 @@ def _build_query(literal: str, graph_uris: tuple[str, ...]) -> str:
     )
 
 
+def _build_legacy_mapping_query(literal: str) -> str:
+    """Build the legacy-vocabulary-bridge SPARQL SELECT.
+
+    Three UNION branches, in priority order:
+
+    1. **YSA → YSO** (direct): the YSA concept's prefLabel matches; its
+       ``skos:exactMatch`` / ``skos:closeMatch`` points into YSO. Most
+       common path — covers bare-form misses like ``"lapset"`` that
+       didn't survive the 2014-2018 merge as a YSO altLabel.
+    2. **MUSA → YSA → YSO** (two-hop): MUSA concepts are deprecated;
+       each carries ``dct:isReplacedBy`` pointing to a YSA concept,
+       which in turn has the ``exactMatch`` / ``closeMatch`` to YSO.
+       Cross-graph: MUSA graph for the literal match + isReplacedBy
+       step, YSA graph for the mapping step.
+    3. **Allärs → YSO** (direct, Swedish): same shape as YSA but for
+       Swedish-language ``$2 allars`` literals that didn't already
+       hit tier-0 lexical via the Allärs graph.
+
+    ``FILTER (STRSTARTS(STR(?uri), "<yso namespace>"))`` enforces the
+    YSO-destination requirement on every branch so a YSA-internal
+    ``skos:closeMatch`` to another YSA URI doesn't accidentally bind.
+
+    Language preference on the matched legacy label biases toward the
+    Finnish or Swedish form (cataloguer literals are almost always one
+    of those two).
+    """
+    quoted = _quote_sparql_literal(literal)
+    yso_ns = _YSO_GRAPH_URI
+    return (
+        "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+        "PREFIX dct:  <http://purl.org/dc/terms/>\n"
+        "SELECT ?uri ?label ?via WHERE {\n"
+        "  {\n"
+        f"    GRAPH <{_LEGACY_GRAPH_YSA}> {{\n"
+        "      ?legacy skos:prefLabel ?label .\n"
+        f"      FILTER (str(?label) = {quoted})\n"
+        "      ?legacy (skos:exactMatch | skos:closeMatch) ?uri .\n"
+        "    }\n"
+        '    BIND ("via-ysa" AS ?via)\n'
+        "  } UNION {\n"
+        f"    GRAPH <{_LEGACY_GRAPH_MUSA}> {{\n"
+        "      ?legacy skos:prefLabel ?label .\n"
+        f"      FILTER (str(?label) = {quoted})\n"
+        "      ?legacy dct:isReplacedBy ?ysa_uri .\n"
+        "    }\n"
+        f"    GRAPH <{_LEGACY_GRAPH_YSA}> {{\n"
+        "      ?ysa_uri (skos:exactMatch | skos:closeMatch) ?uri .\n"
+        "    }\n"
+        '    BIND ("via-musa" AS ?via)\n'
+        "  } UNION {\n"
+        f"    GRAPH <{_LEGACY_GRAPH_ALLARS}> {{\n"
+        "      ?legacy skos:prefLabel ?label .\n"
+        f"      FILTER (str(?label) = {quoted})\n"
+        "      ?legacy (skos:exactMatch | skos:closeMatch) ?uri .\n"
+        "    }\n"
+        '    BIND ("via-allars" AS ?via)\n'
+        "  }\n"
+        f'  FILTER (STRSTARTS(STR(?uri), "{yso_ns}"))\n'
+        "}\n"
+        'ORDER BY DESC(IF(LANG(?label) = "fi", 3, '
+        'IF(LANG(?label) = "sv", 2, '
+        'IF(LANG(?label) = "en", 1, 0))))\n'
+        "LIMIT 1\n"
+    )
+
+
 @dataclass
 class FusekiConceptResolver:
     """Tier-0 resolver backed by a SPARQL endpoint.
@@ -188,7 +278,24 @@ class FusekiConceptResolver:
     _cache: dict[tuple[AuthorityKind, str], LocalConceptHit | None] = field(default_factory=dict)
 
     def resolve(self, *, literal: str, kind: AuthorityKind) -> LocalConceptHit | None:
-        """SPARQL the local authority graphs for an exact prefLabel match."""
+        """SPARQL the local authority graphs for an exact prefLabel match.
+
+        Two-tier resolution chain:
+
+        1. Lexical: literal must match the ``skos:prefLabel`` of a
+           concept in one of the kind's authoritative graphs (YSO,
+           Allärs, KAUNO, etc.).
+        2. Legacy mapping (subject-kind only): if lexical fails, look
+           up the literal in the deprecated YSA / MUSA / Allärs graphs
+           and follow ``skos:exactMatch`` / ``skos:closeMatch`` or
+           ``dct:isReplacedBy``+``exactMatch`` to a YSO concept. The
+           returned ``source_vocabulary`` carries ``via-ysa`` /
+           ``via-musa`` / ``via-allars`` so downstream provenance
+           records the bridge.
+
+        Tier-2 (Finto API) and tier-3 (LLM picker) follow downstream
+        when both tiers here miss.
+        """
         graphs = _KIND_TO_GRAPHS.get(kind)
         if not graphs:
             return None
@@ -198,6 +305,11 @@ class FusekiConceptResolver:
 
         graph_uris = tuple(g for _, g in graphs)
         hit = self._exact_match(literal=literal, graph_uris=graph_uris, graphs=graphs)
+        if hit is None and kind == "subject":
+            # Legacy-bridge tier is subject-only — YSA / MUSA / Allärs
+            # are all subject vocabularies; person / corporate-body
+            # authorities go through KANTO at tier-2 instead.
+            hit = self._legacy_mapping_match(literal=literal)
         self._cache[cache_key] = hit
         return hit
 
@@ -228,6 +340,36 @@ class FusekiConceptResolver:
         if not bindings:
             return None
         return self._hit_from_row(bindings[0], graphs=graphs, is_fuzzy_match=False)
+
+    def _legacy_mapping_match(self, *, literal: str) -> LocalConceptHit | None:
+        """Resolve ``literal`` via the YSA / MUSA / Allärs bridge graphs.
+
+        The bridge SPARQL UNIONs three branches and returns the YSO
+        URI reached by following ``skos:exactMatch`` / ``closeMatch``
+        (direct) or ``dct:isReplacedBy`` + ``exactMatch`` (MUSA's
+        two-hop). The ``via`` binding tags which legacy graph
+        carried the literal; we surface that as
+        ``source_vocabulary`` on the hit so downstream provenance can
+        emit ``bffi-prov:via-legacy-mapping``.
+
+        Returns ``None`` when no legacy concept matches the literal or
+        none of the matches have a YSO destination.
+        """
+        bindings = self._post_sparql(_build_legacy_mapping_query(literal))
+        if not bindings:
+            return None
+        row = bindings[0]
+        uri = row.get("uri", {}).get("value")
+        label = row.get("label", {}).get("value", "")
+        via = row.get("via", {}).get("value")
+        if not uri or not via:
+            return None
+        return LocalConceptHit(
+            uri=str(uri),
+            pref_label=str(label),
+            source_vocabulary=str(via),
+            is_fuzzy_match=False,
+        )
 
     def _hit_from_row(
         self,
@@ -262,12 +404,16 @@ class StubLocalConceptResolver:
 
 
 __all__ = [
+    "LEGACY_BRIDGE_VOCABS",
     "VOCAB_ALLARS",
     "VOCAB_CHILDRENS_SUBJECTS",
     "VOCAB_KAUNOKKI",
     "VOCAB_LCGFT",
     "VOCAB_LCSH",
     "VOCAB_SLM",
+    "VOCAB_VIA_ALLARS",
+    "VOCAB_VIA_MUSA",
+    "VOCAB_VIA_YSA",
     "FusekiConceptResolver",
     "LocalConceptHit",
     "LocalConceptResolver",

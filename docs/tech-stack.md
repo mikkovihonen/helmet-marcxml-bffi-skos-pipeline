@@ -119,6 +119,8 @@ Loaded into Fuseki by `bffi-pipeline load-finto`. Each vocab lives in its own na
 | MUSO | Music genre/form | `http://www.yso.fi/onto/muso/` |
 | SLM | Subject category | `http://urn.fi/URN:NBN:fi:au:slm:` |
 | ALLARS | Subject (Swedish-language alternate to YSO) | `http://www.yso.fi/onto/allars/` |
+| YSA | Legacy subject thesaurus (frozen 2019). Bridges to YSO via `skos:exactMatch` / `skos:closeMatch` triples consumed by the M9 legacy-mapping tier in `local_concept_resolver.py`. | `http://www.yso.fi/onto/ysa/` |
+| MUSA | Legacy Music + Visual Arts (CILLA merged in) subject headings (frozen 2019). Two-hop bridge to YSO via `dct:isReplacedBy` → YSA → `skos:exactMatch`. | `http://www.yso.fi/onto/musa/` |
 | KAUNOKKI | Fiction subjects (Finnish) | `http://urn.fi/URN:NBN:fi:au:kaunokki:` |
 | LCSH | Subjects (LoC) | `http://id.loc.gov/authorities/subjects/` |
 | LCGFT | Genre/form (LoC) | `http://id.loc.gov/authorities/genreForms/` |

@@ -55,6 +55,14 @@ _WORK_CONTEXT_FIELD_CAP: Final[int] = 12
 #: YSO and KAUNO respectively; ``$2 allars`` routes to ``"subject"``
 #: and ``$2 bella`` routes to ``"genre_form"`` (same kind as the
 #: existing ``$2 kaunokki`` which substring-matches ``"kauno"``).
+#: ``musa`` (deprecated Music Subject Headings) and ``cilla`` (the
+#: visual-arts terms merged into MUSA) both route to ``"subject"`` —
+#: they bridge into YSO via the M9 legacy-mapping tier in
+#: :mod:`bffi_pipeline.stages.m9.local_concept_resolver`. ``muso``
+#: (live music genre vocabulary) is the lookalike; ``muso`` appears
+#: earlier in this list so its substring check fires first on the
+#: ambiguous ``$2 musa`` → ``$2 muso`` mistype edge case (unlikely
+#: in practice — MARC ``$2`` is cataloguer-typed and stable).
 _SOURCE_TOKEN_TO_KIND: Final[tuple[tuple[str, AuthorityKind], ...]] = (
     ("yso", "subject"),
     ("ysa", "subject"),
@@ -62,6 +70,8 @@ _SOURCE_TOKEN_TO_KIND: Final[tuple[tuple[str, AuthorityKind], ...]] = (
     ("kauno", "genre_form"),
     ("bella", "genre_form"),
     ("muso", "music_form"),
+    ("musa", "subject"),
+    ("cilla", "subject"),
     ("slm", "genre_form"),
 )
 

@@ -144,6 +144,38 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://www.yso.fi/onto/allars/",
         languages=("sv",),
     ),
+    # YSA — the legacy Finnish General Thesaurus (Yleinen suomalainen
+    # asiasanasto). Stopped being updated in 2019 when YSO became the
+    # successor; the 2014-2018 merge brought YSA prefLabels into YSO
+    # but NOT bare-form altLabels for disambiguated concepts (``lapset``
+    # in YSA was split into ``lapset (ikäryhmät)`` + ``lapset
+    # (perheenjäsenet)`` in YSO with neither bare form surviving as
+    # altLabel). Older Helmet records carrying ``$2 ysa`` literals
+    # fall into the ~4% gap surfaced by ``ysa_disambiguation_report``.
+    # Loading the full YSA SKOS dump lets the new M9 legacy-mapping
+    # tier follow ``skos:exactMatch`` / ``skos:closeMatch`` triples
+    # from YSA concepts into YSO without a Finto API round-trip. ~15
+    # MB. Own URI namespace at ``http://www.yso.fi/onto/ysa/`` so it
+    # lives in its own Fuseki named graph.
+    FintoVocab(
+        vocab_id="ysa",
+        dump_url="https://api.finto.fi/download/ysa/ysa-skos.ttl",
+        graph_uri="http://www.yso.fi/onto/ysa/",
+        languages=("fi", "sv"),
+    ),
+    # MUSA — the legacy Music Subject Headings (Musiikin asiasanasto),
+    # which also contains the merged CILLA (visual-arts terms). Frozen
+    # post-2019 like YSA. MUSA concepts bridge to YSO via a two-hop
+    # path: MUSA concept → ``dct:isReplacedBy`` → YSA concept →
+    # ``skos:exactMatch`` → YSO concept. The M9 legacy-mapping tier
+    # follows the chain via a cross-graph SPARQL UNION. ~700 KB. Own
+    # URI namespace at ``http://www.yso.fi/onto/musa/``.
+    FintoVocab(
+        vocab_id="musa",
+        dump_url="https://api.finto.fi/download/musa/musa-skos.ttl",
+        graph_uri="http://www.yso.fi/onto/musa/",
+        languages=("fi",),
+    ),
     # MARC Code List for Relators — not Finto-hosted but loaded the
     # same way so Skosmos renders the bf:role URIs the M3
     # contributor-extraction cascade emits (e.g. relators/trl) as

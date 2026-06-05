@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -19,9 +20,14 @@ from rdflib.namespace import RDF
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m9.local_concept_resolver import (
     _KIND_TO_GRAPHS,
+    LEGACY_BRIDGE_VOCABS,
+    VOCAB_VIA_ALLARS,
+    VOCAB_VIA_MUSA,
+    VOCAB_VIA_YSA,
     FusekiConceptResolver,
     LocalConceptHit,
     StubLocalConceptResolver,
+    _build_legacy_mapping_query,
     _build_query,
     _quote_sparql_literal,
 )
@@ -200,7 +206,14 @@ def test_resolver_caches_per_kind_and_literal() -> None:
 
 
 def test_resolver_caches_misses_too() -> None:
-    """A second lookup for a known-miss literal must not re-query Fuseki."""
+    """A second lookup for a known-miss literal must not re-query Fuseki.
+
+    A first ``subject`` miss fires two SPARQL queries — the lexical
+    tier-0 plus the YSA / MUSA / Allärs legacy-mapping tier — so the
+    floor is two calls, not one. The cache invariant is that a SECOND
+    lookup for the same ``(kind, literal)`` doesn't increase the count
+    further.
+    """
     calls = {"n": 0}
 
     def handler(_: httpx.Request) -> httpx.Response:
@@ -212,8 +225,9 @@ def test_resolver_caches_misses_too() -> None:
         fuseki_url="http://localhost:3030/bffi",
     )
     assert resolver.resolve(literal="nope", kind="subject") is None
+    calls_after_first_lookup = calls["n"]
     assert resolver.resolve(literal="nope", kind="subject") is None
-    assert calls["n"] == 1
+    assert calls["n"] == calls_after_first_lookup
 
 
 def test_resolver_strips_trailing_slash_on_fuseki_url() -> None:
@@ -230,6 +244,181 @@ def test_resolver_strips_trailing_slash_on_fuseki_url() -> None:
     resolver.resolve(literal="x", kind="subject")
     assert captured["url"].endswith("/sparql")
     assert "/bffi/sparql" in captured["url"]
+
+
+# --- Legacy-mapping tier (YSA / MUSA / Allärs → YSO) --------------------
+
+
+def _legacy_bindings(uri: str, label: str, lang: str, via: str) -> dict[str, Any]:
+    """Build the SPARQL JSON-results envelope for one legacy-mapping row."""
+    return {
+        "results": {
+            "bindings": [
+                {
+                    "uri": {"type": "uri", "value": uri},
+                    "label": {"type": "literal", "value": label, "xml:lang": lang},
+                    "via": {"type": "literal", "value": via},
+                }
+            ]
+        }
+    }
+
+
+def test_build_legacy_mapping_query_includes_all_three_legacy_graphs() -> None:
+    q = _build_legacy_mapping_query("lapset")
+    # All three legacy graphs covered
+    assert "http://www.yso.fi/onto/ysa/" in q
+    assert "http://www.yso.fi/onto/musa/" in q
+    assert "http://www.yso.fi/onto/allars/" in q
+    # YSO destination filter present
+    assert 'STRSTARTS(STR(?uri), "http://www.yso.fi/onto/yso/")' in q
+    # MUSA chain follows dct:isReplacedBy
+    assert "dct:isReplacedBy" in q
+    # exactMatch / closeMatch alternation present
+    assert "skos:exactMatch | skos:closeMatch" in q
+    assert '"lapset"' in q
+
+
+def _decoded_body(request: httpx.Request) -> str:
+    """URL-decode a Fuseki form-encoded POST body so test substring
+    checks can look at the raw SPARQL the resolver sent."""
+    body = request.content.decode("utf-8")
+    parsed = parse_qs(body)
+    queries = parsed.get("query", [])
+    return queries[0] if queries else ""
+
+
+def test_resolve_falls_back_to_legacy_mapping_when_lexical_misses() -> None:
+    """The flagship YSA-bridge case: ``lapset`` doesn't survive as a YSO
+    altLabel after the 2014-2018 merge (split into disambiguated forms),
+    but the YSA graph still carries the bare prefLabel + exactMatch
+    triple to YSO. Tier-0 lexical misses; legacy-mapping tier hits."""
+    yso_uri = "http://www.yso.fi/onto/yso/p4354"
+    bodies: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        bodies.append(sparql)
+        if "dct:isReplacedBy" in sparql:
+            return httpx.Response(200, json=_legacy_bindings(yso_uri, "lapset", "fi", "via-ysa"))
+        # Lexical query — empty.
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="lapset", kind="subject")
+    assert hit is not None
+    assert hit.uri == yso_uri
+    assert hit.source_vocabulary == VOCAB_VIA_YSA
+    assert hit.source_vocabulary in LEGACY_BRIDGE_VOCABS
+    assert len(bodies) == 2  # Lexical THEN legacy mapping
+    assert "VALUES ?graph" in bodies[0]
+    assert "dct:isReplacedBy" in bodies[1]
+
+
+def test_resolve_picks_musa_via_tag_when_mapping_chain_passes_through_musa() -> None:
+    """MUSA → YSA → YSO is the two-hop chain; the SPARQL UNION returns
+    ``via-musa`` as the bridge tag on that branch."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if "dct:isReplacedBy" in sparql:
+            return httpx.Response(
+                200,
+                json=_legacy_bindings(
+                    "http://www.yso.fi/onto/yso/p27182",
+                    "transkriptiot (musiikki)",
+                    "fi",
+                    "via-musa",
+                ),
+            )
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="transkriptiot (musiikki)", kind="subject")
+    assert hit is not None
+    assert hit.source_vocabulary == VOCAB_VIA_MUSA
+
+
+def test_resolve_picks_allars_via_tag_for_swedish_legacy_literal() -> None:
+    """Swedish ``$2 allars`` literals can hit the legacy tier too — Allärs
+    carries the same exactMatch/closeMatch mapping pattern."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if "dct:isReplacedBy" in sparql:
+            return httpx.Response(
+                200,
+                json=_legacy_bindings(
+                    "http://www.yso.fi/onto/yso/p4354", "barn", "sv", "via-allars"
+                ),
+            )
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="barn", kind="subject")
+    assert hit is not None
+    assert hit.source_vocabulary == VOCAB_VIA_ALLARS
+
+
+def test_resolve_skips_legacy_mapping_when_lexical_already_hit() -> None:
+    """Lexical YSO hit short-circuits — no legacy-mapping SPARQL fired."""
+    yso_uri = "http://www.yso.fi/onto/yso/p104958"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if "dct:isReplacedBy" in sparql:
+            pytest.fail("Legacy-mapping tier must NOT fire on a lexical hit")
+        return httpx.Response(
+            200,
+            json=_bindings(yso_uri, "Päijänne", "fi", "http://www.yso.fi/onto/yso/"),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="Päijänne", kind="subject")
+    assert hit is not None
+    assert hit.uri == yso_uri
+    assert hit.source_vocabulary == "yso"
+
+
+def test_resolve_skips_legacy_mapping_for_non_subject_kinds() -> None:
+    """Legacy mapping is subject-only: YSA / MUSA / Allärs are subject
+    vocabularies. Genre/form + music_form must not fire the bridge."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if "dct:isReplacedBy" in sparql:
+            pytest.fail("Legacy-mapping must not fire for non-subject kinds")
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    assert resolver.resolve(literal="muistelmat", kind="genre_form") is None
+    assert resolver.resolve(literal="sinfoniat", kind="music_form") is None
+
+
+def test_resolve_returns_none_when_both_tiers_miss() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    assert resolver.resolve(literal="nonsense", kind="subject") is None
 
 
 # --- StubLocalConceptResolver -------------------------------------------
