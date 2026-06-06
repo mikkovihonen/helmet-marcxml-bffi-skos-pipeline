@@ -262,6 +262,56 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://id.loc.gov/vocabulary/carriers/",
         languages=("en",),
     ),
+    # MARC 007-derived format detail vocabs. Together these distinguish
+    # what the RDA carrier collapses: ``mencformat`` separates DVD from
+    # Blu-ray (carrier ``vd`` is just "videodisc"); ``mrecmedium`` +
+    # ``mplayspeed`` distinguish audio CD from vinyl LP (carrier ``sd``
+    # is just "audio disc"); ``mplayback`` adds stereo/mono;
+    # ``mcapturestorage`` adds distribution-master / analog / digital;
+    # ``mcolor`` adds color/B&W. marc2bibframe2 emits all of these
+    # under ``bf:digitalCharacteristic`` (video) / ``bf:soundCharacteristic``
+    # (audio) / ``bf:colorContent``; the M3 Manifestation CONSTRUCT
+    # forwards them onto ``bffi:Manifestation``. All MADS-shaped at
+    # LoC, so the existing ``_lift_mads_to_skos`` transform handles
+    # them automatically. Sparse on Helmet (single-digit count each
+    # on the 500-record sample) but the values that ARE present are
+    # exactly the ones cataloguers want surfaced. ~5-10 KB each.
+    FintoVocab(
+        vocab_id="mencformat",
+        dump_url="https://id.loc.gov/vocabulary/mencformat.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/mencformat/",
+        languages=("en",),
+    ),
+    FintoVocab(
+        vocab_id="mrecmedium",
+        dump_url="https://id.loc.gov/vocabulary/mrecmedium.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/mrecmedium/",
+        languages=("en",),
+    ),
+    FintoVocab(
+        vocab_id="mplayspeed",
+        dump_url="https://id.loc.gov/vocabulary/mplayspeed.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/mplayspeed/",
+        languages=("en",),
+    ),
+    FintoVocab(
+        vocab_id="mplayback",
+        dump_url="https://id.loc.gov/vocabulary/mplayback.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/mplayback/",
+        languages=("en",),
+    ),
+    FintoVocab(
+        vocab_id="mcapturestorage",
+        dump_url="https://id.loc.gov/vocabulary/mcapturestorage.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/mcapturestorage/",
+        languages=("en",),
+    ),
+    FintoVocab(
+        vocab_id="mcolor",
+        dump_url="https://id.loc.gov/vocabulary/mcolor.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/mcolor/",
+        languages=("en",),
+    ),
     # LC Genre/Form Terms — Helmet cataloguers cite English genre/form
     # URIs (e.g. ``http://id.loc.gov/authorities/genreForms/gf2015026020``
     # for "Novels", ``.../gf2014026542`` for "Short stories") on MARC
@@ -426,6 +476,63 @@ _RDA_LABEL_OVERRIDES: Final[dict[str, dict[str, str]]] = {
         "sv": "datorchipkassett",
     },
     "http://id.loc.gov/vocabulary/carriers/cz": {"fi": "muu", "sv": "annan"},
+    # mencformat (video encoding format — MARC 007/04)
+    "http://id.loc.gov/vocabulary/mencformat/dvdv": {"fi": "DVD", "sv": "DVD"},
+    "http://id.loc.gov/vocabulary/mencformat/bluray": {"fi": "Blu-ray", "sv": "Blu-ray"},
+    # mrecmedium (recording medium — MARC 007/03 for sound)
+    "http://id.loc.gov/vocabulary/mrecmedium/opt": {
+        "fi": "optinen tallenne",
+        "sv": "optisk inspelning",
+    },
+    "http://id.loc.gov/vocabulary/mrecmedium/mag": {
+        "fi": "magneettinen tallenne",
+        "sv": "magnetisk inspelning",
+    },
+    # mplayspeed (playback speed — MARC 007/03 for sound; distinguishes
+    # CD from vinyl LP from 78s etc.)
+    "http://id.loc.gov/vocabulary/mplayspeed/f": {
+        "fi": "1,4 m/s (CD)",
+        "sv": "1,4 m/s (CD)",
+    },
+    "http://id.loc.gov/vocabulary/mplayspeed/b": {
+        "fi": "33⅓ kierr./min",
+        "sv": "33⅓ varv/min",
+    },
+    "http://id.loc.gov/vocabulary/mplayspeed/c": {
+        "fi": "45 kierr./min",
+        "sv": "45 varv/min",
+    },
+    "http://id.loc.gov/vocabulary/mplayspeed/d": {
+        "fi": "78 kierr./min",
+        "sv": "78 varv/min",
+    },
+    # mplayback (playback channels)
+    "http://id.loc.gov/vocabulary/mplayback/ste": {"fi": "stereo", "sv": "stereo"},
+    "http://id.loc.gov/vocabulary/mplayback/mon": {"fi": "mono", "sv": "mono"},
+    "http://id.loc.gov/vocabulary/mplayback/quad": {
+        "fi": "quadrofoninen",
+        "sv": "kvadrofonisk",
+    },
+    # mcapturestorage (audio capture / storage technique)
+    "http://id.loc.gov/vocabulary/mcapturestorage/dist": {
+        "fi": "jakelumasteri",
+        "sv": "distributionsmaster",
+    },
+    "http://id.loc.gov/vocabulary/mcapturestorage/analog": {
+        "fi": "analoginen",
+        "sv": "analog",
+    },
+    "http://id.loc.gov/vocabulary/mcapturestorage/digital": {
+        "fi": "digitaalinen",
+        "sv": "digital",
+    },
+    # mcolor (color content — video B&W vs color)
+    "http://id.loc.gov/vocabulary/mcolor/mul": {"fi": "monivärinen", "sv": "flerfärgad"},
+    "http://id.loc.gov/vocabulary/mcolor/one": {"fi": "yksivärinen", "sv": "enfärgad"},
+    "http://id.loc.gov/vocabulary/mcolor/bw": {
+        "fi": "mustavalkoinen",
+        "sv": "svartvit",
+    },
 }
 
 

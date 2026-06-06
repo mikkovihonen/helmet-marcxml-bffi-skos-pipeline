@@ -381,6 +381,78 @@ bffi:Manifestation rdfs:label   "Manifestation"@en, "Manifestaatio"@fi, "Manifes
     skosmos:sparqlDialect   "JenaText" ;
     skosmos:fullAlphabeticalIndex true .
 
+# MARC 007-derived format-detail vocabs (P-45 commit 17):
+# Six small LoC vocabularies surfaced on Manifestation pages to
+# distinguish what the coarse RDA carrier collapses — DVD vs Blu-ray,
+# audio CD vs vinyl LP, color vs B&W, etc. All MADS-shaped at LoC;
+# ``load-finto``'s MADS→SKOS lift produces the SKOS labels Skosmos
+# needs. Each ~5-10 KB.
+:mencformat a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "MARC encoding format codes"@en ;
+    skosmos:shortName "mencformat"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/mencformat/" ;
+    skosmos:language        "en", "fi", "sv" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/mencformat/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+:mrecmedium a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "MARC recording medium codes"@en ;
+    skosmos:shortName "mrecmedium"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/mrecmedium/" ;
+    skosmos:language        "en", "fi", "sv" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/mrecmedium/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+:mplayspeed a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "MARC playback speed codes"@en ;
+    skosmos:shortName "mplayspeed"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/mplayspeed/" ;
+    skosmos:language        "en", "fi", "sv" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/mplayspeed/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+:mplayback a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "MARC playback-channel codes"@en ;
+    skosmos:shortName "mplayback"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/mplayback/" ;
+    skosmos:language        "en", "fi", "sv" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/mplayback/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+:mcapturestorage a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "MARC capture / storage technique codes"@en ;
+    skosmos:shortName "mcapturestorage"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/mcapturestorage/" ;
+    skosmos:language        "en", "fi", "sv" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/mcapturestorage/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+:mcolor a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "MARC color-content codes"@en ;
+    skosmos:shortName "mcolor"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/mcolor/" ;
+    skosmos:language        "en", "fi", "sv" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/mcolor/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
 # LoC Children's Subject Headings — juvenile-collection subset of
 # LCSH. Cataloguers may use these forms on translated English
 # children's-collection records.

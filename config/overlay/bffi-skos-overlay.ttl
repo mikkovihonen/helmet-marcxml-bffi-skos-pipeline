@@ -71,6 +71,22 @@ bffi:expressionManifested      rdfs:subPropertyOf skos:broader ;
 bffi:media   rdfs:label "Media type"@en, "Mediatyyppi"@fi, "Medietyp"@sv .
 bffi:carrier rdfs:label "Carrier type"@en, "Tallennetyyppi"@fi, "Bärartyp"@sv .
 
+# MARC 007-derived format details on each Manifestation. The
+# ``bf:digitalCharacteristic`` predicate distinguishes DVD from
+# Blu-ray (LoC mencformat); ``bf:soundCharacteristic`` carries the
+# audio facets — recording medium, playback speed, channels, capture
+# technique (LoC mrecmedium / mplayspeed / mplayback /
+# mcapturestorage). All forwarded onto BFFI by M3.
+bffi:digitalCharacteristic rdfs:label "Digital format"@en,
+                                      "Digitaalinen tallennusmuoto"@fi,
+                                      "Digital format"@sv .
+bffi:soundCharacteristic   rdfs:label "Sound characteristic"@en,
+                                      "Äänen ominaisuudet"@fi,
+                                      "Ljudegenskap"@sv .
+bffi:colorContent          rdfs:label "Color content"@en,
+                                      "Värisisältö"@fi,
+                                      "Färginnehåll"@sv .
+
 # ``prov:wasDerivedFrom`` is set by M8 on each canonical Work — one
 # triple per absorbed raw Work URI from the union-find merge group.
 # Surfacing this on the Skosmos Work page is cataloguer-useful for

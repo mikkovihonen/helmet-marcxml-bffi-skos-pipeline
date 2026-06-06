@@ -75,6 +75,9 @@ SOURCE_TTL = textwrap.dedent(
         bf:instanceOf <{BF_WORK}> ;
         bf:media      <http://id.loc.gov/vocabulary/mediaTypes/n> ;
         bf:carrier    <http://id.loc.gov/vocabulary/carriers/nc> ;
+        bf:digitalCharacteristic <http://id.loc.gov/vocabulary/mencformat/dvdv> ;
+        bf:soundCharacteristic   <http://id.loc.gov/vocabulary/mrecmedium/opt> ;
+        bf:colorContent          <http://id.loc.gov/vocabulary/mcolor/mul> ;
         bf:title      [ a bf:Title ; bf:mainTitle "Sota ja rauha" ] ;
         bf:publicationStatement "Helsinki : Otava, 1923" .
 
@@ -826,6 +829,29 @@ def test_construct_synthesises_manifestation_pref_label_without_pub_year() -> No
     bffi = construct_bffi(g)
     labels = list(bffi.objects(EXPECTED_MANIF, V.SKOS.prefLabel))
     assert labels == [Literal("Sota ja rauha")]
+
+
+def test_construct_forwards_marc_007_format_details_to_manifestation() -> None:
+    """P-45 commit 17: marc2bibframe2 lifts MARC 007/04 → bf:digitalCharacteristic
+    (DVD/Blu-ray distinction), MARC 007 sound positions →
+    bf:soundCharacteristic (CD/vinyl, mono/stereo, etc.), and MARC
+    007/03 video color → bf:colorContent. The Manifestation CONSTRUCT
+    forwards all three onto BFFI so cataloguers can distinguish what
+    the coarse RDA carrier collapses (``vd`` = videodisc covers both
+    DVD and Blu-ray; ``sd`` = audio disc covers both CD and vinyl)."""
+    bffi = construct_bffi(_build_source())
+    digital = list(bffi.objects(EXPECTED_MANIF, V.BFFI.digitalCharacteristic))
+    sound = list(bffi.objects(EXPECTED_MANIF, V.BFFI.soundCharacteristic))
+    color = list(bffi.objects(EXPECTED_MANIF, V.BFFI.colorContent))
+    assert digital == [URIRef("http://id.loc.gov/vocabulary/mencformat/dvdv")]
+    assert sound == [URIRef("http://id.loc.gov/vocabulary/mrecmedium/opt")]
+    assert color == [URIRef("http://id.loc.gov/vocabulary/mcolor/mul")]
+    # Manifestation-only — Work and Expression must NOT carry these
+    # (BFFI 1.0.0 ``rdfs:domain bffi:Manifestation``).
+    for target in (EXPECTED_WORK, EXPECTED_EXPR):
+        assert not list(bffi.objects(target, V.BFFI.digitalCharacteristic))
+        assert not list(bffi.objects(target, V.BFFI.soundCharacteristic))
+        assert not list(bffi.objects(target, V.BFFI.colorContent))
 
 
 def test_construct_forwards_bf_media_and_bf_carrier_to_manifestation() -> None:

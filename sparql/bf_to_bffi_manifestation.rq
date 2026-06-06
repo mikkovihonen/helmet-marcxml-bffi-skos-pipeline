@@ -34,6 +34,9 @@ CONSTRUCT {
             dct:identifier            ?helmetBibIdLiteral ;
             bffi:media                ?mediaURI ;
             bffi:carrier              ?carrierURI ;
+            bffi:digitalCharacteristic ?digitalCharURI ;
+            bffi:soundCharacteristic   ?soundCharURI ;
+            bffi:colorContent          ?colorContentURI ;
             skos:prefLabel            ?manifLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
@@ -85,6 +88,26 @@ WHERE {
   # (commit 3 of this chain).
   OPTIONAL { ?bfInstance bf:media   ?mediaURI .   FILTER(isIRI(?mediaURI)) }
   OPTIONAL { ?bfInstance bf:carrier ?carrierURI . FILTER(isIRI(?carrierURI)) }
+
+  # MARC 007-derived format details lifted by marc2bibframe2:
+  #   ``bf:digitalCharacteristic`` → LoC ``mencformat`` URIs (DVD,
+  #       Blu-ray, etc. — the user-visible "DVD vs Blu-ray" distinction
+  #       that the coarse RDA carrier ``vd`` collapses).
+  #   ``bf:soundCharacteristic`` → LoC ``mrecmedium`` / ``mplayspeed``
+  #       / ``mplayback`` / ``mcapturestorage`` URIs. Same predicate
+  #       on the source side; the object URI's namespace tells which
+  #       facet (medium / speed / channels / capture) is being
+  #       expressed. CD vs vinyl is the speed facet (mplayspeed/f =
+  #       1.4 m/s = CD; mplayspeed/b = 33⅓ rpm = LP).
+  #   ``bf:colorContent`` → LoC ``mcolor`` URIs (color vs B&W).
+  # All three forwarded verbatim onto the Manifestation; Skosmos
+  # resolves the labels via the LoC vocabs loaded by ``load-finto``.
+  OPTIONAL { ?bfInstance bf:digitalCharacteristic ?digitalCharURI .
+             FILTER(isIRI(?digitalCharURI)) }
+  OPTIONAL { ?bfInstance bf:soundCharacteristic   ?soundCharURI .
+             FILTER(isIRI(?soundCharURI)) }
+  OPTIONAL { ?bfInstance bf:colorContent          ?colorContentURI .
+             FILTER(isIRI(?colorContentURI)) }
 
   # Skosmos display label. Without ``skos:prefLabel`` Skosmos renders
   # Manifestations as their bare URI. We synthesise the label from the
