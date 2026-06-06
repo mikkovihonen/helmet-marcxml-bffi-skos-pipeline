@@ -128,10 +128,12 @@ class _Reconstructor:
             self._emit_controlfield(record, "008", cf008)
 
         self._emit_isbns(record)
+        self._emit_publisher_numbers(record)  # 028
         self._emit_helmet_source_marker(record)  # 040 synth marker
         self._emit_languages(record)  # 041
         self._emit_primary_contribution(record)  # 100
         self._emit_title(record)  # 245
+        self._emit_edition_statement(record)  # 250
         self._emit_publication_statement(record)  # 260
         self._emit_extent_and_dimensions(record)  # 300
         self._emit_content_type(record)  # 336
@@ -140,7 +142,9 @@ class _Reconstructor:
         self._emit_digital_characteristic(record)  # 347
         self._emit_sound_characteristic(record)  # 344
         self._emit_color_content(record)  # 346
+        self._emit_series_statement(record)  # 490
         self._emit_notes(record)  # 500
+        self._emit_table_of_contents(record)  # 505
         self._emit_subjects(record)  # 6XX
         self._emit_genre_forms(record)  # 655
         self._emit_added_entries(record)  # 700/710 etc.
@@ -253,6 +257,44 @@ class _Reconstructor:
                 for value in self.graph.objects(ident, RDF.value):
                     if isinstance(value, Literal):
                         self._emit_datafield(record, "020", ("a", str(value)))
+
+    def _emit_publisher_numbers(self, record: Element) -> None:
+        # MARC 028 publisher number / catalog number (music + video).
+        # marc2bibframe2 emits ``bf:identifiedBy [a bf:AudioIssueNumber;
+        # rdf:value "AM950224"]`` on bf:Instance — same shape as bf:Isbn,
+        # different type. ind1=0 (issue number) is the dominant
+        # cataloguer choice for audio; ind2=1 ("number, no note") is
+        # the common Helmet choice but we drop to blank since we don't
+        # carry that flag through.
+        for ident in self.graph.objects(self.manifestation, V.BF.identifiedBy):
+            types = set(self.graph.objects(ident, RDF.type))
+            if V.BF.AudioIssueNumber in types:
+                for value in self.graph.objects(ident, RDF.value):
+                    if isinstance(value, Literal):
+                        self._emit_datafield(record, "028", ("a", str(value)), ind1="0")
+
+    def _emit_edition_statement(self, record: Element) -> None:
+        # MARC 250 edition statement. marc2bibframe2 emits a flat
+        # literal ``bf:editionStatement`` on bf:Instance, which M3's
+        # Manifestation pass forwards onto bffi:editionStatement.
+        # Single $a per row; Helmet rarely splits edition + responsibility
+        # into 250 $a / $b so we don't either.
+        for stmt in self.graph.objects(self.manifestation, V.BFFI.editionStatement):
+            if isinstance(stmt, Literal):
+                self._emit_datafield(record, "250", ("a", str(stmt)))
+
+    def _emit_series_statement(self, record: Element) -> None:
+        # MARC 490 series statement. M3 routes the marc2bibframe2 chain
+        # ``bf:Instance → bf:relation → bf:Relation →
+        # bf:associatedResource → bf:Series → bf:title → bf:Title →
+        # bf:mainTitle`` down to a flat ``bffi:hasSeries`` link from
+        # the Manifestation to a ``bffi:Series`` node carrying
+        # ``rdfs:label``. ind1 = 0 ("series not traced") is the
+        # MARC default; ind2 has no meaning here.
+        for series in self.graph.objects(self.manifestation, V.BFFI.hasSeries):
+            label = self._first_label(series)
+            if label:
+                self._emit_datafield(record, "490", ("a", label), ind1="0")
 
     def _emit_helmet_source_marker(self, record: Element) -> None:
         # 040: cataloguing source. We can't reconstruct the original
@@ -430,30 +472,52 @@ class _Reconstructor:
             self.skipped.append("336")
 
     def _emit_notes(self, record: Element) -> None:
-        # 500 general note. M3 emits ``bffi:note`` on Expression, with
-        # the cataloguer's note text as ``rdf:value`` on a ``bf:Note``
-        # blank node. Each distinct note becomes one 500 row.
-        expr = self.expression
-        if expr is None:
-            return
-        for note in self.graph.objects(expr, V.BFFI.note):
-            # The note may be a literal directly or a blank node with
-            # rdf:value.
-            text: str | None = None
-            if isinstance(note, Literal):
-                text = str(note)
-            else:
-                for val in self.graph.objects(note, V.RDF.value):
-                    if isinstance(val, Literal):
-                        text = str(val)
-                        break
-                if text is None:
-                    for val in self.graph.objects(note, V.RDFS.label):
+        # 500 general note. M3 emits ``bffi:note`` on both Expression
+        # (from bf:Work) and Manifestation (from bf:Instance — physical
+        # carrier / accompanying material notes). Each distinct note
+        # becomes one 500 row; we walk both sides and dedupe by the
+        # extracted text so a note attached to both nodes doesn't
+        # double-emit.
+        seen: set[str] = set()
+        for source in (self.expression, self.manifestation):
+            if source is None:
+                continue
+            for note in self.graph.objects(source, V.BFFI.note):
+                text: str | None = None
+                if isinstance(note, Literal):
+                    text = str(note)
+                else:
+                    for val in self.graph.objects(note, V.RDF.value):
                         if isinstance(val, Literal):
                             text = str(val)
                             break
+                    if text is None:
+                        for val in self.graph.objects(note, V.RDFS.label):
+                            if isinstance(val, Literal):
+                                text = str(val)
+                                break
+                if text and text not in seen:
+                    seen.add(text)
+                    self._emit_datafield(record, "500", ("a", text))
+
+    def _emit_table_of_contents(self, record: Element) -> None:
+        # MARC 505 formatted contents note. M3 hoists
+        # ``bf:tableOfContents`` from the source bf:Work onto the
+        # canonical bffi:Manifestation, modelled as a
+        # bffi:TableOfContents blank node carrying ``rdfs:label`` with
+        # the full track listing / chapter list. We emit one 505 row
+        # per distinct label, single-$a blob (no per-item splitting).
+        # ind1 = 0 ("contents") is the dominant cataloguer choice in
+        # Helmet for both complete book TOCs and CD track listings;
+        # ind2 = " " (no enhanced/structured form). The marker
+        # ``$5 FI-HELME/bffi-roundtrip`` is added by _emit_datafield.
+        manif = self.manifestation
+        if manif is None:
+            return
+        for toc in self.graph.objects(manif, V.BFFI.tableOfContents):
+            text = self._first_label(toc) if not isinstance(toc, Literal) else str(toc)
             if text:
-                self._emit_datafield(record, "500", ("a", text))
+                self._emit_datafield(record, "505", ("a", text), ind1="0")
 
     def _emit_media_type(self, record: Element) -> None:
         for media in self.graph.objects(self.manifestation, V.BFFI.media):
@@ -532,11 +596,12 @@ class _Reconstructor:
         if work is None:
             return
         seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.subject)
+        raw_origin_hints = self._build_raw_origin_hints(work, V.BFFI.subject)
         for subject in self.graph.objects(work, V.BFFI.subject):
             row = self._subject_row(subject, seen_authorities)
             if row is None:
                 continue
-            tag = self._subject_marc_tag(subject)
+            tag = self._subject_marc_tag(subject, raw_origin_hints)
             self._emit_datafield(record, tag, *row, ind2="7")
 
     #: Routes a BFFI subject node to the right MARC 6XX tag by looking
@@ -563,12 +628,26 @@ class _Reconstructor:
     _CORPORATE_HINTS: tuple[str, ...] = ("#Agent610",)
     _MEETING_HINTS: tuple[str, ...] = ("#Agent611",)
 
-    def _subject_marc_tag(self, target: Node) -> str:
+    def _subject_marc_tag(
+        self,
+        target: Node,
+        raw_origin_hints: dict[URIRef, str] | None = None,
+    ) -> str:
         """Route a BFFI subject node to 600 / 610 / 611 / 648 / 651 /
         650 based on URI hints. The hints are the M3-minted fragment
         IDs (``#Agent600-N``, ``#Place651-N``, etc.) for raw URIs, and
         Finto vocab namespaces (yso-paikat, yso-aika, finaf) for
-        M9-bound authority URIs. Default = 650 (topical)."""
+        M9-bound authority URIs. Default = 650 (topical).
+
+        ``raw_origin_hints`` (built once per work by
+        :meth:`_build_raw_origin_hints`) maps each authority URI to the
+        raw bib-URI it came from. The raw URI's fragment ID
+        (e.g. ``#Place651-21``) is the only routing signal that
+        survives M9 — the plain ``yso/p105037`` (Greece) URI alone
+        doesn't say it's geographic. The fallback chain checks the
+        direct URI first, then the back-walk via the raw URI's
+        fragment.
+        """
         if not isinstance(target, URIRef):
             return "650"
         s = str(target)
@@ -582,7 +661,30 @@ class _Reconstructor:
         for hints, tag in routes:
             if any(h in s for h in hints):
                 return tag
+        if raw_origin_hints is not None:
+            raw = raw_origin_hints.get(target)
+            if raw:
+                for hints, tag in routes:
+                    if any(h in raw for h in hints):
+                        return tag
         return "650"
+
+    def _build_raw_origin_hints(self, work: URIRef, predicate: URIRef) -> dict[URIRef, str]:
+        """For each authority URI attached to ``<work> predicate``, find
+        any raw bib-URI on the same Work whose ``skos:exactMatch``
+        points to that authority. Returns ``{auth_uri: raw_uri_str}``
+        so :meth:`_subject_marc_tag` can recover the raw URI's
+        fragment ID (e.g. ``#Place651-21``) — the only 651/648
+        routing signal that survives M9's authority-binding swap.
+        """
+        out: dict[URIRef, str] = {}
+        for raw in self.graph.objects(work, predicate):
+            if not (isinstance(raw, URIRef) and str(raw).startswith(_RAW_BIB_URI_PREFIX)):
+                continue
+            for auth in self.graph.objects(raw, V.SKOS.exactMatch):
+                if isinstance(auth, URIRef) and not str(auth).startswith(_RAW_BIB_URI_PREFIX):
+                    out[auth] = str(raw)
+        return out
 
     def _emit_genre_forms(self, record: Element) -> None:
         work = self.work

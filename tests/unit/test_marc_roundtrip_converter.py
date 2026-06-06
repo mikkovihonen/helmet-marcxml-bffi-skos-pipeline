@@ -587,6 +587,35 @@ def test_500_emits_note_from_bffi_note_blank_node_with_rdf_value() -> None:
     assert _subfield(df, "a") == "Translated from Norwegian."
 
 
+def test_505_emits_table_of_contents_from_bffi_manifestation_blank_node() -> None:
+    """M3 hoists bf:tableOfContents from source bf:Work onto the BFFI
+    Manifestation as a bffi:TableOfContents blank node with rdfs:label.
+    The converter walks that and emits MARC 505 ind1=0 $a with the
+    full track-listing / chapter-list blob."""
+    g = _build_minimal_graph()
+    toc_node = BNode()
+    toc_text = (
+        "12 soitinsävelmää: Horos tou sakena / Stavros Ksarhakos. "
+        "Fildisenio karavaki / Manos Hadjidakis."
+    )
+    g.add((MANIF, V.BFFI.tableOfContents, toc_node))
+    g.add((toc_node, RDF.type, V.BFFI.TableOfContents))
+    g.add((toc_node, V.RDFS.label, Literal(toc_text)))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='505']", NS)
+    assert df is not None
+    assert df.attrib["ind1"] == "0"
+    assert _subfield(df, "a") == toc_text
+
+
+def test_505_skipped_when_no_table_of_contents_present(
+    minimal_record: ET.Element,
+) -> None:
+    """No 505 datafield when the BFFI graph carries no
+    bffi:tableOfContents — silent skip, not a synth row."""
+    assert _datafield(minimal_record, "505") is None
+
+
 def test_336_emits_content_type_when_bffi_content_uri_present() -> None:
     """P-47: ``bffi:content`` on Expression → 336 $a label $b code
     $2 rdacontent. URI resolves to a label via the merged LoC
@@ -641,6 +670,131 @@ def test_710_emits_corporate_added_entry_from_agent710_fragment() -> None:
     df_710 = rec.element.find("m:datafield[@tag='710']", NS)
     assert df_710 is not None
     assert _subfield(df_710, "a") == "Suomen kirjailijaliitto"
+
+
+def test_028_emits_audio_issue_number() -> None:
+    """MARC 028 publisher / catalog number: bf:identifiedBy on the
+    Manifestation pointing to a bf:AudioIssueNumber → 028 $a, ind1=0."""
+    g = _build_minimal_graph()
+    issue = BNode()
+    g.add((MANIF, V.BF.identifiedBy, issue))
+    g.add((issue, RDF.type, V.BF.AudioIssueNumber))
+    g.add((issue, RDF.value, Literal("AM950224")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='028']", NS)
+    assert df is not None
+    assert df.attrib["ind1"] == "0"
+    assert _subfield(df, "a") == "AM950224"
+
+
+def test_250_emits_edition_statement_literal() -> None:
+    """MARC 250 edition: bffi:editionStatement literal on the
+    Manifestation → 250 $a."""
+    g = _build_minimal_graph()
+    g.add((MANIF, V.BFFI.editionStatement, Literal("94. vsk.")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='250']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "94. vsk."
+
+
+def test_490_emits_series_statement_from_manifestation_node() -> None:
+    """MARC 490 series: M3 routes the bf:relation → bf:Series →
+    bf:title → bf:mainTitle chain down to a flat bffi:hasSeries link
+    from the Manifestation to a bffi:Series node carrying
+    ``rdfs:label``. Converter emits 490 $a with ind1=0."""
+    g = _build_minimal_graph()
+    series = BNode()
+    g.add((MANIF, V.BFFI.hasSeries, series))
+    g.add((series, RDF.type, V.BFFI.Series))
+    g.add((series, V.RDFS.label, Literal("Usborne lots of things to know")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='490']", NS)
+    assert df is not None
+    assert df.attrib["ind1"] == "0"
+    assert _subfield(df, "a") == "Usborne lots of things to know"
+
+
+def test_500_emits_notes_from_both_expression_and_manifestation() -> None:
+    """Instance-side notes (physical-format / accompanying-material,
+    e.g. ``Cd-levyllä laulujen taustat``) are routed onto the
+    Manifestation by M3. The converter reads notes from BOTH sides
+    and emits one 500 row per distinct text — dedup on the text
+    so a note attached to both doesn't double-emit."""
+    g = _build_minimal_graph()
+    expr_note = BNode()
+    manif_note = BNode()
+    g.add((EXPR, V.BFFI.note, expr_note))
+    g.add((expr_note, V.RDF.value, Literal("Käännös englanniksi.")))
+    g.add((MANIF, V.BFFI.note, manif_note))
+    g.add((manif_note, V.RDFS.label, Literal("1 CD-äänilevy")))
+    rec = reconstruct_marc(g, MANIF)
+    notes = rec.element.findall("m:datafield[@tag='500']", NS)
+    texts = {_subfield(df, "a") for df in notes}
+    assert texts == {"Käännös englanniksi.", "1 CD-äänilevy"}
+
+
+def test_500_dedupes_when_same_note_on_expression_and_manifestation() -> None:
+    g = _build_minimal_graph()
+    note_text = "Same note attached to both."
+    e_node = BNode()
+    m_node = BNode()
+    g.add((EXPR, V.BFFI.note, e_node))
+    g.add((e_node, V.RDF.value, Literal(note_text)))
+    g.add((MANIF, V.BFFI.note, m_node))
+    g.add((m_node, V.RDF.value, Literal(note_text)))
+    rec = reconstruct_marc(g, MANIF)
+    notes = rec.element.findall("m:datafield[@tag='500']", NS)
+    assert len(notes) == 1
+
+
+def test_651_routes_via_raw_place_fragment_when_authority_lacks_paikat() -> None:
+    """The b10303327 bug — Greece (yso/p105037) was being emitted as
+    650 because the plain ``yso/`` URI has no geographic signal. The
+    raw ``#Place651-N`` URI carries ``skos:exactMatch <yso/p105037>``;
+    the converter walks the back-link and routes to 651."""
+    g = _build_minimal_graph()
+    raw_place = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b10303327#Place651-21")
+    auth_yso = URIRef("http://www.yso.fi/onto/yso/p105037")
+    g.add((WORK, V.BFFI.subject, raw_place))
+    g.add((WORK, V.BFFI.subject, auth_yso))
+    g.add((raw_place, V.SKOS.exactMatch, auth_yso))
+    g.add((auth_yso, V.RDFS.label, Literal("Kreikka")))
+    rec = reconstruct_marc(g, MANIF)
+    # The authority URI emits the row (raw is suppressed by the
+    # dedup logic in _subject_row); the routing is 651, not 650.
+    df_650 = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='650']", NS)
+        if _subfield(df, "0") == str(auth_yso)
+    ]
+    df_651 = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='651']", NS)
+        if _subfield(df, "0") == str(auth_yso)
+    ]
+    assert not df_650, "Greece URI must not emit as 650"
+    assert df_651, "Greece URI must emit as 651 via raw #Place651 back-link"
+
+
+def test_648_routes_via_raw_topic648_fragment_back_link() -> None:
+    """Same pattern for MARC 648 chronological subject: the raw
+    ``#Topic648-N`` URI's ``skos:exactMatch`` lets the converter
+    route the bare YSO authority URI to 648."""
+    g = _build_minimal_graph()
+    raw_chr = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b15177154#Topic648-7")
+    auth_yso = URIRef("http://www.yso.fi/onto/yso/p10000")
+    g.add((WORK, V.BFFI.subject, raw_chr))
+    g.add((WORK, V.BFFI.subject, auth_yso))
+    g.add((raw_chr, V.SKOS.exactMatch, auth_yso))
+    g.add((auth_yso, V.RDFS.label, Literal("1990-luku")))
+    rec = reconstruct_marc(g, MANIF)
+    df_648 = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='648']", NS)
+        if _subfield(df, "0") == str(auth_yso)
+    ]
+    assert df_648, "yso/p10000 must emit as 648 via raw #Topic648 back-link"
 
 
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:

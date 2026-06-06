@@ -31,6 +31,8 @@ CONSTRUCT {
   ?manifURI a bffi:Manifestation ;
             bffi:expressionManifested  ?exprURI ;
             bf:identifiedBy            ?ident ;
+            bf:identifiedBy            ?isbn ;
+            bf:identifiedBy            ?audIssue ;
             dct:identifier             ?helmetBibIdLiteral ;
             bffi:media                 ?mediaURI ;
             bffi:carrier               ?carrierURI ;
@@ -42,10 +44,24 @@ CONSTRUCT {
             bffi:responsibilityStatement ?responsibilityStatement ;
             bffi:extent                ?extent ;
             bffi:dimensions            ?dimensions ;
+            bffi:tableOfContents       ?bfToc ;
+            bffi:editionStatement      ?editionStatement ;
+            bffi:hasSeries             ?seriesNode ;
+            bffi:note                  ?instanceNote ;
             skos:prefLabel             ?manifLabel .
+  ?bfToc   a               bffi:TableOfContents ;
+           rdfs:label      ?tocLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
+  ?isbn    a               bf:Isbn ;
+           rdf:value       ?isbnValue .
+  ?audIssue a              bf:AudioIssueNumber ;
+            rdf:value      ?audIssueValue .
+  ?seriesNode a            bffi:Series ;
+              rdfs:label   ?seriesLabel .
+  ?instanceNote a          bf:Note ;
+                rdfs:label ?instanceNoteLabel .
 }
 WHERE {
   ?bfInstance a bf:Instance ;
@@ -124,6 +140,81 @@ WHERE {
   OPTIONAL { ?bfInstance bf:responsibilityStatement ?responsibilityStatement }
   OPTIONAL { ?bfInstance bf:extent                 ?extent }
   OPTIONAL { ?bfInstance bf:dimensions             ?dimensions }
+
+  # MARC 505 (formatted contents note) → marc2bibframe2 emits
+  # ``bf:tableOfContents`` on the bf:Work side as a bf:TableOfContents
+  # blank node with ``rdfs:label`` carrying the full track listing /
+  # chapter list / item enumeration. BFFI declares
+  # ``bffi:tableOfContents`` with ``rdfs:domain bffi:Manifestation``
+  # (per docs/lkd.rdf line 3995-ish), so we hoist the predicate from
+  # the source bf:Work onto the canonical bffi:Manifestation here —
+  # same Work→Manifestation hoist pattern bf_to_bffi_work.rq uses for
+  # bf:originPlace. The single-string blob preserves whatever
+  # cataloguers typed in MARC 505 $a; per-item structured emission
+  # (505 $t / $r / $g) is intentionally not attempted (would need
+  # parsing the source ``" / "`` separators heuristically, and the
+  # rdfs:label round-trips losslessly as a single $a).
+  OPTIONAL {
+    ?bfWork bf:tableOfContents ?bfToc .
+    ?bfToc rdfs:label ?tocLabel .
+  }
+
+  # MARC 020 (ISBN). marc2bibframe2 emits ``bf:Isbn`` identifiers on
+  # bf:Instance without a ``bf:source`` (unlike the Helmet bib_id
+  # which IS sourced). The existing ?ident OPTIONAL filters on
+  # bf:source = <helmet>, so the ISBN gets dropped at the M3
+  # boundary. Route it here on a separate variable so the round-trip
+  # converter can emit 020 $a.
+  OPTIONAL {
+    ?bfInstance bf:identifiedBy ?isbn .
+    ?isbn a bf:Isbn ;
+          rdf:value ?isbnValue .
+  }
+
+  # MARC 028 (publisher / issue number for music + video). Source has
+  # ``bf:identifiedBy [a bf:AudioIssueNumber; rdf:value "AM950224"]``.
+  # Same routing rationale as ISBN — no ``bf:source`` triple, so the
+  # existing ?ident OPTIONAL drops it.
+  OPTIONAL {
+    ?bfInstance bf:identifiedBy ?audIssue .
+    ?audIssue a bf:AudioIssueNumber ;
+              rdf:value ?audIssueValue .
+  }
+
+  # MARC 250 (edition statement). marc2bibframe2 puts this as a flat
+  # literal ``bf:editionStatement`` on bf:Instance (no blank-node
+  # wrapper). The literal preserves the cataloguer's typed text
+  # ("94. vsk.", "2nd edition", "Rev. ed.").
+  OPTIONAL { ?bfInstance bf:editionStatement ?editionStatement }
+
+  # MARC 490 (series statement). marc2bibframe2 routes series under
+  # ``bf:Instance → bf:relation → bf:Relation → bf:associatedResource
+  # → bf:Series → bf:title → bf:Title → bf:mainTitle "Usborne lots
+  # of things to know"``. We collapse the chain by passing the source
+  # ``bf:Series`` bnode through as ``?bfSeries`` and emit a flat
+  # ``rdfs:label`` on it; rdflib graph semantics dedupe identical
+  # triples so the cross-product blow-up from multiple OPTIONALs
+  # doesn't matter (no BNODE() mint needed). BFFI doesn't have a
+  # dedicated Series class — bffi:Series is modelled by analogy to
+  # bf:Series.
+  OPTIONAL {
+    ?bfInstance bf:relation ?seriesRel .
+    ?seriesRel bf:associatedResource ?seriesNode .
+    ?seriesNode a bf:Series ;
+                bf:title ?bfSeriesTitle .
+    ?bfSeriesTitle bf:mainTitle ?seriesLabel .
+  }
+
+  # MARC 500 (general note) when attached to bf:Instance. The
+  # Expression-side CONSTRUCT already routes ``bf:Work`` notes;
+  # but marc2bibframe2 puts physical-format / accompanying-material
+  # notes on bf:Instance (e.g. "Cd-levyllä laulujen taustat").
+  # Those die at M3 today unless we forward them onto the
+  # Manifestation. The round-trip converter reads from both sides.
+  OPTIONAL {
+    ?bfInstance bf:note ?instanceNote .
+    ?instanceNote rdfs:label ?instanceNoteLabel .
+  }
 
   # Skosmos display label. Without ``skos:prefLabel`` Skosmos renders
   # Manifestations as their bare URI. We synthesise the label from the
