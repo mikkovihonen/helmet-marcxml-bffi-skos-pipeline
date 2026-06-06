@@ -1360,13 +1360,22 @@ function collectMarcRoundtripCandidates(files) {
 }
 
 function renderMarcRoundtripSidebar(active) {
-  const ul = document.getElementById("sidebar-list");
+  // Use the same #candidate-list <ul> as the regular renderSidebar so
+  // the sidebar styling + search input stay consistent. We also clear
+  // the search input since the round-trip tab doesn't filter by it.
+  const ul = document.getElementById("candidate-list");
   ul.innerHTML = "";
+  const searchInput = document.getElementById("search");
+  if (searchInput) {
+    searchInput.value = active.filter || "";
+    searchInput.placeholder = "Search bib id…";
+  }
+  const filter = (active.filter || "").toLowerCase();
   for (let i = 0; i < active.candidates.length; i++) {
     const c = active.candidates[i];
+    if (filter && !c.bib_id.toLowerCase().includes(filter)) continue;
     const li = document.createElement("li");
-    li.className = "sidebar-row";
-    if (i === active.currentIdx) li.classList.add("active");
+    if (i === active.currentIdx) li.className = "active";
     const summary = c.diff?.summary || {};
     const totalDiffs =
       (summary.changed || 0) + (summary.lost || 0) +
