@@ -38,15 +38,24 @@ from bffi_pipeline.stages.m3.runner import (
     _sanitize_uri_whitespace,
     _write_bffi_corpus,
 )
-from bffi_pipeline.uris import mint_raw_expression_uri, mint_raw_work_uri
+from bffi_pipeline.uris import (
+    mint_raw_expression_uri,
+    mint_raw_manifestation_uri,
+    mint_raw_work_uri,
+)
 
 BF_WORK = "http://urn.fi/URN:NBN:fi:bib:raw/10000001#Work"
+BF_INSTANCE = "http://urn.fi/URN:NBN:fi:bib:raw/10000001#Instance"
 EXPECTED_WORK = URIRef(mint_raw_work_uri(BF_WORK))
 EXPECTED_EXPR = URIRef(mint_raw_expression_uri(BF_WORK))
+EXPECTED_MANIF = URIRef(mint_raw_manifestation_uri(BF_INSTANCE))
 
 # A minimal BIBFRAME graph mimicking marc2bibframe2 v3.1.0 output for a
 # Tolstoy translation. Two contributions: PrimaryContribution (Tolstoy)
-# and a non-primary (translator).
+# and a non-primary (translator). The bf:Instance is included because
+# P-45 commit 2 moved the Helmet bib_id from Work → Manifestation, and
+# the M3 manifestation CONSTRUCT requires ``?bfInstance bf:instanceOf
+# ?bfWork`` to produce any bffi:Manifestation triples.
 SOURCE_TTL = textwrap.dedent(
     f"""
     @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
@@ -61,6 +70,9 @@ SOURCE_TTL = textwrap.dedent(
         bf:identifiedBy <#helmet-id> ;
         bf:summary "Russian historical novel." ;
         bf:note "Translated by Esa Adrian." .
+
+    <{BF_INSTANCE}> a bf:Instance ;
+        bf:instanceOf <{BF_WORK}> .
 
     <#contrib-primary> a bf:Contribution, bf:PrimaryContribution ;
         bf:agent <urn:agent/Tolstoy> .
@@ -141,15 +153,26 @@ def test_summary_and_note_routed_to_expression() -> None:
     assert not list(bffi.objects(EXPECTED_WORK, V.BFFI.summary))
 
 
-def test_helmet_identifier_preserved_on_both_sides() -> None:
+def test_helmet_identifier_lives_on_manifestation_not_work_or_expression() -> None:
+    """P-45 commit 2: ``bf:identifiedBy`` moved from Work + Expression to
+    Manifestation. The bib_id identifies a published embodiment, not the
+    abstract creative entity. Discoverable from Work via the
+    Work → Expression ← Manifestation walk."""
     bffi = construct_bffi(_build_source())
     helmet = URIRef("http://urn.fi/URN:NBN:fi:bib:source:helmet")
-    for target in (EXPECTED_WORK, EXPECTED_EXPR):
-        idents = list(bffi.objects(target, V.BF.identifiedBy))
-        assert len(idents) == 1, f"missing Helmet identifier on {target}"
-        ident = idents[0]
-        assert (ident, V.BF.source, helmet) in bffi
-        assert (ident, RDF.value, Literal("10000001")) in bffi
+    # Manifestation carries the identifier.
+    idents = list(bffi.objects(EXPECTED_MANIF, V.BF.identifiedBy))
+    assert len(idents) == 1, f"missing Helmet identifier on Manifestation {EXPECTED_MANIF}"
+    ident = idents[0]
+    assert (ident, V.BF.source, helmet) in bffi
+    assert (ident, RDF.value, Literal("10000001")) in bffi
+    # Work + Expression do NOT carry it directly anymore.
+    assert not list(bffi.objects(EXPECTED_WORK, V.BF.identifiedBy)), (
+        "Work must not carry bf:identifiedBy post-P-45"
+    )
+    assert not list(bffi.objects(EXPECTED_EXPR, V.BF.identifiedBy)), (
+        "Expression must not carry bf:identifiedBy post-P-45"
+    )
 
 
 def test_subject_with_authority_cross_link_resolves_to_authority_uri() -> None:
@@ -739,39 +762,64 @@ def test_pref_label_picks_main_work_language_not_contained_work() -> None:
     assert label.language == "sv"
 
 
-def test_construct_emits_sierra_style_dct_identifier_on_work_and_expression() -> None:
-    """P-36 Phase B: M3's SPARQL CONSTRUCT denormalises the Helmet bib ID
-    onto every Work and Expression as a flat ``dct:identifier`` literal
-    carrying the same string as the structured ``rdf:value`` — the
-    Sierra display form (``b<id><check>``) minted upstream by
-    ``marcxml-export-sierra``. Skosmos can't traverse the structured
-    ``bf:Local`` blank node, so the flat predicate is what cataloguers
-    see on the concept page.
+def test_construct_mints_manifestation_linked_to_expression() -> None:
+    """P-45 commit 2: the third pass mints a bffi:Manifestation per
+    bf:Instance and links it to the bffi:Expression via
+    bffi:expressionManifested. The Expression URI is computed from the
+    same bf:Work hash that the Expression CONSTRUCT uses, so the
+    three classes form a connected triangle:
 
-    Pre-Phase-B this was a Python post-process helper
-    (``_emit_helmet_identifiers``); Phase B routes it via the CONSTRUCT
-    so the post-process surface shrinks and the CONSTRUCT becomes the
-    single source of truth for "what BFFI triples M3 emits per source
-    record".
+        Work — hasExpression → Expression
+         ↑                       ↑
+         bf:instanceOf           bffi:expressionManifested
+         (source side)           (BFFI side)
+         ↑                       ↑
+         bf:Instance — — minted into — — bffi:Manifestation
+    """
+    bffi = construct_bffi(_build_source())
+    manifs = set(bffi.subjects(RDF.type, V.BFFI.Manifestation))
+    assert manifs == {EXPECTED_MANIF}, f"expected one minted bffi:Manifestation; got {manifs}"
+    # Expression-manifested link (Manifestation → Expression).
+    assert (EXPECTED_MANIF, V.BFFI.expressionManifested, EXPECTED_EXPR) in bffi
+    # The Work isn't directly linked TO the Manifestation; the relation
+    # is mediated by Expression (FRBR semantics).
+    assert not list(bffi.objects(EXPECTED_WORK, V.BFFI.expressionManifested))
+
+
+def test_construct_emits_sierra_style_dct_identifier_on_manifestation() -> None:
+    """P-45 commit 2: ``dct:identifier`` moved from Work + Expression to
+    Manifestation. M3's Manifestation CONSTRUCT denormalises the Helmet
+    bib ID as a flat ``dct:identifier`` literal alongside the
+    structured ``bf:identifiedBy`` block — Skosmos can't traverse the
+    blank-node structure, so the flat predicate is the bib-number
+    display form on Manifestation pages.
+
+    Discoverable from Work / Expression via the
+    Work → bffi:hasExpression → Expression ← bffi:expressionManifested
+    ← Manifestation → dct:identifier walk.
 
     Fixture uses the bare numeric ``10000001`` as a stand-in; production
-    data carries the full display form here.
+    data carries the full Sierra display form (``b<id><check>``).
     """
     source = _build_source()
     bffi = construct_bffi(source)
+    idents = list(bffi.objects(EXPECTED_MANIF, DCTERMS.identifier))
+    assert Literal("10000001") in idents, "Helmet bib id missing on Manifestation"
+    # And confirm the Work / Expression do NOT carry it directly.
     for target in (EXPECTED_WORK, EXPECTED_EXPR):
-        idents = list(bffi.objects(target, DCTERMS.identifier))
-        assert Literal("10000001") in idents, f"Helmet bib id missing on {target}"
+        assert not list(bffi.objects(target, DCTERMS.identifier)), (
+            f"dct:identifier must not be on {target} post-P-45"
+        )
 
 
 def test_construct_does_not_emit_dct_identifier_for_non_helmet_sources() -> None:
     """A ``bf:identifiedBy`` triple from a non-Helmet source must not produce a
     Sierra-style ``dct:identifier`` — that form is Helmet/Sierra-specific.
 
-    The CONSTRUCT's WHERE clause filters on
+    The Manifestation CONSTRUCT's WHERE clause filters on
     ``?ident bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet>``, so
     non-Helmet identifiers don't bind ``?helmetBibIdLiteral`` and no
-    ``dct:identifier`` triple is emitted."""
+    ``dct:identifier`` triple is emitted on Manifestation either."""
     source = Graph()
     source.parse(
         data=textwrap.dedent(
@@ -783,6 +831,9 @@ def test_construct_does_not_emit_dct_identifier_for_non_helmet_sources() -> None
                 bf:title         [ bf:mainTitle "Untitled" ] ;
                 bf:identifiedBy  <#other-id> .
 
+            <{BF_INSTANCE}> a bf:Instance ;
+                bf:instanceOf <{BF_WORK}> .
+
             <#other-id> a bf:Local ;
                 rdf:value "FOREIGN-42" ;
                 bf:source <http://example.org/source/external> .
@@ -791,7 +842,10 @@ def test_construct_does_not_emit_dct_identifier_for_non_helmet_sources() -> None
         format="turtle",
     )
     bffi = construct_bffi(source)
+    # Work + Manifestation both stay free of dct:identifier when the
+    # source identifier isn't a Helmet bib_id.
     assert not list(bffi.objects(EXPECTED_WORK, DCTERMS.identifier))
+    assert not list(bffi.objects(EXPECTED_MANIF, DCTERMS.identifier))
 
 
 def test_pref_label_picks_language_via_lingua_when_multiple_candidates() -> None:

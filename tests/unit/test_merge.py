@@ -650,21 +650,25 @@ def test_canonical_carries_mintanchor_predicate_for_anonymous_work(tmp_path: Pat
 # --- Identifier accumulation ---------------------------------------------
 
 
-def test_canonical_carries_one_identified_by_per_absorbed_record(tmp_path: Path) -> None:
-    canonical_path, _, _ = _run(
+def test_canonical_work_does_not_carry_bf_identified_by_post_p45(tmp_path: Path) -> None:
+    """P-45 commit 2: ``bf:identifiedBy`` moved from canonical Work to
+    Manifestation (each Manifestation is 1:1 with one Helmet bib record
+    and never merges). Tooling that needs the absorbed bib_ids walks
+    Work → Expression ← Manifestation → bf:identifiedBy in the BFFI
+    graph, or reads canonical-map.jsonl (the audit log)."""
+    canonical_path, map_path, _ = _run(
         tmp_path,
         [_decision_row(WORK_A, WORK_B, decision="same_work")],
     )
     g = Graph()
     g.parse(str(canonical_path), format="turtle")
-    canonicals = list(g.subjects(V.RDF.type, V.BFFI.Work))
-    merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
-    idents = list(g.objects(merged, V.BF.identifiedBy))
-    assert len(idents) == 2  # one per absorbed Helmet record
-    bib_ids = sorted(
-        str(o) for ident in idents for _, _, o in g.triples((ident, V.RDF.value, None))
-    )
-    assert bib_ids == ["111", "222"]
+    for canonical in g.subjects(V.RDF.type, V.BFFI.Work):
+        assert list(g.objects(canonical, V.BF.identifiedBy)) == []
+    # The bib_id rollup still lives in the canonical-map.jsonl audit log
+    # — that's the cataloguer-facing surface for "which raws absorbed".
+    rows = [json.loads(line) for line in map_path.read_text().splitlines() if line.strip()]
+    merged = next(r for r in rows if len(r["raw_work_uris"]) > 1)
+    assert sorted(merged["helmet_bib_ids"]) == ["111", "222"]
 
 
 def test_canonical_unions_lang_tagged_pref_labels_across_members(tmp_path: Path) -> None:
@@ -697,7 +701,7 @@ def test_canonical_unions_lang_tagged_pref_labels_across_members(tmp_path: Path)
     g = Graph()
     g.parse(str(canonical_path), format="turtle")
     canonicals = list(g.subjects(V.RDF.type, V.BFFI.Work))
-    merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
+    merged = next(c for c in canonicals if len(list(g.objects(c, V.PROV.wasDerivedFrom))) > 1)
     labels = {
         (str(o), o.language) for o in g.objects(merged, V.SKOS.prefLabel) if isinstance(o, Literal)
     }
@@ -708,24 +712,23 @@ def test_canonical_unions_lang_tagged_pref_labels_across_members(tmp_path: Path)
     }
 
 
-def test_canonical_carries_dct_identifier_per_absorbed_bib_id(tmp_path: Path) -> None:
-    """Each absorbed Helmet record contributes one ``dct:identifier`` on
-    the canonical Work so cataloguers see every bib number that rolled
-    into a merged Work, not just one. The literal value is the bib_id
-    string as received from upstream (Sierra display form
-    ``b<id><check>`` in production; bare numerics in these fixtures)."""
-    canonical_path, _, _ = _run(
+def test_canonical_work_does_not_carry_dct_identifier_post_p45(tmp_path: Path) -> None:
+    """P-45 commit 2 companion: ``dct:identifier`` followed
+    ``bf:identifiedBy`` off the canonical Work onto the Manifestation.
+    Cataloguer tools that previously read bib_ids off the Work via
+    dct:identifier now walk the Manifestation chain or read
+    canonical-map.jsonl."""
+    canonical_path, map_path, _ = _run(
         tmp_path,
         [_decision_row(WORK_A, WORK_B, decision="same_work")],
     )
     g = Graph()
     g.parse(str(canonical_path), format="turtle")
-    canonicals = list(g.subjects(V.RDF.type, V.BFFI.Work))
-    merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
-    bib_ids = sorted(str(o) for o in g.objects(merged, DCTERMS.identifier))
-    assert bib_ids == ["111", "222"]
-    for bid in bib_ids:
-        assert (merged, DCTERMS.identifier, Literal(bid)) in g
+    for canonical in g.subjects(V.RDF.type, V.BFFI.Work):
+        assert list(g.objects(canonical, DCTERMS.identifier)) == []
+    rows = [json.loads(line) for line in map_path.read_text().splitlines() if line.strip()]
+    merged = next(r for r in rows if len(r["raw_work_uris"]) > 1)
+    assert sorted(merged["helmet_bib_ids"]) == ["111", "222"]
 
 
 def test_identifiers_deduplicate_when_the_same_bib_id_appears_twice(tmp_path: Path) -> None:
@@ -866,7 +869,7 @@ def test_merged_admin_metadata_modifier_is_cascade_winning_agent(tmp_path: Path)
     g.parse(str(canonical_path), format="turtle")
     canonicals = list(g.subjects(V.RDF.type, V.BFFI.Work))
     # The merged Work has 2 absorbed; the singleton C is also present.
-    merged = next(c for c in canonicals if len(list(g.objects(c, V.BF.identifiedBy))) > 1)
+    merged = next(c for c in canonicals if len(list(g.objects(c, V.PROV.wasDerivedFrom))) > 1)
     block = _admin_block(g, merged)
     modifiers = {str(o) for o in g.objects(block, V.descriptionModifier)}
     assert any("qwen2.5-72b-instruct" in m for m in modifiers)
@@ -887,7 +890,7 @@ def test_canonical_has_expressions_and_expression_points_back_at_canonical(
     canonical = next(
         c
         for c in g.subjects(V.RDF.type, V.BFFI.Work)
-        if len(list(g.objects(c, V.BF.identifiedBy))) > 1
+        if len(list(g.objects(c, V.PROV.wasDerivedFrom))) > 1
     )
     exprs = sorted(str(o) for o in g.objects(canonical, V.BFFI.hasExpression))
     assert exprs == sorted([EXPR_A, EXPR_B])
@@ -907,7 +910,7 @@ def test_canonical_has_was_derived_from_links_to_each_raw_work(tmp_path: Path) -
     canonical = next(
         c
         for c in g.subjects(V.RDF.type, V.BFFI.Work)
-        if len(list(g.objects(c, V.BF.identifiedBy))) > 1
+        if len(list(g.objects(c, V.PROV.wasDerivedFrom))) > 1
     )
     derived = sorted(str(o) for o in g.objects(canonical, V.PROV.wasDerivedFrom))
     assert derived == sorted([WORK_A, WORK_B])
@@ -990,7 +993,7 @@ def _records_with_subjects() -> dict[str, CanonicalWorkInputs]:
 def _merged_canonical(g: Graph) -> URIRef:
     """The merged-group canonical (the one with > 1 bf:identifiedBy)."""
     for c in g.subjects(V.RDF.type, V.BFFI.Work):
-        if isinstance(c, URIRef) and len(list(g.objects(c, V.BF.identifiedBy))) > 1:
+        if isinstance(c, URIRef) and len(list(g.objects(c, V.PROV.wasDerivedFrom))) > 1:
             return c
     raise AssertionError("no merged canonical found")
 

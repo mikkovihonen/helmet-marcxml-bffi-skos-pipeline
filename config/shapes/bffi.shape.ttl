@@ -35,20 +35,15 @@ bffi:WorkShape
         sh:message "bffi:Work must link to at least one bffi:Expression via bffi:hasExpression."
     ] ;
 
-    # Helmet identifier preserved.
-    sh:property [
-        sh:path bf:identifiedBy ;
-        sh:minCount 1 ;
-        sh:qualifiedValueShape [
-            sh:property [
-                sh:path bf:source ;
-                sh:hasValue <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
-            ] ;
-            sh:property [ sh:path rdf:value ; sh:minCount 1 ; sh:datatype xsd:string ] ;
-        ] ;
-        sh:qualifiedMinCount 1 ;
-        sh:message "bffi:Work must carry a Helmet bf:identifiedBy."
-    ] ;
+    # P-45 commit 2: Helmet identifier moved from Work to Manifestation.
+    # The Work no longer asserts ``bf:identifiedBy``; the bib_id lives on
+    # Manifestation (see :bffi:ManifestationShape below). Cataloguer
+    # tooling discovers the bib_id from a Work via:
+    #   Work → bffi:hasExpression → Expression
+    #        ← bffi:expressionManifested ← Manifestation
+    #        → bf:identifiedBy
+    sh:property [ sh:path bf:identifiedBy ; sh:maxCount 0 ;
+                  sh:message "bf:identifiedBy is Manifestation-only post-P-45." ] ;
 
     # prefLabel must exist in at least one of fi/sv/en.
     sh:property [
@@ -92,20 +87,10 @@ bffi:ExpressionShape
         sh:message "bffi:Expression must point at exactly one bffi:Work via bffi:expressionOf."
     ] ;
 
-    # Helmet identifier preserved.
-    sh:property [
-        sh:path bf:identifiedBy ;
-        sh:minCount 1 ;
-        sh:qualifiedValueShape [
-            sh:property [
-                sh:path bf:source ;
-                sh:hasValue <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
-            ] ;
-            sh:property [ sh:path rdf:value ; sh:minCount 1 ; sh:datatype xsd:string ] ;
-        ] ;
-        sh:qualifiedMinCount 1 ;
-        sh:message "bffi:Expression must carry a Helmet bf:identifiedBy."
-    ] ;
+    # P-45 commit 2: bf:identifiedBy moved to Manifestation (see
+    # :bffi:ManifestationShape).
+    sh:property [ sh:path bf:identifiedBy ; sh:maxCount 0 ;
+                  sh:message "bf:identifiedBy is Manifestation-only post-P-45." ] ;
 
     # Properties that belong only to bffi:Work MUST NOT appear here.
     sh:property [ sh:path bffi:hasExpression  ; sh:maxCount 0 ;
@@ -118,3 +103,40 @@ bffi:ExpressionShape
                   sh:message "bffi:originDate is Work-only." ] ;
     sh:property [ sh:path bffi:genreForm      ; sh:maxCount 0 ;
                   sh:message "bffi:genreForm is Work-only." ] .
+
+# --- bffi:Manifestation shape --------------------------------------------
+bffi:ManifestationShape
+    a sh:NodeShape ;
+    sh:targetClass bffi:Manifestation ;
+    rdfs:label "BFFI Manifestation" ;
+
+    sh:not [ sh:property [ sh:path rdf:type ; sh:hasValue bffi:Work ] ] ;
+    sh:not [ sh:property [ sh:path rdf:type ; sh:hasValue bffi:Expression ] ] ;
+
+    # Exactly one Expression via bffi:expressionManifested. Manifestations
+    # are 1:1 with bib records; each describes the published embodiment
+    # of one Expression.
+    sh:property [
+        sh:path bffi:expressionManifested ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "bffi:Manifestation must link to exactly one Expression via bffi:expressionManifested."
+    ] ;
+
+    # Helmet identifier preserved on Manifestation (P-45 commit 2 — moved
+    # here from Work + Expression because the bib_id identifies the
+    # published artefact, not the abstract creative content).
+    sh:property [
+        sh:path bf:identifiedBy ;
+        sh:minCount 1 ;
+        sh:qualifiedValueShape [
+            sh:property [
+                sh:path bf:source ;
+                sh:hasValue <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
+            ] ;
+            sh:property [ sh:path rdf:value ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+        ] ;
+        sh:qualifiedMinCount 1 ;
+        sh:message "bffi:Manifestation must carry a Helmet bf:identifiedBy."
+    ] .

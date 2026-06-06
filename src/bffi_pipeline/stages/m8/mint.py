@@ -285,21 +285,24 @@ def _emit_canonical_work(
         # ``pref_labels`` — production always does, via ``_all_pref_labels``.
         g.add((canonical_uri, V.SKOS.prefLabel, Literal(pref_label)))
 
-    # bf:identifiedBy: union all Helmet identifiers across members, dedup by bib_id.
+    # P-45 commit 2: ``bf:identifiedBy`` + ``dct:identifier`` no longer
+    # union onto the canonical Work — the bib_id moved to Manifestation
+    # (each Manifestation is 1:1 with one Helmet bib record and never
+    # merges). Tooling that walks bib_ids from a Work follows
+    #   Work → bffi:hasExpression → Expression
+    #        ← bffi:expressionManifested ← Manifestation
+    #        → bf:identifiedBy / dct:identifier
+    # We still collect the bib_id list for downstream consumers:
+    # AdminMetadata (cataloguer-facing summary) + canonical-map.jsonl
+    # (forensic audit log of which raws got absorbed).
     seen_bib_ids: set[str] = set()
     helmet_bib_ids_ordered: list[str] = []
     for member in members:
-        for ident_uri, bib_id in member.helmet_identifiers:
+        for _ident_uri, bib_id in member.helmet_identifiers:
             if bib_id in seen_bib_ids:
                 continue
             seen_bib_ids.add(bib_id)
             helmet_bib_ids_ordered.append(bib_id)
-            ident = URIRef(ident_uri)
-            g.add((canonical_uri, V.BF.identifiedBy, ident))
-            g.add((ident, RDF.type, V.BF.Local))
-            g.add((ident, RDF.value, Literal(bib_id)))
-            g.add((ident, V.BF.source, V.HELMET_SOURCE_URI))
-            g.add((canonical_uri, DCTERMS.identifier, Literal(bib_id)))
 
     _propagate_expressions(g, canonical_uri=canonical_uri, members=members)
 

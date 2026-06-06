@@ -1,4 +1,8 @@
-"""Hand-crafted SHACL pass/fail cases for the Boundary 3 (BFFI) shape."""
+"""Hand-crafted SHACL pass/fail cases for the Boundary 3 (BFFI) shape.
+
+P-45 commit 2: ``bf:identifiedBy`` moved from Work + Expression to
+Manifestation. Test fixtures updated accordingly.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +24,8 @@ PREAMBLE = textwrap.dedent(
     """
 ).strip()
 
-# A perfectly-shaped Work + Expression pair that should conform.
+# A perfectly-shaped Work + Expression + Manifestation triplet that
+# should conform. ``bf:identifiedBy`` lives on the Manifestation only.
 VALID_TTL = (
     PREAMBLE
     + textwrap.dedent(
@@ -28,19 +33,17 @@ VALID_TTL = (
 
     <urn:work/A> a bffi:Work ;
         bffi:hasExpression <urn:expr/A> ;
-        bf:identifiedBy <urn:work/A/id> ;
         skos:prefLabel "Sota ja rauha"@fi .
-
-    <urn:work/A/id> a bf:Local ;
-        rdf:value "12345" ;
-        bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> .
 
     <urn:expr/A> a bffi:Expression ;
         bffi:expressionOf <urn:work/A> ;
-        bf:identifiedBy <urn:expr/A/id> ;
         skos:prefLabel "Sota ja rauha"@fi .
 
-    <urn:expr/A/id> a bf:Local ;
+    <urn:manif/A> a bffi:Manifestation ;
+        bffi:expressionManifested <urn:expr/A> ;
+        bf:identifiedBy <urn:manif/A/id> .
+
+    <urn:manif/A/id> a bf:Local ;
         rdf:value "12345" ;
         bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> .
     """
@@ -65,9 +68,6 @@ def test_work_without_expression_fails() -> None:
             PREAMBLE
             + """
             <urn:work/B> a bffi:Work ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] ;
                 skos:prefLabel "x"@fi .
             """
         )
@@ -81,10 +81,7 @@ def test_expression_without_work_fails() -> None:
         _graph(
             PREAMBLE
             + """
-            <urn:expr/C> a bffi:Expression ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
+            <urn:expr/C> a bffi:Expression .
             """
         )
     )
@@ -99,16 +96,10 @@ def test_work_with_untagged_pref_label_fails() -> None:
             + """
             <urn:work/D> a bffi:Work ;
                 bffi:hasExpression <urn:expr/D> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] ;
                 skos:prefLabel "untagged" .
 
             <urn:expr/D> a bffi:Expression ;
-                bffi:expressionOf <urn:work/D> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
+                bffi:expressionOf <urn:work/D> .
             """
         )
     )
@@ -116,7 +107,9 @@ def test_work_with_untagged_pref_label_fails() -> None:
     assert "fi/sv/en" in report.text
 
 
-def test_work_without_helmet_identifier_fails() -> None:
+def test_manifestation_without_helmet_identifier_fails() -> None:
+    """P-45 commit 2: the Helmet identifier requirement now lives on
+    Manifestation, not Work / Expression."""
     report = validate_graph(
         _graph(
             PREAMBLE
@@ -126,15 +119,44 @@ def test_work_without_helmet_identifier_fails() -> None:
                 skos:prefLabel "x"@fi .
 
             <urn:expr/E> a bffi:Expression ;
-                bffi:expressionOf <urn:work/E> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
+                bffi:expressionOf <urn:work/E> .
+
+            <urn:manif/E> a bffi:Manifestation ;
+                bffi:expressionManifested <urn:expr/E> .
             """
         )
     )
     assert not report.conforms
     assert "Helmet" in report.text
+
+
+def test_work_with_bf_identifiedby_fails() -> None:
+    """P-45 commit 2: ``bf:identifiedBy`` is now Manifestation-only.
+    Putting it on a Work violates the shape's max-cardinality 0 rule."""
+    report = validate_graph(
+        _graph(
+            PREAMBLE
+            + """
+            <urn:work/E2> a bffi:Work ;
+                bffi:hasExpression <urn:expr/E2> ;
+                bf:identifiedBy [ a bf:Local ;
+                                  rdf:value "x" ;
+                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] ;
+                skos:prefLabel "x"@fi .
+
+            <urn:expr/E2> a bffi:Expression ;
+                bffi:expressionOf <urn:work/E2> .
+
+            <urn:manif/E2> a bffi:Manifestation ;
+                bffi:expressionManifested <urn:expr/E2> ;
+                bf:identifiedBy [ a bf:Local ;
+                                  rdf:value "x" ;
+                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
+            """
+        )
+    )
+    assert not report.conforms
+    assert "Manifestation-only" in report.text
 
 
 def test_work_with_expression_only_property_fails() -> None:
@@ -145,15 +167,15 @@ def test_work_with_expression_only_property_fails() -> None:
             <urn:work/F> a bffi:Work ;
                 bffi:hasExpression <urn:expr/F> ;
                 bffi:language <urn:lang/fi> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] ;
                 skos:prefLabel "x"@fi .
 
             <urn:expr/F> a bffi:Expression ;
-                bffi:expressionOf <urn:work/F> ;
+                bffi:expressionOf <urn:work/F> .
+
+            <urn:manif/F> a bffi:Manifestation ;
+                bffi:expressionManifested <urn:expr/F> ;
                 bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
+                                  rdf:value "x" ;
                                   bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
             """
         )
@@ -169,16 +191,16 @@ def test_expression_with_work_only_property_fails() -> None:
             + """
             <urn:work/G> a bffi:Work ;
                 bffi:hasExpression <urn:expr/G> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] ;
                 skos:prefLabel "x"@fi .
 
             <urn:expr/G> a bffi:Expression ;
                 bffi:expressionOf <urn:work/G> ;
-                bffi:originDate "2023" ;
+                bffi:originDate "2023" .
+
+            <urn:manif/G> a bffi:Manifestation ;
+                bffi:expressionManifested <urn:expr/G> ;
                 bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
+                                  rdf:value "x" ;
                                   bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
             """
         )
@@ -195,9 +217,6 @@ def test_dual_typed_node_fails_disjointness() -> None:
             <urn:hybrid/H> a bffi:Work, bffi:Expression ;
                 bffi:hasExpression <urn:expr/H> ;
                 bffi:expressionOf <urn:work/H> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "1" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] ;
                 skos:prefLabel "x"@fi .
             """
         )

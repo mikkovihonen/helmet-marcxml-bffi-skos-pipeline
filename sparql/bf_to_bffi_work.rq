@@ -34,9 +34,7 @@ CONSTRUCT {
            bffi:creatorCharacteristic ?creatorCharURI ;
            bffi:originPlace         ?originPlaceURI ;
            bffi:marcKey             ?marcKey ;
-           skos:prefLabel           ?workLabel ;
-           bf:identifiedBy          ?ident ;
-           dct:identifier           ?helmetBibIdLiteral .
+           skos:prefLabel           ?workLabel .
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent .
   ?primaryAgent rdfs:label ?primaryAgentLabel .
@@ -83,9 +81,6 @@ CONSTRUCT {
   ?originPlaceURI a       bffi:Place ;
                   rdfs:label  ?originPlaceLabel ;
                   bf:source   ?bfOriginPlaceSource .
-  ?ident   a               bf:Local ;
-           rdf:value       ?identValue ;
-           bf:source       ?identSource .
 }
 WHERE {
   ?bfWork a bf:Work .
@@ -226,18 +221,11 @@ WHERE {
                      arq:sha1(STR(?originPlaceLabel)))) AS ?originPlaceURI )
   }
 
-  # Helmet identifier preservation (added by M2 post-process).
-  # P-36 Phase B: also denormalise the bib_id as a flat dct:identifier
-  # literal on the Work. Skosmos can't traverse the structured bf:Local
-  # blank node to render the identifier on the concept page; the flat
-  # predicate surfaces a copy-pasteable bib number cataloguers reference
-  # in Sierra and the Helmet OPAC. The structured bf:identifiedBy stays
-  # for BIBFRAME interop.
-  OPTIONAL {
-    ?bfWork bf:identifiedBy ?ident .
-    ?ident  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
-            rdf:value ?identValue ;
-            bf:source ?identSource .
-    BIND(STR(?identValue) AS ?helmetBibIdLiteral)
-  }
+  # P-45 commit 2: Helmet identifier (bf:identifiedBy + dct:identifier)
+  # moved from Work to Manifestation (bf_to_bffi_manifestation.rq). A
+  # bib_id identifies a published embodiment, not the abstract Work.
+  # Discoverable from Work via:
+  #   Work → bffi:hasExpression → Expression
+  #        ← bffi:expressionManifested ← Manifestation
+  #        → bf:identifiedBy / dct:identifier
 }

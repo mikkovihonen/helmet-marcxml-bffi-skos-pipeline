@@ -29,18 +29,13 @@ CONSTRUCT {
            bffi:contribution ?otherContrib ;
            bffi:summary      ?summary ;
            bffi:note         ?note ;
-           skos:prefLabel    ?exprLabel ;
-           bf:identifiedBy   ?ident ;
-           dct:identifier    ?helmetBibIdLiteral .
+           skos:prefLabel    ?exprLabel .
   ?otherContrib a bffi:Contribution ;
                 bffi:agent ?otherAgent ;
                 bf:role    ?otherRole .
   ?otherAgent rdfs:label ?otherAgentLabel .
   ?otherRole a         bf:Role ;
              rdfs:label ?otherRoleLabel .
-  ?ident   a               bf:Local ;
-           rdf:value       ?identValue ;
-           bf:source       ?identSource .
 }
 # P-36 Phase A: bf:role propagation (URI form for cataloguer $4 +
 # blank-node-with-rdfs:label form for $e free-text) routes via the
@@ -101,16 +96,7 @@ WHERE {
     BIND( ?t AS ?title )
   }
 
-  # Helmet identifier preservation (added by M2 post-process).
-  # P-36 Phase B: also denormalise the bib_id as a flat dct:identifier
-  # literal on the Expression (mirroring the Work-side routing in
-  # bf_to_bffi_work.rq). Skosmos uses this flat predicate to render the
-  # bib number on per-Expression concept pages.
-  OPTIONAL {
-    ?bfWork bf:identifiedBy ?ident .
-    ?ident  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
-            rdf:value ?identValue ;
-            bf:source ?identSource .
-    BIND(STR(?identValue) AS ?helmetBibIdLiteral)
-  }
+  # P-45 commit 2: Helmet identifier moved from Expression to
+  # Manifestation (see bf_to_bffi_manifestation.rq). Discoverable from
+  # Expression via the inverse expressionManifested walk.
 }
