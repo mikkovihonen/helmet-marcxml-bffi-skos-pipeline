@@ -246,6 +246,14 @@ def _propagate_expressions(
             g.add((contrib_node, V.BFFI.agent, agent_node))
             if ec.agent_label is not None:
                 g.add((agent_node, V.RDFS.label, Literal(ec.agent_label)))
+            # P-45 follow-up: emit a flat ``dct:contributor`` triple on
+            # the Expression so Skosmos renders the contributor directly
+            # under the labelled "Contributor" / "Muu tekijä" section.
+            # Skosmos shows outgoing properties on a subject's page and
+            # doesn't traverse blank-node ``bffi:contribution`` chains;
+            # without the flat predicate, the contributor exists in the
+            # graph but never appears on the Expression page.
+            g.add((expr, DCTERMS.contributor, agent_node))
 
 
 def _propagate_primary_contributions(
@@ -284,6 +292,15 @@ def _propagate_primary_contributions(
         g.add((contrib, RDF.type, V.BFFI.PrimaryContribution))
         g.add((contrib, V.BFFI.agent, agent))
         g.add((agent, V.RDFS.label, Literal(target.agent_label)))
+        # P-45 follow-up: emit a flat ``dct:creator`` triple on the
+        # canonical Work so Skosmos renders the primary creator
+        # directly under the labelled "Creator" / "Tekijä" section.
+        # Skosmos shows outgoing properties on a subject's page and
+        # doesn't traverse blank-node ``bffi:contribution`` chains;
+        # without the flat predicate, the author exists in the graph
+        # (Work → contribution → blank node → agent → label) but never
+        # appears on the Work page.
+        g.add((canonical_uri, DCTERMS.creator, agent))
 
 
 def _emit_mint_anchor(g: Graph, canonical_uri: URIRef, mint_anchor: MintAnchorKind | None) -> None:

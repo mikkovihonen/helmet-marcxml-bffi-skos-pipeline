@@ -1129,6 +1129,7 @@ def test_canonical_carries_primary_contribution_with_agent_and_label(tmp_path: P
     contribs = list(g.objects(canonical, V.BFFI.contribution))
     # Two distinct agents → two contributions (Tolstoy deduped across A and B).
     assert len(contribs) == 2
+    contribution_agents: set[URIRef] = set()
     for contrib in contribs:
         types = set(g.objects(contrib, V.RDF.type))
         assert V.BFFI.PrimaryContribution in types
@@ -1138,6 +1139,14 @@ def test_canonical_carries_primary_contribution_with_agent_and_label(tmp_path: P
         assert isinstance(agent, URIRef)
         labels = list(g.objects(agent, V.RDFS.label))
         assert len(labels) == 1
+        contribution_agents.add(agent)
+    # P-45 follow-up: each PrimaryContribution also emits a flat
+    # ``dct:creator`` triple on the canonical Work so Skosmos renders
+    # the creator directly (it doesn't traverse blank-node contribution
+    # chains). The flat predicate must point at the same agent URI as
+    # the structured chain.
+    flat_creators = {o for o in g.objects(canonical, DCTERMS.creator) if isinstance(o, URIRef)}
+    assert flat_creators == contribution_agents
 
 
 def test_canonical_dedupes_contribution_by_agent_uri_across_members(tmp_path: Path) -> None:
@@ -1348,6 +1357,11 @@ def test_canonical_expression_carries_uri_agent_contribution_from_700(
     [agent] = list(g.objects(contrib, V.BFFI.agent))
     assert agent == URIRef("http://urn.fi/URN:NBN:fi:bib:raw/aaa#Agent700-24")
     assert (agent, V.RDFS.label, Literal("Adrian, Esa")) in g
+    # P-45 follow-up: a flat ``dct:contributor`` triple on the Expression
+    # mirrors the structured chain so Skosmos's Expression page renders
+    # the translator directly without traversing the blank-node
+    # ``bffi:contribution`` chain.
+    assert (URIRef(EXPR_A), DCTERMS.contributor, agent) in g
 
 
 def test_canonical_expression_dedups_contribution_across_members(tmp_path: Path) -> None:

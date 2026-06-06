@@ -55,7 +55,15 @@ bffi:expressionOf  rdfs:subPropertyOf skos:broader ;
 
 bffi:subject   rdfs:label "Subject"@en, "Aihe"@fi, "Ämne"@sv .
 bffi:genreForm rdfs:label "Genre/form"@en, "Genre/muoto"@fi, "Genre/form"@sv .
-bffi:creator   rdfs:label "Creator"@en, "Tekijä"@fi, "Upphovsperson"@sv .
+
+# Primary creator + non-primary contributor are emitted as flat
+# ``dct:creator`` / ``dct:contributor`` triples on each Work / Expression
+# in M8 so Skosmos renders them directly under the labelled section.
+# Skosmos shows only outgoing properties on a subject's page and doesn't
+# traverse the blank-node ``bffi:contribution`` chain that's the BFFI
+# 1.0.0 structural model — the flat predicates are the display layer.
+dct:creator     rdfs:label "Creator"@en, "Tekijä"@fi, "Upphovsperson"@sv .
+dct:contributor rdfs:label "Contributor"@en, "Muu tekijä"@fi, "Medverkande"@sv .
 
 # bf:role labels the relator URI on each Contribution block (set by the
 # M3 contributor-extraction cascade — bf:role <relators/trl> for
