@@ -100,19 +100,29 @@ LINEAGE_VALUE_PREFIX: Final[str] = "src="
 #: M3's raw-URI positional fragment grammar. Three named groups:
 #:   - ``kind``: the M3 routing prefix (Topic / Place / Agent / Hub / ...)
 #:   - ``tag``:  the source MARC datafield tag (650 / 651 / 700 / ...)
-#:   - ``ord``:  the 1-indexed position of the source field within
-#:               the record (M3's per-record counter).
+#:   - ``ord``:  M3's per-record entity counter — monotonic in source
+#:               MARC encounter order but **NOT** 1-indexed-within-tag.
+#:               A record with 4x 650 + 1x 655 + 9x 700 mints
+#:               ``#Topic650-22`` … ``#Topic650-25``, then ``#Agent700-27``
+#:               … ``#Agent700-35`` (position 26 = the 655 entity). The
+#:               converter normalises this to within-tag rank in the
+#:               lineage token it emits, so the diff comparator can
+#:               pair against ``$9 src=650-1`` / ``src=700-3`` style
+#:               1-indexed ranks (matching its own source-side counter).
 _LINEAGE_FRAGMENT_RE: Final[re.Pattern[str]] = re.compile(
     r"#(?P<kind>Topic|Place|Agent|Hub|MusicMedium|IntendedAudience|"
     r"CreatorCharacteristic)(?P<tag>\d{3})-(?P<ord>\d+)$"
 )
 
 
-def _extract_lineage_token(source: Node | None) -> str | None:
-    """Parse an M3-minted raw URI fragment into a ``<tag>-<ordinal>``
-    lineage token. Returns ``None`` for non-URI inputs, URIs outside
-    the raw-bib namespace, and URIs whose fragment doesn't match the
-    M3 positional convention.
+def _parse_lineage_fragment(source: Node | None) -> tuple[str, int] | None:
+    """Parse an M3-minted raw URI fragment into ``(tag, m3_ord)``.
+
+    Returns ``None`` for non-URI inputs, URIs outside the raw-bib
+    namespace, and URIs whose fragment doesn't match the M3 positional
+    convention. The integer ``m3_ord`` is the per-record entity
+    counter — call :meth:`_Reconstructor._lineage_token` to translate
+    it into the 1-indexed-within-tag rank the diff comparator pairs on.
     """
     if not isinstance(source, URIRef):
         return None
@@ -122,7 +132,7 @@ def _extract_lineage_token(source: Node | None) -> str | None:
     m = _LINEAGE_FRAGMENT_RE.search(s)
     if m is None:
         return None
-    return f"{m.group('tag')}-{m.group('ord')}"
+    return m.group("tag"), int(m.group("ord"))
 
 
 @dataclass(frozen=True)
@@ -165,8 +175,14 @@ class _Reconstructor:
     manifestation: URIRef
     bib_id: str | None = None
     skipped: list[str] = field(default_factory=list)
+    #: Pre-computed translation from M3 raw URI (full string) to the
+    #: 1-indexed-within-tag lineage token (e.g. ``"700-3"``). Built
+    #: once per :meth:`build` call from the BFFI graph; consulted by
+    #: :meth:`_lineage_token` whenever an emitter stamps ``$9 src=…``.
+    _lineage_rank_map: dict[str, str] = field(default_factory=dict)
 
     def build(self) -> ReconstructedRecord:
+        self._lineage_rank_map = self._build_lineage_rank_map()
         bib_id = self.bib_id or self._discover_bib_id()
         record = Element(f"{{{MARC_NAMESPACE}}}record")
 
@@ -704,13 +720,13 @@ class _Reconstructor:
         ``skos:exactMatch`` (built once per emit_subjects pass into
         ``raw_origin_hints``) recovers the originating raw URI's
         fragment."""
-        direct = _extract_lineage_token(target)
+        direct = self._lineage_token(target)
         if direct is not None:
             return direct
         if isinstance(target, URIRef):
             raw = raw_origin_hints.get(target)
             if raw:
-                return _extract_lineage_token(URIRef(raw))
+                return self._lineage_token(URIRef(raw))
         return None
 
     #: Routes a BFFI subject node to the right MARC 6XX tag by looking
@@ -777,6 +793,48 @@ class _Reconstructor:
                     if any(h in raw for h in hints):
                         return tag
         return "650"
+
+    def _build_lineage_rank_map(self) -> dict[str, str]:
+        """Walk every raw-bib URI in the graph, group by MARC tag,
+        sort by M3 ordinal, and assign 1-indexed-within-tag ranks.
+
+        Returns ``{raw_uri_string: "<tag>-<rank>"}``. The rank is
+        what the diff comparator's source-side counter produces
+        (it walks the source MARCXML once and numbers each tag's
+        instances in encounter order), so by emitting ``$9 src=<tag>-
+        <rank>`` we get an exact pairing key. M3's per-record entity
+        counter is monotonic in source-MARC encounter order within a
+        tag bucket (verified on the 500-sample corpus), so the sort
+        recovers source order even though the absolute numbers carry
+        cross-tag offsets (e.g. b10068004: 9x 700 stamped 27..35).
+        """
+        by_tag: dict[str, set[tuple[int, str]]] = {}
+        # Walk every URI mentioned by the graph (subject + object).
+        for s in self.graph.subjects():
+            if isinstance(s, URIRef):
+                parsed = _parse_lineage_fragment(s)
+                if parsed is not None:
+                    by_tag.setdefault(parsed[0], set()).add((parsed[1], str(s)))
+        for o in self.graph.objects():
+            if isinstance(o, URIRef):
+                parsed = _parse_lineage_fragment(o)
+                if parsed is not None:
+                    by_tag.setdefault(parsed[0], set()).add((parsed[1], str(o)))
+
+        out: dict[str, str] = {}
+        for tag, items in by_tag.items():
+            for rank, (_, uri_str) in enumerate(sorted(items), start=1):
+                out[uri_str] = f"{tag}-{rank}"
+        return out
+
+    def _lineage_token(self, node: Node | None) -> str | None:
+        """Look up the rank-normalised lineage token for a raw-bib URI.
+        Returns ``None`` for non-URI inputs, URIs outside the raw-bib
+        namespace, or URIs whose fragment doesn't match M3's
+        positional convention."""
+        if not isinstance(node, URIRef):
+            return None
+        return self._lineage_rank_map.get(str(node))
 
     def _build_raw_origin_hints(self, work: URIRef, predicate: URIRef) -> dict[URIRef, str]:
         """For each authority URI attached to ``<work> predicate``, find
@@ -942,7 +1000,7 @@ class _Reconstructor:
                     continue
                 role_subs = self._collect_role_subs(contrib)
                 tag = self._added_entry_tag(agent)
-                lineage = _extract_lineage_token(agent)
+                lineage = self._lineage_token(agent)
                 self._emit_datafield(
                     record,
                     tag,

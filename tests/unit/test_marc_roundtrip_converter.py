@@ -797,9 +797,13 @@ def test_648_routes_via_raw_topic648_fragment_back_link() -> None:
     assert df_648, "yso/p10000 must emit as 648 via raw #Topic648 back-link"
 
 
-def test_lineage_stamped_on_subject_from_topic650_fragment() -> None:
+def test_lineage_stamped_on_subject_with_within_tag_rank() -> None:
     """P-48 Phase A: a subject URI minted as ``#Topic650-N`` produces
-    a recon 650 row carrying ``$9 src=650-N``."""
+    a recon 650 row carrying ``$9 src=650-<rank>`` where rank is
+    1-indexed within the source's 650 bucket. M3's per-record entity
+    counter (the ``-N`` suffix) is normalised to a within-tag rank
+    by sorting all #Topic650 fragments and renumbering 1, 2, … N.
+    Single subject → rank 1."""
     g = _build_minimal_graph()
     raw = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b13511105#Topic650-7")
     g.add((WORK, V.BFFI.subject, raw))
@@ -811,12 +815,11 @@ def test_lineage_stamped_on_subject_from_topic650_fragment() -> None:
         if _subfield(df, "a") == "dinosaurukset"
     ]
     assert len(rows) == 1
-    assert _subfield(rows[0], "9") == "src=650-7"
+    assert _subfield(rows[0], "9") == "src=650-1"
 
 
-def test_lineage_stamped_on_added_entry_from_agent700_fragment() -> None:
-    """7XX added entries carry the agent URI's ``#Agent700-N``
-    fragment as the lineage payload."""
+def test_lineage_stamped_on_added_entry_with_within_tag_rank() -> None:
+    """7XX added entries carry within-tag rank, not raw M3 ordinal."""
     g = _build_minimal_graph()
     contrib = URIRef("urn:contrib/x")
     agent = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b13511105#Agent700-14")
@@ -830,14 +833,60 @@ def test_lineage_stamped_on_added_entry_from_agent700_fragment() -> None:
         if _subfield(df, "a") == "Vamvakaris, Markos"
     ]
     assert len(rows) == 1
-    assert _subfield(rows[0], "9") == "src=700-14"
+    assert _subfield(rows[0], "9") == "src=700-1"
+
+
+def test_lineage_multi_700_assigns_sequential_ranks_in_m3_order() -> None:
+    """When multiple ``#Agent700-N`` URIs exist (e.g. 9 source 700s with
+    M3 ordinals 27-35 on b10068004), the converter ranks them by their
+    M3 ordinal (= source MARC encounter order) and emits ``src=700-1``
+    … ``src=700-9``. The diff comparator pairs these against the source
+    side's 1-indexed-within-tag counter — closing the cross-graph-
+    iteration-order pairing bug."""
+    g = _build_minimal_graph()
+    # 5 agents with M3 ordinals 27, 28, 29, 30, 31 - mimics b10068004.
+    # Add them to the graph in REVERSE order to confirm rank assignment
+    # ignores graph-iteration order and only looks at the M3 ordinal.
+    expected_label_for_rank = {}
+    for m3_ord, name in (
+        (31, "Andersson, Benny"),
+        (30, "Coleman, Cy"),
+        (29, "Jacobs, Jim"),
+        (28, "Lind, Jon"),
+        (27, "Gore, Michael"),
+    ):
+        contrib = URIRef(f"urn:contrib/{m3_ord}")
+        agent = URIRef(f"http://urn.fi/URN:NBN:fi:bib:raw/bX#Agent700-{m3_ord}")
+        g.add((EXPR, V.BFFI.contribution, contrib))
+        g.add((contrib, V.BFFI.agent, agent))
+        g.add((agent, V.RDFS.label, Literal(name)))
+        # Rank = position in sorted M3-ordinal list.
+        # Sorted ordinals: 27, 28, 29, 30, 31 → ranks 1..5
+        # 27=Gore=rank1, 28=Lind=rank2, 29=Jacobs=rank3,
+        # 30=Coleman=rank4, 31=Andersson=rank5
+    expected_label_for_rank = {
+        1: "Gore, Michael",
+        2: "Lind, Jon",
+        3: "Jacobs, Jim",
+        4: "Coleman, Cy",
+        5: "Andersson, Benny",
+    }
+    rec = reconstruct_marc(g, MANIF)
+    for df in rec.element.findall("m:datafield[@tag='700']", NS):
+        a = _subfield(df, "a")
+        lin = _subfield(df, "9")
+        if lin and lin.startswith("src=700-"):
+            rank = int(lin[len("src=700-") :])
+            assert expected_label_for_rank[rank] == a, (
+                f"rank {rank} should be {expected_label_for_rank[rank]!r}, got {a!r}"
+            )
 
 
 def test_lineage_recovered_via_skos_exactmatch_for_authority_subject() -> None:
     """When M9 reconciles ``#Place651-21`` to an authority URI, the
     raw URI carries ``skos:exactMatch <auth>``; the converter walks
-    the back-link so the authority's emitted row still carries
-    ``$9 src=651-21``."""
+    the back-link so the authority's emitted row carries the raw's
+    within-tag rank in $9."""
     g = _build_minimal_graph()
     raw = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b13511105#Place651-21")
     auth = URIRef("http://www.yso.fi/onto/yso/p105037")
@@ -846,15 +895,14 @@ def test_lineage_recovered_via_skos_exactmatch_for_authority_subject() -> None:
     g.add((raw, V.SKOS.exactMatch, auth))
     g.add((auth, V.RDFS.label, Literal("Kreikka")))
     rec = reconstruct_marc(g, MANIF)
-    # The 651 row from the authority URI must carry the raw's
-    # lineage token (not the bare URI — that has no fragment).
     rows = [
         df
         for df in rec.element.findall("m:datafield[@tag='651']", NS)
         if _subfield(df, "0") == str(auth)
     ]
     assert len(rows) == 1
-    assert _subfield(rows[0], "9") == "src=651-21"
+    # Single #Place651 in the graph → rank 1
+    assert _subfield(rows[0], "9") == "src=651-1"
 
 
 def test_lineage_absent_for_flat_instance_fields_pending_phase_b() -> None:
