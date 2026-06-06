@@ -133,12 +133,14 @@ class _Reconstructor:
         self._emit_primary_contribution(record)  # 100
         self._emit_title(record)  # 245
         self._emit_publication_statement(record)  # 260
+        self._emit_extent_and_dimensions(record)  # 300
         self._emit_content_type(record)  # 336
         self._emit_media_type(record)  # 337
         self._emit_carrier_type(record)  # 338
         self._emit_digital_characteristic(record)  # 347
         self._emit_sound_characteristic(record)  # 344
         self._emit_color_content(record)  # 346
+        self._emit_notes(record)  # 500
         self._emit_subjects(record)  # 6XX
         self._emit_genre_forms(record)  # 655
         self._emit_added_entries(record)  # 700/710 etc.
@@ -316,12 +318,25 @@ class _Reconstructor:
             return
         # 245 ind1=1 ("title added entry") ind2=0 (no non-filing chars
         # to skip). Both are best-effort defaults.
-        self._emit_datafield(record, "245", ("a", label), ind1="1", ind2="0")
+        # 245 $c — statement of responsibility (lifted by M3 onto the
+        # Manifestation as ``bffi:responsibilityStatement``, P-47).
+        subs: list[tuple[str, str]] = [("a", label)]
+        for stmt in self.graph.objects(self.manifestation, V.BFFI.responsibilityStatement):
+            if isinstance(stmt, Literal):
+                subs.append(("c", str(stmt)))
+                break
+        self._emit_datafield(record, "245", *subs, ind1="1", ind2="0")
 
     def _emit_publication_statement(self, record: Element) -> None:
-        # Parse "(<pub statement>)" suffix off the Manifestation's
-        # prefLabel — that's where M3 stashed the bf:Instance's
-        # bf:publicationStatement (P-45 commit 11).
+        # 260 $c date. Prefer the lifted ``bffi:publicationStatement``
+        # literal (P-47 — M3 carries it from bf:Instance verbatim);
+        # fall back to parsing the prefLabel suffix when the literal
+        # is absent (older M3 outputs or records that synthesized the
+        # prefLabel suffix without a bf:publicationStatement source).
+        for stmt in self.graph.objects(self.manifestation, V.BFFI.publicationStatement):
+            if isinstance(stmt, Literal):
+                self._emit_datafield(record, "260", ("c", str(stmt)))
+                return
         for lit in self.graph.objects(self.manifestation, SKOS.prefLabel):
             text = str(lit)
             if "(" in text and text.endswith(")"):
@@ -330,11 +345,79 @@ class _Reconstructor:
                     self._emit_datafield(record, "260", ("c", pub))
                     return
 
+    def _emit_extent_and_dimensions(self, record: Element) -> None:
+        # 300 $a extent ($c dimensions). Both live on the Manifestation
+        # via M3's bf:Instance lift (P-47). Either may be absent — emit
+        # whichever side is present; skip entirely when both are missing.
+        subs: list[tuple[str, str]] = []
+        for ext in self.graph.objects(self.manifestation, V.BFFI.extent):
+            if isinstance(ext, Literal):
+                subs.append(("a", str(ext)))
+            else:
+                lbl = self._first_label(ext)
+                if lbl:
+                    subs.append(("a", lbl))
+            break
+        for dim in self.graph.objects(self.manifestation, V.BFFI.dimensions):
+            if isinstance(dim, Literal):
+                subs.append(("c", str(dim)))
+            else:
+                lbl = self._first_label(dim)
+                if lbl:
+                    subs.append(("c", lbl))
+            break
+        if subs:
+            self._emit_datafield(record, "300", *subs)
+
     def _emit_content_type(self, record: Element) -> None:
-        # 336 — bffi:content lives on Expression. Not currently
-        # forwarded onto BFFI in the pipeline; skip and surface in
-        # diff for visibility.
-        self.skipped.append("336")
+        # 336 content type — lifted from bf:Work via bffi:content (URI
+        # in the LoC contentTypes vocab). Emit $a label from the URI's
+        # cross-graph prefLabel, $b code from the URI tail, $2 source.
+        expr = self.expression
+        if expr is None:
+            return
+        emitted = False
+        for ctype in self.graph.objects(expr, V.BFFI.content):
+            if not isinstance(ctype, URIRef):
+                continue
+            code = self._loc_code(ctype, "contentTypes")
+            label = self._loc_label(ctype, lang_pref=("fi", "en"))
+            self._emit_datafield(
+                record,
+                "336",
+                ("a", label or ""),
+                ("b", code or ""),
+                ("2", "rdacontent"),
+            )
+            emitted = True
+        if not emitted:
+            self.skipped.append("336")
+
+    def _emit_notes(self, record: Element) -> None:
+        # 500 general note. M3 emits ``bffi:note`` on Expression, with
+        # the cataloguer's note text as ``rdf:value`` on a ``bf:Note``
+        # blank node. Each distinct note becomes one 500 row.
+        expr = self.expression
+        if expr is None:
+            return
+        for note in self.graph.objects(expr, V.BFFI.note):
+            # The note may be a literal directly or a blank node with
+            # rdf:value.
+            text: str | None = None
+            if isinstance(note, Literal):
+                text = str(note)
+            else:
+                for val in self.graph.objects(note, V.RDF.value):
+                    if isinstance(val, Literal):
+                        text = str(val)
+                        break
+                if text is None:
+                    for val in self.graph.objects(note, V.RDFS.label):
+                        if isinstance(val, Literal):
+                            text = str(val)
+                            break
+            if text:
+                self._emit_datafield(record, "500", ("a", text))
 
     def _emit_media_type(self, record: Element) -> None:
         for media in self.graph.objects(self.manifestation, V.BFFI.media):
@@ -417,9 +500,53 @@ class _Reconstructor:
             row = self._subject_row(subject, seen_authorities)
             if row is None:
                 continue
-            # 650 = topical default. Distinguishing 600/610/611/648/651
-            # from BFFI alone is heuristic — left for a future commit.
-            self._emit_datafield(record, "650", *row, ind2="7")
+            tag = self._subject_marc_tag(subject)
+            self._emit_datafield(record, tag, *row, ind2="7")
+
+    #: Routes a BFFI subject node to the right MARC 6XX tag by looking
+    #: at clues in the URI / labels / source. Coverage:
+    #:   - 600 personal name subject (KANTO finaf personal-name URIs;
+    #:     marc2bibframe2 mints ``#Agent600-N`` fragments)
+    #:   - 610 corporate-name subject (``#Agent610-N``)
+    #:   - 611 meeting-name subject  (``#Agent611-N``)
+    #:   - 648 chronological subject (yso-aika namespace; ``#Topic648-N``)
+    #:   - 651 geographic subject     (yso-paikat; ``#Place651-N`` fragments)
+    #:   - 650 topical                (everything else)
+    _GEOGRAPHIC_HINTS: tuple[str, ...] = (
+        "yso-paikat",
+        "/yso-paikat/",
+        "#Place651",
+        "#Place-",
+    )
+    _CHRONOLOGICAL_HINTS: tuple[str, ...] = (
+        "yso-aika",
+        "/yso-aika/",
+        "#Topic648",
+    )
+    _PERSONAL_HINTS: tuple[str, ...] = ("#Agent600", "/finaf/")
+    _CORPORATE_HINTS: tuple[str, ...] = ("#Agent610",)
+    _MEETING_HINTS: tuple[str, ...] = ("#Agent611",)
+
+    def _subject_marc_tag(self, target: Node) -> str:
+        """Route a BFFI subject node to 600 / 610 / 611 / 648 / 651 /
+        650 based on URI hints. The hints are the M3-minted fragment
+        IDs (``#Agent600-N``, ``#Place651-N``, etc.) for raw URIs, and
+        Finto vocab namespaces (yso-paikat, yso-aika, finaf) for
+        M9-bound authority URIs. Default = 650 (topical)."""
+        if not isinstance(target, URIRef):
+            return "650"
+        s = str(target)
+        routes: tuple[tuple[tuple[str, ...], str], ...] = (
+            (self._PERSONAL_HINTS, "600"),
+            (self._CORPORATE_HINTS, "610"),
+            (self._MEETING_HINTS, "611"),
+            (self._CHRONOLOGICAL_HINTS, "648"),
+            (self._GEOGRAPHIC_HINTS, "651"),
+        )
+        for hints, tag in routes:
+            if any(h in s for h in hints):
+                return tag
+        return "650"
 
     def _emit_genre_forms(self, record: Element) -> None:
         work = self.work
@@ -524,7 +651,15 @@ class _Reconstructor:
         return None
 
     def _emit_added_entries(self, record: Element) -> None:
-        # Non-primary contributions on the Expression → 700.
+        # Non-primary contributions on the Expression — routed to 700
+        # (personal name), 710 (corporate body), or 711 (meeting) based
+        # on the agent URI's M3-minted fragment ID:
+        #   .../#Agent700-N → 700 (personal)
+        #   .../#Agent710-N → 710 (corporate)
+        #   .../#Agent711-N → 711 (meeting)
+        # KANTO finaf URIs default to 700 (the dominant case); a richer
+        # heuristic could check the KANTO concept type but the URI
+        # fragment is the most reliable signal for unresolved agents.
         expr = self.expression
         if expr is None:
             return
@@ -557,7 +692,20 @@ class _Reconstructor:
                         free_text = self._first_label(role)
                         if free_text:
                             role_subs.append(("e", free_text))
-                self._emit_datafield(record, "700", ("a", label), *role_subs, ind1="1")
+                tag = self._added_entry_tag(agent)
+                self._emit_datafield(record, tag, ("a", label), *role_subs, ind1="1")
+
+    def _added_entry_tag(self, agent: Node) -> str:
+        """Route a non-primary contribution to 700 / 710 / 711 by the
+        agent URI's M3-minted fragment ID. Default 700 (personal)."""
+        if not isinstance(agent, URIRef):
+            return "700"
+        s = str(agent)
+        if "#Agent710" in s:
+            return "710"
+        if "#Agent711" in s:
+            return "711"
+        return "700"
 
     def _emit_bib_id_local(self, record: Element, bib_id: str | None) -> None:
         if not bib_id:

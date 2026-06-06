@@ -452,6 +452,112 @@ def test_every_datafield_carries_roundtrip_marker(minimal_record: ET.Element) ->
         assert any(sf.text == ROUNDTRIP_MARKER for sf in markers), df.attrib["tag"]
 
 
+def test_245_emits_responsibility_statement_in_c_subfield() -> None:
+    """P-47 commit 9: M3 lifts ``bf:responsibilityStatement`` from
+    bf:Instance to Manifestation as ``bffi:responsibilityStatement``;
+    the converter emits it as 245 $c."""
+    g = _build_minimal_graph()
+    g.add((MANIF, V.BFFI.responsibilityStatement, Literal("THOMAS PETER KRAG")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='245']", NS)
+    assert df is not None
+    assert _subfield(df, "c") == "THOMAS PETER KRAG"
+
+
+def test_260_prefers_publication_statement_literal_over_label_parse() -> None:
+    """When ``bffi:publicationStatement`` is present, 260 $c uses it
+    directly instead of parsing the Manifestation prefLabel suffix."""
+    g = _build_minimal_graph()
+    g.add((MANIF, V.BFFI.publicationStatement, Literal("Helsinki : Otava, 1912")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='260']", NS)
+    assert df is not None
+    assert _subfield(df, "c") == "Helsinki : Otava, 1912"
+
+
+def test_300_emits_extent_and_dimensions_when_both_present() -> None:
+    """P-47: 300 $a from ``bffi:extent`` literal, $c from
+    ``bffi:dimensions`` literal — Manifestation-side."""
+    g = _build_minimal_graph()
+    g.add((MANIF, V.BFFI.extent, Literal("256 sivua")))
+    g.add((MANIF, V.BFFI.dimensions, Literal("21 cm")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='300']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "256 sivua"
+    assert _subfield(df, "c") == "21 cm"
+
+
+def test_500_emits_note_from_bffi_note_blank_node_with_rdf_value() -> None:
+    """P-47: M3 emits ``bffi:note`` on Expression with the note text
+    as ``rdf:value`` on a ``bf:Note`` blank node. The converter walks
+    that and emits 500 $a."""
+    g = _build_minimal_graph()
+    note_node = BNode()
+    g.add((EXPR, V.BFFI.note, note_node))
+    g.add((note_node, V.RDF.value, Literal("Translated from Norwegian.")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='500']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Translated from Norwegian."
+
+
+def test_336_emits_content_type_when_bffi_content_uri_present() -> None:
+    """P-47: ``bffi:content`` on Expression → 336 $a label $b code
+    $2 rdacontent. URI resolves to a label via the merged LoC
+    contentTypes vocab when the runner loads it."""
+    g = _build_minimal_graph()
+    content_uri = URIRef("http://id.loc.gov/vocabulary/contentTypes/txt")
+    g.add((EXPR, V.BFFI.content, content_uri))
+    g.add((content_uri, SKOS.prefLabel, Literal("teksti", lang="fi")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='336']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "teksti"
+    assert _subfield(df, "b") == "txt"
+    assert _subfield(df, "2") == "rdacontent"
+    assert "336" not in rec.skipped_tags
+
+
+def test_651_emits_geographic_subject_from_yso_paikat_uri() -> None:
+    """6XX routing: yso-paikat URI → 651 geographic subject."""
+    g = _build_minimal_graph()
+    paikka = URIRef("http://www.yso.fi/onto/yso-paikat/p105076")
+    g.add((WORK, V.BFFI.subject, paikka))
+    g.add((paikka, V.RDFS.label, Literal("Tampere")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='651']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Tampere"
+
+
+def test_600_emits_personal_subject_from_agent600_fragment() -> None:
+    """6XX routing: marc2bibframe2 raw URI with ``#Agent600-N`` → 600."""
+    g = _build_minimal_graph()
+    agent_subj = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Agent600-7")
+    g.add((WORK, V.BFFI.subject, agent_subj))
+    g.add((agent_subj, V.RDFS.label, Literal("Sibelius, Jean")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='600']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Sibelius, Jean"
+
+
+def test_710_emits_corporate_added_entry_from_agent710_fragment() -> None:
+    """7XX routing: agent URI with ``#Agent710-N`` → 710 corporate
+    added entry (not 700)."""
+    g = _build_minimal_graph()
+    contrib = URIRef("urn:contrib/corp")
+    agent = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Agent710-3")
+    g.add((EXPR, V.BFFI.contribution, contrib))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Suomen kirjailijaliitto")))
+    rec = reconstruct_marc(g, MANIF)
+    df_710 = rec.element.find("m:datafield[@tag='710']", NS)
+    assert df_710 is not None
+    assert _subfield(df_710, "a") == "Suomen kirjailijaliitto"
+
+
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:
     # Smoke: we explicitly skip 852 (holdings) and 336 (content type
     # — not currently forwarded onto BFFI). Pin so adding either to
