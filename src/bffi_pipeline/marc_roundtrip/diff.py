@@ -446,21 +446,19 @@ _MARC_TAG_LEN: Final[int] = 3
 
 
 def _diff_sort_key(d: FieldDiff) -> tuple[int, str]:
-    """Sort: LDR / control fields first by tag; then datafields by tag.
-    Within a tag, identical comes after differences so cataloguers see
-    diffs first."""
+    """Sort by MARC field number ascending, LDR first.
+
+    Cataloguers read MARC top-to-bottom by tag (LDR, 008, 020, 100,
+    245, 260, ..., 650, 700, 730, ...), so the diff table mirrors that.
+    Python's sort is stable, so within a tag bucket rows preserve the
+    pairing order from :func:`_pair_data_fields` — which itself is
+    source-MARC encounter order via the lineage-rank pass + heuristic
+    residue. No status-based grouping; the row's status badge gives
+    the cataloguer the same signal at a glance.
+    """
     if d.tag == "LDR":
         return (0, "")
-    if d.tag.isdigit() and len(d.tag) == _MARC_TAG_LEN and d.tag < "010":
-        return (1, d.tag)
-    status_rank = {
-        "changed": 0,
-        "lost": 1,
-        "lost-converter-gap": 2,
-        "added": 3,
-        "identical": 4,
-    }
-    return (2 + status_rank.get(d.status, 99), d.tag)
+    return (1, d.tag)
 
 
 def diff_to_dict(diff: RecordDiff) -> dict[str, Any]:

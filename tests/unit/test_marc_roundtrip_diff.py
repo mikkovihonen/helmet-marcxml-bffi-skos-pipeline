@@ -258,30 +258,50 @@ def test_to_json_is_round_trippable() -> None:
 # --- Field sort order ---------------------------------------------------
 
 
-def test_changed_fields_sort_before_identical_within_same_tag_bucket() -> None:
-    """Cataloguers reading top-to-bottom should see diffs first; the
-    sort surfaces them above the noise of identical fields."""
+def test_diff_rows_sort_by_tag_ascending_with_ldr_first() -> None:
+    """The diff table reads top-to-bottom in MARC tag order so
+    cataloguers can scan it the same way they read a MARC record.
+    LDR is pinned to position 0, then 008 / 020 / 100 / 245 / 500
+    / 650 / 700 / 730. Status badges signal differences without
+    needing the status to drive sort order."""
     orig = _record(
         """
+        <datafield tag="650" ind1=" " ind2="7">
+          <subfield code="a">Subject A</subfield>
+        </datafield>
         <datafield tag="245" ind1="1" ind2="0">
-          <subfield code="a">Same</subfield>
+          <subfield code="a">Title</subfield>
         </datafield>
         <datafield tag="500" ind1=" " ind2=" ">
           <subfield code="a">Lost note</subfield>
+        </datafield>
+        <datafield tag="100" ind1="1" ind2=" ">
+          <subfield code="a">Author</subfield>
         </datafield>
         """
     )
     recon = _record(
         """
         <datafield tag="245" ind1="1" ind2="0">
-          <subfield code="a">Same</subfield>
+          <subfield code="a">Title</subfield>
+        </datafield>
+        <datafield tag="100" ind1="1" ind2=" ">
+          <subfield code="a">Author</subfield>
+        </datafield>
+        <datafield tag="650" ind1=" " ind2="7">
+          <subfield code="a">Subject A</subfield>
         </datafield>
         """
     )
     diff = diff_records(bib_id="b1", original=orig, reconstructed=recon)
-    statuses = [d.status for d in diff.fields]
-    # `lost` (500) should appear before `identical` (245) in the sorted list.
-    assert statuses.index("lost") < statuses.index("identical")
+    tags = [d.tag for d in diff.fields]
+    # LDR may or may not be present; whatever data tags exist must be
+    # in ascending order even though source / recon had them in mixed
+    # order and statuses are a mix of identical + lost.
+    data_tags = [t for t in tags if t != "LDR"]
+    assert data_tags == sorted(data_tags), (
+        f"datafield rows must sort ascending by tag, got {data_tags}"
+    )
 
 
 def test_lineage_subfield_strips_from_recon_and_pairs_by_token() -> None:
