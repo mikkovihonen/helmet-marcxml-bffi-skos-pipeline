@@ -36,6 +36,11 @@ from bffi_pipeline.stages.m8.schemas import (
     SubjectTarget,
 )
 
+#: Prefix for M3-minted raw bib URIs. The manifestation propagation
+#: pass follows these into the canonical graph so per-record subgraphs
+#: (Hubs, etc.) reach the round-trip converter intact.
+_RAW_BIB_URI_PREFIX: str = "http://urn.fi/URN:NBN:fi:bib:raw/"
+
 
 def _admin_metadata_uri(canonical_uri: str) -> URIRef:
     digest = hashlib.sha1(canonical_uri.encode("utf-8")).hexdigest()
@@ -75,7 +80,19 @@ def _propagate_manifestations(g: Graph, raw_graph: Graph) -> int:
         for p, o in raw_graph.predicate_objects(node):
             g.add((node, p, o))
             count += 1
-            if isinstance(o, BNode) and o not in visited:
+            # Follow blank nodes (the usual case: bf:title, bf:Note,
+            # bf:Local identifiers, etc.) AND raw-bib URIs that hang off
+            # the Manifestation — most notably ``#Hub730-N`` URIs reached
+            # via ``bffi:relation → bffi:Relation → bffi:associatedResource``.
+            # Raw-bib URIs are per-record (M3 mints them with the bib_id
+            # in the prefix) so they only appear in one record's output;
+            # following them is safe and copies the Hub's full bf:title
+            # subgraph into the canonical graph for the round-trip
+            # converter to read.
+            if o not in visited and (
+                isinstance(o, BNode)
+                or (isinstance(o, URIRef) and str(o).startswith(_RAW_BIB_URI_PREFIX))
+            ):
                 queue.append(o)
     # Materialise the inverse ``bffi:manifestationOfExpression`` triple
     # on each Expression so Skosmos's Expression page surfaces a

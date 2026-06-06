@@ -978,6 +978,129 @@ def test_authority_subject_falls_back_to_raw_uri_label_when_finto_absent() -> No
     assert _subfield(rows[0], "a") == "buzuki"
 
 
+def test_730_emits_from_hub_marcKey_subfields_preferentially() -> None:
+    """When the bf:Hub carries a ``bflc:marcKey`` (faithful source
+    subfield string), the converter parses ``$a`` / ``$g`` directly
+    from it — preserves the cataloguer's original subfield structure
+    exactly, including trailing punctuation on $a."""
+    g = _build_minimal_graph()
+    hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Hub730-7")
+    rel = BNode()
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add(
+        (
+            rel,
+            V.BFFI.relationship,
+            URIRef("http://id.loc.gov/vocabulary/relationship/relatedwork"),
+        )
+    )
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal("73000 $aAnother suitcase in another hall /$gLloyd Webber, Andrew"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='730']", NS)
+    assert df is not None
+    assert df.attrib["ind1"] == "0"
+    assert _subfield(df, "a") == "Another suitcase in another hall /"
+    assert _subfield(df, "g") == "Lloyd Webber, Andrew"
+    # Lineage stamped from #Hub730-7 (single Hub → rank 1).
+    assert _subfield(df, "9") == "src=730-1"
+
+
+def test_730_falls_back_to_mainTitle_split_when_no_marcKey() -> None:
+    """Without bflc:marcKey, the converter splits bf:Title.bf:mainTitle
+    on the cataloguer-conventional ` / ` separator."""
+    g = _build_minimal_graph()
+    hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Hub730-5")
+    title = BNode()
+    rel = BNode()
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add((hub, V.BF.title, title))
+    g.add((title, V.BF.mainTitle, Literal("Fame / Gore, Michael")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='730']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Fame /"
+    assert _subfield(df, "g") == "Gore, Michael"
+
+
+def test_730_emits_a_only_when_mainTitle_has_no_responsibility() -> None:
+    """A bf:mainTitle without ` / ` separator → just ``$a`` (no $g)."""
+    g = _build_minimal_graph()
+    hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Hub730-1")
+    title = BNode()
+    rel = BNode()
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add((hub, V.BF.title, title))
+    g.add((title, V.BF.mainTitle, Literal("Standalone Title")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='730']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Standalone Title"
+    assert _subfield(df, "g") is None
+
+
+def test_730_skips_non_hub_associatedResource() -> None:
+    """A ``bffi:relation → bffi:Relation → bffi:associatedResource →
+    bf:Series`` chain (the 490 series shape) must NOT emit a 730 —
+    the type filter is on the associated resource's class."""
+    g = _build_minimal_graph()
+    series = BNode()
+    rel = BNode()
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, V.BFFI.associatedResource, series))
+    g.add((series, RDF.type, V.BF.Series))
+    g.add((series, V.RDFS.label, Literal("Some series")))
+    rec = reconstruct_marc(g, MANIF)
+    assert rec.element.find("m:datafield[@tag='730']", NS) is None
+
+
+def test_730_emits_multiple_hubs_with_ranked_lineage() -> None:
+    """Nine 730s on a single record (the b10068004 music-collection
+    case) emit nine 730 rows with lineage ``src=730-1`` … ``src=730-9``
+    in source-MARC encounter order. Ranks are derived from the
+    ``#Hub730-N`` ordinals; the converter's rank-map normalises
+    across-kind M3 offsets to within-tag positions."""
+    g = _build_minimal_graph()
+    # M3 ordinals 36..38 mimic the b10068004 spacing (Hubs start
+    # after Topic + Agent entities). Add in reverse order to
+    # confirm graph-iteration order doesn't leak into ranking.
+    for m3_ord, song in (
+        (38, "Third song"),
+        (36, "First song"),
+        (37, "Second song"),
+    ):
+        hub = URIRef(f"http://urn.fi/URN:NBN:fi:bib:raw/bX#Hub730-{m3_ord}")
+        title = BNode()
+        rel = BNode()
+        g.add((MANIF, V.BFFI.relation, rel))
+        g.add((rel, V.BFFI.associatedResource, hub))
+        g.add((hub, RDF.type, V.BF.Hub))
+        g.add((hub, V.BF.title, title))
+        g.add((title, V.BF.mainTitle, Literal(song)))
+    rec = reconstruct_marc(g, MANIF)
+    rows = rec.element.findall("m:datafield[@tag='730']", NS)
+    assert len(rows) == 3
+    by_lineage = {_subfield(df, "9"): _subfield(df, "a") for df in rows}
+    assert by_lineage == {
+        "src=730-1": "First song",  # M3 ord 36 = within-tag rank 1
+        "src=730-2": "Second song",  # M3 ord 37 = rank 2
+        "src=730-3": "Third song",  # M3 ord 38 = rank 3
+    }
+
+
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:
     # Smoke: we explicitly skip 852 (holdings) and 336 (content type
     # — not currently forwarded onto BFFI). Pin so adding either to

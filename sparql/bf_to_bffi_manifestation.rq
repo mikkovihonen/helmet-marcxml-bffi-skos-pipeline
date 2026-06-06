@@ -20,6 +20,7 @@
 # (inverse bffi:hasExpression) → Work``.
 
 PREFIX bf:    <http://id.loc.gov/ontologies/bibframe/>
+PREFIX bflc:  <http://id.loc.gov/ontologies/bflc/>
 PREFIX bffi:  <http://urn.fi/URN:NBN:fi:schema:bffi:>
 PREFIX dct:   <http://purl.org/dc/terms/>
 PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -48,9 +49,17 @@ CONSTRUCT {
             bffi:editionStatement      ?editionStatement ;
             bffi:hasSeries             ?seriesNode ;
             bffi:note                  ?instanceNote ;
+            bffi:relation              ?hubRel ;
             skos:prefLabel             ?manifLabel .
   ?bfToc   a               bffi:TableOfContents ;
            rdfs:label      ?tocLabel .
+  ?hubRel  a                       bffi:Relation ;
+           bffi:relationship       ?hubRelationship ;
+           bffi:associatedResource ?bfHub .
+  ?bfHub   a               bf:Hub ;
+           bf:title        ?bfHubTitle ;
+           bflc:marcKey    ?hubMarcKey .
+  ?bfHubTitle bf:mainTitle ?hubMainTitle .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -214,6 +223,37 @@ WHERE {
   OPTIONAL {
     ?bfInstance bf:note ?instanceNote .
     ?instanceNote rdfs:label ?instanceNoteLabel .
+  }
+
+  # MARC 730 (added entry — uniform title): marc2bibframe2 emits these
+  # as ``bf:Instance → bf:relation → bf:Relation`` chains whose
+  # ``bf:associatedResource`` is a ``bf:Hub`` URI minted in the raw
+  # bib namespace as ``#Hub730-N``. The Hub carries ``bf:title →
+  # bf:Title → bf:mainTitle "<title> / <responsibility>"`` plus a
+  # ``bflc:marcKey`` with the original MARC subfield string. Route
+  # the whole chain onto the canonical ``bffi:Manifestation`` using
+  # BFFI 1.0.0's relation pattern (``bffi:relation →
+  # bffi:Relation → bffi:relationship + bffi:associatedResource``),
+  # which is ``owl:equivalentProperty``/``owl:equivalentClass`` to
+  # the BIBFRAME counterparts per ``docs/lkd.rdf``. The Hub itself
+  # stays a ``bf:Hub`` because BFFI has no Hub equivalent — the
+  # blank-node Title substructure is also passed through verbatim
+  # (the round-trip converter reads ``bf:mainTitle`` + ``bflc:marcKey``
+  # to reconstruct ``$a`` / ``$g``).
+  #
+  # Filter on the Hub type so this OPTIONAL doesn't match the
+  # ``bf:Series`` chain routed separately above (490 series; Series
+  # uses a flatter ``bffi:hasSeries`` model).
+  OPTIONAL {
+    ?bfInstance bf:relation ?hubRel .
+    ?hubRel bf:associatedResource ?bfHub .
+    ?bfHub a bf:Hub .
+    OPTIONAL { ?hubRel bf:relationship ?hubRelationship }
+    OPTIONAL {
+      ?bfHub bf:title ?bfHubTitle .
+      ?bfHubTitle bf:mainTitle ?hubMainTitle .
+    }
+    OPTIONAL { ?bfHub bflc:marcKey ?hubMarcKey }
   }
 
   # Skosmos display label. Without ``skos:prefLabel`` Skosmos renders

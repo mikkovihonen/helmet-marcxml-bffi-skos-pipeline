@@ -21,6 +21,7 @@ BFFI = Namespace("http://urn.fi/URN:NBN:fi:schema:bffi:")
 BFFI_PROV = Namespace("http://urn.fi/URN:NBN:fi:schema:bffi-prov#")
 BIB = Namespace("http://urn.fi/URN:NBN:fi:bib:")
 BF = Namespace("http://id.loc.gov/ontologies/bibframe/")
+BFLC = Namespace("http://id.loc.gov/ontologies/bflc/")
 SKOS = Namespace("http://www.w3.org/2004/02/skos/core#")
 
 # --- Activity classes -----------------------------------------------------

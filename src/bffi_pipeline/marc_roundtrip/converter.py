@@ -217,6 +217,7 @@ class _Reconstructor:
         self._emit_subjects(record)  # 6XX
         self._emit_genre_forms(record)  # 655
         self._emit_added_entries(record)  # 700/710 etc.
+        self._emit_related_uniform_titles(record)  # 730
         self._emit_bib_id_local(record, bib_id)  # 907 Helmet display form
 
         # Holdings (852) explicitly skipped — BFFI doesn't model Items
@@ -1022,10 +1023,109 @@ class _Reconstructor:
             return "711"
         return "700"
 
+    def _emit_related_uniform_titles(self, record: Element) -> None:
+        """MARC 730 (added entry — uniform title).
+
+        BFFI 1.0.0 path (canonical, ``owl:equivalentProperty`` /
+        ``owl:equivalentClass`` to the BIBFRAME counterparts):
+
+            bffi:Manifestation
+              └─ bffi:relation
+                 └─ bffi:Relation
+                    ├─ bffi:relationship   <…/relatedwork>
+                    └─ bffi:associatedResource
+                       └─ bf:Hub                          (BIBFRAME — BFFI
+                          ├─ bf:title                      has no Hub class)
+                          │  └─ bf:Title
+                          │     └─ bf:mainTitle
+                          │        "Title / Responsibility"
+                          └─ bflc:marcKey "73000 $a…$g…"
+
+        Strategy: prefer ``bflc:marcKey`` (carries the exact source
+        subfield structure) when present, otherwise split
+        ``bf:mainTitle`` on `` / `` into ``$a`` (with trailing slash
+        preserved per Helmet convention) + ``$g``. ind1 = 0 ("no
+        nonfiling characters") is the dominant Helmet choice for
+        music-collection 730s; ind2 = blank.
+        """
+        manif = self.manifestation
+        if manif is None:
+            return
+        for rel in self.graph.objects(manif, V.BFFI.relation):
+            # bffi:Relation typing isn't load-bearing — the marker is
+            # the associatedResource being a bf:Hub. We skip Series
+            # relations (handled by _emit_series_statement above) by
+            # checking the target type below.
+            for resource in self.graph.objects(rel, V.BFFI.associatedResource):
+                if V.BF.Hub not in set(self.graph.objects(resource, RDF.type)):
+                    continue
+                subs = self._related_title_subfields(resource)
+                if not subs:
+                    continue
+                lineage = self._lineage_token(resource)
+                self._emit_datafield(record, "730", *subs, ind1="0", lineage=lineage)
+
+    def _related_title_subfields(self, hub: Node) -> tuple[tuple[str, str], ...]:
+        """Build the ``$a`` / ``$g`` subfield tuple for one 730 row.
+
+        Prefers parsing the source ``bflc:marcKey`` (faithful to the
+        original MARC subfields) and falls back to splitting
+        ``bf:mainTitle`` on `` / `` (last-resort heuristic — covers
+        the music-collection case where the cataloguer wrote
+        ``"Title / Author"``)."""
+        for mk in self.graph.objects(hub, V.BFLC.marcKey):
+            if isinstance(mk, Literal):
+                parsed = _parse_marc_key_subfields(str(mk), ("a", "g"))
+                if parsed:
+                    return parsed
+        # Fall back to bf:mainTitle split
+        for title in self.graph.objects(hub, V.BF.title):
+            for mt in self.graph.objects(title, V.BF.mainTitle):
+                if isinstance(mt, Literal):
+                    return _split_title_responsibility(str(mt))
+        return ()
+
     def _emit_bib_id_local(self, record: Element, bib_id: str | None) -> None:
         if not bib_id:
             return
         self._emit_datafield(record, "907", ("a", f".{bib_id}"))
+
+
+def _parse_marc_key_subfields(marc_key: str, codes: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
+    """Parse a ``bflc:marcKey`` string like ``"73000 $aTitle$gAuthor"``
+    into ``(($a, "Title"), ($g, "Author"))``.
+
+    Returns an empty tuple when the string doesn't start with the
+    expected indicator-prefix pattern (``\\d{2}\\s+``) or when no
+    requested subfields are present. ``codes`` filters which
+    subfields are extracted (order-preserving)."""
+    # Drop the leading "XX " indicator pair (e.g. "73000 ")
+    if " " not in marc_key:
+        return ()
+    _, _, body = marc_key.partition(" ")
+    if "$" not in body:
+        return ()
+    parts: dict[str, str] = {}
+    # Split on "$" — first piece is anything before the first subfield
+    # (typically empty); subsequent pieces start with the subfield code.
+    for chunk in body.split("$")[1:]:
+        if not chunk:
+            continue
+        code, value = chunk[0], chunk[1:]
+        if code not in parts:  # keep first occurrence
+            parts[code] = value
+    return tuple((c, parts[c]) for c in codes if c in parts)
+
+
+def _split_title_responsibility(text: str) -> tuple[tuple[str, str], ...]:
+    """Split a `"Title / Responsibility"` MARC main-title literal into
+    ``$a`` (with trailing `` /`` preserved) + ``$g``. Returns just
+    ``($a, text)`` when the splitter `` / `` is absent."""
+    sep = " / "
+    if sep in text:
+        head, _, tail = text.partition(sep)
+        return (("a", f"{head} /"), ("g", tail))
+    return (("a", text),)
 
 
 def _indent(elem: Element, level: int = 0) -> None:

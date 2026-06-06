@@ -2126,3 +2126,96 @@ def test_p45_manifestation_subgraphs_propagate_into_canonical_ttl(tmp_path: Path
     # declares owl:inverseOf but Skosmos doesn't run a reasoner).
     expr_uri = URIRef("urn:expr/A")
     assert (expr_uri, V.BFFI.manifestationOfExpression, manif_uri) in out
+
+
+def test_p48_730_hub_subgraph_propagates_via_raw_bib_uri_passthrough(
+    tmp_path: Path,
+) -> None:
+    """MARC 730 lands in BIBFRAME as ``bf:Instance → bf:relation →
+    bf:Relation → bf:associatedResource → bf:Hub`` with the Hub minted
+    as a raw-bib URI (``#Hub730-N``). M3 routes the chain onto
+    ``bffi:Manifestation``; M8's manifestation propagation must follow
+    the Hub URI (a URIRef, not a BNode) into the canonical graph so
+    the round-trip converter can read its ``bf:title → bf:mainTitle``
+    and emit MARC 730. Without the raw-bib URI passthrough the
+    canonical graph carries only the Relation blank node and the
+    Hub URI as a dangling reference — the Hub's title triples die at
+    the M8 boundary.
+    """
+    BFFI = "http://urn.fi/URN:NBN:fi:schema:bffi:"
+    BF = "http://id.loc.gov/ontologies/bibframe/"
+    BFLC = "http://id.loc.gov/ontologies/bflc/"
+    HELMET = "http://urn.fi/URN:NBN:fi:bib:source:helmet"
+    bffi_dir = tmp_path / "bffi"
+    bffi_dir.mkdir()
+    (bffi_dir / "10000001.ttl").write_text(
+        dedent(
+            f"""\
+            @prefix bf:   <{BF}> .
+            @prefix bflc: <{BFLC}> .
+            @prefix bffi: <{BFFI}> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix dct:  <http://purl.org/dc/terms/> .
+
+            <urn:work/A>  a bffi:Work ;
+                          bffi:hasExpression <urn:expr/A> .
+            <urn:expr/A>  a bffi:Expression ;
+                          bffi:expressionOf <urn:work/A> .
+            <urn:manif/A> a bffi:Manifestation ;
+                          bffi:expressionManifested <urn:expr/A> ;
+                          dct:identifier "b10000001" ;
+                          bf:identifiedBy [ a bf:Local ;
+                                            rdf:value "b10000001" ;
+                                            bf:source <{HELMET}> ] ;
+                          bffi:relation [
+                            a bffi:Relation ;
+                            bffi:associatedResource
+                              <http://urn.fi/URN:NBN:fi:bib:raw/b10000001#Hub730-7> ] .
+            <http://urn.fi/URN:NBN:fi:bib:raw/b10000001#Hub730-7>
+                          a bf:Hub ;
+                          bflc:marcKey "73000 $aFame /$gGore, Michael" ;
+                          bf:title [ bf:mainTitle "Fame / Gore, Michael" ] .
+            """
+        ),
+        encoding="utf-8",
+    )
+    work_records = {
+        "urn:work/A": CanonicalWorkInputs(
+            work_uri="urn:work/A",
+            creator_uri="urn:agent/X",
+            pref_label="X",
+            expression_uris=["urn:expr/A"],
+            helmet_identifiers=[("urn:helmet/A1", "b10000001")],
+        ),
+    }
+    helmet_entries = {
+        "urn:work/A": HelmetMapEntry("urn:work/A", "b10000001", "2026-06-06T12:00:00+00:00"),
+    }
+    canonical_path = tmp_path / "canonical.ttl"
+    decisions_path = tmp_path / "judge-decisions.jsonl"
+    decisions_path.write_text("", encoding="utf-8")
+    apply_merge(
+        decisions_path,
+        tmp_path,
+        output_path=canonical_path,
+        map_path=tmp_path / "canonical-map.jsonl",
+        conflicts_path=tmp_path / "canonical-conflicts.jsonl",
+        helmet_map_path=tmp_path / "helmet-map.jsonl",
+        work_records=work_records,
+        helmet_entries=helmet_entries,
+        now=datetime(2026, 6, 6, 12, 0, tzinfo=UTC),
+    )
+    out = Graph()
+    out.parse(canonical_path, format="turtle")
+    hub_uri = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b10000001#Hub730-7")
+    # The Hub triples must survive the M8 boundary.
+    assert (hub_uri, RDF.type, V.BF.Hub) in out
+    assert (
+        hub_uri,
+        URIRef("http://id.loc.gov/ontologies/bflc/marcKey"),
+        Literal("73000 $aFame /$gGore, Michael"),
+    ) in out
+    # Reachable blank node from Hub (bf:title) — must also survive.
+    titles = list(out.objects(hub_uri, V.BF.title))
+    assert len(titles) == 1
+    assert (titles[0], V.BF.mainTitle, Literal("Fame / Gore, Michael")) in out
