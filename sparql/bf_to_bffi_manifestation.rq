@@ -30,7 +30,9 @@ CONSTRUCT {
   ?manifURI a bffi:Manifestation ;
             bffi:expressionManifested ?exprURI ;
             bf:identifiedBy           ?ident ;
-            dct:identifier            ?helmetBibIdLiteral .
+            dct:identifier            ?helmetBibIdLiteral ;
+            bffi:media                ?mediaURI ;
+            bffi:carrier              ?carrierURI .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -68,4 +70,17 @@ WHERE {
             bf:source ?identSource .
     BIND(STR(?identValue) AS ?helmetBibIdLiteral)
   }
+
+  # RDA media + carrier — marc2bibframe2 deterministically resolves MARC
+  # 337$b (media code) → ``bf:media`` URI in ``id.loc.gov/vocabulary/
+  # mediaTypes/`` and MARC 338$b (carrier code) → ``bf:carrier`` URI in
+  # ``id.loc.gov/vocabulary/carriers/``. Both URIs are already canonical
+  # LoC RDA terms — no reconciliation needed; just forward them onto the
+  # Manifestation under their BFFI parallels (which are ``bf:media`` /
+  # ``bf:carrier`` subproperties per ``docs/lkd.rdf``). Skosmos renders
+  # them as labelled clickable concepts on the Manifestation page once
+  # the RDA-Media + RDA-Carrier graphs are loaded by ``load-finto``
+  # (commit 3 of this chain).
+  OPTIONAL { ?bfInstance bf:media   ?mediaURI .   FILTER(isIRI(?mediaURI)) }
+  OPTIONAL { ?bfInstance bf:carrier ?carrierURI . FILTER(isIRI(?carrierURI)) }
 }

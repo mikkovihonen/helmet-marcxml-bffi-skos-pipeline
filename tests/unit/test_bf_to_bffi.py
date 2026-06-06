@@ -72,7 +72,9 @@ SOURCE_TTL = textwrap.dedent(
         bf:note "Translated by Esa Adrian." .
 
     <{BF_INSTANCE}> a bf:Instance ;
-        bf:instanceOf <{BF_WORK}> .
+        bf:instanceOf <{BF_WORK}> ;
+        bf:media      <http://id.loc.gov/vocabulary/mediaTypes/n> ;
+        bf:carrier    <http://id.loc.gov/vocabulary/carriers/nc> .
 
     <#contrib-primary> a bf:Contribution, bf:PrimaryContribution ;
         bf:agent <urn:agent/Tolstoy> .
@@ -784,6 +786,30 @@ def test_construct_mints_manifestation_linked_to_expression() -> None:
     # The Work isn't directly linked TO the Manifestation; the relation
     # is mediated by Expression (FRBR semantics).
     assert not list(bffi.objects(EXPECTED_WORK, V.BFFI.expressionManifested))
+
+
+def test_construct_forwards_bf_media_and_bf_carrier_to_manifestation() -> None:
+    """P-45 commit 4: marc2bibframe2 deterministically resolves MARC
+    337$b → ``bf:media`` URI in ``id.loc.gov/vocabulary/mediaTypes/`` and
+    MARC 338$b → ``bf:carrier`` URI in ``id.loc.gov/vocabulary/carriers/``.
+    Both URIs are already canonical LoC RDA terms, so M3 just forwards
+    them onto the Manifestation under their ``bffi:`` parallels. Skosmos
+    renders them as labelled clickable concepts once the RDA-Media +
+    RDA-Carrier graphs are loaded by ``load-finto`` (commit 3).
+
+    The fixture ``bf:media .../mediaTypes/n`` = "unmediated" and
+    ``bf:carrier .../carriers/nc`` = "volume" (the codes a print book
+    carries in MARC 337$b ``n`` / 338$b ``nc``)."""
+    bffi = construct_bffi(_build_source())
+    media = list(bffi.objects(EXPECTED_MANIF, V.BFFI.media))
+    carriers = list(bffi.objects(EXPECTED_MANIF, V.BFFI.carrier))
+    assert media == [URIRef("http://id.loc.gov/vocabulary/mediaTypes/n")]
+    assert carriers == [URIRef("http://id.loc.gov/vocabulary/carriers/nc")]
+    # Work / Expression must NOT carry these — they're Manifestation-only
+    # per the BFFI 1.0.0 ontology (lkd.rdf rdfs:domain = bffi:Manifestation).
+    for target in (EXPECTED_WORK, EXPECTED_EXPR):
+        assert not list(bffi.objects(target, V.BFFI.media))
+        assert not list(bffi.objects(target, V.BFFI.carrier))
 
 
 def test_construct_emits_sierra_style_dct_identifier_on_manifestation() -> None:
