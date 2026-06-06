@@ -1,6 +1,8 @@
 # P-33 — M3 Manifestation + Item CONSTRUCT passes
 
-**Status**: proposed.
+**Status**: superseded.
+- The **Manifestation half** shipped 2026-06-06 as the P-45 commit chain (`165e82e..5ba91ee` on `main`): three-class BFFI 1.0.0 graph (Work + Expression + Manifestation), with `bf:identifiedBy` moved from Work onto Manifestation, RDA-Media / RDA-Carrier vocab loads, and three sibling Skosmos pages sharing the `bffi-works` named graph. The 856-demotion question (Phase B in the original wording) is *not* in scope of what shipped — `bf:Instance` siblings minted from MARC 856 still get the workaround at `549baa0`.
+- The **Item half** is split off into [p-46-bffi-item-class.md](p-46-bffi-item-class.md) as a focused, separately-prioritised proposal. The Item-specific content of this document (Item rq sketch, Sierra exporter requirements, branch vocab, holdings-refresh question) is mirrored there; this file stays in place as the historical record of the combined thinking.
 **Scope**: 2-3 days for an MVP that mints `bffi:Manifestation` from
 the obvious BIBFRAME shape (one Manifestation per `bf:Instance`,
 publication / extent / carrier / dimensions / identifier-by-ISBN) and
