@@ -573,6 +573,81 @@ def test_300_emits_extent_and_dimensions_when_both_present() -> None:
     assert _subfield(df, "c") == "21 cm"
 
 
+def test_300_emits_a_and_b_from_extent_with_nested_physical_note() -> None:
+    """MARC 300 $a (extent) + $b (other physical details) round-trip
+    from the BIBFRAME nested structure: ``bf:Extent`` carries
+    ``rdfs:label "201 sivua"`` (→ $a) plus a nested ``bf:note → bf:Note
+    (a mnotetype/physical) rdfs:label "kuvitettu"`` (→ $b)."""
+    g = _build_minimal_graph()
+    extent = BNode()
+    phys_note = BNode()
+    g.add((MANIF, V.BFFI.extent, extent))
+    g.add((extent, V.RDFS.label, Literal("201 sivua")))
+    g.add((extent, V.BF.note, phys_note))
+    g.add(
+        (
+            phys_note,
+            RDF.type,
+            URIRef("http://id.loc.gov/vocabulary/mnotetype/physical"),
+        )
+    )
+    g.add((phys_note, V.RDFS.label, Literal("kuvitettu")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='300']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "201 sivua"
+    assert _subfield(df, "b") == "kuvitettu"
+
+
+def test_300_emits_e_from_instance_accmat_note() -> None:
+    """MARC 300 $e (accompanying material) — ``bffi:note`` on the
+    Manifestation typed ``rdf:type <mnotetype/accmat>``. The
+    converter routes the typed note to 300 $e, NOT to 500."""
+    g = _build_minimal_graph()
+    acc_note = BNode()
+    g.add((MANIF, V.BFFI.note, acc_note))
+    g.add(
+        (
+            acc_note,
+            RDF.type,
+            URIRef("http://id.loc.gov/vocabulary/mnotetype/accmat"),
+        )
+    )
+    g.add((acc_note, V.RDFS.label, Literal("1 CD-äänilevy")))
+    rec = reconstruct_marc(g, MANIF)
+    df_300 = rec.element.find("m:datafield[@tag='300']", NS)
+    assert df_300 is not None
+    assert _subfield(df_300, "e") == "1 CD-äänilevy"
+    # Must NOT also appear as a 500.
+    notes_500 = rec.element.findall("m:datafield[@tag='500']", NS)
+    assert all(_subfield(df, "a") != "1 CD-äänilevy" for df in notes_500)
+
+
+def test_300_emits_all_four_subfields_when_present() -> None:
+    """All four common 300 subfields together: $a extent, $b physical,
+    $c dimensions, $e accompanying material."""
+    g = _build_minimal_graph()
+    extent = BNode()
+    phys_note = BNode()
+    acc_note = BNode()
+    g.add((MANIF, V.BFFI.extent, extent))
+    g.add((extent, V.RDFS.label, Literal("1 säveImäkokoelma (48 s.)")))
+    g.add((extent, V.BF.note, phys_note))
+    g.add((phys_note, RDF.type, URIRef("http://id.loc.gov/vocabulary/mnotetype/physical")))
+    g.add((phys_note, V.RDFS.label, Literal("AAD")))
+    g.add((MANIF, V.BFFI.dimensions, Literal("30 cm")))
+    g.add((MANIF, V.BFFI.note, acc_note))
+    g.add((acc_note, RDF.type, URIRef("http://id.loc.gov/vocabulary/mnotetype/accmat")))
+    g.add((acc_note, V.RDFS.label, Literal("1 CD-äänilevy")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='300']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "1 säveImäkokoelma (48 s.)"
+    assert _subfield(df, "b") == "AAD"
+    assert _subfield(df, "c") == "30 cm"
+    assert _subfield(df, "e") == "1 CD-äänilevy"
+
+
 def test_500_emits_note_from_bffi_note_blank_node_with_rdf_value() -> None:
     """P-47: M3 emits ``bffi:note`` on Expression with the note text
     as ``rdf:value`` on a ``bf:Note`` blank node. The converter walks

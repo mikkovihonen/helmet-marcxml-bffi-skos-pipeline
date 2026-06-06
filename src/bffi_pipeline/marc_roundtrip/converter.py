@@ -572,28 +572,75 @@ class _Reconstructor:
                     return
 
     def _emit_extent_and_dimensions(self, record: Element) -> None:
-        # 300 $a extent ($c dimensions). Both live on the Manifestation
-        # via M3's bf:Instance lift (P-47). Either may be absent — emit
-        # whichever side is present; skip entirely when both are missing.
+        # MARC 300 — physical description. Four subfields routed:
+        #   $a extent              → ``bffi:extent`` value or nested
+        #                            ``bf:Extent rdfs:label``
+        #   $b other physical      → nested
+        #     details                ``bf:Extent → bf:note → bf:Note
+        #                            (a mnotetype/physical) rdfs:label``
+        #   $c dimensions          → ``bffi:dimensions`` value
+        #   $e accompanying        → Instance-side
+        #     material               ``bffi:note → bf:Note
+        #                            (a mnotetype/accmat) rdfs:label``
+        # Skip entirely when all four are absent.
         subs: list[tuple[str, str]] = []
-        for ext in self.graph.objects(self.manifestation, V.BFFI.extent):
-            if isinstance(ext, Literal):
-                subs.append(("a", str(ext)))
-            else:
-                lbl = self._first_label(ext)
-                if lbl:
-                    subs.append(("a", lbl))
-            break
-        for dim in self.graph.objects(self.manifestation, V.BFFI.dimensions):
-            if isinstance(dim, Literal):
-                subs.append(("c", str(dim)))
-            else:
-                lbl = self._first_label(dim)
-                if lbl:
-                    subs.append(("c", lbl))
-            break
+        subs.extend(self._extent_subs())
+        subs.extend(self._dimensions_subs())
+        subs.extend(self._accmat_subs())
         if subs:
             self._emit_datafield(record, "300", *subs)
+
+    def _extent_subs(self) -> list[tuple[str, str]]:
+        """``$a`` + nested ``$b`` from the Manifestation's first
+        ``bffi:extent``. Literal extents emit only ``$a``; bf:Extent
+        bnodes walk into ``bf:note`` for ``$b`` other-physical."""
+        out: list[tuple[str, str]] = []
+        for ext in self.graph.objects(self.manifestation, V.BFFI.extent):
+            if isinstance(ext, Literal):
+                out.append(("a", str(ext)))
+                return out
+            lbl = self._first_label(ext)
+            if lbl:
+                out.append(("a", lbl))
+            for note in self.graph.objects(ext, V.BF.note):
+                if self._has_marc_note_type(note, "physical"):
+                    nlbl = self._first_label(note)
+                    if nlbl:
+                        out.append(("b", nlbl))
+                        return out
+            return out
+        return out
+
+    def _dimensions_subs(self) -> list[tuple[str, str]]:
+        """``$c`` from the first ``bffi:dimensions``."""
+        for dim in self.graph.objects(self.manifestation, V.BFFI.dimensions):
+            if isinstance(dim, Literal):
+                return [("c", str(dim))]
+            lbl = self._first_label(dim)
+            if lbl:
+                return [("c", lbl)]
+            return []
+        return []
+
+    def _accmat_subs(self) -> list[tuple[str, str]]:
+        """``$e`` from the first Instance-side ``bffi:note`` typed
+        ``rdf:type <mnotetype/accmat>``."""
+        for note in self.graph.objects(self.manifestation, V.BFFI.note):
+            if self._has_marc_note_type(note, "accmat"):
+                nlbl = self._first_label(note)
+                if nlbl:
+                    return [("e", nlbl)]
+        return []
+
+    _MARC_NOTE_TYPE_NS: Final[str] = "http://id.loc.gov/vocabulary/mnotetype/"
+
+    def _has_marc_note_type(self, node: Node, suffix: str) -> bool:
+        """True when ``node`` carries
+        ``rdf:type <mnotetype/<suffix>>``. The mnotetype vocab
+        carries marc2bibframe2's categorical note classification —
+        ``physical`` = 300 $b, ``accmat`` = 300 $e, etc."""
+        target = URIRef(self._MARC_NOTE_TYPE_NS + suffix)
+        return target in set(self.graph.objects(node, RDF.type))
 
     def _emit_content_type(self, record: Element) -> None:
         # 336 content type — lifted from bf:Work via bffi:content (URI
@@ -631,6 +678,17 @@ class _Reconstructor:
             if source is None:
                 continue
             for note in self.graph.objects(source, V.BFFI.note):
+                # Skip notes whose ``rdf:type`` routes them to a more
+                # specific MARC field (``mnotetype/physical`` → 300 $b,
+                # ``mnotetype/accmat`` → 300 $e, both emitted by
+                # :meth:`_emit_extent_and_dimensions`). Without this
+                # skip, "kuvitettu" / "1 CD-äänilevy" would
+                # double-emit as 500 rows.
+                if not isinstance(note, Literal) and (
+                    self._has_marc_note_type(note, "physical")
+                    or self._has_marc_note_type(note, "accmat")
+                ):
+                    continue
                 text: str | None = None
                 if isinstance(note, Literal):
                     text = str(note)

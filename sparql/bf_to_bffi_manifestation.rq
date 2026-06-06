@@ -68,6 +68,14 @@ CONSTRUCT {
               bf:title        ?relWorkTitle ;
               bflc:marcKey    ?relWorkMarcKey .
   ?relWorkTitle bf:mainTitle  ?relWorkMainTitle .
+  ?extent  rdfs:label    ?extentLabel ;
+           bf:note       ?extentNote .
+  ?extentNote a          bf:Note ;
+              rdf:type   ?extentNoteType ;
+              rdfs:label ?extentNoteLabel .
+  ?instanceNote a        bf:Note ;
+                rdf:type ?instanceNoteType ;
+                rdfs:label ?instanceNoteLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -77,8 +85,6 @@ CONSTRUCT {
             rdf:value      ?audIssueValue .
   ?seriesNode a            bffi:Series ;
               rdfs:label   ?seriesLabel .
-  ?instanceNote a          bf:Note ;
-                rdfs:label ?instanceNoteLabel .
 }
 WHERE {
   ?bfInstance a bf:Instance ;
@@ -155,7 +161,23 @@ WHERE {
   OPTIONAL { ?bfInstance bf:provisionActivity      ?provisionActivity }
   OPTIONAL { ?bfInstance bf:publicationStatement   ?publicationStatement }
   OPTIONAL { ?bfInstance bf:responsibilityStatement ?responsibilityStatement }
-  OPTIONAL { ?bfInstance bf:extent                 ?extent }
+  # MARC 300 $a (extent) lives on ``bf:Extent.rdfs:label``; MARC
+  # 300 $b (other physical details) lives in a nested
+  # ``bf:Extent → bf:note → bf:Note [a mnotetype/physical]
+  # rdfs:label "kuvitettu"`` block. The CONSTRUCT template
+  # passes the nested chain through verbatim (with the
+  # ``rdf:type <mnotetype/physical>`` discriminator preserved) so
+  # the round-trip converter can route them to $a / $b.
+  OPTIONAL {
+    ?bfInstance bf:extent ?extent .
+    OPTIONAL { ?extent rdfs:label ?extentLabel }
+    OPTIONAL {
+      ?extent bf:note ?extentNote .
+      OPTIONAL { ?extentNote rdfs:label ?extentNoteLabel }
+      OPTIONAL { ?extentNote rdf:type ?extentNoteType .
+                 FILTER(?extentNoteType != bf:Note) }
+    }
+  }
   OPTIONAL { ?bfInstance bf:dimensions             ?dimensions }
 
   # MARC 505 (formatted contents note) → marc2bibframe2 emits
@@ -222,15 +244,19 @@ WHERE {
     ?bfSeriesTitle bf:mainTitle ?seriesLabel .
   }
 
-  # MARC 500 (general note) when attached to bf:Instance. The
-  # Expression-side CONSTRUCT already routes ``bf:Work`` notes;
-  # but marc2bibframe2 puts physical-format / accompanying-material
-  # notes on bf:Instance (e.g. "Cd-levyllä laulujen taustat").
-  # Those die at M3 today unless we forward them onto the
-  # Manifestation. The round-trip converter reads from both sides.
+  # MARC 500 (general note) + MARC 300 $e (accompanying material)
+  # when attached to bf:Instance. The Expression-side CONSTRUCT
+  # already routes bf:Work notes; bf:Instance notes carry both
+  # generic notes ("Cd-levyllä laulujen taustat" → 500) and
+  # accompanying-material notes ("1 CD-äänilevy", typed as
+  # ``rdf:type <mnotetype/accmat>`` → 300 $e). The CONSTRUCT
+  # passes the ``rdf:type`` discriminator through so the round-trip
+  # converter can dispatch each note to the right tag.
   OPTIONAL {
     ?bfInstance bf:note ?instanceNote .
     ?instanceNote rdfs:label ?instanceNoteLabel .
+    OPTIONAL { ?instanceNote rdf:type ?instanceNoteType .
+               FILTER(?instanceNoteType != bf:Note) }
   }
 
   # MARC 730 (added entry — uniform title): marc2bibframe2 emits these
