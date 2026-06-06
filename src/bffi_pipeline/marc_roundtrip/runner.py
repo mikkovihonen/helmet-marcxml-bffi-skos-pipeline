@@ -172,11 +172,28 @@ def run(
     return summary
 
 
-#: Vocab dumps the converter benefits from cross-resolving (label
-#: lookups for relator URIs, media/carrier URIs, etc.). Loading more
-#: than this is wasteful — we don't query the YSO graph for anything
-#: at round-trip time. Keep the list narrow so the merge stays fast.
+#: Vocab dumps the converter loads for label cross-resolution.
+#:
+#: Two categories:
+#:
+#: 1. **LoC technical vocabs** (small, always loaded) — relator codes,
+#:    RDA media / carrier, MARC 007-derived format facets. Used by
+#:    the LoC URI → ``$a`` / ``$b`` / ``$e`` label lookups in
+#:    100 / 700 / 336 / 337 / 338 / 344 / 346 / 347.
+#:
+#: 2. **Finto subject / agent vocabs** (large, loaded for authority-URI
+#:    label resolution on the 6XX / 655 / 7XX recon rows). M9 binds
+#:    raw URIs to YSO / KANTO authority URIs but doesn't materialise
+#:    the authority's ``skos:prefLabel`` into the canonical graph
+#:    (those labels live in the Finto dumps loaded into Fuseki by
+#:    ``load-finto``, NOT in canonical-skosified.ttl). Without these
+#:    here, recon rows emit ``$0 yso/p29977`` with no ``$a`` — the
+#:    cataloguer sees a URI but not what the concept is. Adds
+#:    ~30-60 s startup on the 500-sample (yso 30 MB + finaf 192 MB
+#:    dominate); acceptable trade-off for the cataloguer-review
+#:    legibility.
 _ROUNDTRIP_VOCAB_FILES: tuple[str, ...] = (
+    # LoC technical vocabs
     "relators-skos.ttl",
     "rda-media-skos.ttl",
     "rda-carrier-skos.ttl",
@@ -186,6 +203,17 @@ _ROUNDTRIP_VOCAB_FILES: tuple[str, ...] = (
     "mplayback-skos.ttl",
     "mcapturestorage-skos.ttl",
     "mcolor-skos.ttl",
+    # Finto subject / agent vocabs (P-48 recon-$a-prefLabel work)
+    "yso-skos.ttl",
+    "yso-paikat-skos.ttl",
+    "yso-aika-skos.ttl",
+    "slm-skos.ttl",
+    "kauno-skos.ttl",
+    "kaunokki-skos.ttl",
+    "musa-skos.ttl",
+    "allars-skos.ttl",
+    "finaf-skos.ttl",
+    "lcsh-skos.ttl",
 )
 
 

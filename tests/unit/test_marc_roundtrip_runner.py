@@ -77,6 +77,12 @@ def test_runner_writes_reconstructed_marc_and_diff_per_bib(tmp_path: Path) -> No
         canonical_path=canonical,
         marcxml_dir=marc_dir,
         output_dir=output,
+        # Point at an empty dir so the runner skips the Finto-dump
+        # merge — the real ``finto-dumps/`` is ~250 MB and parses
+        # for ~5 min at every unit-test invocation. The converter's
+        # own label-resolution unit tests inject the labels they
+        # need into the synthetic graph directly.
+        finto_dump_dir=tmp_path / "no-finto",
     )
 
     assert summary.total_manifestations == 1
@@ -114,6 +120,12 @@ def test_runner_records_missing_original_softly(tmp_path: Path) -> None:
         canonical_path=canonical,
         marcxml_dir=marc_dir,
         output_dir=output,
+        # Point at an empty dir so the runner skips the Finto-dump
+        # merge — the real ``finto-dumps/`` is ~250 MB and parses
+        # for ~5 min at every unit-test invocation. The converter's
+        # own label-resolution unit tests inject the labels they
+        # need into the synthetic graph directly.
+        finto_dump_dir=tmp_path / "no-finto",
     )
     assert summary.reconstructed == 1
     assert summary.diffed == 0
@@ -128,7 +140,12 @@ def test_summary_json_aggregates_per_status_counts(tmp_path: Path) -> None:
     canonical = _write_canonical(tmp_path)
     marc_dir = _write_original_marc(tmp_path, "b13511105")
     output = tmp_path / "marc-roundtrip"
-    roundtrip_run(canonical_path=canonical, marcxml_dir=marc_dir, output_dir=output)
+    roundtrip_run(
+        canonical_path=canonical,
+        marcxml_dir=marc_dir,
+        output_dir=output,
+        finto_dump_dir=tmp_path / "no-finto",
+    )
     summary = json.loads((output / "summary.json").read_text())
     assert summary["per_status"]
     assert isinstance(summary["per_status"], dict)

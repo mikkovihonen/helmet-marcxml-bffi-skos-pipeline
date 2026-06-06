@@ -870,6 +870,66 @@ def test_lineage_absent_for_flat_instance_fields_pending_phase_b() -> None:
     assert _subfield(df_020, "9") is None
 
 
+def test_authority_subject_resolves_a_from_finnish_preflabel() -> None:
+    """When the YSO/KANTO authority URI has a ``skos:prefLabel`` in
+    the graph (Finto dumps are loaded into the round-trip graph),
+    the recon row emits ``$a`` with the Finnish prefLabel."""
+    g = _build_minimal_graph()
+    auth = URIRef("http://www.yso.fi/onto/yso/p29977")
+    g.add((WORK, V.BFFI.subject, auth))
+    g.add((auth, SKOS.prefLabel, Literal("buzukit", lang="fi")))
+    g.add((auth, SKOS.prefLabel, Literal("bouzoukis", lang="en")))
+    rec = reconstruct_marc(g, MANIF)
+    rows = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='650']", NS)
+        if _subfield(df, "0") == str(auth)
+    ]
+    assert len(rows) == 1
+    assert _subfield(rows[0], "a") == "buzukit"
+
+
+def test_authority_subject_label_prefers_swedish_over_english() -> None:
+    """Finnish > Swedish > English. With no Finnish, picks Swedish."""
+    g = _build_minimal_graph()
+    auth = URIRef("http://www.yso.fi/onto/yso/p11111")
+    g.add((WORK, V.BFFI.subject, auth))
+    g.add((auth, SKOS.prefLabel, Literal("Some concept", lang="en")))
+    g.add((auth, SKOS.prefLabel, Literal("Något", lang="sv")))
+    rec = reconstruct_marc(g, MANIF)
+    rows = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='650']", NS)
+        if _subfield(df, "0") == str(auth)
+    ]
+    assert len(rows) == 1
+    assert _subfield(rows[0], "a") == "Något"
+
+
+def test_authority_subject_falls_back_to_raw_uri_label_when_finto_absent() -> None:
+    """Cataloguer's typed text on the raw URI is the last-resort
+    label when the Finto dump for the authority's namespace isn't
+    loaded. The raw URI's ``skos:exactMatch`` points to the
+    authority; the converter walks the inverse link to find the
+    cataloguer's original typed term."""
+    g = _build_minimal_graph()
+    raw = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Topic650-9")
+    auth = URIRef("http://www.yso.fi/onto/yso/pXXXXX")  # no labels attached
+    g.add((WORK, V.BFFI.subject, raw))
+    g.add((WORK, V.BFFI.subject, auth))
+    g.add((raw, V.RDFS.label, Literal("buzuki", lang="fi")))
+    g.add((raw, V.SKOS.exactMatch, auth))
+    rec = reconstruct_marc(g, MANIF)
+    rows = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='650']", NS)
+        if _subfield(df, "0") == str(auth)
+    ]
+    assert len(rows) == 1
+    # Raw's label "buzuki" surfaces as $a since the authority has none.
+    assert _subfield(rows[0], "a") == "buzuki"
+
+
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:
     # Smoke: we explicitly skip 852 (holdings) and 336 (content type
     # — not currently forwarded onto BFFI). Pin so adding either to

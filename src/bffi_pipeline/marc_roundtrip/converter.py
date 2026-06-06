@@ -452,6 +452,30 @@ class _Reconstructor:
                     return str(val)
         return None
 
+    #: Display-language priority for authority-URI prefLabel lookups
+    #: in the round-trip. Matches CLAUDE.md's
+    #: "Display language priority for skos:prefLabel: fi, sv, en".
+    _AUTHORITY_LABEL_LANG_PREF: tuple[str, ...] = ("fi", "sv", "en")
+
+    def _authority_label(self, node: Node) -> str | None:
+        """Language-aware label lookup for authority URIs (YSO, KANTO,
+        SLM, etc.). Walks both ``rdfs:label`` and ``skos:prefLabel``,
+        prefers Finnish, then Swedish, then English, then any label.
+        Returns ``None`` when nothing's found (e.g. the Finto vocab
+        dump isn't loaded for this URI's namespace).
+        """
+        labels_by_lang: dict[str | None, str] = {}
+        for prop in (SKOS.prefLabel, V.RDFS.label):
+            for val in self.graph.objects(node, prop):
+                if isinstance(val, Literal):
+                    labels_by_lang.setdefault(val.language, str(val))
+        for pref in self._AUTHORITY_LABEL_LANG_PREF:
+            if pref in labels_by_lang:
+                return labels_by_lang[pref]
+        if labels_by_lang:
+            return next(iter(labels_by_lang.values()))
+        return None
+
     def _emit_title(self, record: Element) -> None:
         work = self.work
         if work is None:
@@ -833,8 +857,16 @@ class _Reconstructor:
             if source:
                 subs.append(("2", source))
             return tuple(subs) if subs else None
-        # Authority URI (or blank node) — emit normally.
-        label = self._first_label(target)
+        # Authority URI (or blank node) — emit normally. Use the
+        # language-aware authority lookup (prefer fi > sv > en) so
+        # YSO / KANTO / SLM URIs resolve to their Finnish prefLabel
+        # in $a. Falls back to walking back to the originating raw
+        # URI's rdfs:label (the cataloguer's typed text) when the
+        # authority itself has no label — happens when the Finto
+        # vocab dump for the URI's namespace wasn't loaded.
+        label = self._authority_label(target)
+        if label is None and isinstance(target, URIRef):
+            label = self._raw_origin_label(target)
         source = self._first_source(target)
         subs = []
         if label:
@@ -844,6 +876,18 @@ class _Reconstructor:
         if isinstance(target, URIRef):
             subs.append(("0", str(target)))
         return tuple(subs) if subs else None
+
+    def _raw_origin_label(self, authority: URIRef) -> str | None:
+        """Walk inverse ``skos:exactMatch`` from an authority URI back
+        to any raw bib-URI that pointed to it; return that raw URI's
+        ``rdfs:label`` (= cataloguer's typed $a). Last-resort fallback
+        for authority URIs without a loaded Finto prefLabel."""
+        for raw in self.graph.subjects(V.SKOS.exactMatch, authority):
+            if isinstance(raw, URIRef) and str(raw).startswith(_RAW_BIB_URI_PREFIX):
+                lbl = self._first_label(raw)
+                if lbl is not None:
+                    return lbl
+        return None
 
     def _first_authority_redirect(self, raw_uri: URIRef) -> URIRef | None:
         """Return the first ``skos:exactMatch`` target of a raw URI
