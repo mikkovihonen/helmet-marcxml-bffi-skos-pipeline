@@ -421,11 +421,53 @@ class _Reconstructor:
                 if not label:
                     continue
                 role_subs = self._collect_role_subs(contrib)
+                id_subs = self._collect_agent_id_subs(agent)
                 # 100 ind1=1 ("surname"-form name) is the dominant
                 # cataloguer choice for Helmet personal names. ind2 is
                 # undefined in current MARC ⇒ blank.
-                self._emit_datafield(record, "100", ("a", label), *role_subs, ind1="1")
+                self._emit_datafield(record, "100", ("a", label), *role_subs, *id_subs, ind1="1")
                 return  # only one primary
+
+    def _collect_agent_id_subs(self, agent: Node) -> list[tuple[str, str]]:
+        """Walk an agent's ``bf:identifiedBy`` chain and return ``$0``
+        subfield pairs in source-MARC format (``(CODE)VALUE``).
+
+        Shape (from marc2bibframe2):
+
+            <agent> bf:identifiedBy [
+                a bf:Identifier ;
+                rdf:value "000039084 " ;     # may have trailing space
+                bf:source [
+                    a bf:Source ;
+                    bf:code "FI-ASTERI-N" ;  # the (FI-ASTERI-N) prefix
+                ]
+            ] .
+
+        Output: ``("0", "(FI-ASTERI-N)000039084 ")`` — matches the
+        source MARC ``$0`` verbatim (round-trip preserves trailing
+        whitespace too). When the identifier has no ``bf:source``
+        code, the ``(CODE)`` prefix is omitted.
+        """
+        subs: list[tuple[str, str]] = []
+        for ident in self.graph.objects(agent, V.BF.identifiedBy):
+            value: str | None = None
+            for v in self.graph.objects(ident, RDF.value):
+                if isinstance(v, Literal):
+                    value = str(v)
+                    break
+            if value is None:
+                continue
+            code: str | None = None
+            for source in self.graph.objects(ident, V.BF.source):
+                for c in self.graph.objects(source, V.BF.code):
+                    if isinstance(c, Literal):
+                        code = str(c)
+                        break
+                if code is not None:
+                    break
+            formatted = f"({code}){value}" if code else value
+            subs.append(("0", formatted))
+        return subs
 
     def _collect_role_subs(self, contrib: Node) -> list[tuple[str, str]]:
         """Walk all ``bf:role`` triples on ``contrib`` and return the
@@ -1000,6 +1042,7 @@ class _Reconstructor:
                 if not label:
                     continue
                 role_subs = self._collect_role_subs(contrib)
+                id_subs = self._collect_agent_id_subs(agent)
                 tag = self._added_entry_tag(agent)
                 lineage = self._lineage_token(agent)
                 self._emit_datafield(
@@ -1007,6 +1050,7 @@ class _Reconstructor:
                     tag,
                     ("a", label),
                     *role_subs,
+                    *id_subs,
                     ind1="1",
                     lineage=lineage,
                 )

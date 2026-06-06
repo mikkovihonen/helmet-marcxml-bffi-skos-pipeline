@@ -33,7 +33,13 @@ CONSTRUCT {
   ?otherContrib a bffi:Contribution ;
                 bffi:agent ?otherAgent ;
                 bf:role    ?otherRole .
-  ?otherAgent rdfs:label ?otherAgentLabel .
+  ?otherAgent rdfs:label     ?otherAgentLabel ;
+              bf:identifiedBy ?otherAgentIdent .
+  ?otherAgentIdent a         bf:Identifier ;
+                   rdf:value ?otherAgentIdentValue ;
+                   bf:source ?otherAgentIdentSource .
+  ?otherAgentIdentSource a   bf:Source ;
+                         bf:code ?otherAgentIdentSourceCode .
   ?otherRole a         bf:Role ;
              rdfs:label ?otherRoleLabel .
 }
@@ -84,6 +90,21 @@ WHERE {
     FILTER NOT EXISTS { ?c a bf:PrimaryContribution }
     ?c bf:agent ?otherAgent .
     OPTIONAL { ?otherAgent rdfs:label ?otherAgentLabel }
+    # Route MARC 700/710/711 $0 ASTERI / FINAF identifiers. Source
+    # MARC ``$0 (FI-ASTERI-N)NNNNNN`` lands as
+    # ``bf:identifiedBy → bf:Identifier → rdf:value + bf:source →
+    # bf:Source → bf:code "FI-ASTERI-N"`` on the agent. Mirrors
+    # bf_to_bffi_work.rq's primary-agent identifier routing — the
+    # round-trip converter reads this chain off the rebuilt
+    # canonical Expression's agent and emits ``$0 (code)value``.
+    OPTIONAL {
+      ?otherAgent bf:identifiedBy ?otherAgentIdent .
+      ?otherAgentIdent rdf:value ?otherAgentIdentValue .
+      OPTIONAL {
+        ?otherAgentIdent bf:source ?otherAgentIdentSource .
+        ?otherAgentIdentSource bf:code ?otherAgentIdentSourceCode .
+      }
+    }
     OPTIONAL {
       ?c bf:role ?otherRole .
       OPTIONAL { ?otherRole rdfs:label ?otherRoleLabel }

@@ -32,6 +32,7 @@ from bffi_pipeline.stages.m8.mint import (
     _emit_canonical_work,
     _propagate_expression_passthrough,
     _propagate_manifestations,
+    _propagate_raw_agent_identifiers,
     _select_description_modifier,
 )
 from bffi_pipeline.stages.m8.schemas import (
@@ -227,6 +228,13 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
         # note, title, classification, ...). Without this the data M3
         # emits per-record dies at the M8 boundary.
         _propagate_expression_passthrough(g, raw_corpus_graph)
+        # Agent-side ``bf:identifiedBy`` subgraphs (ASTERI / FINAF $0
+        # IDs on 100/700/710/711 agents). The Expression rebuild reuses
+        # the source agent URI verbatim, so propagating the agent's
+        # identifier chain into the canonical graph lands it on the
+        # rebuilt canonical contribution's agent — and the round-trip
+        # converter can read it to emit $0.
+        _propagate_raw_agent_identifiers(g, raw_corpus_graph)
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label

@@ -38,7 +38,13 @@ CONSTRUCT {
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent ;
            bf:role         ?primaryRole .
-  ?primaryAgent rdfs:label ?primaryAgentLabel .
+  ?primaryAgent rdfs:label   ?primaryAgentLabel ;
+                bf:identifiedBy ?primaryAgentIdent .
+  ?primaryAgentIdent a       bf:Identifier ;
+                     rdf:value  ?primaryAgentIdentValue ;
+                     bf:source  ?primaryAgentIdentSource .
+  ?primaryAgentIdentSource a  bf:Source ;
+                           bf:code ?primaryAgentIdentSourceCode .
   ?primaryRole  a          bf:Role ;
                 rdfs:label ?primaryRoleLabel .
   # P-36 Phase C: route ``rdfs:label`` for subjects and genreForms.
@@ -119,6 +125,20 @@ WHERE {
     ?c a bf:PrimaryContribution ;
        bf:agent ?primaryAgent .
     OPTIONAL { ?primaryAgent rdfs:label ?primaryAgentLabel }
+    # Route MARC 100 $0 ASTERI / FINAF identifiers — the cataloguer's
+    # authority binding via the source-coded ID block
+    # ``bf:identifiedBy → bf:Identifier → rdf:value + bf:source →
+    # bf:Source → bf:code``. The round-trip converter formats this as
+    # ``$0 (FI-ASTERI-N)NNNNNN`` matching the source MARC subfield
+    # exactly. The agent label propagates separately above.
+    OPTIONAL {
+      ?primaryAgent bf:identifiedBy ?primaryAgentIdent .
+      ?primaryAgentIdent rdf:value ?primaryAgentIdentValue .
+      OPTIONAL {
+        ?primaryAgentIdent bf:source ?primaryAgentIdentSource .
+        ?primaryAgentIdentSource bf:code ?primaryAgentIdentSourceCode .
+      }
+    }
     # Route MARC 100 $e (relator term, e.g. "kirjoittaja",
     # "säveltäjä") onto the new BFFI PrimaryContribution. Same
     # blank-node-with-rdfs:label shape as the Expression-side

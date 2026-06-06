@@ -2128,6 +2128,94 @@ def test_p45_manifestation_subgraphs_propagate_into_canonical_ttl(tmp_path: Path
     assert (expr_uri, V.BFFI.manifestationOfExpression, manif_uri) in out
 
 
+def test_agent_asteri_identifier_subgraph_propagates_to_canonical(
+    tmp_path: Path,
+) -> None:
+    """MARC $0 (FI-ASTERI-N)NNNNNN lands in BIBFRAME as the agent's
+    ``bf:identifiedBy → bf:Identifier → rdf:value + bf:source →
+    bf:Source → bf:code`` chain. M3 emits these triples on the
+    raw-bib agent URI; the canonical Expression-contribution rebuild
+    reuses the source agent URI verbatim, so the new
+    ``_propagate_raw_agent_identifiers`` pass copies the chain into
+    canonical for the round-trip converter to read."""
+    BFFI = "http://urn.fi/URN:NBN:fi:schema:bffi:"
+    BF = "http://id.loc.gov/ontologies/bibframe/"
+    HELMET = "http://urn.fi/URN:NBN:fi:bib:source:helmet"
+    bffi_dir = tmp_path / "bffi"
+    bffi_dir.mkdir()
+    (bffi_dir / "10000001.ttl").write_text(
+        dedent(
+            f"""\
+            @prefix bf:   <{BF}> .
+            @prefix bffi: <{BFFI}> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            @prefix dct:  <http://purl.org/dc/terms/> .
+
+            <urn:work/A>  a bffi:Work ;
+                          bffi:hasExpression <urn:expr/A> .
+            <urn:expr/A>  a bffi:Expression ;
+                          bffi:expressionOf <urn:work/A> .
+            <urn:manif/A> a bffi:Manifestation ;
+                          bffi:expressionManifested <urn:expr/A> ;
+                          dct:identifier "b10000001" ;
+                          bf:identifiedBy [ a bf:Local ;
+                                            rdf:value "b10000001" ;
+                                            bf:source <{HELMET}> ] .
+
+            <http://urn.fi/URN:NBN:fi:bib:raw/b10000001#Agent710-1>
+                          rdfs:label "Otava, kustannusosakeyhtiö" ;
+                          bf:identifiedBy [
+                              a bf:Identifier ;
+                              rdf:value "000039084" ;
+                              bf:source [ a bf:Source ;
+                                          bf:code "FI-ASTERI-N" ] ] .
+            """
+        ),
+        encoding="utf-8",
+    )
+    work_records = {
+        "urn:work/A": CanonicalWorkInputs(
+            work_uri="urn:work/A",
+            creator_uri="urn:agent/X",
+            pref_label="X",
+            expression_uris=["urn:expr/A"],
+            helmet_identifiers=[("urn:helmet/A1", "b10000001")],
+        ),
+    }
+    helmet_entries = {
+        "urn:work/A": HelmetMapEntry("urn:work/A", "b10000001", "2026-06-06T12:00:00+00:00"),
+    }
+    canonical_path = tmp_path / "canonical.ttl"
+    decisions_path = tmp_path / "judge-decisions.jsonl"
+    decisions_path.write_text("", encoding="utf-8")
+    apply_merge(
+        decisions_path,
+        tmp_path,
+        output_path=canonical_path,
+        map_path=tmp_path / "canonical-map.jsonl",
+        conflicts_path=tmp_path / "canonical-conflicts.jsonl",
+        helmet_map_path=tmp_path / "helmet-map.jsonl",
+        work_records=work_records,
+        helmet_entries=helmet_entries,
+        now=datetime(2026, 6, 6, 12, 0, tzinfo=UTC),
+    )
+    out = Graph()
+    out.parse(canonical_path, format="turtle")
+    agent_uri = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b10000001#Agent710-1")
+    # The agent's bf:identifiedBy + Identifier blank-node subgraph
+    # must reach canonical (without the new
+    # _propagate_raw_agent_identifiers pass, no triples about the
+    # agent URI survive M8).
+    idents = list(out.objects(agent_uri, V.BF.identifiedBy))
+    assert len(idents) == 1, f"expected 1 identifier, found {len(idents)}"
+    ident = idents[0]
+    assert (ident, RDF.value, Literal("000039084")) in out
+    sources = list(out.objects(ident, V.BF.source))
+    assert len(sources) == 1
+    assert (sources[0], V.BF.code, Literal("FI-ASTERI-N")) in out
+
+
 def test_p48_730_hub_subgraph_propagates_via_raw_bib_uri_passthrough(
     tmp_path: Path,
 ) -> None:

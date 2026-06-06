@@ -127,6 +127,51 @@ _EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
 )
 
 
+def _propagate_raw_agent_identifiers(g: Graph, raw_graph: Graph) -> int:
+    """Copy ``bf:identifiedBy`` subgraphs on raw-bib agent URIs
+    (``#Agent100-N`` / ``#Agent700-N`` / ``#Agent710-N`` / ``#Agent711-N``)
+    from the M3 per-record graph into the canonical graph.
+
+    The canonical Expression's contribution rebuild in
+    :func:`_propagate_expression_contributions` (and the Work's
+    primary-contribution rebuild) reuses the source agent URI verbatim
+    whenever the schema carries one, so any triples about that URI in
+    the canonical graph end up attached to the rebuilt canonical
+    agent. M3 emits the agent's ASTERI / FINAF identifier as
+    ``bf:identifiedBy → bf:Identifier → rdf:value + bf:source →
+    bf:Source → bf:code "FI-ASTERI-N"``; this copies the full chain
+    (including the reachable blank-node Identifier + Source) so the
+    round-trip converter can emit ``$0 (FI-ASTERI-N)NNNNNN`` on the
+    100 / 700 / 710 row.
+
+    Returns triples copied.
+    """
+    count = 0
+    visited_bnodes: set[BNode] = set()
+    for agent in raw_graph.subjects(V.BF.identifiedBy, None):
+        if not (isinstance(agent, URIRef) and str(agent).startswith(_RAW_BIB_URI_PREFIX)):
+            continue
+        for ident in raw_graph.objects(agent, V.BF.identifiedBy):
+            g.add((agent, V.BF.identifiedBy, ident))
+            count += 1
+            # Walk the Identifier blank-node subgraph (rdf:value,
+            # bf:source → bf:Source → bf:code) verbatim. Re-uses the
+            # same bnode-walk discipline as _propagate_manifestations.
+            if isinstance(ident, BNode):
+                queue: list[BNode] = [ident]
+                while queue:
+                    node = queue.pop()
+                    if node in visited_bnodes:
+                        continue
+                    visited_bnodes.add(node)
+                    for p2, o2 in raw_graph.predicate_objects(node):
+                        g.add((node, p2, o2))
+                        count += 1
+                        if isinstance(o2, BNode) and o2 not in visited_bnodes:
+                            queue.append(o2)
+    return count
+
+
 def _propagate_expression_passthrough(g: Graph, raw_graph: Graph) -> int:
     """Copy a curated list of Expression-side predicates from the M3
     per-record output into the canonical M8 graph, including reachable

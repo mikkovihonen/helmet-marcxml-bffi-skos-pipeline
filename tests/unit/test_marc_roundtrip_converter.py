@@ -1157,6 +1157,79 @@ def test_740_and_730_both_emit_from_same_record() -> None:
     assert _subfield(df_740, "a") == "Pääkaupunkiseutu"
 
 
+def test_710_emits_asteri_id_in_dollar0_with_source_code_prefix() -> None:
+    """MARC 710 $0 (FI-ASTERI-N)NNNNNN must round-trip from BIBFRAME's
+    ``agent → bf:identifiedBy → bf:Identifier → rdf:value + bf:source →
+    bf:Source → bf:code "FI-ASTERI-N"`` shape into a ``$0 (CODE)VALUE``
+    subfield matching the cataloguer's typed form. Trailing whitespace
+    on the value is preserved verbatim — round-trip is round-trip."""
+    g = _build_minimal_graph()
+    contrib = URIRef("urn:contrib/asteri")
+    agent = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Agent710-1")
+    ident = BNode()
+    source = BNode()
+    g.add((EXPR, V.BFFI.contribution, contrib))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Otava, kustannusosakeyhtiö")))
+    g.add((agent, V.BF.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BF.Identifier))
+    g.add((ident, RDF.value, Literal("000039084 ")))  # trailing space
+    g.add((ident, V.BF.source, source))
+    g.add((source, RDF.type, V.BF.Source))
+    g.add((source, V.BF.code, Literal("FI-ASTERI-N")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='710']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Otava, kustannusosakeyhtiö"
+    assert _subfield(df, "0") == "(FI-ASTERI-N)000039084 "
+
+
+def test_100_emits_asteri_id_on_primary_contribution() -> None:
+    """ASTERI IDs on primary creators (MARC 100 $0) round-trip via the
+    same agent-identifier chain — the Work-side CONSTRUCT routes it
+    onto the BFFI primary contribution's agent."""
+    g = _build_minimal_graph()
+    # Override the minimal graph's primary agent with one that carries
+    # an ASTERI identifier.
+    ident = BNode()
+    source = BNode()
+    g.add((AGENT, V.BF.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BF.Identifier))
+    g.add((ident, RDF.value, Literal("000123456")))
+    g.add((ident, V.BF.source, source))
+    g.add((source, V.BF.code, Literal("FI-ASTERI-N")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='100']", NS)
+    assert df is not None
+    assert _subfield(df, "0") == "(FI-ASTERI-N)000123456"
+
+
+def test_700_emits_dollar0_value_only_when_source_code_absent() -> None:
+    """When an agent carries an identifier without a ``bf:source``
+    code block (rare but possible in the corpus), emit ``$0 VALUE``
+    without a prefix — better than dropping the data."""
+    g = _build_minimal_graph()
+    contrib = URIRef("urn:contrib/no-code")
+    agent = URIRef("urn:agent/no-code")
+    ident = BNode()
+    g.add((EXPR, V.BFFI.contribution, contrib))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Some Agent")))
+    g.add((agent, V.BF.identifiedBy, ident))
+    g.add((ident, RDF.value, Literal("bare-id")))
+    rec = reconstruct_marc(g, MANIF)
+    df = next(
+        (
+            df
+            for df in rec.element.findall("m:datafield[@tag='700']", NS)
+            if _subfield(df, "a") == "Some Agent"
+        ),
+        None,
+    )
+    assert df is not None
+    assert _subfield(df, "0") == "bare-id"
+
+
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:
     # Smoke: we explicitly skip 852 (holdings) and 336 (content type
     # — not currently forwarded onto BFFI). Pin so adding either to
