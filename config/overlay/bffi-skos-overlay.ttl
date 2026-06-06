@@ -42,6 +42,23 @@ bffi:expressionOf  rdfs:subPropertyOf skos:broader ;
                    rdfs:label "expression of"@en, "ekspressio teoksesta"@fi,
                               "uttryck för verk"@sv .
 
+# Manifestation-side links (P-45). Labels MUST be declared here or
+# Skosmos drops the rows from the rendered concept page — the BFFI
+# ontology's lkd.rdf labels aren't loaded into the bffi-works graph,
+# only the overlay is. Subproperty lifting to skos:narrower /
+# skos:broader makes Manifestations appear under their Expression in
+# the Skosmos hierarchy view (the Expression page's left-rail tree
+# expands to show its Manifestations).
+bffi:manifestationOfExpression rdfs:subPropertyOf skos:narrower ;
+                               rdfs:label "manifestation of expression"@en,
+                                          "manifestaatio"@fi,
+                                          "manifestation"@sv .
+
+bffi:expressionManifested      rdfs:subPropertyOf skos:broader ;
+                               rdfs:label "expression manifested"@en,
+                                          "manifestoitu ekspressio"@fi,
+                                          "uttryck"@sv .
+
 # ---------------------------------------------------------------------------
 # Reconciliation predicates surfaced as concept-page properties.
 #
