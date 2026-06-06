@@ -50,6 +50,7 @@ VOCAB_KAUNOKKI: Final[str] = "kaunokki"
 VOCAB_CHILDRENS_SUBJECTS: Final[str] = "childrensSubjects"
 VOCAB_MTS: Final[str] = "mts"
 VOCAB_SEKO: Final[str] = "seko"
+VOCAB_LCMPT: Final[str] = "lcmpt"
 
 #: Legacy-bridge source-vocabulary tags surfaced on ``LocalConceptHit``
 #: when the resolved URI was reached by following mapping triples from
@@ -70,11 +71,26 @@ VOCAB_VIA_ALLARS: Final[str] = "via-allars"
 #: Closes the "KAUNO is partly deprecated" gap (6,554 of KAUNO's concepts
 #: are now also in YSO; modernised records should bind to the YSO URI).
 VOCAB_VIA_KAUNO: Final[str] = "via-kauno"
+#: ``music_form`` post-tier-0 redirect tag. Unlike the other ``via-*``
+#: tags (which all redirect to YSO), ``via-seko`` redirects to
+#: **LCMPT** (LoC Medium of Performance Thesaurus) — SEKO has 590
+#: ``skos:exactMatch`` / ``closeMatch`` triples pointing at
+#: ``id.loc.gov/authorities/performanceMediums/`` URIs. Provenance
+#: writers should treat ``via-*`` as "redirected via legacy-mapping"
+#: generically; the actual destination URI is on the
+#: ``chosenAuthorityUri`` triple.
+VOCAB_VIA_SEKO: Final[str] = "via-seko"
 
 #: Set of all legacy-bridge tags, used by provenance code to test
 #: whether a hit's vocab tag indicates a legacy-mapping resolution.
 LEGACY_BRIDGE_VOCABS: Final[frozenset[str]] = frozenset(
-    {VOCAB_VIA_YSA, VOCAB_VIA_MUSA, VOCAB_VIA_ALLARS, VOCAB_VIA_KAUNO}
+    {
+        VOCAB_VIA_YSA,
+        VOCAB_VIA_MUSA,
+        VOCAB_VIA_ALLARS,
+        VOCAB_VIA_KAUNO,
+        VOCAB_VIA_SEKO,
+    }
 )
 
 #: Named graph URIs for the legacy thesauri loaded by ``load-finto``.
@@ -83,7 +99,9 @@ _LEGACY_GRAPH_YSA: Final[str] = "http://www.yso.fi/onto/ysa/"
 _LEGACY_GRAPH_MUSA: Final[str] = "http://www.yso.fi/onto/musa/"
 _LEGACY_GRAPH_ALLARS: Final[str] = "http://www.yso.fi/onto/allars/"
 _LEGACY_GRAPH_KAUNO: Final[str] = "http://www.yso.fi/onto/kauno/"
+_LEGACY_GRAPH_SEKO: Final[str] = "http://urn.fi/urn:nbn:fi:au:seko:"
 _YSO_GRAPH_URI: Final[str] = "http://www.yso.fi/onto/yso/"
+_LCMPT_GRAPH_URI: Final[str] = "http://id.loc.gov/authorities/performanceMediums/"
 
 #: Authority kind → (source-vocabulary tag, named-graph URI) tuples.
 #: Multiple entries per kind get tried in declaration order in a single
@@ -156,6 +174,12 @@ _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
         # win on ties (graph-priority tiebreaker added in commit
         # 384d49a takes care of that).
         (VOCAB_SEKO, "http://urn.fi/urn:nbn:fi:au:seko:"),
+        # LCMPT — LoC Medium of Performance Thesaurus. English-side
+        # fallback for performance-medium literals; also the redirect
+        # target for SEKO concepts that bridge into LCMPT. Tier-0
+        # priority is last so Finnish MUSO / SEKO bindings still win on
+        # ties.
+        (VOCAB_LCMPT, "http://id.loc.gov/authorities/performanceMediums/"),
     ),
 }
 
@@ -348,6 +372,46 @@ def _build_allars_redirect_query(allars_uri: str) -> str:
     )
 
 
+def _build_seko_redirect_query(seko_uri: str) -> str:
+    """Build the post-tier-0 SEKO → LCMPT redirect SPARQL.
+
+    Used after a ``music_form``-kind tier-0 hit that landed in the SEKO
+    graph (``http://urn.fi/urn:nbn:fi:au:seko:``). SEKO publishes 590
+    ``skos:exactMatch`` / ``skos:closeMatch`` triples pointing at
+    LCMPT (``id.loc.gov/authorities/performanceMediums/``) — these are
+    the cross-language mappings between Finnish instrument / ensemble
+    terms and their international LCMPT equivalents.
+
+    Unlike the Allars / KAUNO redirects (which target YSO), this one
+    targets LCMPT. The ``via-seko`` tag on the resulting hit signals
+    "matched in SEKO, redirected to its bridge target" — the actual
+    destination URI is on the chosen-URI field.
+
+    ``FILTER (STRSTARTS(?lcmpt, ".../performanceMediums/"))`` guards
+    against SEKO's other mapping targets if any exist outside LCMPT.
+    """
+    quoted_uri = f"<{seko_uri}>"
+    lcmpt_ns = _LCMPT_GRAPH_URI
+    return (
+        "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+        "SELECT ?lcmpt ?label WHERE {\n"
+        f"  GRAPH <{_LEGACY_GRAPH_SEKO}> {{\n"
+        f"    {quoted_uri} (skos:exactMatch | skos:closeMatch) ?lcmpt .\n"
+        "  }\n"
+        f'  FILTER (STRSTARTS(STR(?lcmpt), "{lcmpt_ns}"))\n'
+        "  OPTIONAL {\n"
+        f"    GRAPH <{lcmpt_ns}> {{\n"
+        "      ?lcmpt skos:prefLabel ?label .\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+        'ORDER BY DESC(IF(LANG(?label) = "en", 3, '
+        'IF(LANG(?label) = "fi", 2, '
+        'IF(LANG(?label) = "sv", 1, 0))))\n'
+        "LIMIT 1\n"
+    )
+
+
 def _build_kauno_redirect_query(kauno_uri: str) -> str:
     """Build the post-tier-0 KAUNO → YSO redirect SPARQL.
 
@@ -461,6 +525,14 @@ class FusekiConceptResolver:
             redirected = self._kauno_redirect_match(kauno_hit=hit)
             if redirected is not None:
                 hit = redirected
+        elif hit is not None and kind == "music_form" and hit.uri.startswith(_LEGACY_GRAPH_SEKO):
+            # Post-tier-0 SEKO → LCMPT redirect — canonicalises the
+            # ~590 SEKO concepts that bridge into LoC's Medium of
+            # Performance Thesaurus. Unlike the YSO-targeted redirects,
+            # this swaps to an LCMPT URI when one exists.
+            redirected = self._seko_redirect_match(seko_hit=hit)
+            if redirected is not None:
+                hit = redirected
         self._cache[cache_key] = hit
         return hit
 
@@ -556,6 +628,35 @@ class FusekiConceptResolver:
             is_fuzzy_match=False,
         )
 
+    def _seko_redirect_match(self, *, seko_hit: LocalConceptHit) -> LocalConceptHit | None:
+        """Follow a SEKO hit's ``exactMatch`` / ``closeMatch`` into LCMPT.
+
+        Called from :meth:`resolve` when ``kind == "music_form"`` and the
+        tier-0 lexical match landed in the SEKO graph. Returns a hit
+        with the LCMPT URI + ``via-seko`` source_vocabulary tag when an
+        LCMPT bridge exists; otherwise returns ``None`` and the original
+        SEKO hit stays.
+
+        SEKO is Finnish-only; LCMPT is English-only. The redirect's
+        ORDER BY prefers an English LCMPT prefLabel since that's the
+        target vocab's primary language; falls back to the original
+        SEKO Finnish label when LCMPT carries no prefLabel.
+        """
+        bindings = self._post_sparql(_build_seko_redirect_query(seko_hit.uri))
+        if not bindings:
+            return None
+        row = bindings[0]
+        lcmpt_uri = row.get("lcmpt", {}).get("value")
+        lcmpt_label = row.get("label", {}).get("value", "")
+        if not lcmpt_uri:
+            return None
+        return LocalConceptHit(
+            uri=str(lcmpt_uri),
+            pref_label=str(lcmpt_label) or seko_hit.pref_label,
+            source_vocabulary=VOCAB_VIA_SEKO,
+            is_fuzzy_match=False,
+        )
+
     def _kauno_redirect_match(self, *, kauno_hit: LocalConceptHit) -> LocalConceptHit | None:
         """Follow a KAUNO hit's ``exactMatch`` / ``isReplacedBy`` into YSO.
 
@@ -622,6 +723,7 @@ __all__ = [
     "VOCAB_CHILDRENS_SUBJECTS",
     "VOCAB_KAUNOKKI",
     "VOCAB_LCGFT",
+    "VOCAB_LCMPT",
     "VOCAB_LCSH",
     "VOCAB_MTS",
     "VOCAB_SEKO",
@@ -629,6 +731,7 @@ __all__ = [
     "VOCAB_VIA_ALLARS",
     "VOCAB_VIA_KAUNO",
     "VOCAB_VIA_MUSA",
+    "VOCAB_VIA_SEKO",
     "VOCAB_VIA_YSA",
     "FusekiConceptResolver",
     "LocalConceptHit",

@@ -24,6 +24,7 @@ from bffi_pipeline.stages.m9.local_concept_resolver import (
     VOCAB_VIA_ALLARS,
     VOCAB_VIA_KAUNO,
     VOCAB_VIA_MUSA,
+    VOCAB_VIA_SEKO,
     VOCAB_VIA_YSA,
     FusekiConceptResolver,
     LocalConceptHit,
@@ -32,6 +33,7 @@ from bffi_pipeline.stages.m9.local_concept_resolver import (
     _build_kauno_redirect_query,
     _build_legacy_mapping_query,
     _build_query,
+    _build_seko_redirect_query,
     _quote_sparql_literal,
 )
 from bffi_pipeline.stages.m9.runner import (
@@ -576,6 +578,143 @@ def test_genre_form_allars_hit_does_not_trigger_allars_redirect() -> None:
     # this hit is _KIND_TO_GRAPHS-dependent — the assertion lives in the
     # handler's pytest.fail above.
     resolver.resolve(literal="fake-genre", kind="genre_form")
+
+
+# --- SEKO → LCMPT redirect (music_form-kind post-tier-0) ---------------
+
+
+def _seko_redirect_bindings(lcmpt_uri: str, label: str, lang: str) -> dict[str, Any]:
+    """SPARQL JSON-results envelope for a SEKO→LCMPT redirect row."""
+    return {
+        "results": {
+            "bindings": [
+                {
+                    "lcmpt": {"type": "uri", "value": lcmpt_uri},
+                    "label": {"type": "literal", "value": label, "xml:lang": lang},
+                }
+            ]
+        }
+    }
+
+
+def test_build_seko_redirect_query_has_lcmpt_destination_filter() -> None:
+    q = _build_seko_redirect_query("http://urn.fi/urn:nbn:fi:au:seko:00710")
+    # SEKO graph (the source) appears
+    assert "http://urn.fi/urn:nbn:fi:au:seko/" in q or "urn:nbn:fi:au:seko:" in q
+    assert "http://urn.fi/urn:nbn:fi:au:seko:00710" in q
+    # LCMPT destination filter (the target — different from the
+    # YSO-targeted Allars / KAUNO redirects)
+    assert 'STRSTARTS(STR(?lcmpt), "http://id.loc.gov/authorities/performanceMediums/")' in q
+    # Follows both exactMatch and closeMatch
+    assert "skos:exactMatch" in q
+    assert "skos:closeMatch" in q
+
+
+def test_music_form_seko_hit_redirects_to_lcmpt_when_bridge_exists() -> None:
+    """Headline case: cataloguer literal ``$2 seko`` matches a SEKO
+    prefLabel; the matched SEKO concept has
+    ``skos:closeMatch lcmpt:…``; resolver swaps to the LCMPT URI with
+    ``source_vocabulary=via-seko``."""
+    seko_uri = "http://urn.fi/urn:nbn:fi:au:seko:00003"
+    lcmpt_uri = "http://id.loc.gov/authorities/performanceMediums/mp2013015108"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if seko_uri in sparql:
+            return httpx.Response(
+                200,
+                json=_seko_redirect_bindings(lcmpt_uri, "accordion", "en"),
+            )
+        return httpx.Response(
+            200,
+            json=_bindings(
+                seko_uri, "3-rivinen harmonikka", "fi", "http://urn.fi/urn:nbn:fi:au:seko:"
+            ),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="3-rivinen harmonikka", kind="music_form")
+    assert hit is not None
+    assert hit.uri == lcmpt_uri
+    assert hit.source_vocabulary == VOCAB_VIA_SEKO
+    assert hit.source_vocabulary in LEGACY_BRIDGE_VOCABS
+    # The English-side LCMPT prefLabel surfaces on the redirected hit.
+    assert hit.pref_label == "accordion"
+
+
+def test_music_form_seko_hit_without_lcmpt_bridge_keeps_seko_uri() -> None:
+    """When the matched SEKO concept has no LCMPT bridge (Finnish-only
+    instruments like ``5-kielinen kantele`` that LCMPT doesn't
+    distinguish), the original SEKO URI stays."""
+    seko_uri = "http://urn.fi/urn:nbn:fi:au:seko:99999"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if seko_uri in sparql:
+            return httpx.Response(200, json={"results": {"bindings": []}})
+        return httpx.Response(
+            200,
+            json=_bindings(
+                seko_uri, "5-kielinen kantele", "fi", "http://urn.fi/urn:nbn:fi:au:seko:"
+            ),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="5-kielinen kantele", kind="music_form")
+    assert hit is not None
+    assert hit.uri == seko_uri  # SEKO URI preserved
+    assert hit.source_vocabulary == "seko"
+
+
+def test_music_form_muso_hit_does_not_trigger_seko_redirect() -> None:
+    """A music_form tier-0 hit landing in MUSO (not SEKO) doesn't
+    trigger the SEKO redirect."""
+    muso_uri = "http://www.yso.fi/onto/muso/p1"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        # SEKO redirect's distinguishing marker is the LCMPT-namespace filter.
+        if "STRSTARTS(STR(?lcmpt)" in sparql:
+            pytest.fail("SEKO redirect must NOT fire when tier-0 hit MUSO")
+        return httpx.Response(
+            200, json=_bindings(muso_uri, "sinfonia", "fi", "http://www.yso.fi/onto/muso/")
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="sinfonia", kind="music_form")
+    assert hit is not None
+    assert hit.uri == muso_uri
+    assert hit.source_vocabulary == "muso"
+
+
+def test_subject_kind_seko_hit_does_not_trigger_redirect() -> None:
+    """The SEKO redirect is music_form-only. A subject-kind lookup that
+    landed in SEKO (defensive — shouldn't happen since SEKO isn't in
+    ``_KIND_TO_GRAPHS["subject"]``) wouldn't fire the redirect."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if "STRSTARTS(STR(?lcmpt)" in sparql:
+            pytest.fail("SEKO redirect must NOT fire for kind=subject")
+        # subject kind queries YSO/Allars/LCSH/childrensSubjects/MTS — none
+        # are configured here; tier-0 misses and the legacy-mapping bridge
+        # also misses.
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    resolver.resolve(literal="anything", kind="subject")
 
 
 # --- KAUNO → YSO redirect (genre_form-kind post-tier-0) ----------------

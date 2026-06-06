@@ -261,6 +261,21 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://id.loc.gov/authorities/subjects/",
         languages=("en",),
     ),
+    # LC Medium of Performance Thesaurus (LCMPT) — small (~99 KB
+    # gzipped) thesaurus covering musical instruments + performance
+    # mediums in English. Cataloguers rarely tag ``$2 lcmpt`` on Helmet
+    # records directly, but LCMPT is the bridge target for SEKO (Finnish
+    # Performance Ensemble Vocabulary): SEKO has 590 ``skos:exactMatch``
+    # / ``skos:closeMatch`` triples pointing into the LCMPT URI
+    # namespace. Loading LCMPT lets M9's post-tier-0 SEKO→LCMPT redirect
+    # canonicalise Finnish music-ensemble literals to the international
+    # LCMPT URIs where one exists. English-only labels.
+    FintoVocab(
+        vocab_id="lcmpt",
+        dump_url="https://id.loc.gov/download/authorities/performanceMediums.skosrdf.ttl.gz",
+        graph_uri="http://id.loc.gov/authorities/performanceMediums/",
+        languages=("en",),
+    ),
     # LC Children's Subject Headings — a subset of LCSH tuned for
     # juvenile-collection cataloguing. Cataloguers tag ``$2 lcsh``
     # for children's-collection records on translated English imports
