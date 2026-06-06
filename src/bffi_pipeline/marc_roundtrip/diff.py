@@ -28,7 +28,12 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from typing import Any, Final, Literal
 
-from bffi_pipeline.marc_roundtrip.converter import MARC_NAMESPACE, ROUNDTRIP_MARKER
+from bffi_pipeline.marc_roundtrip.converter import (
+    LINEAGE_SUBFIELD,
+    LINEAGE_VALUE_PREFIX,
+    MARC_NAMESPACE,
+    ROUNDTRIP_MARKER,
+)
 
 _NS: Final[dict[str, str]] = {"m": MARC_NAMESPACE}
 
@@ -42,7 +47,13 @@ _NOISE_SUBFIELD_VALUES: Final[frozenset[str]] = frozenset({ROUNDTRIP_MARKER})
 #: converter intentionally didn't reproduce them. We classify the original's
 #: instance as ``lost-converter-gap`` so the HTML can distinguish "BFFI
 #: doesn't carry this" from "the converter could carry this but didn't".
-DiffStatus = Literal["identical", "lost", "added", "changed", "lost-converter-gap"]
+#:
+#: ``tag-changed`` (P-48 Phase A): the lineage token pairs an original field
+#: to a reconstructed field with a DIFFERENT tag (e.g. source 651 Kreikka
+#: paired with a recon 650 — the b10303327 Greece bug shape). Surfaces in
+#: the HTML viewer as its own colour band so cataloguers see misroutes
+#: directly.
+DiffStatus = Literal["identical", "lost", "added", "changed", "lost-converter-gap", "tag-changed"]
 
 
 @dataclass(frozen=True)
@@ -64,6 +75,13 @@ class FieldRecord:
     ind2: str = " "
     value: str | None = None  # control fields carry their data here
     subfields: tuple[SubfieldRecord, ...] = ()
+    #: P-48 Phase A lineage token (``<tag>-<ord>``) parsed off the
+    #: reconstructed side's ``$9 src=…`` subfield. ``None`` on the
+    #: original side (cataloguer-supplied $9 with other content is
+    #: kept as a real subfield, not parsed as lineage) and on
+    #: lineage-absent reconstructed fields (the flat Instance-side
+    #: predicates pending P-48 Phase B).
+    lineage: str | None = None
 
     def primary_a(self) -> str | None:
         """The first ``$a`` subfield value — the natural pair key for
@@ -81,6 +99,10 @@ class FieldRecord:
             "ind2": self.ind2,
             "value": self.value,
             "subfields": [sf.to_json() for sf in self.subfields],
+            # ``lineage`` deliberately NOT serialised — it's an internal
+            # pairing key, not user-facing data. The HTML viewer reads
+            # the per-field ``status`` (incl. the new ``tag-changed``)
+            # which already encodes the pairing decision.
         }
 
 
@@ -175,12 +197,26 @@ def diff_records(
             continue
         assert orig is not None and recon is not None
         notes = list(_indicator_notes(orig, recon))
-        if _subfields_equal(orig, recon):
-            status: DiffStatus = "identical"
+        # P-48 Phase A: lineage-paired across tags = the converter
+        # routed the source field to the wrong MARC tag. The data
+        # didn't disappear; it's just labelled wrong. Cataloguers
+        # need to see this distinctly so they can decide whether
+        # the routing change is acceptable (a "yes, 651 IS now 650
+        # because we collapsed geographic into topical") or a bug
+        # (b10303327's Greece — should stay 651).
+        if orig.tag != recon.tag:
+            status: DiffStatus = "tag-changed"
+            notes.append(f"source tag {orig.tag} → reconstructed tag {recon.tag}")
+        elif _subfields_equal(orig, recon):
+            status = "identical"
         else:
             status = "changed"
         diffs.append(
             FieldDiff(
+                # Original's tag — the cataloguer's authoritative
+                # view of what the field IS. The recon's tag (when
+                # different) is surfaced via the ``status`` +
+                # ``notes`` so the row sorts under the source tag.
                 tag=orig.tag,
                 status=status,
                 original=orig,
@@ -213,10 +249,19 @@ def _parse_record(record: ET.Element, *, strip_marker: bool = False) -> list[Fie
         ind1 = df.attrib.get("ind1", " ")
         ind2 = df.attrib.get("ind2", " ")
         subfields: list[SubfieldRecord] = []
+        lineage: str | None = None
         for sf in df.findall("m:subfield", _NS):
             code = sf.attrib.get("code", "")
             value = sf.text or ""
             if strip_marker and value in _NOISE_SUBFIELD_VALUES:
+                continue
+            # P-48 Phase A: parse + strip the lineage subfield on the
+            # reconstructed side only. Cataloguer-supplied ``$9`` with
+            # other content (not starting with ``src=``) passes
+            # through as a normal subfield and survives the diff
+            # comparison.
+            if strip_marker and code == LINEAGE_SUBFIELD and value.startswith(LINEAGE_VALUE_PREFIX):
+                lineage = value[len(LINEAGE_VALUE_PREFIX) :]
                 continue
             subfields.append(SubfieldRecord(code=code, value=value))
         out.append(
@@ -226,6 +271,7 @@ def _parse_record(record: ET.Element, *, strip_marker: bool = False) -> list[Fie
                 ind1=ind1,
                 ind2=ind2,
                 subfields=tuple(subfields),
+                lineage=lineage,
             )
         )
     return out
@@ -261,14 +307,68 @@ def _pair_control_fields(
 def _pair_data_fields(
     original: list[FieldRecord], reconstructed: list[FieldRecord]
 ) -> list[tuple[FieldRecord | None, FieldRecord | None]]:
+    """Pair data fields between the two records.
+
+    P-48 Phase A pass: when a reconstructed field carries a
+    ``$9 src=<tag>-<ord>`` lineage token, look up the original field
+    by (tag, 1-indexed position within the tag bucket) and pair them
+    explicitly — even if their tags differ on the two sides (the
+    misroute case). Whatever's left unpaired falls through to the
+    legacy tag-bucket heuristic.
+    """
+    orig_data = [f for f in original if not f.is_control]
+    recon_data = [f for f in reconstructed if not f.is_control]
+
+    # Build the lineage lookup over the original side. Position
+    # within the source's tag bucket IS the second half of the
+    # lineage token. M3's positional counter for ``#Topic650-N`` /
+    # ``#Place651-N`` is 1-indexed-within-record (not 1-indexed-
+    # within-tag-bucket), so we walk the original record once and
+    # number each tag's instances in encounter order. That matches
+    # marc2bibframe2's own per-record counter.
+    orig_by_lineage: dict[str, FieldRecord] = {}
+    tag_counters: dict[str, int] = {}
+    for f in orig_data:
+        tag_counters[f.tag] = tag_counters.get(f.tag, 0) + 1
+        orig_by_lineage[f"{f.tag}-{tag_counters[f.tag]}"] = f
+
+    pairs: list[tuple[FieldRecord | None, FieldRecord | None]] = []
+    matched_orig_ids: set[int] = set()
+    residue_recon: list[FieldRecord] = []
+    for recon in recon_data:
+        if recon.lineage is None:
+            residue_recon.append(recon)
+            continue
+        orig_match = orig_by_lineage.get(recon.lineage)
+        if orig_match is not None and id(orig_match) not in matched_orig_ids:
+            matched_orig_ids.add(id(orig_match))
+            pairs.append((orig_match, recon))
+        else:
+            # Lineage points at an original we already matched (the
+            # converter emitted two rows from one source field — rare
+            # but possible) OR at a token absent from the original
+            # (the converter mis-stamped). Fall back to heuristic for
+            # this row.
+            residue_recon.append(recon)
+
+    residue_orig = [f for f in orig_data if id(f) not in matched_orig_ids]
+    pairs.extend(_pair_residue_via_heuristic(residue_orig, residue_recon))
+    return pairs
+
+
+def _pair_residue_via_heuristic(
+    original: list[FieldRecord], reconstructed: list[FieldRecord]
+) -> list[tuple[FieldRecord | None, FieldRecord | None]]:
+    """Pre-P-48 pairing path: bucket by tag, then within a tag match
+    by ``$a`` and finally by position. Used for the lineage-absent
+    residue (today's flat Instance-side fields + any Phase-B-not-yet
+    surface)."""
     orig_df: dict[str, list[FieldRecord]] = {}
     recon_df: dict[str, list[FieldRecord]] = {}
     for f in original:
-        if not f.is_control:
-            orig_df.setdefault(f.tag, []).append(f)
+        orig_df.setdefault(f.tag, []).append(f)
     for f in reconstructed:
-        if not f.is_control:
-            recon_df.setdefault(f.tag, []).append(f)
+        recon_df.setdefault(f.tag, []).append(f)
 
     pairs: list[tuple[FieldRecord | None, FieldRecord | None]] = []
     for tag in sorted(set(orig_df) | set(recon_df)):
@@ -335,6 +435,7 @@ def _summarise(diffs: Iterable[FieldDiff]) -> dict[str, int]:
         "added": 0,
         "changed": 0,
         "lost-converter-gap": 0,
+        "tag-changed": 0,
     }
     for d in diffs:
         summary[d.status] = summary.get(d.status, 0) + 1

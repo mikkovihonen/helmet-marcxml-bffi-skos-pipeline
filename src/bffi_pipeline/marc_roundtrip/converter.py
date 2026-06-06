@@ -30,10 +30,24 @@ subfield so cataloguers can tell at-a-glance what was reconstructed by
 this module vs what survived the original MARC verbatim. The marker
 also lets the diff comparator ignore round-trip-introduced subfields
 without false-flagging them as cataloguer-side changes.
+
+P-48 Phase A — **lineage subfield ($9)**. Datafields whose source MARC
+field can be traced via M3's raw URI positional fragments
+(``#Topic650-N``, ``#Place651-N``, ``#Agent700-N``, etc.) also carry a
+``$9 src=<tag>-<ordinal>`` subfield (e.g. ``$9 src=650-20``). The diff
+comparator pairs reconstructed fields to source fields by this token
+first, falling back to today's tag+$a+position heuristic only for the
+lineage-absent residue. ``$9`` is MARC's "local processing" subfield;
+lineage values always start with ``src=`` so cataloguer-supplied ``$9``
+subfields with other content survive the diff strip untouched. Phase A
+covers 6XX + 655 + 7XX (raw URI fragments present); flat Instance-side
+fields (020 / 028 / 250 / 490 / 500 / 505 / 264) are unstamped pending
+Phase B's ``bffi-prov:fromSourceField`` triples.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Final
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -70,6 +84,45 @@ _INDICATOR_BLANK: Final[str] = " "
 #: carries the authority URI cataloguers care about, not pipeline-
 #: internal scaffolding.
 _RAW_BIB_URI_PREFIX: Final[str] = "http://urn.fi/URN:NBN:fi:bib:raw/"
+
+#: MARC subfield code used for the round-trip lineage token (P-48 Phase A).
+#: ``$9`` is the MARC "local processing" subfield — distinct from the
+#: existing ``$5 FI-HELME/bffi-roundtrip`` marker so the two can be
+#: inspected independently and cataloguer-supplied ``$9`` subfields with
+#: other content survive untouched (the diff comparator strips only
+#: ``$9`` values that begin with ``src=``).
+LINEAGE_SUBFIELD: Final[str] = "9"
+
+#: Value-prefix marker. Diff-side strip + cataloguer-supplied-$9
+#: pass-through both key on this prefix.
+LINEAGE_VALUE_PREFIX: Final[str] = "src="
+
+#: M3's raw-URI positional fragment grammar. Three named groups:
+#:   - ``kind``: the M3 routing prefix (Topic / Place / Agent / Hub / ...)
+#:   - ``tag``:  the source MARC datafield tag (650 / 651 / 700 / ...)
+#:   - ``ord``:  the 1-indexed position of the source field within
+#:               the record (M3's per-record counter).
+_LINEAGE_FRAGMENT_RE: Final[re.Pattern[str]] = re.compile(
+    r"#(?P<kind>Topic|Place|Agent|Hub|MusicMedium|IntendedAudience|"
+    r"CreatorCharacteristic)(?P<tag>\d{3})-(?P<ord>\d+)$"
+)
+
+
+def _extract_lineage_token(source: Node | None) -> str | None:
+    """Parse an M3-minted raw URI fragment into a ``<tag>-<ordinal>``
+    lineage token. Returns ``None`` for non-URI inputs, URIs outside
+    the raw-bib namespace, and URIs whose fragment doesn't match the
+    M3 positional convention.
+    """
+    if not isinstance(source, URIRef):
+        return None
+    s = str(source)
+    if not s.startswith(_RAW_BIB_URI_PREFIX):
+        return None
+    m = _LINEAGE_FRAGMENT_RE.search(s)
+    if m is None:
+        return None
+    return f"{m.group('tag')}-{m.group('ord')}"
 
 
 @dataclass(frozen=True)
@@ -234,6 +287,7 @@ class _Reconstructor:
         ind1: str = _INDICATOR_BLANK,
         ind2: str = _INDICATOR_BLANK,
         add_marker: bool = True,
+        lineage: str | None = None,
     ) -> None:
         df = SubElement(
             record,
@@ -245,6 +299,17 @@ class _Reconstructor:
                 continue
             sf = SubElement(df, f"{{{MARC_NAMESPACE}}}subfield", attrib={"code": code})
             sf.text = value
+        # P-48 Phase A: lineage token immediately precedes the marker,
+        # so the two round-trip-only subfields stay grouped at the
+        # tail of the datafield for easy visual + programmatic
+        # inspection.
+        if lineage is not None:
+            sf = SubElement(
+                df,
+                f"{{{MARC_NAMESPACE}}}subfield",
+                attrib={"code": LINEAGE_SUBFIELD},
+            )
+            sf.text = f"{LINEAGE_VALUE_PREFIX}{lineage}"
         if add_marker:
             sf = SubElement(df, f"{{{MARC_NAMESPACE}}}subfield", attrib={"code": "5"})
             sf.text = ROUNDTRIP_MARKER
@@ -602,7 +667,27 @@ class _Reconstructor:
             if row is None:
                 continue
             tag = self._subject_marc_tag(subject, raw_origin_hints)
-            self._emit_datafield(record, tag, *row, ind2="7")
+            lineage = self._lineage_for_subject(subject, raw_origin_hints)
+            self._emit_datafield(record, tag, *row, ind2="7", lineage=lineage)
+
+    def _lineage_for_subject(
+        self,
+        target: Node,
+        raw_origin_hints: dict[URIRef, str],
+    ) -> str | None:
+        """Lineage token for a subject row. Direct fragment if the
+        subject IS a raw bib URI; otherwise the back-walk via
+        ``skos:exactMatch`` (built once per emit_subjects pass into
+        ``raw_origin_hints``) recovers the originating raw URI's
+        fragment."""
+        direct = _extract_lineage_token(target)
+        if direct is not None:
+            return direct
+        if isinstance(target, URIRef):
+            raw = raw_origin_hints.get(target)
+            if raw:
+                return _extract_lineage_token(URIRef(raw))
+        return None
 
     #: Routes a BFFI subject node to the right MARC 6XX tag by looking
     #: at clues in the URI / labels / source. Coverage:
@@ -691,11 +776,13 @@ class _Reconstructor:
         if work is None:
             return
         seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.genreForm)
+        raw_origin_hints = self._build_raw_origin_hints(work, V.BFFI.genreForm)
         for genre in self.graph.objects(work, V.BFFI.genreForm):
             row = self._subject_row(genre, seen_authorities)
             if row is None:
                 continue
-            self._emit_datafield(record, "655", *row, ind2="7")
+            lineage = self._lineage_for_subject(genre, raw_origin_hints)
+            self._emit_datafield(record, "655", *row, ind2="7", lineage=lineage)
 
     def _authority_targets(self, work: URIRef, predicate: URIRef) -> set[URIRef]:
         """Return the set of authority-URI targets of ``<work> predicate``
@@ -811,7 +898,15 @@ class _Reconstructor:
                     continue
                 role_subs = self._collect_role_subs(contrib)
                 tag = self._added_entry_tag(agent)
-                self._emit_datafield(record, tag, ("a", label), *role_subs, ind1="1")
+                lineage = _extract_lineage_token(agent)
+                self._emit_datafield(
+                    record,
+                    tag,
+                    ("a", label),
+                    *role_subs,
+                    ind1="1",
+                    lineage=lineage,
+                )
 
     def _added_entry_tag(self, agent: Node) -> str:
         """Route a non-primary contribution to 700 / 710 / 711 by the

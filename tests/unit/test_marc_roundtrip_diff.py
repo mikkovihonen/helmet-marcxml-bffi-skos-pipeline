@@ -284,6 +284,121 @@ def test_changed_fields_sort_before_identical_within_same_tag_bucket() -> None:
     assert statuses.index("lost") < statuses.index("identical")
 
 
+def test_lineage_subfield_strips_from_recon_and_pairs_by_token() -> None:
+    """P-48 Phase A: a $9 src=<tag>-<ord> subfield on the recon side
+    pairs explicitly to the source field at that position within the
+    tag bucket; the subfield is also stripped from the recon's
+    subfield list so it doesn't trigger a `changed` status."""
+    orig_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">viihdemusiikki</subfield>
+    </datafield>
+    """
+    # Recon row carries the lineage marker pointing at 650-1.
+    recon_body = f"""
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">viihdemusiikki</subfield>
+      <subfield code="9">src=650-1</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    # One identical row (lineage paired + subfields equal after strip).
+    rows = [d for d in diff.fields if d.tag == "650"]
+    assert len(rows) == 1
+    assert rows[0].status == "identical"
+
+
+def test_lineage_pairs_across_tag_buckets_emitting_tag_changed() -> None:
+    """The b10303327 Greece bug shape: source 651-1 Kreikka, recon
+    emits the same data as 650 carrying ``$9 src=651-1``. The diff
+    must NOT classify this as ``lost + added``; it must pair the
+    two fields by lineage and report ``status=tag-changed``."""
+    orig_body = """
+    <datafield tag="651" ind1=" " ind2="7">
+      <subfield code="a">Kreikka</subfield>
+    </datafield>
+    """
+    recon_body = f"""
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">Kreikka</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p105037</subfield>
+      <subfield code="9">src=651-1</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    rows = list(diff.fields)
+    assert len(rows) == 1
+    assert rows[0].status == "tag-changed"
+    assert rows[0].original is not None and rows[0].original.tag == "651"
+    assert rows[0].reconstructed is not None and rows[0].reconstructed.tag == "650"
+    assert any("651 → reconstructed tag 650" in n for n in rows[0].notes)
+
+
+def test_lineage_absent_falls_back_to_heuristic_pairing() -> None:
+    """Without a ``$9 src=…`` token, pairing falls through to today's
+    tag-bucket + $a heuristic — pre-Phase-A behaviour is preserved
+    for the flat Instance-side fields the converter doesn't stamp
+    yet."""
+    orig_body = """
+    <datafield tag="020" ind1=" " ind2=" ">
+      <subfield code="a">9780000000002</subfield>
+    </datafield>
+    """
+    recon_body = f"""
+    <datafield tag="020" ind1=" " ind2=" ">
+      <subfield code="a">9780000000002</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    rows = list(diff.fields)
+    assert len(rows) == 1
+    assert rows[0].status == "identical"
+
+
+def test_cataloguer_supplied_dollar9_survives_diff_strip() -> None:
+    """A source ``$9 foo`` (cataloguer's local processing code) must
+    NOT be stripped by the lineage parser — only ``$9 src=…`` values
+    are recognised as round-trip lineage and removed."""
+    orig_body = """
+    <datafield tag="500" ind1=" " ind2=" ">
+      <subfield code="a">Note text</subfield>
+      <subfield code="9">FOO</subfield>
+    </datafield>
+    """
+    recon_body = f"""
+    <datafield tag="500" ind1=" " ind2=" ">
+      <subfield code="a">Note text</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    rows = list(diff.fields)
+    assert len(rows) == 1
+    # Source has $9 FOO, recon doesn't → changed (the cataloguer's
+    # $9 subfield was lost in the round-trip — we want this surfaced,
+    # NOT suppressed as a lineage strip).
+    assert rows[0].status == "changed"
+
+
 def test_path_import_is_used_in_some_assertions() -> None:
     """No-op sanity test — pytest discovers test_ functions and this
     test pulls Path into the module's namespace so future fixture

@@ -797,6 +797,79 @@ def test_648_routes_via_raw_topic648_fragment_back_link() -> None:
     assert df_648, "yso/p10000 must emit as 648 via raw #Topic648 back-link"
 
 
+def test_lineage_stamped_on_subject_from_topic650_fragment() -> None:
+    """P-48 Phase A: a subject URI minted as ``#Topic650-N`` produces
+    a recon 650 row carrying ``$9 src=650-N``."""
+    g = _build_minimal_graph()
+    raw = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b13511105#Topic650-7")
+    g.add((WORK, V.BFFI.subject, raw))
+    g.add((raw, V.RDFS.label, Literal("dinosaurukset")))
+    rec = reconstruct_marc(g, MANIF)
+    rows = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='650']", NS)
+        if _subfield(df, "a") == "dinosaurukset"
+    ]
+    assert len(rows) == 1
+    assert _subfield(rows[0], "9") == "src=650-7"
+
+
+def test_lineage_stamped_on_added_entry_from_agent700_fragment() -> None:
+    """7XX added entries carry the agent URI's ``#Agent700-N``
+    fragment as the lineage payload."""
+    g = _build_minimal_graph()
+    contrib = URIRef("urn:contrib/x")
+    agent = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b13511105#Agent700-14")
+    g.add((EXPR, V.BFFI.contribution, contrib))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Vamvakaris, Markos")))
+    rec = reconstruct_marc(g, MANIF)
+    rows = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='700']", NS)
+        if _subfield(df, "a") == "Vamvakaris, Markos"
+    ]
+    assert len(rows) == 1
+    assert _subfield(rows[0], "9") == "src=700-14"
+
+
+def test_lineage_recovered_via_skos_exactmatch_for_authority_subject() -> None:
+    """When M9 reconciles ``#Place651-21`` to an authority URI, the
+    raw URI carries ``skos:exactMatch <auth>``; the converter walks
+    the back-link so the authority's emitted row still carries
+    ``$9 src=651-21``."""
+    g = _build_minimal_graph()
+    raw = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b13511105#Place651-21")
+    auth = URIRef("http://www.yso.fi/onto/yso/p105037")
+    g.add((WORK, V.BFFI.subject, raw))
+    g.add((WORK, V.BFFI.subject, auth))
+    g.add((raw, V.SKOS.exactMatch, auth))
+    g.add((auth, V.RDFS.label, Literal("Kreikka")))
+    rec = reconstruct_marc(g, MANIF)
+    # The 651 row from the authority URI must carry the raw's
+    # lineage token (not the bare URI — that has no fragment).
+    rows = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='651']", NS)
+        if _subfield(df, "0") == str(auth)
+    ]
+    assert len(rows) == 1
+    assert _subfield(rows[0], "9") == "src=651-21"
+
+
+def test_lineage_absent_for_flat_instance_fields_pending_phase_b() -> None:
+    """Phase A intentionally doesn't stamp 020 / 028 / 250 / 490 /
+    500 / 505 — those need ``bffi-prov:fromSourceField`` triples in
+    Phase B. Pin so adding lineage to them later updates this test
+    deliberately."""
+    g = _build_minimal_graph()
+    rec = reconstruct_marc(g, MANIF)
+    # The minimal graph carries an ISBN (`bf:identifiedBy → bf:Isbn`).
+    df_020 = rec.element.find("m:datafield[@tag='020']", NS)
+    assert df_020 is not None
+    assert _subfield(df_020, "9") is None
+
+
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:
     # Smoke: we explicitly skip 852 (holdings) and 336 (content type
     # — not currently forwarded onto BFFI). Pin so adding either to
