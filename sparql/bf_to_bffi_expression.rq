@@ -42,6 +42,7 @@ CONSTRUCT {
                          bf:code ?otherAgentIdentSourceCode .
   ?otherRole a         bf:Role ;
              rdfs:label ?otherRoleLabel .
+  ?contentType rdfs:label ?contentTypeLabel .
 }
 # P-36 Phase A: bf:role propagation (URI form for cataloguer $4 +
 # blank-node-with-rdfs:label form for $e free-text) routes via the
@@ -67,7 +68,13 @@ WHERE {
             arq:sha1(STR(?bfWork)))) AS ?exprURI )
 
   OPTIONAL { ?bfWork bf:language        ?language }
-  OPTIONAL { ?bfWork bf:content         ?contentType }
+  OPTIONAL {
+    ?bfWork bf:content ?contentType .
+    # Pass the Finnish source-MARC $a label attached to the URI by
+    # marc2bibframe2 through to BFFI so MARC 336 $a round-trips
+    # without a LoC contentTypes vocab dump.
+    OPTIONAL { ?contentType rdfs:label ?contentTypeLabel }
+  }
   OPTIONAL { ?bfWork bf:summary         ?summary }
   OPTIONAL { ?bfWork bf:note            ?note }
   # bf:tableOfContents is intentionally NOT routed here: BFFI's

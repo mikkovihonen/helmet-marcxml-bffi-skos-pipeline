@@ -31,6 +31,7 @@ from bffi_pipeline.stages.m8.mint import (
     _bind_prefixes,
     _emit_canonical_work,
     _propagate_expression_passthrough,
+    _propagate_loc_vocab_labels,
     _propagate_manifestations,
     _propagate_raw_agent_identifiers,
     _select_description_modifier,
@@ -235,6 +236,13 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
         # rebuilt canonical contribution's agent — and the round-trip
         # converter can read it to emit $0.
         _propagate_raw_agent_identifiers(g, raw_corpus_graph)
+        # LoC vocabulary labels (336/337/338 $a, plus 040 $b/$e
+        # vocab URIs). marc2bibframe2 attaches the Finnish source
+        # label directly to the URI as rdfs:label; the propagation
+        # pass copies these triples into canonical so the round-trip
+        # converter can render $a without depending on a separate
+        # LoC vocab dump being loaded into the round-trip stage.
+        _propagate_loc_vocab_labels(g, raw_corpus_graph)
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label

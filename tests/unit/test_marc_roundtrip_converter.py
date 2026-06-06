@@ -1305,6 +1305,110 @@ def test_700_emits_dollar0_value_only_when_source_code_absent() -> None:
     assert _subfield(df, "0") == "bare-id"
 
 
+def test_020_emits_q_qualifier_when_isbn_carries_one() -> None:
+    """``bf:Isbn → bf:qualifier "nidottu"`` round-trips as MARC 020
+    $q (binding type — "nidottu" / "kovakantinen" / "pehmeäkantinen"
+    in Helmet's Finnish cataloguing)."""
+    g = _build_minimal_graph()
+    isbn = URIRef("urn:isbn/withq")
+    g.add((MANIF, V.BF.identifiedBy, isbn))
+    g.add((isbn, RDF.type, V.BF.Isbn))
+    g.add((isbn, RDF.value, Literal("9510066966")))
+    g.add((isbn, V.BF.qualifier, Literal("pehmeäkantinen")))
+    rec = reconstruct_marc(g, MANIF)
+    df = next(
+        df
+        for df in rec.element.findall("m:datafield[@tag='020']", NS)
+        if _subfield(df, "a") == "9510066966"
+    )
+    assert _subfield(df, "q") == "pehmeäkantinen"
+
+
+def test_336_337_338_emit_a_from_rdfs_label_on_loc_uri() -> None:
+    """marc2bibframe2 attaches the Finnish source-MARC ``$a`` label
+    directly to the LoC URI as ``rdfs:label`` (e.g.
+    ``<…/contentTypes/txt> rdfs:label "teksti"``). The converter
+    walks ``rdfs:label`` in addition to ``skos:prefLabel`` so
+    337/338 $a round-trip without depending on a LoC vocab dump."""
+    g = _build_minimal_graph()
+    content_uri = URIRef("http://id.loc.gov/vocabulary/contentTypes/txt")
+    g.add((EXPR, V.BFFI.content, content_uri))
+    g.add((content_uri, V.RDFS.label, Literal("teksti")))
+    g.remove((URIRef("http://id.loc.gov/vocabulary/mediaTypes/n"), SKOS.prefLabel, None))
+    g.add(
+        (
+            URIRef("http://id.loc.gov/vocabulary/mediaTypes/n"),
+            V.RDFS.label,
+            Literal("käytettävissä ilman laitetta"),
+        )
+    )
+    g.remove((URIRef("http://id.loc.gov/vocabulary/carriers/nc"), SKOS.prefLabel, None))
+    g.add(
+        (
+            URIRef("http://id.loc.gov/vocabulary/carriers/nc"),
+            V.RDFS.label,
+            Literal("nide"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df_336 = rec.element.find("m:datafield[@tag='336']", NS)
+    assert df_336 is not None and _subfield(df_336, "a") == "teksti"
+    df_337 = rec.element.find("m:datafield[@tag='337']", NS)
+    assert df_337 is not None
+    assert _subfield(df_337, "a") == "käytettävissä ilman laitetta"
+    df_338 = rec.element.find("m:datafield[@tag='338']", NS)
+    assert df_338 is not None and _subfield(df_338, "a") == "nide"
+
+
+def test_040_emits_source_a_b_e_from_admin_metadata() -> None:
+    """MARC 040 $a / $b / $e round-trip from the source's
+    ``bffi:adminMetadata`` block: $a from ``bf:agent → bf:code``,
+    $b from ``bffi:descriptionLanguage`` URI tail, $e from
+    ``bffi:descriptionConventions`` URI tail. $d always carries the
+    ``FI-HELME/bffi-roundtrip`` marker."""
+    g = _build_minimal_graph()
+    admin = BNode()
+    agent = BNode()
+    g.add((MANIF, V.BFFI.adminMetadata, admin))
+    g.add((admin, RDF.type, V.BFFI.AdminMetadata))
+    g.add((admin, V.BF.agent, agent))
+    g.add((agent, V.BF.code, Literal("FI-BTJ")))
+    g.add(
+        (
+            admin,
+            V.BFFI.descriptionLanguage,
+            URIRef("http://id.loc.gov/vocabulary/languages/fin"),
+        )
+    )
+    g.add(
+        (
+            admin,
+            V.BFFI.descriptionConventions,
+            URIRef("http://id.loc.gov/vocabulary/descriptionConventions/rda"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='040']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "FI-BTJ"
+    assert _subfield(df, "b") == "fin"
+    assert _subfield(df, "e") == "rda"
+    assert _subfield(df, "d") == "FI-HELME/bffi-roundtrip"
+
+
+def test_040_falls_back_to_fi_helme_a_when_no_admin_metadata(
+    minimal_record: ET.Element,
+) -> None:
+    """When no source AdminMetadata, emit synth $a 'FI-HELME' + $d
+    marker so the round-trip stamp stays cataloguer-visible."""
+    df = _datafield(minimal_record, "040")
+    assert df is not None
+    assert _subfield(df, "a") == "FI-HELME"
+    assert _subfield(df, "b") is None
+    assert _subfield(df, "e") is None
+    assert _subfield(df, "d") == "FI-HELME/bffi-roundtrip"
+
+
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:
     # Smoke: we explicitly skip 852 (holdings) and 336 (content type
     # — not currently forwarded onto BFFI). Pin so adding either to

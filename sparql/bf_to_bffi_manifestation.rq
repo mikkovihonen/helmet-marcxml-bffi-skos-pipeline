@@ -51,7 +51,16 @@ CONSTRUCT {
             bffi:note                  ?instanceNote ;
             bffi:relation              ?hubRel ;
             bffi:relation              ?relWorkRel ;
+            bffi:adminMetadata         ?adminMeta ;
             skos:prefLabel             ?manifLabel .
+  ?mediaURI   rdfs:label ?mediaLabel .
+  ?carrierURI rdfs:label ?carrierLabel .
+  ?adminMeta  a bffi:AdminMetadata ;
+              bf:agent ?adminAgent ;
+              bffi:descriptionLanguage    ?descLangURI ;
+              bffi:descriptionConventions ?descConvURI .
+  ?adminAgent a bf:Agent ;
+              bf:code ?adminAgencyCode .
   ?bfToc   a               bffi:TableOfContents ;
            rdfs:label      ?tocLabel .
   ?hubRel  a                       bffi:Relation ;
@@ -80,7 +89,8 @@ CONSTRUCT {
            rdf:value       ?identValue ;
            bf:source       ?identSource .
   ?isbn    a               bf:Isbn ;
-           rdf:value       ?isbnValue .
+           rdf:value       ?isbnValue ;
+           bf:qualifier    ?isbnQualifier .
   ?audIssue a              bf:AudioIssueNumber ;
             rdf:value      ?audIssueValue .
   ?seriesNode a            bffi:Series ;
@@ -130,8 +140,20 @@ WHERE {
   # them as labelled clickable concepts on the Manifestation page once
   # the RDA-Media + RDA-Carrier graphs are loaded by ``load-finto``
   # (commit 3 of this chain).
-  OPTIONAL { ?bfInstance bf:media   ?mediaURI .   FILTER(isIRI(?mediaURI)) }
-  OPTIONAL { ?bfInstance bf:carrier ?carrierURI . FILTER(isIRI(?carrierURI)) }
+  OPTIONAL {
+    ?bfInstance bf:media ?mediaURI .
+    FILTER(isIRI(?mediaURI))
+    # marc2bibframe2 attaches the Finnish source-MARC $a label
+    # directly to the URI (``<…/mediaTypes/n> rdfs:label "käytettävissä
+    # ilman laitetta"``). Pass it through so MARC 337 $a round-trips
+    # without depending on the LoC vocab dump being loaded.
+    OPTIONAL { ?mediaURI rdfs:label ?mediaLabel }
+  }
+  OPTIONAL {
+    ?bfInstance bf:carrier ?carrierURI .
+    FILTER(isIRI(?carrierURI))
+    OPTIONAL { ?carrierURI rdfs:label ?carrierLabel }
+  }
 
   # MARC 007-derived format details lifted by marc2bibframe2:
   #   ``bf:digitalCharacteristic`` → LoC ``mencformat`` URIs (DVD,
@@ -208,6 +230,35 @@ WHERE {
     ?bfInstance bf:identifiedBy ?isbn .
     ?isbn a bf:Isbn ;
           rdf:value ?isbnValue .
+    OPTIONAL { ?isbn bf:qualifier ?isbnQualifier }
+  }
+
+  # MARC 040 cataloging source. The source 040 $a / $b / $e live in
+  # different bf:adminMetadata blocks emitted by marc2bibframe2:
+  #   $a (cataloging agency) → bf:adminMetadata → bf:AdminMetadata
+  #                            → bf:agent → bf:Agent → bf:code
+  #   $b (lang of cataloging) → bf:adminMetadata → bf:AdminMetadata
+  #                            → bf:descriptionLanguage
+  #   $e (descr conventions) → bf:adminMetadata → bf:AdminMetadata
+  #                            → bf:descriptionConventions
+  # We aggregate them onto a single canonical bffi:AdminMetadata
+  # block via a deterministic SHA-1-derived URI (per bf:Instance) so
+  # multiple OPTIONALs all add triples to the same node — graph
+  # dedup makes this safe across cross-product solution rows.
+  BIND(IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:adminmeta/",
+                  arq:sha1(STR(?bfInstance)))) AS ?adminMeta)
+  OPTIONAL {
+    ?bfInstance bf:adminMetadata ?srcAdminBlock1 .
+    ?srcAdminBlock1 bf:agent ?adminAgent .
+    ?adminAgent bf:code ?adminAgencyCode .
+  }
+  OPTIONAL {
+    ?bfInstance bf:adminMetadata ?srcAdminBlock2 .
+    ?srcAdminBlock2 bf:descriptionLanguage ?descLangURI .
+  }
+  OPTIONAL {
+    ?bfInstance bf:adminMetadata ?srcAdminBlock3 .
+    ?srcAdminBlock3 bf:descriptionConventions ?descConvURI .
   }
 
   # MARC 028 (publisher / issue number for music + video). Source has

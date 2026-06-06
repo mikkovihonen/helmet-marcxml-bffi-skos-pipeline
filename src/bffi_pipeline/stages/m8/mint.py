@@ -127,6 +127,44 @@ _EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
 )
 
 
+#: Prefix for LoC vocabulary URIs whose ``rdfs:label`` triples must
+#: survive the M3 → canonical boundary so the round-trip converter
+#: can render MARC 336 / 337 / 338 ``$a`` (content / media / carrier
+#: type human-readable labels) — and other 040-side vocab labels.
+_LOC_VOCAB_URI_PREFIX: str = "http://id.loc.gov/vocabulary/"
+
+
+def _propagate_loc_vocab_labels(g: Graph, raw_graph: Graph) -> int:
+    """Copy ``rdfs:label`` triples on LoC vocabulary URIs from the M3
+    per-record graph into the canonical graph.
+
+    marc2bibframe2 attaches the Finnish source-MARC ``$a`` label
+    directly to the LoC URI as ``rdfs:label`` (e.g.
+    ``<…/contentTypes/txt> rdfs:label "teksti"``); without this
+    propagation the label dies at the M8 boundary because the LoC
+    URI is neither a blank node nor a raw-bib URI, so neither of the
+    other propagation passes follows it. Copying only ``rdfs:label``
+    on LoC vocab URIs keeps the data flow surgical — no risk of
+    pulling in unrelated triples.
+
+    Returns triples copied.
+    """
+    count = 0
+    seen: set[tuple[URIRef, str]] = set()
+    for s, _p, o in raw_graph.triples((None, V.RDFS.label, None)):
+        if not (isinstance(s, URIRef) and str(s).startswith(_LOC_VOCAB_URI_PREFIX)):
+            continue
+        if not isinstance(o, Literal):
+            continue
+        key = (s, str(o))
+        if key in seen:
+            continue
+        seen.add(key)
+        g.add((s, V.RDFS.label, o))
+        count += 1
+    return count
+
+
 def _propagate_raw_agent_identifiers(g: Graph, raw_graph: Graph) -> int:
     """Copy ``bf:identifiedBy`` subgraphs on raw-bib agent URIs
     (``#Agent100-N`` / ``#Agent700-N`` / ``#Agent710-N`` / ``#Agent711-N``)

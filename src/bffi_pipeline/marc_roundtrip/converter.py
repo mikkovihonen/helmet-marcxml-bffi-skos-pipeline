@@ -333,12 +333,20 @@ class _Reconstructor:
 
     def _emit_isbns(self, record: Element) -> None:
         # bf:identifiedBy → bf:Isbn → rdf:value on the Manifestation.
+        # Plus ``bf:qualifier`` (MARC 020 $q, "kovakantinen" /
+        # "nidottu" / "pehmeäkantinen") when the cataloguer typed one.
         for ident in self.graph.objects(self.manifestation, V.BF.identifiedBy):
             types = set(self.graph.objects(ident, RDF.type))
-            if V.BF.Isbn in types:
-                for value in self.graph.objects(ident, RDF.value):
-                    if isinstance(value, Literal):
-                        self._emit_datafield(record, "020", ("a", str(value)))
+            if V.BF.Isbn not in types:
+                continue
+            for value in self.graph.objects(ident, RDF.value):
+                if not isinstance(value, Literal):
+                    continue
+                subs: list[tuple[str, str]] = [("a", str(value))]
+                for qual in self.graph.objects(ident, V.BF.qualifier):
+                    if isinstance(qual, Literal):
+                        subs.append(("q", str(qual)))
+                self._emit_datafield(record, "020", *subs)
 
     def _emit_publisher_numbers(self, record: Element) -> None:
         # MARC 028 publisher number / catalog number (music + video).
@@ -378,16 +386,58 @@ class _Reconstructor:
             if label:
                 self._emit_datafield(record, "490", ("a", label), ind1="0")
 
+    _LANGUAGES_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
+    _DESCRIPTION_CONVENTIONS_URI_PREFIX: Final[str] = (
+        "http://id.loc.gov/vocabulary/descriptionConventions/"
+    )
+
     def _emit_helmet_source_marker(self, record: Element) -> None:
-        # 040: cataloguing source. We can't reconstruct the original
-        # ``$a $b $c $d`` chain from BFFI's AdminMetadata block —
-        # emit a synth row that flags the round-trip.
+        # MARC 040 cataloging source. The source 040 $a / $b / $e land
+        # in BIBFRAME's bf:adminMetadata blocks (cataloging agency
+        # code, description language URI, description conventions URI
+        # respectively). M3's Manifestation pass aggregates them onto
+        # a single ``bffi:adminMetadata → bffi:AdminMetadata`` block;
+        # we read those four predicates here. ``$d`` always carries
+        # the ``FI-HELME/bffi-roundtrip`` marker so cataloguers see at
+        # a glance that this row was reconstructed by the round-trip.
+        subs: list[tuple[str, str]] = []
+        for admin in self.graph.objects(self.manifestation, V.BFFI.adminMetadata):
+            for agent in self.graph.objects(admin, V.BF.agent):
+                for code in self.graph.objects(agent, V.BF.code):
+                    if isinstance(code, Literal):
+                        subs.append(("a", str(code)))
+                        break
+                if any(c == "a" for c, _ in subs):
+                    break
+            for lang_uri in self.graph.objects(admin, V.BFFI.descriptionLanguage):
+                if isinstance(lang_uri, URIRef) and str(lang_uri).startswith(
+                    self._LANGUAGES_URI_PREFIX
+                ):
+                    subs.append(("b", str(lang_uri)[len(self._LANGUAGES_URI_PREFIX) :]))
+                    break
+            for conv_uri in self.graph.objects(admin, V.BFFI.descriptionConventions):
+                if isinstance(conv_uri, URIRef) and str(conv_uri).startswith(
+                    self._DESCRIPTION_CONVENTIONS_URI_PREFIX
+                ):
+                    subs.append(
+                        (
+                            "e",
+                            str(conv_uri)[len(self._DESCRIPTION_CONVENTIONS_URI_PREFIX) :],
+                        )
+                    )
+                    break
+            break
+        # Fall back: synth ``$a FI-HELME`` when the source carried no
+        # 040 (older records). The synth marker in $d is always
+        # present so cataloguers can tell what's reconstructed.
+        if not any(c == "a" for c, _ in subs):
+            subs.append(("a", "FI-HELME"))
+        subs.append(("d", "FI-HELME/bffi-roundtrip"))
         self._emit_datafield(
             record,
             "040",
-            ("a", "FI-HELME"),
-            ("d", "FI-HELME/bffi-roundtrip"),
-            add_marker=False,  # this row IS the marker
+            *subs,
+            add_marker=False,  # this row IS the marker (via $d)
         )
 
     def _emit_languages(self, record: Element) -> None:
@@ -784,12 +834,17 @@ class _Reconstructor:
         return None
 
     def _loc_label(self, uri: Node, *, lang_pref: tuple[str, ...]) -> str | None:
-        # Look up skos:prefLabel preferentially in the requested
-        # languages. Returns None if no label.
+        # Look up labels in the requested languages. Walks BOTH
+        # ``skos:prefLabel`` (the Finto/LoC SKOS dump shape) and
+        # ``rdfs:label`` (the shape marc2bibframe2 attaches directly
+        # to LoC URIs in BIBFRAME — propagated to canonical by
+        # ``_propagate_loc_vocab_labels``). Returns None if neither
+        # carries a label.
         labels: dict[str | None, str] = {}
-        for val in self.graph.objects(uri, SKOS.prefLabel):
-            if isinstance(val, Literal):
-                labels[val.language] = str(val)
+        for prop in (SKOS.prefLabel, V.RDFS.label):
+            for val in self.graph.objects(uri, prop):
+                if isinstance(val, Literal):
+                    labels.setdefault(val.language, str(val))
         for pref in lang_pref:
             if pref in labels:
                 return labels[pref]
