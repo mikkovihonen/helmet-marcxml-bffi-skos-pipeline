@@ -36,8 +36,11 @@ CONSTRUCT {
            bffi:marcKey             ?marcKey ;
            skos:prefLabel           ?workLabel .
   ?contrib a               bffi:PrimaryContribution ;
-           bffi:agent      ?primaryAgent .
+           bffi:agent      ?primaryAgent ;
+           bf:role         ?primaryRole .
   ?primaryAgent rdfs:label ?primaryAgentLabel .
+  ?primaryRole  a          bf:Role ;
+                rdfs:label ?primaryRoleLabel .
   # P-36 Phase C: route ``rdfs:label`` for subjects and genreForms.
   # Labels go on ``?bfSubject`` (the source subject node), NOT on
   # ``?subject`` (the COALESCE result). When the cataloguer attached a
@@ -116,6 +119,19 @@ WHERE {
     ?c a bf:PrimaryContribution ;
        bf:agent ?primaryAgent .
     OPTIONAL { ?primaryAgent rdfs:label ?primaryAgentLabel }
+    # Route MARC 100 $e (relator term, e.g. "kirjoittaja",
+    # "säveltäjä") onto the new BFFI PrimaryContribution. Same
+    # blank-node-with-rdfs:label shape as the Expression-side
+    # non-primary role routing in bf_to_bffi_expression.rq —
+    # the post-M3 relator-term enrichment pass
+    # (:mod:`bffi_pipeline.stages.m3.relator_term_enrichment`)
+    # looks up the label in the curated MARC-FI ⇆ LoC table and
+    # adds a sibling `bf:role <relators/CODE>` URI when matched,
+    # so the round-trip converter emits both 100 $4 + $e.
+    OPTIONAL {
+      ?c bf:role ?primaryRole .
+      OPTIONAL { ?primaryRole rdfs:label ?primaryRoleLabel }
+    }
     BIND(BNODE() AS ?contrib)
   }
   # P-15: when marc2bibframe2 emits the subject as a bf:Place / bf:Person /

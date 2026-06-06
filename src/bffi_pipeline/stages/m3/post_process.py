@@ -27,6 +27,7 @@ from rdflib.namespace import DCTERMS, RDF, RDFS
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m3.contributions import _emit_extracted_contributions
 from bffi_pipeline.stages.m3.language_detect import _candidate_languages, _retag_pref_labels
+from bffi_pipeline.stages.m3.relator_term_enrichment import enrich_role_uris
 
 
 def post_process(
@@ -72,6 +73,12 @@ def post_process(
         audit_log_path=audit_log_path,
         now=now,
     )
+    # Resolve Finnish / Swedish ``$e`` role terms on every bf:role
+    # blank node to a LoC relator URI when the curated mapping
+    # matches. Sibling URI lives next to the original
+    # blank-node-with-rdfs:label so round-trip MARC keeps the
+    # cataloguer's original ``$e`` and gains a ``$4`` code.
+    enrich_role_uris(bffi_graph)
     bffi_graph.bind("bf", V.BF)
     bffi_graph.bind("bffi", V.BFFI)
     bffi_graph.bind("bib", V.BIB)

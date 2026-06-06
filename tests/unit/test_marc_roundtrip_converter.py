@@ -435,6 +435,91 @@ def test_700_emits_relator_term_e_from_freetext_role_label(tmp_path) -> None:
     assert _subfield(df, "4") is None
 
 
+def test_700_dedups_e_when_both_uri_and_bnode_label_present() -> None:
+    """The post-M3 relator-term enrichment pass adds a sibling
+    ``bf:role <relators/aut>`` next to the original blank-node-with-
+    label. The converter must emit ``$e`` once, preferring the
+    cataloguer's original term (the BNode label) over the LoC URI
+    label."""
+    g = Graph()
+    work = URIRef("urn:work/dedup")
+    expr = URIRef("urn:expr/dedup")
+    manif = URIRef("urn:manif/dedup")
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, SKOS.prefLabel, Literal("X", lang="fi")))
+    g.add((work, V.BFFI.hasExpression, expr))
+    g.add((expr, RDF.type, V.BFFI.Expression))
+    g.add((expr, V.BFFI.expressionOf, work))
+    g.add((manif, RDF.type, V.BFFI.Manifestation))
+    g.add((manif, V.BFFI.expressionManifested, expr))
+    g.add((manif, DCTERMS.identifier, Literal("bD")))
+
+    contrib = URIRef("urn:contrib/dedup")
+    agent = URIRef("urn:agent/dedup")
+    role_bnode = BNode()
+    role_uri = URIRef("http://id.loc.gov/vocabulary/relators/aut")
+    g.add((expr, V.BFFI.contribution, contrib))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Adrian, Esa")))
+    g.add((contrib, V.BF.role, role_bnode))
+    g.add((role_bnode, V.RDFS.label, Literal("kirjoittaja", lang="fi")))
+    g.add((contrib, V.BF.role, role_uri))
+    # LoC label that the converter would otherwise pick as fallback
+    g.add((role_uri, SKOS.prefLabel, Literal("tekijä", lang="fi")))
+
+    rec = reconstruct_marc(g, manif)
+    df = rec.element.find("m:datafield[@tag='700']", NS)
+    assert df is not None
+    # $4 comes from the URI tail.
+    assert _subfield(df, "4") == "aut"
+    # $e is the BNode label (cataloguer's original word) — NOT the
+    # LoC vocab's @fi prefLabel "tekijä".
+    e_values = [sf.text for sf in df.findall("m:subfield", NS) if sf.attrib.get("code") == "e"]
+    assert e_values == ["kirjoittaja"]
+
+
+def test_100_emits_e_and_4_from_primary_contribution_role() -> None:
+    """MARC 100 ``$e`` (primary creator relator term) must be
+    reconstructed on the round-trip when the BFFI graph carries a
+    ``bf:role`` on the primary contribution — same shape as 700."""
+    g = Graph()
+    work = URIRef("urn:work/P")
+    expr = URIRef("urn:expr/P")
+    manif = URIRef("urn:manif/P")
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, SKOS.prefLabel, Literal("X", lang="fi")))
+    g.add((work, V.BFFI.hasExpression, expr))
+    g.add((expr, RDF.type, V.BFFI.Expression))
+    g.add((expr, V.BFFI.expressionOf, work))
+    g.add((manif, RDF.type, V.BFFI.Manifestation))
+    g.add((manif, V.BFFI.expressionManifested, expr))
+    g.add((manif, DCTERMS.identifier, Literal("bP")))
+
+    contrib = URIRef("urn:contrib/P")
+    agent = URIRef("urn:agent/P")
+    role_bnode = BNode()
+    g.add((work, V.BFFI.contribution, contrib))
+    g.add((contrib, RDF.type, V.BFFI.PrimaryContribution))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Krohn, Aino")))
+    g.add((contrib, V.BF.role, role_bnode))
+    g.add((role_bnode, V.RDFS.label, Literal("kirjoittaja", lang="fi")))
+    g.add(
+        (
+            contrib,
+            V.BF.role,
+            URIRef("http://id.loc.gov/vocabulary/relators/aut"),
+        )
+    )
+
+    rec = reconstruct_marc(g, manif)
+    df = rec.element.find("m:datafield[@tag='100']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Krohn, Aino"
+    assert _subfield(df, "e") == "kirjoittaja"
+    assert _subfield(df, "4") == "aut"
+
+
 def test_907_emits_helmet_bib_id_in_sierra_display_form(minimal_record: ET.Element) -> None:
     df = _datafield(minimal_record, "907")
     assert df is not None

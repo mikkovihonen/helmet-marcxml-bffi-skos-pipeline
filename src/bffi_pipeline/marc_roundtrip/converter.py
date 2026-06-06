@@ -296,11 +296,47 @@ class _Reconstructor:
                 label = self._first_label(agent)
                 if not label:
                     continue
+                role_subs = self._collect_role_subs(contrib)
                 # 100 ind1=1 ("surname"-form name) is the dominant
                 # cataloguer choice for Helmet personal names. ind2 is
                 # undefined in current MARC ⇒ blank.
-                self._emit_datafield(record, "100", ("a", label), ind1="1")
+                self._emit_datafield(record, "100", ("a", label), *role_subs, ind1="1")
                 return  # only one primary
+
+    def _collect_role_subs(self, contrib: Node) -> list[tuple[str, str]]:
+        """Walk all ``bf:role`` triples on ``contrib`` and return the
+        ordered ``$4`` / ``$e`` subfield pairs.
+
+        Shapes handled:
+          - URIRef role (a LoC relator URI). Emits ``$4`` from the URI
+            tail (the relator code). Provides a fallback ``$e`` from
+            the URI's prefLabel in the merged graph.
+          - BNode role with ``rdfs:label``. Provides the preferred
+            ``$e`` — the cataloguer's original Finnish / Swedish term.
+
+        When both shapes coexist on the same contribution (the post-M3
+        relator-term enrichment pass added the URI alongside the
+        original blank node), prefer the BNode label for ``$e`` and
+        suppress the URI's label fallback so we don't emit ``$e``
+        twice. ``$4`` is taken from the URI in either case.
+        """
+        code: str | None = None
+        uri_label: str | None = None
+        bnode_label: str | None = None
+        for role in self.graph.objects(contrib, V.BF.role):
+            if isinstance(role, URIRef):
+                code = code or str(role).rsplit("/", 1)[-1]
+                if uri_label is None:
+                    uri_label = self._loc_label(role, lang_pref=("fi", "sv", "en"))
+            elif bnode_label is None:
+                bnode_label = self._first_label(role)
+        subs: list[tuple[str, str]] = []
+        if code is not None:
+            subs.append(("4", code))
+        chosen_label = bnode_label or uri_label
+        if chosen_label:
+            subs.append(("e", chosen_label))
+        return subs
 
     def _first_label(self, node: Node) -> str | None:
         for prop in (V.RDFS.label, SKOS.prefLabel):
@@ -671,27 +707,7 @@ class _Reconstructor:
                 label = self._first_label(agent)
                 if not label:
                     continue
-                role_subs: list[tuple[str, str]] = []
-                # Role can be:
-                #  - URIRef: a LoC relator URI like .../relators/trl. We
-                #    emit $4 from the URI tail (code) and $e from the
-                #    URI's prefLabel (looked up in whatever graph the
-                #    converter was handed — the runner merges the
-                #    relators vocab dump so URI labels resolve).
-                #  - BNode: M3's contrib cascade for cataloguer-typed
-                #    free-text roles ($e from source MARC 700 $e).
-                #    Carries an ``rdfs:label`` directly; we emit only
-                #    $e (the original didn't carry a relator code).
-                for role in self.graph.objects(contrib, V.BF.role):
-                    if isinstance(role, URIRef):
-                        role_subs.append(("4", str(role).rsplit("/", 1)[-1]))
-                        relator_term = self._loc_label(role, lang_pref=("fi", "sv", "en"))
-                        if relator_term:
-                            role_subs.append(("e", relator_term))
-                    else:
-                        free_text = self._first_label(role)
-                        if free_text:
-                            role_subs.append(("e", free_text))
+                role_subs = self._collect_role_subs(contrib)
                 tag = self._added_entry_tag(agent)
                 self._emit_datafield(record, tag, ("a", label), *role_subs, ind1="1")
 
