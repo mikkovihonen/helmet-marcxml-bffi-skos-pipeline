@@ -455,11 +455,13 @@ def test_run_lifts_mads_authority_to_skos_concept_with_multilang_label(
     put = next(r for r in rec.requests if r.method == "PUT")
     body = put.body or b""
     # The body must declare the URI as skos:Concept (not just mads:Authority)
-    # and carry skos:prefLabel under each project UI language.
+    # and carry skos:prefLabel under each project UI language. For known
+    # RDA URIs the fi/sv labels use NLF-sourced translations; for
+    # uncovered URIs the English label is reused under fi/sv tags.
     assert b"skos:Concept" in body
     assert b'"unmediated"@en' in body
-    assert b'"unmediated"@fi' in body
-    assert b'"unmediated"@sv' in body
+    assert "ilman välinettä".encode() in body  # NLF Finnish for mediaTypes/n
+    assert b"utan medel" in body  # NLF Swedish for mediaTypes/n
 
 
 # --- Gzipped Turtle dumps (LoC LCGFT / LCSH) ----------------------------

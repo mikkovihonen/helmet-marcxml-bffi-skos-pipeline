@@ -375,6 +375,60 @@ _RDFXML_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 
+#: Finnish + Swedish prefLabels for LoC RDA vocab URIs. Sourced from
+#: the National Library of Finland's Finnish RDA Toolkit terminology
+#: (Kansalliskirjasto, RDA-FI). Only the codes that actually appear
+#: in the 500-record Helmet smoke + the next-most-common surrounding
+#: codes are listed — uncovered URIs fall back to the English label
+#: with @fi / @sv tags (Skosmos still resolves them but renders the
+#: English string). Extend this map when a new code surfaces.
+#:
+#: Swedish translations are best-effort; the authoritative Swedish
+#: RDA Toolkit terminology is published by Kungliga biblioteket. If
+#: a cataloguer corrects a Swedish term, update it here.
+_RDA_LABEL_OVERRIDES: Final[dict[str, dict[str, str]]] = {
+    # mediaTypes
+    "http://id.loc.gov/vocabulary/mediaTypes/n": {"fi": "ilman välinettä", "sv": "utan medel"},
+    "http://id.loc.gov/vocabulary/mediaTypes/s": {"fi": "audio", "sv": "audio"},
+    "http://id.loc.gov/vocabulary/mediaTypes/v": {"fi": "video", "sv": "video"},
+    "http://id.loc.gov/vocabulary/mediaTypes/c": {"fi": "tietokone", "sv": "dator"},
+    "http://id.loc.gov/vocabulary/mediaTypes/h": {"fi": "mikromuoto", "sv": "mikroform"},
+    "http://id.loc.gov/vocabulary/mediaTypes/g": {"fi": "projisoitava", "sv": "projicerad"},
+    "http://id.loc.gov/vocabulary/mediaTypes/p": {"fi": "mikroskooppinen", "sv": "mikroskopisk"},
+    "http://id.loc.gov/vocabulary/mediaTypes/e": {"fi": "stereografinen", "sv": "stereografisk"},
+    "http://id.loc.gov/vocabulary/mediaTypes/x": {"fi": "muu", "sv": "annan"},
+    "http://id.loc.gov/vocabulary/mediaTypes/z": {"fi": "määrittelemätön", "sv": "ospecificerad"},
+    # carriers
+    "http://id.loc.gov/vocabulary/carriers/nc": {"fi": "nidos", "sv": "volym"},
+    "http://id.loc.gov/vocabulary/carriers/na": {"fi": "arkki", "sv": "blad"},
+    "http://id.loc.gov/vocabulary/carriers/nr": {"fi": "rulla", "sv": "rulle"},
+    "http://id.loc.gov/vocabulary/carriers/sd": {"fi": "äänilevy", "sv": "ljudskiva"},
+    "http://id.loc.gov/vocabulary/carriers/ss": {"fi": "äänikasetti", "sv": "ljudkassett"},
+    "http://id.loc.gov/vocabulary/carriers/vd": {"fi": "videolevy", "sv": "videoskiva"},
+    "http://id.loc.gov/vocabulary/carriers/vf": {"fi": "videokasetti", "sv": "videokassett"},
+    "http://id.loc.gov/vocabulary/carriers/vr": {"fi": "videokela", "sv": "videorulle"},
+    "http://id.loc.gov/vocabulary/carriers/cd": {"fi": "tietokonelevy", "sv": "datorskiva"},
+    "http://id.loc.gov/vocabulary/carriers/cr": {
+        "fi": "verkkoaineisto",
+        "sv": "online-resurs",
+    },
+    "http://id.loc.gov/vocabulary/carriers/ck": {"fi": "tietokonekortti", "sv": "datorkort"},
+    "http://id.loc.gov/vocabulary/carriers/ce": {
+        "fi": "tietokonelevykasetti",
+        "sv": "datorskivkassett",
+    },
+    "http://id.loc.gov/vocabulary/carriers/ca": {
+        "fi": "tietokonenauhakasetti",
+        "sv": "datorbandkassett",
+    },
+    "http://id.loc.gov/vocabulary/carriers/ch": {
+        "fi": "tietokonepiirikasetti",
+        "sv": "datorchipkassett",
+    },
+    "http://id.loc.gov/vocabulary/carriers/cz": {"fi": "muu", "sv": "annan"},
+}
+
+
 def _lift_mads_to_skos(graph: Graph) -> None:
     """In-place: lift LoC MADS-shaped authority data to SKOS.
 
@@ -385,11 +439,14 @@ def _lift_mads_to_skos(graph: Graph) -> None:
     a MADS-only graph shows URIs as ``prefix:code`` instead of the
     label text. This helper dual-types every ``mads:Authority`` as
     ``skos:Concept`` and lifts ``mads:authoritativeLabel`` to
-    ``skos:prefLabel`` tagged with ``@en``, ``@fi``, and ``@sv`` (same
-    English string in all three tags — the data is English-only, but
-    declaring the label under all three project UI languages lets
-    Skosmos's cross-vocab label lookup resolve from a Finnish /
-    Swedish concept page that links into a MADS vocab).
+    ``skos:prefLabel`` tagged ``@en``.
+
+    For URIs in :data:`_RDA_LABEL_OVERRIDES` the fi/sv prefLabels use
+    the project's NLF-sourced Finnish / Swedish RDA terminology; for
+    URIs without an override the English label is reused under @fi /
+    @sv tags so Skosmos's cross-vocab lookup still resolves from
+    Finnish / Swedish pages (rendering the English string when no
+    local translation exists).
 
     No-op on graphs that don't contain ``mads:Authority``.
     """
@@ -399,10 +456,12 @@ def _lift_mads_to_skos(graph: Graph) -> None:
     MADS = Namespace("http://www.loc.gov/mads/rdf/v1#")
     for s in list(graph.subjects(RDF.type, MADS.Authority)):
         graph.add((s, RDF.type, SKOS.Concept))
+        overrides = _RDA_LABEL_OVERRIDES.get(str(s), {})
         for label in graph.objects(s, MADS.authoritativeLabel):
             text = str(label)
-            for lang in ("en", "fi", "sv"):
-                graph.add((s, SKOS.prefLabel, Literal(text, lang=lang)))
+            graph.add((s, SKOS.prefLabel, Literal(text, lang="en")))
+            graph.add((s, SKOS.prefLabel, Literal(overrides.get("fi", text), lang="fi")))
+            graph.add((s, SKOS.prefLabel, Literal(overrides.get("sv", text), lang="sv")))
 
 
 def _download_dump(
