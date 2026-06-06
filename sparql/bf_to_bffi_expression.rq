@@ -23,6 +23,8 @@ PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 CONSTRUCT {
   ?exprURI a bffi:Expression ;
            bffi:expressionOf ?workURI ;
+           bffi:uniformTitleHub ?uniformTitleHub ;
+           bffi:variantTitle ?variantTitle ;
            bffi:language     ?language ;
            bffi:content      ?contentType ;
            bffi:title        ?title ;
@@ -44,6 +46,10 @@ CONSTRUCT {
   ?otherRole a         bf:Role ;
              rdfs:label ?otherRoleLabel .
   ?contentType rdfs:label ?contentTypeLabel .
+  ?uniformTitleHub a bf:Hub ;
+                   bflc:marcKey ?uniformTitleMarcKey .
+  ?variantTitle a bf:VariantTitle ;
+                bf:mainTitle ?variantMainTitle .
 }
 # P-36 Phase A: bf:role propagation (URI form for cataloguer $4 +
 # blank-node-with-rdfs:label form for $e free-text) routes via the
@@ -128,6 +134,30 @@ WHERE {
   OPTIONAL {
     ?bfWork bf:title ?t . ?t bf:mainTitle ?exprLabel .
     BIND( ?t AS ?title )
+  }
+
+  # MARC 240 (uniform title) lands in BIBFRAME as
+  # ``bf:Work → bf:expressionOf → bf:Hub (#Hub240-N)``. The Hub
+  # carries a ``bflc:marcKey`` with the combined source MARC 1XX +
+  # 240 subfield string (e.g.
+  # ``1001 $aMorosinotto, Davide$tGrandissimi.$n2,$pLeonardo da Vincei…$lVenäjä``).
+  # Round-trip converter parses ``$t``/``$n``/``$p``/``$l`` from
+  # marcKey to emit MARC 240 ``$a``/``$n``/``$p``/``$l``.
+  OPTIONAL {
+    ?bfWork bf:expressionOf ?uniformTitleHub .
+    ?uniformTitleHub a bf:Hub .
+    OPTIONAL { ?uniformTitleHub bflc:marcKey ?uniformTitleMarcKey }
+  }
+
+  # MARC 246 (varying form of title) lands as
+  # ``bf:Work → bf:title → bf:VariantTitle → bf:mainTitle``. The
+  # ``a bf:VariantTitle`` typing distinguishes it from the main
+  # ``bf:Title`` block (which became 245 above). Single ``$a`` for
+  # the variant title.
+  OPTIONAL {
+    ?bfWork bf:title ?variantTitle .
+    ?variantTitle a bf:VariantTitle ;
+                  bf:mainTitle ?variantMainTitle .
   }
 
   # P-45 commit 2: Helmet identifier moved from Expression to

@@ -287,7 +287,9 @@ class _Reconstructor:
         self._emit_helmet_source_marker(record)  # 040 synth marker
         self._emit_languages(record)  # 041
         self._emit_primary_contribution(record)  # 100
+        self._emit_uniform_title(record)  # 240
         self._emit_title(record)  # 245
+        self._emit_variant_title(record)  # 246
         self._emit_edition_statement(record)  # 250
         self._emit_publication_statement(record)  # 260
         self._emit_extent_and_dimensions(record)  # 300
@@ -757,6 +759,52 @@ class _Reconstructor:
         if labels_by_lang:
             return next(iter(labels_by_lang.values()))
         return None
+
+    def _emit_uniform_title(self, record: Element) -> None:
+        """MARC 240 — uniform title for the work. Source data lives
+        on a per-record ``bf:Hub`` (``#Hub240-N``) attached to the
+        Expression via ``bffi:uniformTitleHub``; the Hub carries a
+        ``bflc:marcKey`` with the combined 1XX + 240 subfield
+        structure (e.g. ``1001 $aAuthor$tTitle$n2,$pPart$lLang``).
+        We parse marcKey for ``$t``/``$n``/``$p``/``$l`` and map
+        to MARC 240 ``$a``/``$n``/``$p``/``$l``. ind1=1 (title
+        traced), ind2=0 (no nonfiling characters).
+        """
+        expr = self.expression
+        if expr is None:
+            return
+        for hub in self.graph.objects(expr, V.BFFI.uniformTitleHub):
+            for mk in self.graph.objects(hub, V.BFLC.marcKey):
+                if not isinstance(mk, Literal):
+                    continue
+                # marcKey carries 100+240 combined; we want $t/$n/$p/$l
+                # (the 240 subfields, NOT the 100 subfields $a/$e
+                # which route via _emit_primary_contribution).
+                parsed = _parse_marc_key_subfields(str(mk))
+                subs: list[tuple[str, str]] = []
+                for code, value in parsed:
+                    if code == "t":
+                        subs.append(("a", value))
+                    elif code in ("n", "p", "l"):
+                        subs.append((code, value))
+                if subs:
+                    self._emit_datafield(record, "240", *subs, ind1="1", ind2="0")
+                    break
+
+    def _emit_variant_title(self, record: Element) -> None:
+        """MARC 246 — varying form of title. Routed through
+        ``bffi:variantTitle`` → ``bf:VariantTitle`` blank node →
+        ``bf:mainTitle``. Single ``$a`` per row. ind1=3
+        (no note, added entry) is Helmet's dominant choice; ind2
+        blank (type of title unspecified)."""
+        expr = self.expression
+        if expr is None:
+            return
+        for variant in self.graph.objects(expr, V.BFFI.variantTitle):
+            for title in self.graph.objects(variant, V.BF.mainTitle):
+                if isinstance(title, Literal):
+                    self._emit_datafield(record, "246", ("a", str(title)), ind1="3")
+                    break
 
     def _emit_title(self, record: Element) -> None:
         work = self.work

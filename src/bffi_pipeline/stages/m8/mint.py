@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 from typing import Literal as LiteralType
+from typing import TypeGuard
 
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF
@@ -124,6 +125,8 @@ _EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
     V.BFFI.summary,
     V.BFFI.classification,
     V.BFFI.marcKey,
+    V.BFFI.uniformTitleHub,
+    V.BFFI.variantTitle,
 )
 
 
@@ -273,25 +276,59 @@ def _propagate_expression_passthrough(g: Graph, raw_graph: Graph) -> int:
     expressions = [
         e for e in raw_graph.subjects(RDF.type, V.BFFI.Expression) if isinstance(e, URIRef)
     ]
+    visited_uris: set[URIRef] = set()
     for expr in expressions:
         for predicate in _EXPRESSION_PASSTHROUGH_PREDICATES:
             for obj in raw_graph.objects(expr, predicate):
                 g.add((expr, predicate, obj))
                 count += 1
-                # Walk reachable blank-node subgraphs (bf:Title /
-                # bf:Note / etc.) verbatim.
-                if isinstance(obj, BNode):
-                    queue: list[BNode] = [obj]
-                    while queue:
-                        node = queue.pop()
-                        if node in visited_bnodes:
-                            continue
-                        visited_bnodes.add(node)
-                        for p2, o2 in raw_graph.predicate_objects(node):
-                            g.add((node, p2, o2))
-                            count += 1
-                            if isinstance(o2, BNode) and o2 not in visited_bnodes:
-                                queue.append(o2)
+                if _is_propagatable_subject(obj):
+                    count += _copy_subgraph(g, raw_graph, obj, visited_bnodes, visited_uris)
+    return count
+
+
+def _is_propagatable_subject(node: object) -> TypeGuard[BNode | URIRef]:
+    """True for blank nodes and per-record raw-bib URIs that the
+    Expression passthrough should follow. Raw-bib URIs (e.g.
+    ``#Hub240-N``) carry per-record subgraphs that the other
+    propagation passes don't reach."""
+    if isinstance(node, BNode):
+        return True
+    return isinstance(node, URIRef) and str(node).startswith(_RAW_BIB_URI_PREFIX)
+
+
+def _copy_subgraph(
+    g: Graph,
+    raw_graph: Graph,
+    seed: BNode | URIRef,
+    visited_bnodes: set[BNode],
+    visited_uris: set[URIRef],
+) -> int:
+    """Copy ``seed``'s reachable subgraph (predicates + nested
+    propagatable objects) from ``raw_graph`` into ``g``. Mutates
+    the visited sets in place so callers can dedupe across multiple
+    seeds. Returns triples copied."""
+    count = 0
+    queue: list[BNode | URIRef] = [seed]
+    while queue:
+        node = queue.pop()
+        if isinstance(node, BNode):
+            if node in visited_bnodes:
+                continue
+            visited_bnodes.add(node)
+        elif node in visited_uris:
+            continue
+        else:
+            visited_uris.add(node)
+        for p2, o2 in raw_graph.predicate_objects(node):
+            g.add((node, p2, o2))
+            count += 1
+            if (
+                _is_propagatable_subject(o2)
+                and o2 not in visited_bnodes
+                and (not isinstance(o2, URIRef) or o2 not in visited_uris)
+            ):
+                queue.append(o2)
     return count
 
 

@@ -629,6 +629,73 @@ def test_245_emits_responsibility_statement_in_c_subfield() -> None:
     assert _subfield(df, "c") == "THOMAS PETER KRAG"
 
 
+def test_240_emits_uniform_title_with_a_n_p_l_from_hub_marcKey() -> None:
+    """MARC 240 uniform title: bf:Hub on the Expression via
+    ``bffi:uniformTitleHub`` carries a ``bflc:marcKey`` with the
+    combined 1XX + 240 subfields. Converter parses ``$t``/``$n``/
+    ``$p``/``$l`` and maps to MARC 240 ``$a``/``$n``/``$p``/``$l``.
+    The b26164413 Russian-translation case."""
+    g = _build_minimal_graph()
+    hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b26164413#Hub240-14")
+    g.add((EXPR, V.BFFI.uniformTitleHub, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal(
+                "1001 $aMorosinotto, Davide,$ekirjoittaja."
+                "$tGrandissimi.$n2,$pLeonardo da Vincei, genio senza tempo.$lVenäjä"
+            ),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='240']", NS)
+    assert df is not None
+    assert df.attrib["ind1"] == "1"
+    assert df.attrib["ind2"] == "0"
+    assert _subfield(df, "a") == "Grandissimi."
+    assert _subfield(df, "n") == "2,"
+    assert _subfield(df, "p") == "Leonardo da Vincei, genio senza tempo."
+    assert _subfield(df, "l") == "Venäjä"
+
+
+def test_240_skipped_when_no_uniform_title_hub() -> None:
+    """No 240 emitted when the Expression has no
+    ``bffi:uniformTitleHub`` — silent skip, not a synth row."""
+    g = _build_minimal_graph()
+    rec = reconstruct_marc(g, MANIF)
+    assert rec.element.find("m:datafield[@tag='240']", NS) is None
+
+
+def test_246_emits_variant_title_from_bf_VariantTitle() -> None:
+    """MARC 246 varying-form title: ``bffi:variantTitle ->
+    bf:VariantTitle -> bf:mainTitle``. Single ``$a`` with
+    ind1=3 (no note, added entry)."""
+    g = _build_minimal_graph()
+    variant = BNode()
+    g.add((EXPR, V.BFFI.variantTitle, variant))
+    g.add((variant, RDF.type, V.BF.VariantTitle))
+    g.add(
+        (
+            variant,
+            V.BF.mainTitle,
+            Literal("Leonardo da Vino : genij na vse vremena"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='246']", NS)
+    assert df is not None
+    assert df.attrib["ind1"] == "3"
+    assert _subfield(df, "a") == "Leonardo da Vino : genij na vse vremena"
+
+
+def test_246_skipped_when_no_variant_title() -> None:
+    g = _build_minimal_graph()
+    rec = reconstruct_marc(g, MANIF)
+    assert rec.element.find("m:datafield[@tag='246']", NS) is None
+
+
 def test_264_emits_structured_publication_with_a_b_c_subfields() -> None:
     """Structured ``bffi:provisionActivity`` bnode → one MARC 264 row
     with $a (place), $b (agent), $c (date). ind2 derived from the
