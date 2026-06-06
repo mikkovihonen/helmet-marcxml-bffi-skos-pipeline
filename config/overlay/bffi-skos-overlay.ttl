@@ -24,11 +24,14 @@
 # bffi:Expression typing remains.
 # ---------------------------------------------------------------------------
 
-bffi:Work       rdfs:subClassOf skos:Concept ;
-                rdfs:label "Work"@en, "Teos"@fi, "Verk"@sv .
+bffi:Work          rdfs:subClassOf skos:Concept ;
+                   rdfs:label "Work"@en, "Teos"@fi, "Verk"@sv .
 
-bffi:Expression rdfs:subClassOf skos:Concept ;
-                rdfs:label "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv .
+bffi:Expression    rdfs:subClassOf skos:Concept ;
+                   rdfs:label "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv .
+
+bffi:Manifestation rdfs:subClassOf skos:Concept ;
+                   rdfs:label "Manifestation"@en, "Manifestaatio"@fi, "Manifestation"@sv .
 
 # ---------------------------------------------------------------------------
 # Hierarchical relations ⊑ SKOS — the Skosmos hierarchy view follows
