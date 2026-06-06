@@ -110,12 +110,12 @@ def _build_minimal_graph() -> Graph:
     subject_yso = URIRef("http://www.yso.fi/onto/yso/p1234")
     g.add((WORK, V.BFFI.subject, subject_yso))
     g.add((subject_yso, V.RDFS.label, Literal("sodat")))
-    g.add((subject_yso, V.BF.source, Literal("yso/fin")))
+    g.add((subject_yso, V.BF.source, Literal("yso")))
 
     genre_slm = URIRef("http://urn.fi/URN:NBN:fi:au:slm:s1044")
     g.add((WORK, V.BFFI.genreForm, genre_slm))
     g.add((genre_slm, V.RDFS.label, Literal("käännökset")))
-    g.add((genre_slm, V.BF.source, Literal("slm/fin")))
+    g.add((genre_slm, V.BF.source, Literal("slm")))
 
     return g
 
@@ -259,16 +259,15 @@ def test_650_emits_yso_subject_with_authority_uri(minimal_record: ET.Element) ->
     assert df is not None
     assert df.attrib["ind2"] == "7"
     assert _subfield(df, "a") == "sodat"
-    assert _subfield(df, "2") == "yso/fin"
+    assert _subfield(df, "2") == "yso"
     assert _subfield(df, "0") == "http://www.yso.fi/onto/yso/p1234"
 
 
-def test_650_emits_kauno_fin_source_from_subject_uri_namespace() -> None:
-    """marc2bibframe2 strips the ``/fin`` language suffix when
-    normalising source ``$2 kauno/fin`` to the LoC subjectSchemes
-    URI ``<…/subjectSchemes/kauno>``. The converter recovers the
-    full ``kauno/fin`` from the subject URI's own namespace
-    (``http://www.yso.fi/onto/kauno/…``), not bf:source."""
+def test_650_emits_kauno_source_from_subject_uri_namespace() -> None:
+    """``bf:source`` URI is lossy (``<…/subjectSchemes/kauno>``); the
+    converter recovers the cataloguer-typed ``$2 kauno`` from the
+    subject URI's own namespace (``http://www.yso.fi/onto/kauno/…``).
+    Language suffix dropped per modern Finto / RDA convention."""
     g = _build_minimal_graph()
     kauno_uri = URIRef("http://www.yso.fi/onto/kauno/p4013")
     g.add((WORK, V.BFFI.subject, kauno_uri))
@@ -287,12 +286,13 @@ def test_650_emits_kauno_fin_source_from_subject_uri_namespace() -> None:
         for df in rec.element.findall("m:datafield[@tag='650']", NS)
         if _subfield(df, "0") == str(kauno_uri)
     )
-    assert _subfield(df, "2") == "kauno/fin"
+    assert _subfield(df, "2") == "kauno"
 
 
 def test_650_emits_yso_paikat_source_for_geographic_subject() -> None:
-    """yso-paikat namespace → ``yso/fin`` source code (cataloguer
-    convention: $2 yso/fin even for geographic subjects in YSO-paikat)."""
+    """yso-paikat namespace → ``yso`` source code (cataloguer
+    convention: $2 yso even for geographic subjects in YSO-paikat,
+    language suffix dropped)."""
     g = _build_minimal_graph()
     paikat = URIRef("http://www.yso.fi/onto/yso-paikat/p105076")
     g.add((WORK, V.BFFI.subject, paikat))
@@ -303,11 +303,12 @@ def test_650_emits_yso_paikat_source_for_geographic_subject() -> None:
         for df in rec.element.findall("m:datafield[@tag='651']", NS)
         if _subfield(df, "0") == str(paikat)
     )
-    assert _subfield(df, "2") == "yso/fin"
+    assert _subfield(df, "2") == "yso"
 
 
-def test_650_emits_bella_swe_source_for_swedish_fiction_namespace() -> None:
-    """bella (Swedish fiction-subject vocab) → bella/swe."""
+def test_650_emits_bella_source_for_swedish_fiction_namespace() -> None:
+    """bella (Swedish fiction-subject vocab) → bella (no /swe
+    suffix; namespace already encodes the language)."""
     g = _build_minimal_graph()
     bella = URIRef("http://www.yso.fi/onto/bella/p1234")
     g.add((WORK, V.BFFI.subject, bella))
@@ -318,13 +319,12 @@ def test_650_emits_bella_swe_source_for_swedish_fiction_namespace() -> None:
         for df in rec.element.findall("m:datafield[@tag='650']", NS)
         if _subfield(df, "0") == str(bella)
     )
-    assert _subfield(df, "2") == "bella/swe"
+    assert _subfield(df, "2") == "bella"
 
 
-def test_655_emits_slm_fin_source_for_slm_genre_form() -> None:
+def test_655_emits_slm_source_for_slm_genre_form() -> None:
     """SLM (Suomalainen lajityyppi- ja muotosanasto) URI →
-    ``slm/fin`` (genre/form schemes still use the ``/fin`` suffix
-    on 655 $2 by Helmet cataloguer convention)."""
+    ``slm`` (modern Finto / RDA form; language suffix dropped)."""
     g = _build_minimal_graph()
     slm = URIRef("http://urn.fi/URN:NBN:fi:au:slm:s9999")
     g.add((WORK, V.BFFI.genreForm, slm))
@@ -335,7 +335,7 @@ def test_655_emits_slm_fin_source_for_slm_genre_form() -> None:
         for df in rec.element.findall("m:datafield[@tag='655']", NS)
         if _subfield(df, "0") == str(slm)
     )
-    assert _subfield(df, "2") == "slm/fin"
+    assert _subfield(df, "2") == "slm"
 
 
 def test_raw_bib_subject_with_skos_exactmatch_yields_only_authority_row() -> None:
@@ -441,7 +441,7 @@ def test_655_emits_slm_genre_form(minimal_record: ET.Element) -> None:
     assert df is not None
     assert df.attrib["ind2"] == "7"
     assert _subfield(df, "a") == "käännökset"
-    assert _subfield(df, "2") == "slm/fin"
+    assert _subfield(df, "2") == "slm"
     assert _subfield(df, "0") == "http://urn.fi/URN:NBN:fi:au:slm:s1044"
 
 

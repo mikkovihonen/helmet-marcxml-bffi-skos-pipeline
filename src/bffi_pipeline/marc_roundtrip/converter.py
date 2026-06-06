@@ -107,29 +107,29 @@ _ORG_URI_TO_MARC_CODE: Final[dict[str, str]] = {
 }
 
 #: Subject / genre-form URI namespace → cataloguer MARC ``$2`` code.
-#: marc2bibframe2 strips the ``/fin``/``/swe`` language suffix when
-#: normalising the source ``$2 kauno/fin`` to a LoC
-#: ``<…/subjectSchemes/kauno>`` URI, but the subject URI's own
-#: namespace IS the authoritative reverse-mapping target (and
-#: encodes the conventional language for the namespace — kauno is
-#: Finnish, bella is its Swedish counterpart, etc.).
+#: Language suffix dropped (``$2 kauno`` not ``$2 kauno/fin``) per
+#: modern Finto / RDA convention — older Helmet records used the
+#: ``/fin``/``/swe`` long form but the cataloguer-team prefers the
+#: unsuffixed code going forward. The URI namespace already encodes
+#: the conventional language for language-specific vocabs (kauno =
+#: Finnish, bella = Swedish counterpart).
 #:
 #: Order matters: longer prefixes (``yso-paikat`` / ``yso-aika``)
 #: are checked before the bare ``yso`` prefix. Python dict ordering
 #: is insertion-order, so the iteration in
 #: ``_marc_source_from_uri_namespace`` honours this.
 _URI_NAMESPACE_TO_MARC_SOURCE: Final[dict[str, str]] = {
-    "http://www.yso.fi/onto/yso-paikat/": "yso/fin",
-    "http://www.yso.fi/onto/yso-aika/": "yso/fin",
-    "http://www.yso.fi/onto/kauno/": "kauno/fin",
-    "http://www.yso.fi/onto/musa/": "musa/fin",
-    "http://www.yso.fi/onto/bella/": "bella/swe",
-    "http://www.yso.fi/onto/cilla/": "cilla/swe",
-    "http://www.yso.fi/onto/allars/": "allars/swe",
+    "http://www.yso.fi/onto/yso-paikat/": "yso",
+    "http://www.yso.fi/onto/yso-aika/": "yso",
+    "http://www.yso.fi/onto/kauno/": "kauno",
+    "http://www.yso.fi/onto/musa/": "musa",
+    "http://www.yso.fi/onto/bella/": "bella",
+    "http://www.yso.fi/onto/cilla/": "cilla",
+    "http://www.yso.fi/onto/allars/": "allars",
     "http://www.yso.fi/onto/kaunokki/": "kaunokki",
-    "http://www.yso.fi/onto/yso/": "yso/fin",
-    "http://urn.fi/URN:NBN:fi:au:slm:": "slm/fin",
-    "http://urn.fi/URN:NBN:fi:au:slm-swe:": "slm/swe",
+    "http://www.yso.fi/onto/yso/": "yso",
+    "http://urn.fi/URN:NBN:fi:au:slm:": "slm",
+    "http://urn.fi/URN:NBN:fi:au:slm-swe:": "slm",
     "http://id.loc.gov/authorities/subjects/": "lcsh",
     "http://id.loc.gov/authorities/names/": "lcnaf",
     "http://id.loc.gov/vocabulary/genreFormSchemes/lcgft/": "lcgft",
