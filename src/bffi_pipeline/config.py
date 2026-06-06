@@ -37,6 +37,10 @@ class Settings(BaseSettings):
         default="http://urn.fi/URN:NBN:fi:bib:expression:",
         alias="BFFI_EXPRESSION_NAMESPACE",
     )
+    manifestation_namespace: str = Field(
+        default="http://urn.fi/URN:NBN:fi:bib:manifestation:",
+        alias="BFFI_MANIFESTATION_NAMESPACE",
+    )
     helmet_source_uri: str = Field(
         default="http://urn.fi/URN:NBN:fi:bib:source:helmet",
         alias="BFFI_HELMET_SOURCE_URI",

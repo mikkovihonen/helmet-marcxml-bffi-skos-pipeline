@@ -26,6 +26,7 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 
 - Work URI namespace: `http://urn.fi/URN:NBN:fi:bib:work:`
 - Expression URI namespace: `http://urn.fi/URN:NBN:fi:bib:expression:`
+- Manifestation URI namespace: `http://urn.fi/URN:NBN:fi:bib:manifestation:` (1:1 with Helmet bib records; no canonical/raw split — the raw URI minted at M3 IS the canonical URI because Manifestations don't merge)
 - Helmet source URI (used in `bf:identifiedBy`): `http://urn.fi/URN:NBN:fi:bib:source:helmet`
 - Named-graph base for Fuseki: `http://urn.fi/URN:NBN:fi:bib:graph:`
 - `bffi-prov` namespace: `http://urn.fi/URN:NBN:fi:schema:bffi-prov#` (provenance vocabulary — Activity classes, decision/confidence/rationale predicates, stage tags). Full `bffi-prov:stage` enum and Activity class list live in `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` § 8 (archived spec; treat enum additions as code changes — extend `STAGE_*` constants in `src/bffi_pipeline/stages/judge.py` and document the new value in the relevant active plan).

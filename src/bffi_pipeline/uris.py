@@ -1,4 +1,4 @@
-"""Deterministic URI minting for BFFI Works and Expressions.
+"""Deterministic URI minting for BFFI Works, Expressions, and Manifestations.
 
 All URI construction in this project goes through this module — never
 concatenate URI strings elsewhere (see ``CLAUDE.md`` "Conventions"). URIs
@@ -18,10 +18,15 @@ BIBFRAME→BFFI hop):
   language editions.
 
 * **Raw** (M3, used by the BIBFRAME-to-BFFI CONSTRUCT pair):
-  :func:`mint_raw_work_uri` / :func:`mint_raw_expression_uri` hash the
-  source ``bf:Work`` URI string. The same XSLT input always produces the
+  :func:`mint_raw_work_uri` / :func:`mint_raw_expression_uri` /
+  :func:`mint_raw_manifestation_uri` hash the source ``bf:Work`` /
+  ``bf:Instance`` URI string. The same XSLT input always produces the
   same raw BFFI URI on re-run; raw URIs are inputs to M8 and disappear
   from the canonical graph after merge.
+
+Manifestations are 1:1 with Helmet bib records (no merging — each
+record describes exactly one published embodiment), so there's no
+canonical mint variant for them; the raw URI IS the canonical URI.
 
 The SPARQL CONSTRUCTs in ``sparql/`` mint raw URIs via the Jena
 ``arq:sha1`` extension function. :func:`register_sparql_functions` makes
@@ -96,6 +101,20 @@ def mint_raw_expression_uri(bf_work_uri: str) -> str:
     return f"{get_settings().expression_namespace}{digest}"
 
 
+def mint_raw_manifestation_uri(bf_instance_uri: str) -> str:
+    """Mint a raw BFFI Manifestation URI from a source ``bf:Instance`` URI (M3).
+
+    Manifestations are 1:1 with Helmet bib records in our pipeline, so
+    each ``bf:Instance`` minted by marc2bibframe2 maps to exactly one
+    ``bffi:Manifestation`` — no canonical / raw distinction (no merge
+    step, unlike Works). The helper is named ``raw`` for naming
+    consistency with :func:`mint_raw_work_uri` even though there's no
+    paired ``mint_manifestation_uri`` canonical variant.
+    """
+    digest = hashlib.sha1(_normalize_uri(bf_instance_uri).encode("utf-8")).hexdigest()
+    return f"{get_settings().manifestation_namespace}{digest}"
+
+
 def _arq_sha1_impl(value: Any) -> Literal:
     """rdflib implementation of the Jena ``arq:sha1`` extension function."""
     return Literal(hashlib.sha1(str(value).encode("utf-8")).hexdigest())
@@ -118,6 +137,7 @@ def register_sparql_functions() -> None:
 __all__ = [
     "mint_expression_uri",
     "mint_raw_expression_uri",
+    "mint_raw_manifestation_uri",
     "mint_raw_work_uri",
     "mint_work_uri",
     "register_sparql_functions",
