@@ -176,6 +176,28 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://www.yso.fi/onto/musa/",
         languages=("fi",),
     ),
+    # MTS (Metatietosanasto) — Metadata Thesaurus. Loaded pre-emptively;
+    # not present in Helmet's 500-sample corpus but used by other Finnish
+    # libraries (archives, repositories) for administrative metadata
+    # like RDA content / media / carrier types, file formats, access
+    # conditions. ~4,434 concepts, 2.7 MB. Spans two domains:
+    #   - Topical: 1,458 ``skos:closeMatch yso:`` triples for concepts
+    #     that overlap with YSO (could canonicalise to YSO in a future
+    #     redirect, but not done here — MTS's RDA-side concepts
+    #     shouldn't get rebound to YSO).
+    #   - RDA-admin: 1,521 ``skos:exactMatch`` triples to RDA
+    #     vocabularies (rdaw, rdae, rdam, rdaa, rdai, rdact, etc.) for
+    #     content / media / carrier descriptors.
+    # The download URL uses the full vocab name in the path
+    # (``metatietosanasto`` not ``mts``), unlike most Finto vocabs;
+    # Finto API's short alias is ``mts`` but the on-disk dump is
+    # ``metatietosanasto-skos.ttl``.
+    FintoVocab(
+        vocab_id="mts",
+        dump_url="https://api.finto.fi/download/metatietosanasto/metatietosanasto-skos.ttl",
+        graph_uri="http://urn.fi/URN:NBN:fi:au:mts:",
+        languages=("fi", "sv", "en"),
+    ),
     # MARC Code List for Relators — not Finto-hosted but loaded the
     # same way so Skosmos renders the bf:role URIs the M3
     # contributor-extraction cascade emits (e.g. relators/trl) as

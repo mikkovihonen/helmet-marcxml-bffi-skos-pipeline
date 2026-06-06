@@ -48,6 +48,7 @@ VOCAB_LCSH: Final[str] = "lcsh"
 VOCAB_ALLARS: Final[str] = "allars"
 VOCAB_KAUNOKKI: Final[str] = "kaunokki"
 VOCAB_CHILDRENS_SUBJECTS: Final[str] = "childrensSubjects"
+VOCAB_MTS: Final[str] = "mts"
 
 #: Legacy-bridge source-vocabulary tags surfaced on ``LocalConceptHit``
 #: when the resolved URI was reached by following mapping triples from
@@ -118,6 +119,13 @@ _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
         # subset of LCSH. After LCSH because the general form usually
         # carries the same prefLabel and is the broader binding.
         (VOCAB_CHILDRENS_SUBJECTS, "http://id.loc.gov/authorities/childrensSubjects/"),
+        # MTS (Metatietosanasto) — Finnish Metadata Thesaurus. Last in
+        # the priority chain because MTS spans topical + RDA-aligned
+        # admin metadata; lexical matches against MTS prefLabels could
+        # mis-bind RDA-style descriptive metadata as topical subjects.
+        # Kept as a safety-net fallback for non-Helmet corpora that tag
+        # ``$2 mts``; not exercised in the Helmet smoke.
+        (VOCAB_MTS, "http://urn.fi/URN:NBN:fi:au:mts:"),
     ),
     "genre_form": (
         (VOCAB_KAUNO, "http://www.yso.fi/onto/kauno/"),
@@ -603,6 +611,7 @@ __all__ = [
     "VOCAB_KAUNOKKI",
     "VOCAB_LCGFT",
     "VOCAB_LCSH",
+    "VOCAB_MTS",
     "VOCAB_SLM",
     "VOCAB_VIA_ALLARS",
     "VOCAB_VIA_KAUNO",

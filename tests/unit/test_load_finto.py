@@ -314,6 +314,7 @@ def test_canonical_vocab_list_covers_expected_authority_vocabularies() -> None:
         "allars",
         "ysa",
         "musa",
+        "mts",
         "relators",
         "lcgft",
         "lcsh",

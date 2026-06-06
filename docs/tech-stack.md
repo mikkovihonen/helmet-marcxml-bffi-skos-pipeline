@@ -122,6 +122,7 @@ Loaded into Fuseki by `bffi-pipeline load-finto`. Each vocab lives in its own na
 | YSA | Legacy subject thesaurus (frozen 2019). Bridges to YSO via `skos:exactMatch` / `skos:closeMatch` triples consumed by the M9 legacy-mapping tier in `local_concept_resolver.py`. | `http://www.yso.fi/onto/ysa/` |
 | MUSA | Legacy Music + Visual Arts (CILLA merged in) subject headings (frozen 2019). Two-hop bridge to YSO via `dct:isReplacedBy` → YSA → `skos:exactMatch`. | `http://www.yso.fi/onto/musa/` |
 | KAUNOKKI | Fiction subjects (Finnish; legacy KAUNO with Swedish Bella sub-vocab). Internal `dct:isReplacedBy` only — no published bridge to KAUNO or YSO. Stays as a `kaunokki:` URI when matched. | `http://urn.fi/URN:NBN:fi:au:kaunokki:` |
+| MTS (Metatietosanasto) | Finnish Metadata Thesaurus — administrative metadata (RDA content/media/carrier types, file formats, access conditions). Loaded pre-emptively; **not used in Helmet's sampled subset** but tagged elsewhere as `$2 mts`. Last in subject tier-0 priority because MTS spans topical + RDA-admin domains; lexical hits stay as `mts:` URIs (no MTS→YSO redirect — RDA-side concepts shouldn't be canonicalised to YSO). | `http://urn.fi/URN:NBN:fi:au:mts:` |
 | LCSH | Subjects (LoC) | `http://id.loc.gov/authorities/subjects/` |
 | LCGFT | Genre/form (LoC) | `http://id.loc.gov/authorities/genreForms/` |
 | childrensSubjects | LoC children's subjects | `http://id.loc.gov/authorities/childrensSubjects/` |

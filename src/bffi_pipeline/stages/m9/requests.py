@@ -73,6 +73,13 @@ _SOURCE_TOKEN_TO_KIND: Final[tuple[tuple[str, AuthorityKind], ...]] = (
     ("musa", "subject"),
     ("cilla", "subject"),
     ("slm", "genre_form"),
+    # MTS (Metatietosanasto) — Finnish Metadata Thesaurus. Pre-emptive
+    # routing for non-Helmet corpora (Helmet doesn't tag $2 mts in the
+    # sampled subset). Routes to subject as the safest default; the
+    # RDA-aligned MTS concepts in tier-0 stay as their MTS URI because
+    # there's no MTS→YSO redirect (mts has bridges into both YSO and
+    # RDA vocabs, so unconditional canonicalisation isn't safe).
+    ("mts", "subject"),
 )
 
 
