@@ -12,7 +12,7 @@ to confirm no in-flight work has reshaped the round-trip surface.
 
 **Phase commits**:
 
-- Phase A (raw-URI-fragment lineage): `<unfilled>`
+- Phase A (raw-URI-fragment lineage): `3be50cf`
 - Phase B (synthetic lineage for flat Instance-side fields): `<unfilled>`
 - Phase C (diff comparator pairs by lineage marker first): `<unfilled>`
 
