@@ -12,8 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import RDF
+from rdflib import BNode, Graph, Literal, URIRef
+from rdflib.namespace import DCTERMS, RDF
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m10.skosify_run import (
@@ -137,6 +137,89 @@ def test_skosify_run_uses_committed_overlay_and_config_paths(
     # Sanity: the constants point at real files.
     assert DEFAULT_OVERLAY_PATH.is_file()
     assert DEFAULT_CONFIG_PATH.is_file()
+
+
+# --- Display-predicate synthesis (P-45) ---------------------------------
+
+
+def test_skosify_run_synthesises_dct_creator_for_primary_contribution(tmp_path: Path) -> None:
+    """BFFI 1.0.0 has no flat creator predicate — only the structured
+    ``bffi:contribution → bffi:PrimaryContribution → bffi:agent`` chain.
+    Skosify-time synthesis adds ``dct:creator`` on the Work pointing at
+    the agent, so Skosmos's default template can render the author
+    without traversing the blank-node chain. Canonical.ttl carries
+    only the BFFI shape; the dct:* triple lives only in the
+    Skosify-loaded output."""
+    AGENT = URIRef("urn:agent/tolstoy")
+    g = Graph()
+    work = URIRef(WORK)
+    expr = URIRef(EXPR)
+    contrib = BNode()
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, V.SKOS.prefLabel, Literal("Sota ja rauha", lang="fi")))
+    g.add((work, V.BFFI.hasExpression, expr))
+    g.add((work, V.BFFI.contribution, contrib))
+    g.add((contrib, RDF.type, V.BFFI.PrimaryContribution))
+    g.add((contrib, V.BFFI.agent, AGENT))
+    g.add((AGENT, V.RDFS.label, Literal("Tolstoy, Leo")))
+    g.add((expr, RDF.type, V.BFFI.Expression))
+    g.add((expr, V.BFFI.expressionOf, work))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    # Source canonical: NO dct:creator.
+    assert (work, DCTERMS.creator, AGENT) not in g
+    # Skosify output: dct:creator IS present.
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, DCTERMS.creator, AGENT) in skosified
+    # The structured BFFI chain is preserved alongside (blank-node IDs
+    # are rewritten on parse-round-trip, so look up by agent).
+    chain_agents = {
+        a
+        for c in skosified.objects(work, V.BFFI.contribution)
+        for a in skosified.objects(c, V.BFFI.agent)
+    }
+    assert AGENT in chain_agents
+
+
+def test_skosify_run_synthesises_dct_contributor_for_non_primary_contribution(
+    tmp_path: Path,
+) -> None:
+    """Non-primary contributions (translators / illustrators / performers)
+    on an Expression get a flat ``dct:contributor`` triple at Skosify
+    time. The BFFI source has only a ``bffi:Contribution`` node (no
+    ``bffi:PrimaryContribution`` typing)."""
+    AGENT = URIRef("urn:agent/adrian-translator")
+    g = Graph()
+    work = URIRef(WORK)
+    expr = URIRef(EXPR)
+    contrib = BNode()
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, V.SKOS.prefLabel, Literal("Sota ja rauha", lang="fi")))
+    g.add((work, V.BFFI.hasExpression, expr))
+    g.add((expr, RDF.type, V.BFFI.Expression))
+    g.add((expr, V.BFFI.expressionOf, work))
+    g.add((expr, V.BFFI.contribution, contrib))
+    # Note: NOT typed PrimaryContribution — base Contribution only.
+    g.add((contrib, RDF.type, V.BFFI.Contribution))
+    g.add((contrib, V.BFFI.agent, AGENT))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    # Non-primary → dct:contributor (NOT dct:creator).
+    assert (expr, DCTERMS.contributor, AGENT) in skosified
+    assert (expr, DCTERMS.creator, AGENT) not in skosified
 
 
 # --- Idempotency ---------------------------------------------------------

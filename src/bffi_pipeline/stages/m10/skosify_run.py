@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from rdflib import Graph
+from rdflib.namespace import DCTERMS, RDF
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.observability.events import emit_if_active
@@ -106,6 +107,54 @@ def _count_dual_typed(g: Graph, bffi_class: Any) -> int:
     return count
 
 
+def _synthesise_display_predicates(graph: Graph) -> tuple[int, int]:
+    """Add flat ``dct:creator`` / ``dct:contributor`` triples to the
+    Skosmos-loaded graph so the standard concept-page template renders
+    authors and contributors.
+
+    BFFI 1.0.0's authorship model is the structured chain
+    ``<entity> bffi:contribution <Contribution> ; <Contribution>
+    bffi:agent <Agent>``. ``canonical.ttl`` carries that shape verbatim
+    and stays BFFI-spec-clean. Skosmos's default Twig template, however,
+    only renders direct outgoing properties on a concept page — it
+    does not traverse blank-node ``bffi:contribution`` chains — so
+    without a flat predicate the author exists in the graph but is
+    invisible in the UI.
+
+    The synthesis here lives in M10 / Skosify (not M8 / merge) so the
+    canonical graph the project would contribute to NLF carries only
+    BFFI-canonical triples; the Dublin Core display predicates appear
+    only in the Skosmos-loaded artefact (``canonical-skosified.ttl``).
+
+    Rules:
+      - For every ``?s bffi:contribution ?c`` where ``?c`` is typed
+        ``bffi:PrimaryContribution``: emit ``?s dct:creator ?agent``
+        with the agent URI taken from ``?c bffi:agent ?agent``.
+        ``?s`` is the canonical Work in practice.
+      - For every ``?s bffi:contribution ?c`` NOT typed
+        ``PrimaryContribution`` (i.e. ``bffi:Contribution`` base): emit
+        ``?s dct:contributor ?agent``. ``?s`` is the canonical
+        Expression in practice (M3-cascade-emitted translators,
+        illustrators, performers).
+
+    Returns the (creators_added, contributors_added) counts for the
+    summary.
+    """
+    creators = 0
+    contributors = 0
+    for s, contrib in graph.subject_objects(V.BFFI.contribution):
+        contrib_types = set(graph.objects(contrib, RDF.type))
+        is_primary = V.BFFI.PrimaryContribution in contrib_types
+        for agent in graph.objects(contrib, V.BFFI.agent):
+            if is_primary:
+                graph.add((s, DCTERMS.creator, agent))
+                creators += 1
+            else:
+                graph.add((s, DCTERMS.contributor, agent))
+                contributors += 1
+    return creators, contributors
+
+
 def _summarise(
     skosified: Graph, *, input_triples: int, output_path: Path, skipped: bool
 ) -> SkosifyResult:
@@ -176,6 +225,11 @@ def run(
 
     cfg = _load_skosify_config(config_path)
     skosified = skosify(str(canonical_path), str(overlay_path), **cfg)
+
+    # Post-Skosify: synthesise ``dct:creator`` / ``dct:contributor``
+    # for Skosmos display. The triples land only in the Skosify output
+    # so canonical.ttl stays BFFI 1.0.0-pure.
+    _synthesise_display_predicates(skosified)
 
     tmp = output_path.with_suffix(output_path.suffix + ".tmp")
     skosified.serialize(destination=str(tmp), format="turtle")
