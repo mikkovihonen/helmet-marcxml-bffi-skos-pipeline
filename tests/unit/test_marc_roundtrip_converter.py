@@ -12,7 +12,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 
 import pytest
-from rdflib import Graph, Literal, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF, SKOS
 
 from bffi_pipeline.marc_roundtrip import (
@@ -278,6 +278,63 @@ def test_700_emits_translator_added_entry(minimal_record: ET.Element) -> None:
     assert df.attrib["ind1"] == "1"
     assert _subfield(df, "a") == "Adrian, Esa"
     assert _subfield(df, "4") == "trl"
+
+
+def test_700_emits_relator_term_e_from_uri_via_label_lookup(tmp_path) -> None:
+    """When the bf:role is a LoC relator URI AND the graph carries
+    that URI's skos:prefLabel (the relators vocab dump merged in by
+    the runner), the converter resolves $e from the label."""
+    g = _build_minimal_graph()
+    # Add a Finnish label for the trl URI as the relators vocab dump
+    # would in production. The converter's _loc_label finds it.
+    g.add(
+        (
+            URIRef("http://id.loc.gov/vocabulary/relators/trl"),
+            SKOS.prefLabel,
+            Literal("Translator", lang="en"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='700']", NS)
+    assert df is not None
+    assert _subfield(df, "e") == "Translator"
+
+
+def test_700_emits_relator_term_e_from_freetext_role_label(tmp_path) -> None:
+    """When the bf:role is a blank node carrying rdfs:label (M3's
+    cataloguer-typed free-text $e), the converter emits $e directly
+    from that label."""
+    g = Graph()
+    # Build a minimal graph with a free-text role only
+    work = URIRef("urn:work/W")
+    expr = URIRef("urn:expr/W")
+    manif = URIRef("urn:manif/W")
+    # Real M3 emission for free-text $e is a blank node — match that.
+    role_node = BNode()
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, SKOS.prefLabel, Literal("X", lang="fi")))
+    g.add((work, V.BFFI.hasExpression, expr))
+    g.add((expr, RDF.type, V.BFFI.Expression))
+    g.add((expr, V.BFFI.expressionOf, work))
+    g.add((manif, RDF.type, V.BFFI.Manifestation))
+    g.add((manif, V.BFFI.expressionManifested, expr))
+    g.add((manif, DCTERMS.identifier, Literal("bX")))
+    # Non-primary contribution with a free-text Finnish role label
+    contrib = URIRef("urn:contrib/c1")
+    agent = URIRef("urn:agent/a1")
+    g.add((expr, V.BFFI.contribution, contrib))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Adrian, Esa")))
+    g.add((contrib, V.BF.role, role_node))
+    g.add((role_node, V.RDFS.label, Literal("kääntäjä", lang="fi")))
+
+    rec = reconstruct_marc(g, manif)
+    df = rec.element.find("m:datafield[@tag='700']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Adrian, Esa"
+    assert _subfield(df, "e") == "kääntäjä"
+    # No $4 — the free-text path doesn't have a relator code.
+    assert _subfield(df, "4") is None
 
 
 def test_907_emits_helmet_bib_id_in_sierra_display_form(minimal_record: ET.Element) -> None:

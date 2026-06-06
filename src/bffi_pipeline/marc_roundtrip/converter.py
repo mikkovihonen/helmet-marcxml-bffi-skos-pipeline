@@ -469,9 +469,26 @@ class _Reconstructor:
                 if not label:
                     continue
                 role_subs: list[tuple[str, str]] = []
+                # Role can be:
+                #  - URIRef: a LoC relator URI like .../relators/trl. We
+                #    emit $4 from the URI tail (code) and $e from the
+                #    URI's prefLabel (looked up in whatever graph the
+                #    converter was handed — the runner merges the
+                #    relators vocab dump so URI labels resolve).
+                #  - BNode: M3's contrib cascade for cataloguer-typed
+                #    free-text roles ($e from source MARC 700 $e).
+                #    Carries an ``rdfs:label`` directly; we emit only
+                #    $e (the original didn't carry a relator code).
                 for role in self.graph.objects(contrib, V.BF.role):
                     if isinstance(role, URIRef):
                         role_subs.append(("4", str(role).rsplit("/", 1)[-1]))
+                        relator_term = self._loc_label(role, lang_pref=("fi", "sv", "en"))
+                        if relator_term:
+                            role_subs.append(("e", relator_term))
+                    else:
+                        free_text = self._first_label(role)
+                        if free_text:
+                            role_subs.append(("e", free_text))
                 self._emit_datafield(record, "700", ("a", label), *role_subs, ind1="1")
 
     def _emit_bib_id_local(self, record: Element, bib_id: str | None) -> None:

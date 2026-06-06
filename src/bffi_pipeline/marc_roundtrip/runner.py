@@ -68,9 +68,16 @@ def run(
     canonical_path: Path,
     marcxml_dir: Path,
     output_dir: Path,
+    finto_dump_dir: Path | None = None,
 ) -> RoundtripSummary:
     """Reconstruct + diff every Manifestation. Returns the summary
-    that ``summary.json`` is built from."""
+    that ``summary.json`` is built from.
+
+    ``finto_dump_dir`` (default = the project's ``finto-dumps/``) is
+    merged into the same graph as the canonical so the converter's
+    cross-vocab label lookups work — relator URIs resolve to ``$e``
+    relator terms on 700, media/carrier URIs resolve to ``$a`` labels
+    on 337/338, etc. Pass an empty/non-existent path to skip the merge."""
     canonical_path = Path(canonical_path)
     marcxml_dir = Path(marcxml_dir)
     output_dir = Path(output_dir)
@@ -93,6 +100,7 @@ def run(
 
     graph = Graph()
     graph.parse(str(canonical_path), format="turtle")
+    _merge_vocab_dumps(graph, finto_dump_dir)
 
     manifestation_uris = [
         s for s in graph.subjects(V.RDF.type, V.BFFI.Manifestation) if isinstance(s, URIRef)
@@ -162,6 +170,43 @@ def run(
         },
     )
     return summary
+
+
+#: Vocab dumps the converter benefits from cross-resolving (label
+#: lookups for relator URIs, media/carrier URIs, etc.). Loading more
+#: than this is wasteful — we don't query the YSO graph for anything
+#: at round-trip time. Keep the list narrow so the merge stays fast.
+_ROUNDTRIP_VOCAB_FILES: tuple[str, ...] = (
+    "relators-skos.ttl",
+    "rda-media-skos.ttl",
+    "rda-carrier-skos.ttl",
+    "mencformat-skos.ttl",
+    "mrecmedium-skos.ttl",
+    "mplayspeed-skos.ttl",
+    "mplayback-skos.ttl",
+    "mcapturestorage-skos.ttl",
+    "mcolor-skos.ttl",
+)
+
+
+def _merge_vocab_dumps(graph: Graph, finto_dump_dir: Path | None) -> None:
+    """Parse the small Finto / LoC vocab dumps used for cross-vocab
+    label lookups into ``graph``. No-op when the dir is absent or the
+    dumps haven't been fetched yet — the converter degrades gracefully
+    (URIs render in $4 codes / no $a / no $e)."""
+    if finto_dump_dir is None:
+        # Default to the project's finto-dumps/ — the load-finto cache.
+        finto_dump_dir = Path(__file__).resolve().parents[3] / "finto-dumps"
+    finto_dump_dir = Path(finto_dump_dir)
+    if not finto_dump_dir.is_dir():
+        return
+    for name in _ROUNDTRIP_VOCAB_FILES:
+        path = finto_dump_dir / name
+        if path.is_file():
+            try:
+                graph.parse(str(path), format="turtle")
+            except Exception as exc:
+                print(f"[marc-roundtrip] WARN: could not parse {path}: {exc}")
 
 
 def _diff_one(record: ReconstructedRecord, original_path: Path) -> RecordDiff | None:
