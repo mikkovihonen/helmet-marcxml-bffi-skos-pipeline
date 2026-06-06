@@ -110,7 +110,7 @@ LINEAGE_VALUE_PREFIX: Final[str] = "src="
 #:               pair against ``$9 src=650-1`` / ``src=700-3`` style
 #:               1-indexed ranks (matching its own source-side counter).
 _LINEAGE_FRAGMENT_RE: Final[re.Pattern[str]] = re.compile(
-    r"#(?P<kind>Topic|Place|Agent|Hub|MusicMedium|IntendedAudience|"
+    r"#(?P<kind>Topic|Place|Agent|Hub|Work|MusicMedium|IntendedAudience|"
     r"CreatorCharacteristic)(?P<tag>\d{3})-(?P<ord>\d+)$"
 )
 
@@ -1024,7 +1024,7 @@ class _Reconstructor:
         return "700"
 
     def _emit_related_uniform_titles(self, record: Element) -> None:
-        """MARC 730 (added entry — uniform title).
+        """MARC 730 / 740 (added entry — title).
 
         BFFI 1.0.0 path (canonical, ``owl:equivalentProperty`` /
         ``owl:equivalentClass`` to the BIBFRAME counterparts):
@@ -1034,36 +1034,40 @@ class _Reconstructor:
                  └─ bffi:Relation
                     ├─ bffi:relationship   <…/relatedwork>
                     └─ bffi:associatedResource
-                       └─ bf:Hub                          (BIBFRAME — BFFI
-                          ├─ bf:title                      has no Hub class)
-                          │  └─ bf:Title
-                          │     └─ bf:mainTitle
-                          │        "Title / Responsibility"
-                          └─ bflc:marcKey "73000 $a…$g…"
+                       ├─ bf:Hub  → MARC 730   (uniform title)
+                       │   ├─ bf:title → bf:Title → bf:mainTitle
+                       │   └─ bflc:marcKey
+                       └─ bf:Work → MARC 740   (uncontrolled
+                           ├─ bf:title → bf:Title → bf:mainTitle    related/
+                           └─ bflc:marcKey                        analytical)
 
-        Strategy: prefer ``bflc:marcKey`` (carries the exact source
-        subfield structure) when present, otherwise split
-        ``bf:mainTitle`` on `` / `` into ``$a`` (with trailing slash
-        preserved per Helmet convention) + ``$g``. ind1 = 0 ("no
-        nonfiling characters") is the dominant Helmet choice for
-        music-collection 730s; ind2 = blank.
+        Strategy per row: prefer ``bflc:marcKey`` (carries the exact
+        source subfield structure) when present, otherwise split
+        ``bf:mainTitle`` on `` / `` into ``$a`` + ``$g``. Tag picked by
+        the associated resource's ``rdf:type``: ``bf:Hub`` → 730,
+        ``bf:Work`` → 740. ind1 = 0 ("no nonfiling characters"); ind2 =
+        blank. (740 ind2=2 "analytical entry" semantics are not
+        preserved — BFFI doesn't carry that bit.)
         """
         manif = self.manifestation
         if manif is None:
             return
         for rel in self.graph.objects(manif, V.BFFI.relation):
-            # bffi:Relation typing isn't load-bearing — the marker is
-            # the associatedResource being a bf:Hub. We skip Series
-            # relations (handled by _emit_series_statement above) by
-            # checking the target type below.
+            # The marker is the associatedResource's rdf:type. Series
+            # (bf:Series) is handled by _emit_series_statement.
             for resource in self.graph.objects(rel, V.BFFI.associatedResource):
-                if V.BF.Hub not in set(self.graph.objects(resource, RDF.type)):
+                types = set(self.graph.objects(resource, RDF.type))
+                if V.BF.Hub in types:
+                    tag = "730"
+                elif V.BF.Work in types:
+                    tag = "740"
+                else:
                     continue
                 subs = self._related_title_subfields(resource)
                 if not subs:
                     continue
                 lineage = self._lineage_token(resource)
-                self._emit_datafield(record, "730", *subs, ind1="0", lineage=lineage)
+                self._emit_datafield(record, tag, *subs, ind1="0", lineage=lineage)
 
     def _related_title_subfields(self, hub: Node) -> tuple[tuple[str, str], ...]:
         """Build the ``$a`` / ``$g`` subfield tuple for one 730 row.

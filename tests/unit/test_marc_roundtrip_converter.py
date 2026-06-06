@@ -1101,6 +1101,62 @@ def test_730_emits_multiple_hubs_with_ranked_lineage() -> None:
     }
 
 
+def test_740_emits_from_bf_work_associatedResource() -> None:
+    """MARC 740 (uncontrolled related/analytical title) lands in
+    BIBFRAME as the same relation chain as 730, but the
+    ``bf:associatedResource`` is a ``bf:Work`` (URI ``#Work740-N``)
+    instead of a ``bf:Hub``. The converter branches on the type
+    and emits MARC 740. ind1=0; lineage stamps via ``#Work740-N``
+    rank."""
+    g = _build_minimal_graph()
+    related_work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Work740-39")
+    title = BNode()
+    rel = BNode()
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, V.BFFI.associatedResource, related_work))
+    g.add((related_work, RDF.type, V.BF.Work))
+    g.add((related_work, V.BF.title, title))
+    g.add((title, V.BF.mainTitle, Literal("Kartor och gatunamnen")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='740']", NS)
+    assert df is not None
+    assert df.attrib["ind1"] == "0"
+    assert _subfield(df, "a") == "Kartor och gatunamnen"
+    assert _subfield(df, "9") == "src=740-1"
+
+
+def test_740_and_730_both_emit_from_same_record() -> None:
+    """A record carrying both 730 (Hub-typed associated resource) and
+    740 (Work-typed) emits both tags. Confirms the type-branch in
+    ``_emit_related_uniform_titles`` routes each row to its tag."""
+    g = _build_minimal_graph()
+    hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Hub730-7")
+    related_work = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Work740-8")
+    hub_title = BNode()
+    work_title = BNode()
+    g.add((MANIF, V.BFFI.relation, BNode()))  # filler — needs predicate path
+    rel_hub = BNode()
+    g.add((MANIF, V.BFFI.relation, rel_hub))
+    g.add((rel_hub, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add((hub, V.BF.title, hub_title))
+    g.add((hub_title, V.BF.mainTitle, Literal("Fame / Gore, Michael")))
+    rel_work = BNode()
+    g.add((MANIF, V.BFFI.relation, rel_work))
+    g.add((rel_work, V.BFFI.associatedResource, related_work))
+    g.add((related_work, RDF.type, V.BF.Work))
+    g.add((related_work, V.BF.title, work_title))
+    g.add((work_title, V.BF.mainTitle, Literal("Pääkaupunkiseutu")))
+    rec = reconstruct_marc(g, MANIF)
+    df_730 = rec.element.find("m:datafield[@tag='730']", NS)
+    df_740 = rec.element.find("m:datafield[@tag='740']", NS)
+    assert df_730 is not None
+    assert df_740 is not None
+    assert _subfield(df_730, "a") == "Fame /"
+    assert _subfield(df_730, "g") == "Gore, Michael"
+    assert _subfield(df_740, "a") == "Pääkaupunkiseutu"
+
+
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:
     # Smoke: we explicitly skip 852 (holdings) and 336 (content type
     # — not currently forwarded onto BFFI). Pin so adding either to

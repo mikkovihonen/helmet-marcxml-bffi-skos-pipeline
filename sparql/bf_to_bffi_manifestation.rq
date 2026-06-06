@@ -50,6 +50,7 @@ CONSTRUCT {
             bffi:hasSeries             ?seriesNode ;
             bffi:note                  ?instanceNote ;
             bffi:relation              ?hubRel ;
+            bffi:relation              ?relWorkRel ;
             skos:prefLabel             ?manifLabel .
   ?bfToc   a               bffi:TableOfContents ;
            rdfs:label      ?tocLabel .
@@ -60,6 +61,13 @@ CONSTRUCT {
            bf:title        ?bfHubTitle ;
            bflc:marcKey    ?hubMarcKey .
   ?bfHubTitle bf:mainTitle ?hubMainTitle .
+  ?relWorkRel a                    bffi:Relation ;
+              bffi:relationship    ?relWorkRelationship ;
+              bffi:associatedResource ?relWork .
+  ?relWork    a               bf:Work ;
+              bf:title        ?relWorkTitle ;
+              bflc:marcKey    ?relWorkMarcKey .
+  ?relWorkTitle bf:mainTitle  ?relWorkMainTitle .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -254,6 +262,29 @@ WHERE {
       ?bfHubTitle bf:mainTitle ?hubMainTitle .
     }
     OPTIONAL { ?bfHub bflc:marcKey ?hubMarcKey }
+  }
+
+  # MARC 740 (added entry — uncontrolled related/analytical title).
+  # Structurally identical to 730 in BIBFRAME but the target is a
+  # ``bf:Work`` URI (``#Work740-N``) instead of a ``bf:Hub`` —
+  # marc2bibframe2 mints a Work for the cataloguer's free-text
+  # related-title entry, distinct from the uniform-title Hubs that
+  # 730 produces. The main bf:Work CONSTRUCT in bf_to_bffi_work.rq
+  # already FILTER-NOT-EXISTS-skips these (their `?ref
+  # bf:associatedResource ?bfWork` link makes them
+  # contained/related Works, never minted as bffi:Works), so the
+  # raw URI exists in the source graph but has no canonical Work
+  # role — perfect for the same pass-through routing as Hubs.
+  OPTIONAL {
+    ?bfInstance bf:relation ?relWorkRel .
+    ?relWorkRel bf:associatedResource ?relWork .
+    ?relWork a bf:Work .
+    OPTIONAL { ?relWorkRel bf:relationship ?relWorkRelationship }
+    OPTIONAL {
+      ?relWork bf:title ?relWorkTitle .
+      ?relWorkTitle bf:mainTitle ?relWorkMainTitle .
+    }
+    OPTIONAL { ?relWork bflc:marcKey ?relWorkMarcKey }
   }
 
   # Skosmos display label. Without ``skos:prefLabel`` Skosmos renders
