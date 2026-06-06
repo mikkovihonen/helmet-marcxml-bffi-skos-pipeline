@@ -125,6 +125,10 @@ Loaded into Fuseki by `bffi-pipeline load-finto`. Each vocab lives in its own na
 | MUSA | Legacy Music + Visual Arts (CILLA merged in) subject headings (frozen 2019). Two-hop bridge to YSO via `dct:isReplacedBy` → YSA → `skos:exactMatch`. | `http://www.yso.fi/onto/musa/` |
 | KAUNOKKI | Fiction subjects (Finnish; legacy KAUNO with Swedish Bella sub-vocab). Internal `dct:isReplacedBy` only — no published bridge to KAUNO or YSO. Stays as a `kaunokki:` URI when matched. | `http://urn.fi/URN:NBN:fi:au:kaunokki:` |
 | MTS (Metatietosanasto) | Finnish Metadata Thesaurus — administrative metadata (RDA content/media/carrier types, file formats, access conditions). Loaded pre-emptively; **not used in Helmet's sampled subset** but tagged elsewhere as `$2 mts`. Last in subject tier-0 priority because MTS spans topical + RDA-admin domains; lexical hits stay as `mts:` URIs (no MTS→YSO redirect — RDA-side concepts shouldn't be canonicalised to YSO). | `http://urn.fi/URN:NBN:fi:au:mts:` |
+
+In addition to the subject-side vocabs above, M3 also extracts (and M9 reconciles) these MARC fields with the same flatten-and-mint pattern used for 382: **385 → `bffi:intendedAudience`** (1,240 records on the Sierra corpus, age groups / reader profiles, reconciled against YSO); **386 → `bffi:creatorCharacteristic`** (162 records, gender / nationality / role of creator, reconciled against YSO). Both walk `marc2bibframe2`'s `bf:intendedAudience` / `bflc:creatorCharacteristic` triples, mint local URI fragments like `#IntendedAudience385-<sha1(label)>`, and route to `kind=subject` in M9.
+
+Fields **388 (Time Period of Creation, 5,549 records)** and **257 (Country of Producing Entity, 3,875 records)** would fit the same pattern but are deferred: 388 isn't emitted by `marc2bibframe2` v3.1.0 at all, and 257 emits onto the BIBFRAME `Instance` (not `Work`) — Instance-walking is a larger refactor.
 | LCSH | Subjects (LoC) | `http://id.loc.gov/authorities/subjects/` |
 | LCGFT | Genre/form (LoC) | `http://id.loc.gov/authorities/genreForms/` |
 | childrensSubjects | LoC children's subjects | `http://id.loc.gov/authorities/childrensSubjects/` |

@@ -409,6 +409,75 @@ def test_construct_music_medium_coalesces_same_label_on_one_work() -> None:
     )
 
 
+def test_construct_extracts_intended_audience_from_marc_385() -> None:
+    """MARC 385 → ``bf:intendedAudience`` → ``bf:IntendedAudience`` →
+    ``rdfs:label``. marc2bibframe2 emits a flat predicate; M3 mints
+    a local ``#IntendedAudience385-<sha1(label)>`` URI so the resolver
+    has a stable target for the audience reconciliation."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Lasten kuvakirja" ] ;
+                bf:intendedAudience [
+                    a bf:IntendedAudience ;
+                    rdfs:label "lapset" ;
+                    bf:source <http://urn.fi/URN:NBN:fi:au:yso>
+                ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    audiences = list(bffi.objects(EXPECTED_WORK, V.BFFI.intendedAudience))
+    assert len(audiences) == 1, f"expected one bffi:intendedAudience; got {audiences}"
+    audience = audiences[0]
+    assert isinstance(audience, URIRef)
+    assert "#IntendedAudience385-" in str(audience)
+    assert str(audience).startswith("http://urn.fi/URN:NBN:fi:bib:raw/10000001")
+    assert (audience, RDF.type, V.BFFI.IntendedAudience) in bffi
+    assert Literal("lapset") in set(bffi.objects(audience, V.RDFS.label))
+
+
+def test_construct_extracts_creator_characteristic_from_marc_386() -> None:
+    """MARC 386 → ``bflc:creatorCharacteristic`` (note BFLC, not
+    BIBFRAME) → CreatorCharacteristic blank node with label + source.
+    Same flatten-and-mint pattern as 385."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix bflc: <http://id.loc.gov/ontologies/bflc/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Naiskirjailijoiden antologia" ] ;
+                bflc:creatorCharacteristic [
+                    a bflc:CreatorCharacteristic ;
+                    rdfs:label "naiset" ;
+                    bf:source <http://urn.fi/URN:NBN:fi:au:yso>
+                ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    characteristics = list(bffi.objects(EXPECTED_WORK, V.BFFI.creatorCharacteristic))
+    assert len(characteristics) == 1, (
+        f"expected one bffi:creatorCharacteristic; got {characteristics}"
+    )
+    cc = characteristics[0]
+    assert isinstance(cc, URIRef)
+    assert "#CreatorCharacteristic386-" in str(cc)
+    assert (cc, RDF.type, V.BFFI.CreatorCharacteristic) in bffi
+    assert Literal("naiset") in set(bffi.objects(cc, V.RDFS.label))
+
+
 def test_construct_routes_genreform_label() -> None:
     """P-36 Phase C: bf:genreForm targets must round-trip their
     ``rdfs:label`` through M3's CONSTRUCT so M9 has something to walk.

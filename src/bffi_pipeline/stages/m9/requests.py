@@ -196,16 +196,27 @@ def _collect_contributor_labels(graph: Graph, work: URIRef) -> list[str]:
 
 
 def _collect_subject_labels(graph: Graph, work: URIRef) -> list[str]:
-    """Walk ``bffi:subject`` + ``bffi:genreForm`` + ``bffi:musicMedium``
-    target labels, capped.
+    """Walk subject-shape target labels for picker Work context, capped.
+
+    Includes ``bffi:subject`` + ``bffi:genreForm`` + ``bffi:musicMedium``
+    + ``bffi:intendedAudience`` + ``bffi:creatorCharacteristic``.
 
     Music-medium labels (e.g. ``"kantele"``, ``"5-rivinen harmonikka"``)
     join the Work context so the LLM picker can use them as
     disambiguation evidence — a Work tagged with ``"sello"`` as music
     medium is plausibly a chamber-music work, which helps narrow
-    contributor / subject reconciliation."""
+    contributor / subject reconciliation. Intended-audience labels
+    (``"lapset"`` / ``"nuoret"``) similarly signal genre context;
+    creator-characteristic labels (``"naiset"``) help disambiguate
+    shared-name contributors."""
     out: list[str] = []
-    for predicate in (V.BFFI.subject, V.BFFI.genreForm, V.BFFI.musicMedium):
+    for predicate in (
+        V.BFFI.subject,
+        V.BFFI.genreForm,
+        V.BFFI.musicMedium,
+        V.BFFI.intendedAudience,
+        V.BFFI.creatorCharacteristic,
+    ):
         for target in graph.objects(work, predicate):
             if len(out) >= _WORK_CONTEXT_FIELD_CAP:
                 return out
@@ -312,7 +323,13 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
         # carry only pre-resolved YSO/KANTO URIs, so the work_context
         # would otherwise be built and thrown away.
         work_context: WorkContext | None = None
-        for predicate in (V.BFFI.subject, V.BFFI.genreForm, V.BFFI.musicMedium):
+        for predicate in (
+            V.BFFI.subject,
+            V.BFFI.genreForm,
+            V.BFFI.musicMedium,
+            V.BFFI.intendedAudience,
+            V.BFFI.creatorCharacteristic,
+        ):
             for target in graph.objects(work, predicate):
                 # Skip URIs that already resolve to an authority graph
                 # we have loaded locally (YSO/KANTO/KAUNO/MUSO/SLM via

@@ -1063,6 +1063,10 @@ def _build_subject_canonical_graph(
     genre_source: str | None = None,
     music_medium_label: str | None = None,
     music_medium_source: str | None = None,
+    intended_audience_label: str | None = None,
+    intended_audience_source: str | None = None,
+    creator_characteristic_label: str | None = None,
+    creator_characteristic_source: str | None = None,
 ) -> Graph:
     """Build a canonical graph with optional subject + genreForm + musicMedium targets.
 
@@ -1094,6 +1098,18 @@ def _build_subject_canonical_graph(
         g.add((mnode, V.RDFS.label, Literal(music_medium_label)))
         if music_medium_source is not None:
             g.add((mnode, V.BF.source, Literal(music_medium_source)))
+    if intended_audience_label is not None:
+        anode = BNode()
+        g.add((work, V.BFFI.intendedAudience, anode))
+        g.add((anode, V.RDFS.label, Literal(intended_audience_label)))
+        if intended_audience_source is not None:
+            g.add((anode, V.BF.source, Literal(intended_audience_source)))
+    if creator_characteristic_label is not None:
+        cnode = BNode()
+        g.add((work, V.BFFI.creatorCharacteristic, cnode))
+        g.add((cnode, V.RDFS.label, Literal(creator_characteristic_label)))
+        if creator_characteristic_source is not None:
+            g.add((cnode, V.BF.source, Literal(creator_characteristic_source)))
     return g
 
 
@@ -1193,6 +1209,37 @@ def test_iter_subject_requests_yields_all_three_subject_predicates_together() ->
     assert by_predicate[str(V.BFFI.subject)].kind == "subject"
     assert by_predicate[str(V.BFFI.genreForm)].kind == "genre_form"
     assert by_predicate[str(V.BFFI.musicMedium)].kind == "music_form"
+
+
+def test_iter_subject_requests_yields_intended_audience_as_subject() -> None:
+    """MARC 385 audience characteristics (e.g. ``"lapset"`` /
+    ``"nuoret"``) route through tier-0 YSO — they're topical concepts
+    in the YSO age-group hierarchy. Kind is ``subject``."""
+    g = _build_subject_canonical_graph(
+        subject_label=None,
+        intended_audience_label="lapset",
+        intended_audience_source="yso/fin",
+    )
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "subject"
+    assert requests[0].literal == "lapset"
+    assert requests[0].predicate_uri == str(V.BFFI.intendedAudience)
+
+
+def test_iter_subject_requests_yields_creator_characteristic_as_subject() -> None:
+    """MARC 386 creator characteristics (e.g. ``"naiset"`` —
+    woman-authored work) route through tier-0 YSO. Kind is ``subject``."""
+    g = _build_subject_canonical_graph(
+        subject_label=None,
+        creator_characteristic_label="naiset",
+        creator_characteristic_source="yso/fin",
+    )
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "subject"
+    assert requests[0].literal == "naiset"
+    assert requests[0].predicate_uri == str(V.BFFI.creatorCharacteristic)
 
 
 def test_iter_subject_requests_classifies_bella_source_as_genre_form() -> None:

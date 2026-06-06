@@ -23,17 +23,19 @@ PREFIX arq:     <http://jena.apache.org/ARQ/function#>
 
 CONSTRUCT {
   ?workURI a bffi:Work ;
-           bffi:hasExpression  ?exprURI ;
-           bffi:contribution   ?contrib ;
-           bffi:subject        ?subject ;
-           bffi:classification ?class ;
-           bffi:originDate     ?originDate ;
-           bffi:genreForm      ?workGenre ;
-           bffi:musicMedium    ?mediumURI ;
-           bffi:marcKey        ?marcKey ;
-           skos:prefLabel      ?workLabel ;
-           bf:identifiedBy     ?ident ;
-           dct:identifier      ?helmetBibIdLiteral .
+           bffi:hasExpression       ?exprURI ;
+           bffi:contribution        ?contrib ;
+           bffi:subject             ?subject ;
+           bffi:classification      ?class ;
+           bffi:originDate          ?originDate ;
+           bffi:genreForm           ?workGenre ;
+           bffi:musicMedium         ?mediumURI ;
+           bffi:intendedAudience    ?audienceURI ;
+           bffi:creatorCharacteristic ?creatorCharURI ;
+           bffi:marcKey             ?marcKey ;
+           skos:prefLabel           ?workLabel ;
+           bf:identifiedBy          ?ident ;
+           dct:identifier           ?helmetBibIdLiteral .
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent .
   ?primaryAgent rdfs:label ?primaryAgentLabel .
@@ -58,6 +60,19 @@ CONSTRUCT {
   ?mediumURI a              bffi:MusicMedium ;
              rdfs:label     ?mediumLabel ;
              bf:source      ?bfMediumSource .
+  # MARC 385 (intended audience) → ``bf:intendedAudience`` →
+  # ``bf:IntendedAudience`` with ``rdfs:label`` + optional ``bf:source``.
+  # Targets at lkd.rdf's ``bffi:IntendedAudience`` class which
+  # ``owl:equivalentClass``-es BIBFRAME's bf:IntendedAudience.
+  ?audienceURI a            bffi:IntendedAudience ;
+               rdfs:label   ?audienceLabel ;
+               bf:source    ?bfAudienceSource .
+  # MARC 386 (creator characteristic) →
+  # ``bflc:creatorCharacteristic`` (note bflc: not bf:) → BFLC
+  # CreatorCharacteristic node. Same flatten-and-mint shape.
+  ?creatorCharURI a         bffi:CreatorCharacteristic ;
+                  rdfs:label    ?creatorCharLabel ;
+                  bf:source     ?bfCreatorCharSource .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -152,6 +167,35 @@ WHERE {
     BIND( IRI(CONCAT(?recordRoot,
                      "#MusicMedium382-",
                      arq:sha1(STR(?mediumLabel)))) AS ?mediumURI )
+  }
+  # MARC 385 (intended audience) — flat ``bf:intendedAudience`` linking
+  # to a ``bf:IntendedAudience`` blank node with ``rdfs:label`` + optional
+  # ``bf:source``. marc2bibframe2 doesn't mint URI fragments for these,
+  # so we mint locally as ``<record-root>#IntendedAudience385-<sha1(label)>``.
+  # Reconciles against YSO (age groups like ``"lapset (ikäryhmät)"``
+  # are YSO concepts).
+  OPTIONAL {
+    ?bfWork bf:intendedAudience ?bfAudience .
+    ?bfAudience rdfs:label ?audienceLabel .
+    OPTIONAL { ?bfAudience bf:source ?bfAudienceSource }
+    BIND( STRBEFORE(STR(?bfWork), "#") AS ?audRecordRoot )
+    BIND( IRI(CONCAT(?audRecordRoot,
+                     "#IntendedAudience385-",
+                     arq:sha1(STR(?audienceLabel)))) AS ?audienceURI )
+  }
+  # MARC 386 (creator characteristic) — note the predicate is
+  # ``bflc:creatorCharacteristic`` (BFLC, not BIBFRAME). Same shape as
+  # 385: flat link to a CreatorCharacteristic blank node carrying
+  # label + optional source. Reconciles against YSO (gender / role
+  # concepts like ``"naiset"``).
+  OPTIONAL {
+    ?bfWork bflc:creatorCharacteristic ?bfCreatorChar .
+    ?bfCreatorChar rdfs:label ?creatorCharLabel .
+    OPTIONAL { ?bfCreatorChar bf:source ?bfCreatorCharSource }
+    BIND( STRBEFORE(STR(?bfWork), "#") AS ?ccRecordRoot )
+    BIND( IRI(CONCAT(?ccRecordRoot,
+                     "#CreatorCharacteristic386-",
+                     arq:sha1(STR(?creatorCharLabel)))) AS ?creatorCharURI )
   }
 
   # Helmet identifier preservation (added by M2 post-process).
