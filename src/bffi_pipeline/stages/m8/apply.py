@@ -30,6 +30,7 @@ from bffi_pipeline.stages.m8.helmet_map import _load_helmet_map
 from bffi_pipeline.stages.m8.mint import (
     _bind_prefixes,
     _emit_canonical_work,
+    _propagate_expression_passthrough,
     _propagate_manifestations,
     _select_description_modifier,
 )
@@ -220,6 +221,12 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
     # would silently drop on the floor between M3 and Skosify.
     if raw_corpus_graph is not None:
         _propagate_manifestations(g, raw_corpus_graph)
+        # P-47: also passthrough Expression-side BFFI predicates that
+        # the canonical-from-scratch Expression rebuild in
+        # ``_propagate_expressions`` doesn't carry (language, content,
+        # note, title, classification, ...). Without this the data M3
+        # emits per-record dies at the M8 boundary.
+        _propagate_expression_passthrough(g, raw_corpus_graph)
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label

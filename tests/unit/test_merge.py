@@ -1941,6 +1941,98 @@ def test_p19_load_work_records_ignores_bibframe_dir(tmp_path: Path) -> None:
     assert isinstance(records, dict)
 
 
+def test_p47_expression_passthrough_carries_language_content_note_title(
+    tmp_path: Path,
+) -> None:
+    """P-47: M3 emits ``bffi:language`` / ``bffi:content`` / ``bffi:note``
+    / ``bffi:title`` / ``bffi:classification`` / ``bffi:summary`` /
+    ``bffi:marcKey`` on each Expression. M8 was rebuilding the
+    canonical Expression from a sparse seed (just typing + prefLabel +
+    hasExpression links), dropping every per-record Expression-side
+    triple. This passthrough copies those predicates verbatim — plus
+    any blank-node subgraph reachable from them (e.g. bf:Note block
+    with rdf:value, bf:Title block with bf:mainTitle) — so downstream
+    consumers (round-trip MARC reconstruction, SPARQL queries) see
+    what M3 produced.
+    """
+    BFFI = "http://urn.fi/URN:NBN:fi:schema:bffi:"
+    BF = "http://id.loc.gov/ontologies/bibframe/"
+    bffi_dir = tmp_path / "bffi"
+    bffi_dir.mkdir()
+    (bffi_dir / "bX.ttl").write_text(
+        dedent(
+            f"""\
+            @prefix bf:   <{BF}> .
+            @prefix bffi: <{BFFI}> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <urn:work/A>  a bffi:Work ;
+                          bffi:hasExpression <urn:expr/A> .
+            <urn:expr/A>  a bffi:Expression ;
+                          bffi:expressionOf <urn:work/A> ;
+                          bffi:language     <http://id.loc.gov/vocabulary/languages/fin> ;
+                          bffi:content      <http://id.loc.gov/vocabulary/contentTypes/txt> ;
+                          bffi:note         [ a bf:Note ; rdf:value "An interesting note." ] ;
+                          bffi:title        [ a bf:Title ; bf:mainTitle "Aada Wilde" ] ;
+                          bffi:classification "84.2" .
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    work_records = {
+        "urn:work/A": CanonicalWorkInputs(
+            work_uri="urn:work/A",
+            creator_uri="urn:agent/X",
+            pref_label="Aada Wilde",
+            expression_uris=["urn:expr/A"],
+            helmet_identifiers=[("urn:helmet/A1", "bX")],
+        ),
+    }
+    helmet_entries = {
+        "urn:work/A": HelmetMapEntry("urn:work/A", "bX", "2026-06-07T00:00:00+00:00"),
+    }
+
+    canonical_path = tmp_path / "canonical.ttl"
+    decisions_path = tmp_path / "judge-decisions.jsonl"
+    decisions_path.write_text("", encoding="utf-8")
+    apply_merge(
+        decisions_path,
+        tmp_path,
+        output_path=canonical_path,
+        map_path=tmp_path / "canonical-map.jsonl",
+        conflicts_path=tmp_path / "canonical-conflicts.jsonl",
+        helmet_map_path=tmp_path / "helmet-map.jsonl",
+        work_records=work_records,
+        helmet_entries=helmet_entries,
+        now=datetime(2026, 6, 7, 12, 0, tzinfo=UTC),
+    )
+
+    out = Graph()
+    out.parse(canonical_path, format="turtle")
+    expr = URIRef("urn:expr/A")
+    # Each predicate must survive to the canonical.
+    assert (
+        expr,
+        V.BFFI.language,
+        URIRef("http://id.loc.gov/vocabulary/languages/fin"),
+    ) in out
+    assert (
+        expr,
+        V.BFFI.content,
+        URIRef("http://id.loc.gov/vocabulary/contentTypes/txt"),
+    ) in out
+    assert (expr, V.BFFI.classification, Literal("84.2")) in out
+    # Blank-node note/title subgraphs reach the canonical too.
+    notes = list(out.objects(expr, V.BFFI.note))
+    assert len(notes) == 1
+    assert (notes[0], V.RDF.value, Literal("An interesting note.")) in out
+    titles = list(out.objects(expr, V.BFFI.title))
+    assert len(titles) == 1
+    assert (titles[0], V.BF.mainTitle, Literal("Aada Wilde")) in out
+
+
 def test_p45_manifestation_subgraphs_propagate_into_canonical_ttl(tmp_path: Path) -> None:
     """P-45: Manifestations don't merge — they're 1:1 with Helmet bib
     records. M8 must copy every ``bffi:Manifestation`` subgraph from

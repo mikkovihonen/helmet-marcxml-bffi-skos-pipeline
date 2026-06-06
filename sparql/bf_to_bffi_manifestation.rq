@@ -29,15 +29,20 @@ PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 
 CONSTRUCT {
   ?manifURI a bffi:Manifestation ;
-            bffi:expressionManifested ?exprURI ;
-            bf:identifiedBy           ?ident ;
-            dct:identifier            ?helmetBibIdLiteral ;
-            bffi:media                ?mediaURI ;
-            bffi:carrier              ?carrierURI ;
+            bffi:expressionManifested  ?exprURI ;
+            bf:identifiedBy            ?ident ;
+            dct:identifier             ?helmetBibIdLiteral ;
+            bffi:media                 ?mediaURI ;
+            bffi:carrier               ?carrierURI ;
             bffi:digitalCharacteristic ?digitalCharURI ;
             bffi:soundCharacteristic   ?soundCharURI ;
             bffi:colorContent          ?colorContentURI ;
-            skos:prefLabel            ?manifLabel .
+            bffi:provisionActivity     ?provisionActivity ;
+            bffi:publicationStatement  ?publicationStatement ;
+            bffi:responsibilityStatement ?responsibilityStatement ;
+            bffi:extent                ?extent ;
+            bffi:dimensions            ?dimensions ;
+            skos:prefLabel             ?manifLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -108,6 +113,17 @@ WHERE {
              FILTER(isIRI(?soundCharURI)) }
   OPTIONAL { ?bfInstance bf:colorContent          ?colorContentURI .
              FILTER(isIRI(?colorContentURI)) }
+
+  # MARC 260 / 264 / 300 / 245 $c → bf:Instance predicates that
+  # marc2bibframe2 lifts; M3's Manifestation pass forwards them onto
+  # BFFI so the round-trip MARC reconstruction (P-47) can rebuild
+  # 260 / 264 / 300 / 245 $c subfields from the canonical graph.
+  # Each OPTIONAL — the source bib may not have any given subfield.
+  OPTIONAL { ?bfInstance bf:provisionActivity      ?provisionActivity }
+  OPTIONAL { ?bfInstance bf:publicationStatement   ?publicationStatement }
+  OPTIONAL { ?bfInstance bf:responsibilityStatement ?responsibilityStatement }
+  OPTIONAL { ?bfInstance bf:extent                 ?extent }
+  OPTIONAL { ?bfInstance bf:dimensions             ?dimensions }
 
   # Skosmos display label. Without ``skos:prefLabel`` Skosmos renders
   # Manifestations as their bare URI. We synthesise the label from the

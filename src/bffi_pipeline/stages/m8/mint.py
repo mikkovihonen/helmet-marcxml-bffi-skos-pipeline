@@ -91,6 +91,63 @@ def _propagate_manifestations(g: Graph, raw_graph: Graph) -> int:
     return count
 
 
+#: Expression-side predicates M3 emits on each Expression that the
+#: canonical Work's hand-rolled propagation in :func:`_propagate_expressions`
+#: doesn't carry forward. Keeping the canonical Expression aligned with
+#: what M3 produced (rather than rebuilding from a sparse seed) means
+#: the round-trip MARC reconstruction has access to language, content
+#: type, note text, title block, classification, etc. Without this
+#: passthrough those triples die at the M8 boundary even though M3
+#: emitted them per-record.
+_EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
+    V.BFFI.language,
+    V.BFFI.content,
+    V.BFFI.note,
+    V.BFFI.title,
+    V.BFFI.summary,
+    V.BFFI.classification,
+    V.BFFI.marcKey,
+)
+
+
+def _propagate_expression_passthrough(g: Graph, raw_graph: Graph) -> int:
+    """Copy a curated list of Expression-side predicates from the M3
+    per-record output into the canonical M8 graph, including reachable
+    blank-node subgraphs (notes carry ``bf:Note`` typing + ``rdf:value``,
+    titles carry ``bf:Title`` + ``bf:mainTitle``, etc.).
+
+    Mirrors :func:`_propagate_manifestations`'s passthrough discipline
+    — Expressions are preserved 1:1 across the M3 → M8 boundary by
+    URI hash, so the data has a stable destination.
+
+    Returns triples copied (observability)."""
+    count = 0
+    visited_bnodes: set[BNode] = set()
+    expressions = [
+        e for e in raw_graph.subjects(RDF.type, V.BFFI.Expression) if isinstance(e, URIRef)
+    ]
+    for expr in expressions:
+        for predicate in _EXPRESSION_PASSTHROUGH_PREDICATES:
+            for obj in raw_graph.objects(expr, predicate):
+                g.add((expr, predicate, obj))
+                count += 1
+                # Walk reachable blank-node subgraphs (bf:Title /
+                # bf:Note / etc.) verbatim.
+                if isinstance(obj, BNode):
+                    queue: list[BNode] = [obj]
+                    while queue:
+                        node = queue.pop()
+                        if node in visited_bnodes:
+                            continue
+                        visited_bnodes.add(node)
+                        for p2, o2 in raw_graph.predicate_objects(node):
+                            g.add((node, p2, o2))
+                            count += 1
+                            if isinstance(o2, BNode) and o2 not in visited_bnodes:
+                                queue.append(o2)
+    return count
+
+
 def _propagate_subject_targets(
     g: Graph,
     *,
