@@ -74,7 +74,9 @@ SOURCE_TTL = textwrap.dedent(
     <{BF_INSTANCE}> a bf:Instance ;
         bf:instanceOf <{BF_WORK}> ;
         bf:media      <http://id.loc.gov/vocabulary/mediaTypes/n> ;
-        bf:carrier    <http://id.loc.gov/vocabulary/carriers/nc> .
+        bf:carrier    <http://id.loc.gov/vocabulary/carriers/nc> ;
+        bf:title      [ a bf:Title ; bf:mainTitle "Sota ja rauha" ] ;
+        bf:publicationStatement "Helsinki : Otava, 1923" .
 
     <#contrib-primary> a bf:Contribution, bf:PrimaryContribution ;
         bf:agent <urn:agent/Tolstoy> .
@@ -786,6 +788,44 @@ def test_construct_mints_manifestation_linked_to_expression() -> None:
     # The Work isn't directly linked TO the Manifestation; the relation
     # is mediated by Expression (FRBR semantics).
     assert not list(bffi.objects(EXPECTED_WORK, V.BFFI.expressionManifested))
+
+
+def test_construct_synthesises_manifestation_pref_label_from_title_and_pub_year() -> None:
+    """P-45: Manifestations need a ``skos:prefLabel`` or Skosmos
+    renders them as the bare URI. M3 synthesises one from the
+    bf:Instance's ``bf:title``/``bf:mainTitle`` and (when present)
+    ``bf:publicationStatement`` so cataloguers see "Sota ja rauha
+    (Helsinki : Otava, 1923)" instead of an opaque URN. Different
+    publications of the same intellectual content get distinct
+    Manifestation labels because the pub statement differs per
+    edition."""
+    bffi = construct_bffi(_build_source())
+    labels = list(bffi.objects(EXPECTED_MANIF, V.SKOS.prefLabel))
+    assert labels == [Literal("Sota ja rauha (Helsinki : Otava, 1923)")]
+
+
+def test_construct_synthesises_manifestation_pref_label_without_pub_year() -> None:
+    """When the bf:Instance has a title but no ``bf:publicationStatement``,
+    the Manifestation label falls back to the title alone."""
+    g = Graph()
+    g.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:  <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Sota ja rauha" ] .
+            <{BF_INSTANCE}> a bf:Instance ;
+                bf:instanceOf <{BF_WORK}> ;
+                bf:title [ a bf:Title ; bf:mainTitle "Sota ja rauha" ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(g)
+    labels = list(bffi.objects(EXPECTED_MANIF, V.SKOS.prefLabel))
+    assert labels == [Literal("Sota ja rauha")]
 
 
 def test_construct_forwards_bf_media_and_bf_carrier_to_manifestation() -> None:

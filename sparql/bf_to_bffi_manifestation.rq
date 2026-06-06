@@ -24,6 +24,7 @@ PREFIX bffi:  <http://urn.fi/URN:NBN:fi:schema:bffi:>
 PREFIX dct:   <http://purl.org/dc/terms/>
 PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs:  <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos:  <http://www.w3.org/2004/02/skos/core#>
 PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 
 CONSTRUCT {
@@ -32,7 +33,8 @@ CONSTRUCT {
             bf:identifiedBy           ?ident ;
             dct:identifier            ?helmetBibIdLiteral ;
             bffi:media                ?mediaURI ;
-            bffi:carrier              ?carrierURI .
+            bffi:carrier              ?carrierURI ;
+            skos:prefLabel            ?manifLabel .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -83,4 +85,25 @@ WHERE {
   # (commit 3 of this chain).
   OPTIONAL { ?bfInstance bf:media   ?mediaURI .   FILTER(isIRI(?mediaURI)) }
   OPTIONAL { ?bfInstance bf:carrier ?carrierURI . FILTER(isIRI(?carrierURI)) }
+
+  # Skosmos display label. Without ``skos:prefLabel`` Skosmos renders
+  # Manifestations as their bare URI. We synthesise the label from the
+  # bf:Instance's title and (when present) its publication statement,
+  # giving the cataloguer something like "AADA WILDE (1912)" — distinct
+  # from the Work / Expression labels when the same intellectual content
+  # has multiple published editions of the same translation. Untagged
+  # literal (no @fi/@en) because bf:Instance's bf:title doesn't carry a
+  # language tag from marc2bibframe2; Skosmos falls back to no-lang
+  # labels when no language-specific prefLabel is present.
+  OPTIONAL {
+    ?bfInstance bf:title ?titleNode .
+    ?titleNode bf:mainTitle ?titleLit .
+  }
+  OPTIONAL { ?bfInstance bf:publicationStatement ?pubStmt }
+  BIND(
+    IF(BOUND(?pubStmt),
+       CONCAT(STR(?titleLit), " (", STR(?pubStmt), ")"),
+       STR(?titleLit)
+    ) AS ?manifLabel
+  )
 }
