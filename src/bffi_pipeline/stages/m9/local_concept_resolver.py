@@ -49,6 +49,7 @@ VOCAB_ALLARS: Final[str] = "allars"
 VOCAB_KAUNOKKI: Final[str] = "kaunokki"
 VOCAB_CHILDRENS_SUBJECTS: Final[str] = "childrensSubjects"
 VOCAB_MTS: Final[str] = "mts"
+VOCAB_SEKO: Final[str] = "seko"
 
 #: Legacy-bridge source-vocabulary tags surfaced on ``LocalConceptHit``
 #: when the resolved URI was reached by following mapping triples from
@@ -144,7 +145,18 @@ _KIND_TO_GRAPHS: Final[dict[AuthorityKind, tuple[tuple[str, str], ...]]] = {
         (VOCAB_LCGFT, "http://id.loc.gov/authorities/genreForms/"),
         (VOCAB_YSO, "http://www.yso.fi/onto/yso/"),
     ),
-    "music_form": ((VOCAB_MUSO, "http://www.yso.fi/onto/muso/"),),
+    "music_form": (
+        (VOCAB_MUSO, "http://www.yso.fi/onto/muso/"),
+        # SEKO — Finnish Performance Ensemble Vocabulary (1,243 concepts
+        # of musical instruments + ensembles). Lowercase URI namespace
+        # (``urn:nbn:fi:au:seko:`` not ``URN:NBN``); concept literals
+        # like ``"kantele"`` or ``"5-rivinen harmonikka"`` bind here
+        # when cataloguers tag ``$2 seko`` on 650 / 655. Tier-0 priority
+        # comes after MUSO so genuine MUSO music-form bindings still
+        # win on ties (graph-priority tiebreaker added in commit
+        # 384d49a takes care of that).
+        (VOCAB_SEKO, "http://urn.fi/urn:nbn:fi:au:seko:"),
+    ),
 }
 
 
@@ -612,6 +624,7 @@ __all__ = [
     "VOCAB_LCGFT",
     "VOCAB_LCSH",
     "VOCAB_MTS",
+    "VOCAB_SEKO",
     "VOCAB_SLM",
     "VOCAB_VIA_ALLARS",
     "VOCAB_VIA_KAUNO",

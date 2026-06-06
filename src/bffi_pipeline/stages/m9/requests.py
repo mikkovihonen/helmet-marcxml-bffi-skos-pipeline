@@ -80,6 +80,12 @@ _SOURCE_TOKEN_TO_KIND: Final[tuple[tuple[str, AuthorityKind], ...]] = (
     # there's no MTS→YSO redirect (mts has bridges into both YSO and
     # RDA vocabs, so unconditional canonicalisation isn't safe).
     ("mts", "subject"),
+    # SEKO (Suomalainen esityskokoonpanosanasto) — performance-ensemble
+    # vocab. Routes to music_form (the same bucket as MUSO) so that
+    # tier-0 queries the SEKO graph for instrument / ensemble literals.
+    # Pre-emptive; not in the 500-sample but expected in music-record
+    # corpora as NLF retires HKLJ.
+    ("seko", "music_form"),
 )
 
 

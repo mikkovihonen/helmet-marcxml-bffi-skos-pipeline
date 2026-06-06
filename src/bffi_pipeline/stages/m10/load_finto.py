@@ -176,6 +176,28 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://www.yso.fi/onto/musa/",
         languages=("fi",),
     ),
+    # SEKO (Suomalainen esityskokoonpanosanasto) — Finnish Performance
+    # Ensemble Vocabulary. Loaded pre-emptively while NLF retires HKLJ
+    # and the broader music-cataloguing landscape consolidates. 1,243
+    # concepts covering musical instruments + performance ensembles
+    # ("3-rivinen harmonikka", "5-kielinen kantele", "vocal quartet").
+    # Primary MARC field per the vocab spec is 382 (Medium of
+    # Performance), but cataloguers also tag $2 seko on 650/655 for
+    # music-instrument subjects. Finnish-only, ~606 KB.
+    #
+    # URI namespace uses LOWERCASE ``urn:nbn:fi:au:seko:`` (different
+    # from MTS/SLM which use UPPERCASE ``URN:NBN``).
+    #
+    # Bridges to LoC's Performance Mediums (LCMPT) at
+    # ``id.loc.gov/authorities/performanceMediums/`` — NOT to YSO, so
+    # no SEKO→YSO redirect is added. If LCMPT is loaded in the future
+    # a SEKO→LCMPT redirect could be added analogous to KAUNO→YSO.
+    FintoVocab(
+        vocab_id="seko",
+        dump_url="https://api.finto.fi/download/seko/seko-skos.ttl",
+        graph_uri="http://urn.fi/urn:nbn:fi:au:seko:",
+        languages=("fi",),
+    ),
     # MTS (Metatietosanasto) — Metadata Thesaurus. Loaded pre-emptively;
     # not present in Helmet's 500-sample corpus but used by other Finnish
     # libraries (archives, repositories) for administrative metadata
