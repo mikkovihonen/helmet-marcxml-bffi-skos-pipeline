@@ -123,9 +123,13 @@ bffi:Manifestation rdfs:label   "Manifestation"@en, "Manifestaatio"@fi, "Manifes
     skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
     skosmos:sparqlDialect   "JenaText" ;
 
-    # The two custom types the user can filter by from the type dropdown.
+    # Works only — Expressions live under the sibling ``:bffiExpressions``
+    # vocab and Manifestations under ``:bffiManifestations``. Listing
+    # ``bffi:Expression`` here too would double-count entries in the
+    # alphabetical browse (Pre-P-45 this vocab was the combined
+    # "Works + Expressions" surface; the three-sibling split made
+    # Expressions their own browse).
     skosmos:indexShowClass  bffi:Work ;
-    skosmos:indexShowClass  bffi:Expression ;
 
     # Group view — Works clustered with their Expressions via
     # skos:narrower (lifted from bffi:hasExpression by the Skosify overlay).

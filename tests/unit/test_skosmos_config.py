@@ -140,12 +140,19 @@ def test_vocabulary_sparql_dialect_is_jenatext(graph: Graph) -> None:
     assert dialects == [Literal("JenaText")]
 
 
-def test_index_show_class_carries_both_bffi_types(graph: Graph) -> None:
-    """M11 (Skosmos config) commits two indexShowClass entries: bffi:Work and bffi:Expression."""
+def test_bffi_works_vocab_lists_works_only(graph: Graph) -> None:
+    """Each sibling vocab from the P-45 three-vocab split lists its
+    own class only. ``:bffiWorks`` lists ``bffi:Work``;
+    ``:bffiExpressions`` lists ``bffi:Expression``; ``:bffiManifestations``
+    lists ``bffi:Manifestation``. Pre-P-45 this vocab was the combined
+    Works + Expressions browse, but with Expressions promoted to their
+    own sibling, listing them here would double-count the alphabetical
+    index — the per-sibling assertions in
+    :data:`_BFFI_SIBLING_VOCABS` already require Expression to live
+    under its own vocab."""
     vocab = _vocabulary_subject(graph)
     classes = set(graph.objects(vocab, SKOSMOS.indexShowClass))
-    assert BFFI.Work in classes
-    assert BFFI.Expression in classes
+    assert classes == {BFFI.Work}
 
 
 def test_vocabulary_uses_isothes_concept_group(graph: Graph) -> None:
