@@ -34,6 +34,7 @@ CONSTRUCT {
             bf:identifiedBy            ?ident ;
             bf:identifiedBy            ?isbn ;
             bf:identifiedBy            ?audIssue ;
+            bf:identifiedBy            ?sysCtrl ;
             dct:identifier             ?helmetBibIdLiteral ;
             bffi:media                 ?mediaURI ;
             bffi:carrier               ?carrierURI ;
@@ -91,6 +92,11 @@ CONSTRUCT {
   ?isbn    a               bf:Isbn ;
            rdf:value       ?isbnValue ;
            bf:qualifier    ?isbnQualifier .
+  ?sysCtrl a               bf:Local ;
+           rdf:value       ?sysCtrlValue ;
+           bf:assigner     ?sysCtrlAssigner .
+  ?sysCtrlAgent a          bf:Agent ;
+                bf:code    ?sysCtrlAgentCode .
   ?audIssue a              bf:AudioIssueNumber ;
             rdf:value      ?audIssueValue .
   ?seriesNode a            bffi:Series ;
@@ -231,6 +237,30 @@ WHERE {
     ?isbn a bf:Isbn ;
           rdf:value ?isbnValue .
     OPTIONAL { ?isbn bf:qualifier ?isbnQualifier }
+  }
+
+  # MARC 035 (system control number, ``(SOURCE)VALUE`` format).
+  # marc2bibframe2 emits these as ``bf:identifiedBy → bf:Local →
+  # rdf:value + bf:assigner``. The assigner is either a LoC
+  # organizations URI (``<…/organizations/fimelinda>``) — in which
+  # case the round-trip converter derives the MARC code from the
+  # URI tail / table — or a ``bf:Agent`` blank node carrying
+  # ``bf:code "FI-BTJ"`` (used when marc2bibframe2 doesn't know the
+  # LoC URI). We pass both shapes through and let the converter
+  # format the ``(CODE)VALUE`` string.
+  #
+  # The Helmet bib_id (also a bf:Local on bf:Instance) is filtered
+  # out by requiring ``bf:assigner`` — Helmet's identifier uses
+  # ``bf:source <…/source:helmet>`` instead.
+  OPTIONAL {
+    ?bfInstance bf:identifiedBy ?sysCtrl .
+    ?sysCtrl a bf:Local ;
+             rdf:value ?sysCtrlValue ;
+             bf:assigner ?sysCtrlAssigner .
+    OPTIONAL {
+      ?sysCtrlAssigner bf:code ?sysCtrlAgentCode .
+      BIND(?sysCtrlAssigner AS ?sysCtrlAgent)
+    }
   }
 
   # MARC 040 cataloging source. The source 040 $a / $b / $e live in

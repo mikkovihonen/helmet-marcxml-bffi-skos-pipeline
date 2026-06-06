@@ -85,6 +85,27 @@ _INDICATOR_BLANK: Final[str] = " "
 #: internal scaffolding.
 _RAW_BIB_URI_PREFIX: Final[str] = "http://urn.fi/URN:NBN:fi:bib:raw/"
 
+#: LoC ``organizations`` URI prefix. The URI tail reduces the MARC
+#: organization code by lower-casing and removing hyphens — the
+#: ``_ORG_URI_TO_MARC_CODE`` table reverses the dominant Helmet cases.
+_ORG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/organizations/"
+
+#: Reverse lookup for the LoC organizations URI tail → cataloguer
+#: MARC code. Covers the dominant Helmet cases. Unknown tails fall
+#: back to ``tail.upper()`` (surfaces in the round-trip diff so
+#: cataloguers see the heuristic's reach).
+_ORG_URI_TO_MARC_CODE: Final[dict[str, str]] = {
+    "fimelinda": "FI-MELINDA",
+    "fihelme": "FI-HELME",
+    "fibtj": "FI-BTJ",
+    "finl": "FI-NL",
+    "finlfennica": "FI-NL-fennica",
+    "fiyle": "FI-YLE",
+    "dlc": "DLC",
+    "uk": "UK",
+    "ukobi": "UkObi",
+}
+
 #: MARC subfield code used for the round-trip lineage token (P-48 Phase A).
 #: ``$9`` is the MARC "local processing" subfield — distinct from the
 #: existing ``$5 FI-HELME/bffi-roundtrip`` marker so the two can be
@@ -198,6 +219,7 @@ class _Reconstructor:
 
         self._emit_isbns(record)
         self._emit_publisher_numbers(record)  # 028
+        self._emit_system_control_numbers(record)  # 035
         self._emit_helmet_source_marker(record)  # 040 synth marker
         self._emit_languages(record)  # 041
         self._emit_primary_contribution(record)  # 100
@@ -393,6 +415,52 @@ class _Reconstructor:
                 for value in self.graph.objects(ident, RDF.value):
                     if isinstance(value, Literal):
                         self._emit_datafield(record, "028", ("a", str(value)), ind1="0")
+
+    def _assigner_marc_code(self, assigner: Node) -> str | None:
+        """Resolve a ``bf:assigner`` to the cataloguer-typed
+        organization code (the bit inside ``$a (CODE)VALUE``).
+
+        Two shapes:
+          - URI form: LoC organizations URI (`<…/organizations/fimelinda>`).
+            Looks up the curated table; falls back to upper-cased tail.
+          - Blank-node ``bf:Agent`` form: read ``bf:code`` directly.
+        """
+        if isinstance(assigner, URIRef):
+            s = str(assigner)
+            if s.startswith(_ORG_URI_PREFIX):
+                tail = s[len(_ORG_URI_PREFIX) :]
+                return _ORG_URI_TO_MARC_CODE.get(tail, tail.upper())
+            return None
+        for code in self.graph.objects(assigner, V.BF.code):
+            if isinstance(code, Literal):
+                return str(code)
+        return None
+
+    def _emit_system_control_numbers(self, record: Element) -> None:
+        """MARC 035 — system control numbers. ``bf:Instance →
+        bf:identifiedBy → bf:Local`` with ``bf:assigner`` (URI or
+        Agent bnode with ``bf:code``). Format: ``$a (CODE)VALUE``.
+
+        The Helmet bib_id (also a bf:Local on bf:Instance) is
+        excluded by requiring ``bf:assigner`` — Helmet uses
+        ``bf:source <…/source:helmet>`` instead, with no assigner.
+        """
+        for ident in self.graph.objects(self.manifestation, V.BF.identifiedBy):
+            types = set(self.graph.objects(ident, RDF.type))
+            if V.BF.Local not in types:
+                continue
+            assigner = next(iter(self.graph.objects(ident, V.BF.assigner)), None)
+            if assigner is None:
+                continue
+            code = self._assigner_marc_code(assigner)
+            value = next(
+                (str(v) for v in self.graph.objects(ident, RDF.value) if isinstance(v, Literal)),
+                None,
+            )
+            if value is None:
+                continue
+            formatted = f"({code}){value}" if code else value
+            self._emit_datafield(record, "035", ("a", formatted))
 
     def _emit_edition_statement(self, record: Element) -> None:
         # MARC 250 edition statement. marc2bibframe2 emits a flat

@@ -1409,6 +1409,82 @@ def test_040_falls_back_to_fi_helme_a_when_no_admin_metadata(
     assert _subfield(df, "d") == "FI-HELME/bffi-roundtrip"
 
 
+def test_035_emits_from_loc_organizations_uri_assigner() -> None:
+    """MARC 035 $a (FI-MELINDA)006644447 round-trips from
+    ``bf:identifiedBy → bf:Local`` with ``bf:assigner`` pointing at
+    the LoC organizations URI ``<…/organizations/fimelinda>``.
+    Converter reverse-derives ``FI-MELINDA`` via the curated table."""
+    g = _build_minimal_graph()
+    ident = BNode()
+    g.add((MANIF, V.BF.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BF.Local))
+    g.add((ident, RDF.value, Literal("006644447")))
+    g.add(
+        (
+            ident,
+            V.BF.assigner,
+            URIRef("http://id.loc.gov/vocabulary/organizations/fimelinda"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='035']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "(FI-MELINDA)006644447"
+
+
+def test_035_emits_from_agent_bnode_assigner_with_bf_code() -> None:
+    """When ``bf:assigner`` is a ``bf:Agent`` blank node with
+    ``bf:code "FI-BTJ"``, the converter reads the code directly."""
+    g = _build_minimal_graph()
+    ident = BNode()
+    agent = BNode()
+    g.add((MANIF, V.BF.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BF.Local))
+    g.add((ident, RDF.value, Literal("7247969")))
+    g.add((ident, V.BF.assigner, agent))
+    g.add((agent, RDF.type, V.BF.Agent))
+    g.add((agent, V.BF.code, Literal("FI-BTJ")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='035']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "(FI-BTJ)7247969"
+
+
+def test_035_does_not_emit_for_helmet_bib_id_local() -> None:
+    """The Helmet bib_id is also a ``bf:Local`` on the Manifestation
+    but uses ``bf:source <…/source:helmet>`` (no ``bf:assigner``).
+    Must not surface as 035 (that's 001 controlfield territory)."""
+    g = _build_minimal_graph()
+    ident = BNode()
+    g.add((MANIF, V.BF.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BF.Local))
+    g.add((ident, RDF.value, Literal("b13511105")))
+    g.add((ident, V.BF.source, URIRef("http://urn.fi/URN:NBN:fi:bib:source:helmet")))
+    rec = reconstruct_marc(g, MANIF)
+    assert rec.element.find("m:datafield[@tag='035']", NS) is None
+
+
+def test_035_falls_back_to_uppercased_uri_tail_for_unknown_org() -> None:
+    """Unknown LoC organizations URI tails: fall back to upper-casing
+    the tail rather than dropping the row entirely."""
+    g = _build_minimal_graph()
+    ident = BNode()
+    g.add((MANIF, V.BF.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BF.Local))
+    g.add((ident, RDF.value, Literal("99999")))
+    g.add(
+        (
+            ident,
+            V.BF.assigner,
+            URIRef("http://id.loc.gov/vocabulary/organizations/zzunknown"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='035']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "(ZZUNKNOWN)99999"
+
+
 def test_600_emits_separate_a_and_c_from_marcKey_on_subject() -> None:
     """The b12191139 / b22522396 "(fiktiivinen hahmo)" bug: source 600
     ``$a "Mikki Hiiri" $c "(fiktiivinen hahmo)"`` was collapsing to
