@@ -263,6 +263,104 @@ def test_650_emits_yso_subject_with_authority_uri(minimal_record: ET.Element) ->
     assert _subfield(df, "0") == "http://www.yso.fi/onto/yso/p1234"
 
 
+def test_raw_bib_subject_with_skos_exactmatch_yields_only_authority_row() -> None:
+    """When M9 binds a raw M3-minted subject URI to an authority
+    (emitting ``<raw> skos:exactMatch <auth>`` per P-47), the
+    converter follows the link: the raw URI's row is suppressed,
+    the authority URI emits its own row with ``$0`` = the authority,
+    and no pipeline-internal ``urn.fi/.../bib:raw/.../#Topic650-N`` URI
+    appears in MARC output."""
+    g = Graph()
+    work = URIRef("urn:work/X")
+    expr = URIRef("urn:expr/X")
+    manif = URIRef("urn:manif/X")
+    raw_sub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Topic650-22")
+    yso_sub = URIRef("http://www.yso.fi/onto/yso/p11180")
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, SKOS.prefLabel, Literal("X", lang="fi")))
+    g.add((work, V.BFFI.hasExpression, expr))
+    g.add((expr, RDF.type, V.BFFI.Expression))
+    g.add((expr, V.BFFI.expressionOf, work))
+    g.add((manif, RDF.type, V.BFFI.Manifestation))
+    g.add((manif, V.BFFI.expressionManifested, expr))
+    g.add((manif, DCTERMS.identifier, Literal("bX")))
+    # M9-bound: both raw + authority on the Work, with skos:exactMatch
+    g.add((work, V.BFFI.subject, raw_sub))
+    g.add((work, V.BFFI.subject, yso_sub))
+    g.add((raw_sub, V.RDFS.label, Literal("norjankielinen kirjallisuus", lang="fi")))
+    g.add((raw_sub, V.SKOS.exactMatch, yso_sub))
+    g.add((yso_sub, SKOS.prefLabel, Literal("norjankielinen kirjallisuus", lang="fi")))
+
+    rec = reconstruct_marc(g, manif)
+    rows = [df for df in rec.element.findall("m:datafield[@tag='650']", NS)]
+    assert len(rows) == 1
+    [df] = rows
+    assert _subfield(df, "0") == str(yso_sub)
+    # No raw bib URI appears anywhere on the row.
+    for sf in df.findall("m:subfield", NS):
+        assert "bib:raw/" not in (sf.text or "")
+
+
+def test_raw_bib_subject_without_redirect_dedups_via_label_match() -> None:
+    """For canonical graphs produced BEFORE the M9 skos:exactMatch
+    emission landed: the raw URI lacks the redirect, but a sibling
+    authority URI on the same Work shares the same label. The
+    converter still de-dupes: emits the authority's row, suppresses
+    the raw URI's row entirely."""
+    g = Graph()
+    work = URIRef("urn:work/Y")
+    expr = URIRef("urn:expr/Y")
+    manif = URIRef("urn:manif/Y")
+    raw_sub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bY#Topic650-30")
+    yso_sub = URIRef("http://www.yso.fi/onto/yso/p99999")
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, SKOS.prefLabel, Literal("Y", lang="fi")))
+    g.add((work, V.BFFI.hasExpression, expr))
+    g.add((expr, RDF.type, V.BFFI.Expression))
+    g.add((expr, V.BFFI.expressionOf, work))
+    g.add((manif, RDF.type, V.BFFI.Manifestation))
+    g.add((manif, V.BFFI.expressionManifested, expr))
+    g.add((manif, DCTERMS.identifier, Literal("bY")))
+    g.add((work, V.BFFI.subject, raw_sub))
+    g.add((work, V.BFFI.subject, yso_sub))
+    g.add((raw_sub, V.RDFS.label, Literal("sota", lang="fi")))
+    # No skos:exactMatch — but the YSO label matches the raw's label.
+    g.add((yso_sub, SKOS.prefLabel, Literal("sota", lang="fi")))
+
+    rec = reconstruct_marc(g, manif)
+    rows = [df for df in rec.element.findall("m:datafield[@tag='650']", NS)]
+    assert len(rows) == 1
+    [df] = rows
+    assert _subfield(df, "0") == str(yso_sub)
+
+
+def test_raw_bib_subject_without_authority_emits_with_no_dollar_zero() -> None:
+    """When M9 found no authority for a raw URI, the round-trip emits
+    the row with ``$a`` from rdfs:label but NO ``$0`` — the raw
+    pipeline-internal URI is never the right thing to write into MARC
+    ``$0``."""
+    g = Graph()
+    work = URIRef("urn:work/Z")
+    expr = URIRef("urn:expr/Z")
+    manif = URIRef("urn:manif/Z")
+    raw_sub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bZ#Topic650-1")
+    g.add((work, RDF.type, V.BFFI.Work))
+    g.add((work, SKOS.prefLabel, Literal("Z", lang="fi")))
+    g.add((work, V.BFFI.hasExpression, expr))
+    g.add((expr, RDF.type, V.BFFI.Expression))
+    g.add((expr, V.BFFI.expressionOf, work))
+    g.add((manif, RDF.type, V.BFFI.Manifestation))
+    g.add((manif, V.BFFI.expressionManifested, expr))
+    g.add((manif, DCTERMS.identifier, Literal("bZ")))
+    g.add((work, V.BFFI.subject, raw_sub))
+    g.add((raw_sub, V.RDFS.label, Literal("oddball", lang="fi")))
+
+    rec = reconstruct_marc(g, manif)
+    [df] = rec.element.findall("m:datafield[@tag='650']", NS)
+    assert _subfield(df, "a") == "oddball"
+    assert _subfield(df, "0") is None
+
+
 def test_655_emits_slm_genre_form(minimal_record: ET.Element) -> None:
     df = _datafield(minimal_record, "655")
     assert df is not None

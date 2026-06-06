@@ -63,6 +63,14 @@ _LANGUAGE_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
 #: convention for "indicator undefined / blank".
 _INDICATOR_BLANK: Final[str] = " "
 
+#: M3 mints raw URIs under this prefix for cataloguer-typed subjects /
+#: genre-forms that have no ``$0`` in the source MARC. M9 then emits
+#: ``<raw> skos:exactMatch <authority>`` when it binds the raw URI to
+#: a Finto-vocab concept. The converter follows that link so MARC ``$0``
+#: carries the authority URI cataloguers care about, not pipeline-
+#: internal scaffolding.
+_RAW_BIB_URI_PREFIX: Final[str] = "http://urn.fi/URN:NBN:fi:bib:raw/"
+
 
 @dataclass(frozen=True)
 class ReconstructedRecord:
@@ -404,45 +412,105 @@ class _Reconstructor:
         work = self.work
         if work is None:
             return
+        seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.subject)
         for subject in self.graph.objects(work, V.BFFI.subject):
-            label = self._first_label(subject)
-            if not label and isinstance(subject, URIRef):
-                # Authority URI without an inline label — emit the
-                # URI itself in $0, with $a empty (the diff surfaces
-                # the missing label).
-                label = None
-            source = self._first_source(subject)
+            row = self._subject_row(subject, seen_authorities)
+            if row is None:
+                continue
             # 650 = topical default. Distinguishing 600/610/611/648/651
             # from BFFI alone is heuristic — left for a future commit.
-            tag = "650"
-            subs: list[tuple[str, str]] = []
-            if label:
-                subs.append(("a", label))
-            if source:
-                subs.append(("2", source))
-            if isinstance(subject, URIRef):
-                subs.append(("0", str(subject)))
-            if not subs:
-                continue
-            self._emit_datafield(record, tag, *subs, ind2="7")
+            self._emit_datafield(record, "650", *row, ind2="7")
 
     def _emit_genre_forms(self, record: Element) -> None:
         work = self.work
         if work is None:
             return
+        seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.genreForm)
         for genre in self.graph.objects(work, V.BFFI.genreForm):
-            label = self._first_label(genre)
-            source = self._first_source(genre)
+            row = self._subject_row(genre, seen_authorities)
+            if row is None:
+                continue
+            self._emit_datafield(record, "655", *row, ind2="7")
+
+    def _authority_targets(self, work: URIRef, predicate: URIRef) -> set[URIRef]:
+        """Return the set of authority-URI targets of ``<work> predicate``
+        — every URI target that's NOT a raw M3-minted bib URI. Used to
+        decide whether a raw URI on the same Work has a parallel
+        authority binding (and is therefore the M9-bound redundant
+        twin to be suppressed in the round-trip)."""
+        out: set[URIRef] = set()
+        for o in self.graph.objects(work, predicate):
+            if isinstance(o, URIRef) and not str(o).startswith(_RAW_BIB_URI_PREFIX):
+                out.add(o)
+        return out
+
+    def _subject_row(
+        self, target: Node, authorities_on_work: set[URIRef]
+    ) -> tuple[tuple[str, str], ...] | None:
+        """Build the subfield tuple for one 650/655 row, applying the
+        raw-vs-authority dedup + skos:exactMatch redirect logic.
+
+        Returns ``None`` when the row should be suppressed entirely
+        (raw URI shadowed by a sibling authority binding on the same
+        Work; the authority will emit its own row independently)."""
+        if isinstance(target, URIRef) and str(target).startswith(_RAW_BIB_URI_PREFIX):
+            # Raw bib URI. Follow skos:exactMatch when M9 attached one
+            # — that becomes the row's $0. Otherwise emit the row WITHOUT
+            # $0 (the raw URI is pipeline-internal; cataloguers don't
+            # want it in MARC).
+            redirected = self._first_authority_redirect(target)
+            if redirected is not None:
+                # Honest cataloguer view: the row "is" the authority's
+                # row — let the authority's own iteration emit it
+                # (which is guaranteed since M9 also adds <work>
+                # predicate <auth> alongside the redirect).
+                return None
+            # Look for a same-Work authority whose label matches —
+            # M9-pre-skos-exactMatch back-compat. The match drops this
+            # raw row in favour of the authority's own iteration.
+            label = self._first_label(target)
+            if label is not None and any(
+                self._target_label_matches(auth, label) for auth in authorities_on_work
+            ):
+                return None
+            label = self._first_label(target)
+            source = self._first_source(target)
             subs: list[tuple[str, str]] = []
             if label:
                 subs.append(("a", label))
             if source:
                 subs.append(("2", source))
-            if isinstance(genre, URIRef):
-                subs.append(("0", str(genre)))
-            if not subs:
-                continue
-            self._emit_datafield(record, "655", *subs, ind2="7")
+            return tuple(subs) if subs else None
+        # Authority URI (or blank node) — emit normally.
+        label = self._first_label(target)
+        source = self._first_source(target)
+        subs = []
+        if label:
+            subs.append(("a", label))
+        if source:
+            subs.append(("2", source))
+        if isinstance(target, URIRef):
+            subs.append(("0", str(target)))
+        return tuple(subs) if subs else None
+
+    def _first_authority_redirect(self, raw_uri: URIRef) -> URIRef | None:
+        """Return the first ``skos:exactMatch`` target of a raw URI
+        that points OUT of the raw-bib namespace. None if no such
+        redirect exists."""
+        for o in self.graph.objects(raw_uri, V.SKOS.exactMatch):
+            if isinstance(o, URIRef) and not str(o).startswith(_RAW_BIB_URI_PREFIX):
+                return o
+        return None
+
+    def _target_label_matches(self, target: Node, label: str) -> bool:
+        """True if ``target`` has an ``rdfs:label`` or ``skos:prefLabel``
+        equal to ``label`` in some language (case-sensitive — matches the
+        M9 binding semantics)."""
+        for prop in (V.RDFS.label, SKOS.prefLabel):
+            for val in self.graph.objects(target, prop):
+                if isinstance(val, Literal) and str(val) == label:
+                    return True
+        return False
 
     def _first_source(self, node: Node) -> str | None:
         for val in self.graph.objects(node, V.BF.source):

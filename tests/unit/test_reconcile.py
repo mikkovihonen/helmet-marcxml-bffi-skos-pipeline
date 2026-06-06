@@ -1550,6 +1550,42 @@ def test_apply_reconciliation_subject_path_links_authority_and_bridges_blank_nod
     assert outcomes[0].request.kind == "subject"
 
 
+def test_apply_reconciliation_bridges_raw_bib_uri_with_skos_exactmatch() -> None:
+    """P-47: when a cataloguer-typed subject lives on a raw M3-minted
+    URI (``urn.fi/URN:NBN:fi:bib:raw/...#Topic650-N``) AND M9 binds it
+    to an authority, the graph mutator emits
+    ``<raw> skos:exactMatch <authority>`` so the round-trip converter
+    can redirect MARC ``$0`` to the authority URI cataloguers care
+    about, not the pipeline-internal scaffolding."""
+    g = _build_subject_canonical_graph(subject_label=None)
+    work = URIRef(WORK)
+    raw_uri = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bABC#Topic650-7")
+    g.add((work, V.BFFI.subject, raw_uri))
+    g.add((raw_uri, V.RDFS.label, Literal("Tampere")))
+    yso_uri = "http://www.yso.fi/onto/yso/p105076"
+    client = StubAuthorityClient(
+        fixtures={
+            ("subject", "Tampere"): [
+                _candidate(yso_uri, "Tampere", 0.99, vocab="yso"),
+            ]
+        }
+    )
+    apply_reconciliation(
+        client=client,
+        picker=StubPicker(),
+        graph=g,
+        kinds={"subject"},
+        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+    )
+    assert (work, V.BFFI.subject, URIRef(yso_uri)) in g
+    # The new bridge: raw URI carries a skos:exactMatch to the authority.
+    matches = list(g.objects(raw_uri, V.SKOS.exactMatch))
+    assert URIRef(yso_uri) in matches
+    # Sanity: M9 must NOT have used prov:specializationOf for URIs
+    # (that path is reserved for blank-node targets — audit trail).
+    assert (raw_uri, V.PROV.specializationOf, URIRef(yso_uri)) not in g
+
+
 def test_apply_reconciliation_genre_path_uses_genre_form_predicate() -> None:
     g = _build_subject_canonical_graph(
         subject_label=None,

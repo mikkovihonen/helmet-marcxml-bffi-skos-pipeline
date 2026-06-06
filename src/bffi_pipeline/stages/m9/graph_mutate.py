@@ -93,6 +93,14 @@ def _link_canonical_creator(graph: Graph, work_uri: str, chosen_uri: str) -> Non
                 graph.add((agent, V.PROV.specializationOf, auth))
 
 
+#: M3 raw-URI prefix for cataloguer-typed subjects/genre-forms minted
+#: from MARC 6XX (#Topic650-N, #GenreForm655-N, #Place651-N, etc.).
+#: M9's binding logic uses this to recognise "the raw URI the catalougeur's
+#: term lives on" vs an external authority URI the cataloguer already
+#: typed into ``$0``.
+_RAW_BIB_URI_PREFIX: str = "http://urn.fi/URN:NBN:fi:bib:raw/"
+
+
 def _link_canonical_subject(
     graph: Graph,
     *,
@@ -101,11 +109,23 @@ def _link_canonical_subject(
     predicate_uri: str,
     literal: str,
 ) -> None:
-    """Add ``<work> <predicate> <authority>`` and bridge the original blank node.
+    """Add ``<work> <predicate> <authority>`` and bridge the original
+    cataloguer-typed target.
 
-    The blank-node target M8 propagated onto the canonical Work stays in
-    place (it preserves the cataloguer's literal for audit), and gains a
-    ``prov:specializationOf`` triple pointing at the chosen authority.
+    Two bridge shapes — one per cataloguer-input form M8 propagated onto
+    the canonical Work:
+
+    1. **Blank-node target** (no ``$0`` in source MARC; M8 keeps the
+       cataloguer's literal as ``rdfs:label`` on a blank node): gains
+       ``prov:specializationOf <auth>``. The blank node stays in the
+       graph as the audit trail of the cataloguer's exact literal.
+
+    2. **URI target with the M3 raw-bib prefix**
+       (``urn.fi/URN:NBN:fi:bib:raw/...#Topic650-N``): gains
+       ``skos:exactMatch <auth>``. The round-trip converter (P-47)
+       follows this link to emit the authority URI in MARC ``$0``
+       instead of the pipeline-internal raw URI.
+
     The same predicate (``bffi:subject`` or ``bffi:genreForm``) the M8
     propagation used is re-used here — the cataloguer's MARC tag, not
     the Finto vocabulary, decides which slot the authority binds into.
@@ -115,15 +135,25 @@ def _link_canonical_subject(
     predicate = URIRef(predicate_uri)
     graph.add((work, predicate, auth))
     for target in graph.objects(work, predicate):
-        if isinstance(target, URIRef):
-            continue
-        # Bridge only the blank node whose label matches the input literal,
+        # Bridge only the target whose label matches the input literal,
         # so two distinct cataloguer subjects on the same canonical (e.g.
         # "Tampere" and "Helsinki") don't accidentally share a bridge.
+        target_label_matches = False
         for label in graph.objects(target, V.RDFS.label):
             if isinstance(label, RdfLiteral) and str(label) == literal:
-                graph.add((target, V.PROV.specializationOf, auth))
+                target_label_matches = True
                 break
+        if not target_label_matches:
+            continue
+        if isinstance(target, URIRef):
+            if str(target).startswith(_RAW_BIB_URI_PREFIX) and target != auth:
+                # Bridge the raw URI to the authority. Doesn't fire on
+                # external URIs the cataloguer already typed in source
+                # MARC's ``$0`` (those don't carry the bib:raw prefix).
+                graph.add((target, V.SKOS.exactMatch, auth))
+        else:
+            # Blank-node case — preserve the existing audit-trail link.
+            graph.add((target, V.PROV.specializationOf, auth))
 
 
 def _apply_canonical_link(graph: Graph, request: EntityRequest, chosen_uri: str) -> None:
