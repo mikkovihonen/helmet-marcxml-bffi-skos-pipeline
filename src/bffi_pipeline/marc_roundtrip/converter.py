@@ -106,6 +106,45 @@ _ORG_URI_TO_MARC_CODE: Final[dict[str, str]] = {
     "ukobi": "UkObi",
 }
 
+#: Subject / genre-form URI namespace → cataloguer MARC ``$2`` code.
+#: marc2bibframe2 strips the ``/fin``/``/swe`` language suffix when
+#: normalising the source ``$2 kauno/fin`` to a LoC
+#: ``<…/subjectSchemes/kauno>`` URI, but the subject URI's own
+#: namespace IS the authoritative reverse-mapping target (and
+#: encodes the conventional language for the namespace — kauno is
+#: Finnish, bella is its Swedish counterpart, etc.).
+#:
+#: Order matters: longer prefixes (``yso-paikat`` / ``yso-aika``)
+#: are checked before the bare ``yso`` prefix. Python dict ordering
+#: is insertion-order, so the iteration in
+#: ``_marc_source_from_uri_namespace`` honours this.
+_URI_NAMESPACE_TO_MARC_SOURCE: Final[dict[str, str]] = {
+    "http://www.yso.fi/onto/yso-paikat/": "yso/fin",
+    "http://www.yso.fi/onto/yso-aika/": "yso/fin",
+    "http://www.yso.fi/onto/kauno/": "kauno/fin",
+    "http://www.yso.fi/onto/musa/": "musa/fin",
+    "http://www.yso.fi/onto/bella/": "bella/swe",
+    "http://www.yso.fi/onto/cilla/": "cilla/swe",
+    "http://www.yso.fi/onto/allars/": "allars/swe",
+    "http://www.yso.fi/onto/kaunokki/": "kaunokki",
+    "http://www.yso.fi/onto/yso/": "yso/fin",
+    "http://urn.fi/URN:NBN:fi:au:slm:": "slm/fin",
+    "http://urn.fi/URN:NBN:fi:au:slm-swe:": "slm/swe",
+    "http://id.loc.gov/authorities/subjects/": "lcsh",
+    "http://id.loc.gov/authorities/names/": "lcnaf",
+    "http://id.loc.gov/vocabulary/genreFormSchemes/lcgft/": "lcgft",
+}
+
+
+def _marc_source_from_uri_namespace(uri_str: str) -> str | None:
+    """Look up the cataloguer MARC ``$2`` source-vocab code from the
+    URI namespace. Returns ``None`` when no entry matches."""
+    for prefix, code in _URI_NAMESPACE_TO_MARC_SOURCE.items():
+        if uri_str.startswith(prefix):
+            return code
+    return None
+
+
 #: MARC subfield code used for the round-trip lineage token (P-48 Phase A).
 #: ``$9`` is the MARC "local processing" subfield — distinct from the
 #: existing ``$5 FI-HELME/bffi-roundtrip`` marker so the two can be
@@ -1254,12 +1293,37 @@ class _Reconstructor:
         return False
 
     def _first_source(self, node: Node) -> str | None:
+        """Derive the cataloguer-typed MARC ``$2`` source-vocab code
+        for a subject / genre-form target.
+
+        Three strategies, applied in order:
+
+        1. **URI-namespace lookup**: if the target URI's namespace
+           matches a Finto / LoC vocab pattern (``…/onto/kauno/``,
+           ``…/onto/yso-paikat/``, ``…/au:slm:``, etc.), return the
+           full MARC code WITH the language suffix
+           ("kauno/fin", "yso/fin", "slm/fin", "bella/swe"). This is
+           the most reliable strategy because marc2bibframe2 strips
+           the ``/fin`` language suffix when normalising MARC ``$2 …/fin``
+           to ``bf:source <…/subjectSchemes/kauno>``, but the
+           subject URI namespace IS the authoritative source of truth.
+
+        2. **bf:source literal**: when M3 routed the cataloguer's
+           ``$2`` verbatim as a literal (the raw / un-reconciled
+           subject case), return it as-is.
+
+        3. **bf:source URI tail**: legacy fallback — strip the URI
+           prefix and return the tail (loses ``/fin`` but keeps the
+           data flowing).
+        """
+        if isinstance(node, URIRef):
+            ns_code = _marc_source_from_uri_namespace(str(node))
+            if ns_code is not None:
+                return ns_code
         for val in self.graph.objects(node, V.BF.source):
             if isinstance(val, Literal):
                 return str(val)
             if isinstance(val, URIRef):
-                # If the source is the Helmet bf:Source URI etc., emit
-                # the namespace tail as the cataloguer-typed code.
                 s = str(val)
                 return s.rsplit("/", 1)[-1] if "/" in s else s
         return None

@@ -263,6 +263,81 @@ def test_650_emits_yso_subject_with_authority_uri(minimal_record: ET.Element) ->
     assert _subfield(df, "0") == "http://www.yso.fi/onto/yso/p1234"
 
 
+def test_650_emits_kauno_fin_source_from_subject_uri_namespace() -> None:
+    """marc2bibframe2 strips the ``/fin`` language suffix when
+    normalising source ``$2 kauno/fin`` to the LoC subjectSchemes
+    URI ``<…/subjectSchemes/kauno>``. The converter recovers the
+    full ``kauno/fin`` from the subject URI's own namespace
+    (``http://www.yso.fi/onto/kauno/…``), not bf:source."""
+    g = _build_minimal_graph()
+    kauno_uri = URIRef("http://www.yso.fi/onto/kauno/p4013")
+    g.add((WORK, V.BFFI.subject, kauno_uri))
+    g.add((kauno_uri, V.RDFS.label, Literal("avaruus")))
+    # bf:source is the URI marc2bibframe2 emits (without /fin).
+    g.add(
+        (
+            kauno_uri,
+            V.BF.source,
+            URIRef("http://id.loc.gov/vocabulary/subjectSchemes/kauno"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = next(
+        df
+        for df in rec.element.findall("m:datafield[@tag='650']", NS)
+        if _subfield(df, "0") == str(kauno_uri)
+    )
+    assert _subfield(df, "2") == "kauno/fin"
+
+
+def test_650_emits_yso_paikat_source_for_geographic_subject() -> None:
+    """yso-paikat namespace → ``yso/fin`` source code (cataloguer
+    convention: $2 yso/fin even for geographic subjects in YSO-paikat)."""
+    g = _build_minimal_graph()
+    paikat = URIRef("http://www.yso.fi/onto/yso-paikat/p105076")
+    g.add((WORK, V.BFFI.subject, paikat))
+    g.add((paikat, V.RDFS.label, Literal("Tampere")))
+    rec = reconstruct_marc(g, MANIF)
+    df = next(
+        df
+        for df in rec.element.findall("m:datafield[@tag='651']", NS)
+        if _subfield(df, "0") == str(paikat)
+    )
+    assert _subfield(df, "2") == "yso/fin"
+
+
+def test_650_emits_bella_swe_source_for_swedish_fiction_namespace() -> None:
+    """bella (Swedish fiction-subject vocab) → bella/swe."""
+    g = _build_minimal_graph()
+    bella = URIRef("http://www.yso.fi/onto/bella/p1234")
+    g.add((WORK, V.BFFI.subject, bella))
+    g.add((bella, V.RDFS.label, Literal("rymden")))
+    rec = reconstruct_marc(g, MANIF)
+    df = next(
+        df
+        for df in rec.element.findall("m:datafield[@tag='650']", NS)
+        if _subfield(df, "0") == str(bella)
+    )
+    assert _subfield(df, "2") == "bella/swe"
+
+
+def test_655_emits_slm_fin_source_for_slm_genre_form() -> None:
+    """SLM (Suomalainen lajityyppi- ja muotosanasto) URI →
+    ``slm/fin`` (genre/form schemes still use the ``/fin`` suffix
+    on 655 $2 by Helmet cataloguer convention)."""
+    g = _build_minimal_graph()
+    slm = URIRef("http://urn.fi/URN:NBN:fi:au:slm:s9999")
+    g.add((WORK, V.BFFI.genreForm, slm))
+    g.add((slm, V.RDFS.label, Literal("uusi laji")))
+    rec = reconstruct_marc(g, MANIF)
+    df = next(
+        df
+        for df in rec.element.findall("m:datafield[@tag='655']", NS)
+        if _subfield(df, "0") == str(slm)
+    )
+    assert _subfield(df, "2") == "slm/fin"
+
+
 def test_raw_bib_subject_with_skos_exactmatch_yields_only_authority_row() -> None:
     """When M9 binds a raw M3-minted subject URI to an authority
     (emitting ``<raw> skos:exactMatch <auth>`` per P-47), the
