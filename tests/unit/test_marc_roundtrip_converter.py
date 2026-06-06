@@ -216,11 +216,16 @@ def test_245_emits_work_pref_label_as_title(minimal_record: ET.Element) -> None:
     assert _subfield(df, "a") == "AADA WILDE"
 
 
-def test_260_parses_publication_statement_from_manifestation_label(
+def test_264_parses_publication_statement_from_manifestation_label(
     minimal_record: ET.Element,
 ) -> None:
-    df = _datafield(minimal_record, "260")
+    """MARC 264 (RDA replacement for 260): when no structured
+    ``bffi:provisionActivity`` bnode is present, fall back to
+    parsing the Manifestation's prefLabel suffix for the publication
+    statement. Emits a single 264 $c with ind2=1 (Publication)."""
+    df = _datafield(minimal_record, "264")
     assert df is not None
+    assert df.attrib["ind2"] == "1"
     assert _subfield(df, "c") == "Helsinki : Otava, 1912"
 
 
@@ -624,13 +629,86 @@ def test_245_emits_responsibility_statement_in_c_subfield() -> None:
     assert _subfield(df, "c") == "THOMAS PETER KRAG"
 
 
-def test_260_prefers_publication_statement_literal_over_label_parse() -> None:
-    """When ``bffi:publicationStatement`` is present, 260 $c uses it
+def test_264_emits_structured_publication_with_a_b_c_subfields() -> None:
+    """Structured ``bffi:provisionActivity`` bnode → one MARC 264 row
+    with $a (place), $b (agent), $c (date). ind2 derived from the
+    bnode's ``rdf:type`` (Publication=1, the dominant case)."""
+    g = _build_minimal_graph()
+    prov = BNode()
+    g.add((MANIF, V.BFFI.provisionActivity, prov))
+    g.add((prov, RDF.type, V.BF.Publication))
+    g.add((prov, V.BFLC.simplePlace, Literal("Moskva")))
+    g.add((prov, V.BFLC.simpleAgent, Literal("Izdatelstvo AST")))
+    g.add((prov, V.BFLC.simpleDate, Literal("2025")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='264']", NS)
+    assert df is not None
+    assert df.attrib["ind2"] == "1"
+    assert _subfield(df, "a") == "Moskva"
+    assert _subfield(df, "b") == "Izdatelstvo AST"
+    assert _subfield(df, "c") == "2025"
+
+
+def test_264_ind2_for_manufacture_provision_activity() -> None:
+    """bf:Manufacture → MARC 264 ind2=3 (manufacture)."""
+    g = _build_minimal_graph()
+    prov = BNode()
+    g.add((MANIF, V.BFFI.provisionActivity, prov))
+    g.add((prov, RDF.type, V.BF.Manufacture))
+    g.add((prov, V.BFLC.simplePlace, Literal("Helsinki")))
+    g.add((prov, V.BFLC.simpleAgent, Literal("Otavan Kirjapaino")))
+    g.add((prov, V.BFLC.simpleDate, Literal("2024")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='264']", NS)
+    assert df is not None
+    assert df.attrib["ind2"] == "3"
+
+
+def test_648_routing_from_bf_temporal_rdf_type_on_subject() -> None:
+    """A cataloguer-typed ``$0 http://www.yso.fi/onto/yso/p…`` URI
+    on source MARC 648 lands as ``<bf:Temporal rdf:about="…">``
+    in BIBFRAME. M3 routes ``a bf:Temporal`` to canonical; the
+    converter reads the type and emits 648 (not the default 650)."""
+    g = _build_minimal_graph()
+    temporal = URIRef("http://www.yso.fi/onto/yso/p6140061499")
+    g.add((WORK, V.BFFI.subject, temporal))
+    g.add((temporal, RDF.type, V.BF.Temporal))
+    g.add((temporal, V.RDFS.label, Literal("1400-luku")))
+    rec = reconstruct_marc(g, MANIF)
+    rows = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='648']", NS)
+        if _subfield(df, "0") == str(temporal)
+    ]
+    assert len(rows) == 1
+
+
+def test_651_routing_from_bf_place_rdf_type_on_subject() -> None:
+    """The Iso-Britannia / b26164413 case: plain ``yso/p104990``
+    URI on a source 651 lands as ``<bf:Place rdf:about="…">``.
+    The converter routes to 651 via the ``a bf:Place`` typing
+    (not via URI namespace — plain yso/ has no geographic hint)."""
+    g = _build_minimal_graph()
+    place = URIRef("http://www.yso.fi/onto/yso/p104990")
+    g.add((WORK, V.BFFI.subject, place))
+    g.add((place, RDF.type, V.BF.Place))
+    g.add((place, V.RDFS.label, Literal("Iso-Britannia")))
+    rec = reconstruct_marc(g, MANIF)
+    rows = [
+        df
+        for df in rec.element.findall("m:datafield[@tag='651']", NS)
+        if _subfield(df, "0") == str(place)
+    ]
+    assert len(rows) == 1
+
+
+def test_264_prefers_publication_statement_literal_over_label_parse() -> None:
+    """When ``bffi:publicationStatement`` is present, 264 $c uses it
     directly instead of parsing the Manifestation prefLabel suffix."""
     g = _build_minimal_graph()
     g.add((MANIF, V.BFFI.publicationStatement, Literal("Helsinki : Otava, 1912")))
     rec = reconstruct_marc(g, MANIF)
-    df = rec.element.find("m:datafield[@tag='260']", NS)
+    df = rec.element.find("m:datafield[@tag='264']", NS)
     assert df is not None
     assert _subfield(df, "c") == "Helsinki : Otava, 1912"
 

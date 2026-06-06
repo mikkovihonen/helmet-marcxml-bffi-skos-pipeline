@@ -134,6 +134,53 @@ _EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
 _LOC_VOCAB_URI_PREFIX: str = "http://id.loc.gov/vocabulary/"
 
 
+#: BIBFRAME subject classes that the round-trip converter routes
+#: on (``rdf:type`` on the subject URI = MARC 6XX tag selector):
+#: ``bf:Place`` → 651, ``bf:Temporal`` → 648, ``bf:Person`` → 600,
+#: ``bf:Organization`` → 610, ``bf:Meeting`` → 611, ``bf:Topic`` → 650.
+_SUBJECT_TYPING_PREDICATES: tuple[URIRef, ...] = (
+    V.BF.Topic,
+    V.BF.Place,
+    V.BF.Temporal,
+    V.BF.Person,
+    V.BF.Organization,
+    V.BF.Meeting,
+)
+
+
+def _propagate_subject_typing(g: Graph, raw_graph: Graph) -> int:
+    """Copy ``rdf:type`` triples on bffi:subject target URIs from the
+    raw graph into canonical.
+
+    When a cataloguer types ``$0 http://www.yso.fi/onto/yso/p104990``
+    on a source MARC 651, marc2bibframe2 emits the URI as
+    ``<bf:Place rdf:about="…/p104990">``. The ``a bf:Place`` triple
+    is the only signal that survives the loss of source MARC tag —
+    the URI's own namespace (plain ``yso/``) doesn't reveal the
+    geographic intent. M3 routes the typing triple per-record; this
+    pass forwards it into canonical so the round-trip converter's
+    ``_subject_marc_tag`` can read it and pick 648/651/600/610/611.
+
+    Filtered to the six BIBFRAME subject classes the converter
+    routes on — other rdf:type triples on subject URIs (e.g.
+    ``madsrdf:Topic``) aren't relevant.
+
+    Returns triples copied.
+    """
+    count = 0
+    routable: set[URIRef] = set(_SUBJECT_TYPING_PREDICATES)
+    subject_uris: set[URIRef] = set()
+    for _s, _p, o in raw_graph.triples((None, V.BFFI.subject, None)):
+        if isinstance(o, URIRef):
+            subject_uris.add(o)
+    for uri in subject_uris:
+        for t in raw_graph.objects(uri, RDF.type):
+            if isinstance(t, URIRef) and t in routable:
+                g.add((uri, RDF.type, t))
+                count += 1
+    return count
+
+
 def _propagate_loc_vocab_labels(g: Graph, raw_graph: Graph) -> int:
     """Copy ``rdfs:label`` triples on LoC vocabulary URIs from the M3
     per-record graph into the canonical graph.

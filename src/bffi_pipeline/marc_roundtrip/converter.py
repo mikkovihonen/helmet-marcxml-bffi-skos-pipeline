@@ -136,6 +136,31 @@ _URI_NAMESPACE_TO_MARC_SOURCE: Final[dict[str, str]] = {
 }
 
 
+#: BIBFRAME subject-class ``rdf:type`` → MARC 6XX tag. Used by the
+#: round-trip converter's ``_subject_marc_tag`` to route cataloguer-
+#: typed ``$0`` URIs whose namespace alone doesn't reveal the
+#: subject kind (the plain ``yso/`` URI case — `bf:Place rdf:about`
+#: typing is the discriminator).
+_SUBJECT_TYPE_TO_MARC_6XX_TAG: Final[dict[URIRef, str]] = {
+    V.BF.Person: "600",
+    V.BF.Organization: "610",
+    V.BF.Meeting: "611",
+    V.BF.Temporal: "648",
+    V.BF.Place: "651",
+    V.BF.Topic: "650",
+}
+
+#: BIBFRAME bf:ProvisionActivity subclass tail → MARC 264 ind2.
+#: ind2=1 (Publication) is the dominant fallback.
+_PROVISION_TYPE_TO_IND2: Final[dict[str, str]] = {
+    "Production": "0",
+    "Publication": "1",
+    "Distribution": "2",
+    "Manufacture": "3",
+    "Copyright": "4",
+}
+
+
 def _marc_source_from_uri_namespace(uri_str: str) -> str | None:
     """Look up the cataloguer MARC ``$2`` source-vocab code from the
     URI namespace. Returns ``None`` when no entry matches."""
@@ -752,22 +777,96 @@ class _Reconstructor:
         self._emit_datafield(record, "245", *subs, ind1="1", ind2="0")
 
     def _emit_publication_statement(self, record: Element) -> None:
-        # 260 $c date. Prefer the lifted ``bffi:publicationStatement``
-        # literal (P-47 — M3 carries it from bf:Instance verbatim);
-        # fall back to parsing the prefLabel suffix when the literal
-        # is absent (older M3 outputs or records that synthesized the
-        # prefLabel suffix without a bf:publicationStatement source).
+        """MARC 264 publication / production / distribution / manufacture.
+
+        Prefers structured ``bffi:provisionActivity`` bnodes — each
+        emits one 264 row with:
+          - ind2 from the bnode's rdf:type
+            (bf:Publication → 1, bf:Production → 0,
+             bf:Distribution → 2, bf:Manufacture → 3,
+             bf:Copyright → 4; default = 1).
+          - $a from bflc:simplePlace,
+            $b from bflc:simpleAgent,
+            $c from bflc:simpleDate.
+
+        Falls back to the lifted ``bffi:publicationStatement`` literal
+        (264 ind2=1, single $c) when no structured data is present.
+        Last-resort: parse the prefLabel suffix for older M3 output.
+        """
+        # Structured path: one 264 per provisionActivity bnode.
+        emitted_structured = False
+        for prov in self.graph.objects(self.manifestation, V.BFFI.provisionActivity):
+            if isinstance(prov, Literal):
+                continue
+            subs = self._provision_activity_subs(prov)
+            if not subs:
+                continue
+            ind2 = self._provision_activity_ind2(prov)
+            self._emit_datafield(record, "264", *subs, ind2=ind2)
+            emitted_structured = True
+        if emitted_structured:
+            return
         for stmt in self.graph.objects(self.manifestation, V.BFFI.publicationStatement):
             if isinstance(stmt, Literal):
-                self._emit_datafield(record, "260", ("c", str(stmt)))
+                self._emit_datafield(record, "264", ("c", str(stmt)), ind2="1")
                 return
         for lit in self.graph.objects(self.manifestation, SKOS.prefLabel):
             text = str(lit)
             if "(" in text and text.endswith(")"):
                 pub = text[text.rindex("(") + 1 : -1].strip()
                 if pub:
-                    self._emit_datafield(record, "260", ("c", pub))
+                    self._emit_datafield(record, "264", ("c", pub), ind2="1")
                     return
+
+    def _provision_activity_ind2(self, prov: Node) -> str:
+        """Derive MARC 264 ind2 from the ProvisionActivity rdf:type."""
+        for t in self.graph.objects(prov, RDF.type):
+            if isinstance(t, URIRef) and str(t).startswith(str(V.BF)):
+                kind = str(t)[len(str(V.BF)) :]
+                if kind in _PROVISION_TYPE_TO_IND2:
+                    return _PROVISION_TYPE_TO_IND2[kind]
+        return "1"  # Publication is the dominant default
+
+    def _provision_activity_subs(self, prov: Node) -> list[tuple[str, str]]:
+        """Walk a bf:ProvisionActivity bnode for the 264 subfields.
+
+        ``bflc:simplePlace`` / ``simpleAgent`` / ``simpleDate`` literals
+        carry the source MARC ``$a`` / ``$b`` / ``$c``. Helmet often
+        emits multiple translit forms (Cyrillic + Latin) — we take the
+        first of each kind, which marc2bibframe2 lists in
+        source-MARC encounter order (the Latin form first for
+        b26164413-style records). Source 264 ind2's punctuation
+        (``Moskva :``, ``AST,``, ``2025.``) is also preserved when
+        present.
+        """
+        subs: list[tuple[str, str]] = []
+        place = next(
+            (
+                str(v)
+                for v in self.graph.objects(prov, V.BFLC.simplePlace)
+                if isinstance(v, Literal)
+            ),
+            None,
+        )
+        if place:
+            subs.append(("a", place))
+        agent = next(
+            (
+                str(v)
+                for v in self.graph.objects(prov, V.BFLC.simpleAgent)
+                if isinstance(v, Literal)
+            ),
+            None,
+        )
+        if agent:
+            subs.append(("b", agent))
+        date = next(
+            (str(v) for v in self.graph.objects(prov, V.BFLC.simpleDate) if isinstance(v, Literal)),
+            None,
+        )
+        if date:
+            subs.append(("c", date))
+        return subs
 
     def _emit_extent_and_dimensions(self, record: Element) -> None:
         # MARC 300 — physical description. Four subfields routed:
@@ -1079,6 +1178,18 @@ class _Reconstructor:
         """
         if not isinstance(target, URIRef):
             return "650"
+        # bf:Place / bf:Temporal / bf:Person / bf:Organization /
+        # bf:Meeting / bf:Topic rdf:type on the subject URI is the
+        # most authoritative signal — comes from BIBFRAME's
+        # ``<bf:Place rdf:about="…"/>`` typing on the cataloguer-typed
+        # ``$0`` URI. Propagated to canonical by
+        # :func:`_propagate_subject_typing`. Checked first because
+        # the URI namespace / fragment heuristics fail for the plain
+        # ``yso/`` URI case (a yso/p104990 place URI has no
+        # yso-paikat or #Place651 hint).
+        type_tag = self._marc_tag_from_rdf_type(target)
+        if type_tag is not None:
+            return type_tag
         s = str(target)
         routes: tuple[tuple[tuple[str, ...], str], ...] = (
             (self._PERSONAL_HINTS, "600"),
@@ -1097,6 +1208,15 @@ class _Reconstructor:
                     if any(h in raw for h in hints):
                         return tag
         return "650"
+
+    def _marc_tag_from_rdf_type(self, target: URIRef) -> str | None:
+        """Read ``rdf:type`` triples on the subject URI and map to a
+        MARC 6XX tag. Returns ``None`` when none of the routable
+        types are present."""
+        for t in self.graph.objects(target, RDF.type):
+            if isinstance(t, URIRef) and t in _SUBJECT_TYPE_TO_MARC_6XX_TAG:
+                return _SUBJECT_TYPE_TO_MARC_6XX_TAG[t]
+        return None
 
     def _build_lineage_rank_map(self) -> dict[str, str]:
         """Walk every raw-bib URI in the graph, group by MARC tag,

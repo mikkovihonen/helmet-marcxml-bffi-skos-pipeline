@@ -34,6 +34,7 @@ from bffi_pipeline.stages.m8.mint import (
     _propagate_loc_vocab_labels,
     _propagate_manifestations,
     _propagate_raw_agent_identifiers,
+    _propagate_subject_typing,
     _select_description_modifier,
 )
 from bffi_pipeline.stages.m8.schemas import (
@@ -243,6 +244,12 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
         # converter can render $a without depending on a separate
         # LoC vocab dump being loaded into the round-trip stage.
         _propagate_loc_vocab_labels(g, raw_corpus_graph)
+        # rdf:type on subject URIs (bf:Place / bf:Temporal / bf:Topic /
+        # bf:Person / bf:Organization / bf:Meeting). The round-trip
+        # converter uses these to pick the MARC 6XX tag when the
+        # subject URI's namespace doesn't carry a hint (the
+        # cataloguer-typed plain ``yso/`` URI case).
+        _propagate_subject_typing(g, raw_corpus_graph)
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label

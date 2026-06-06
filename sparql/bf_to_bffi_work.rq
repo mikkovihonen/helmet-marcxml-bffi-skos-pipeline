@@ -58,6 +58,7 @@ CONSTRUCT {
   # here so Skosmos can resolve them from Finto at render time.
   ?bfSubject rdfs:label  ?subjectLabel ;
              bflc:marcKey ?subjectMarcKey .
+  ?subject a ?subjectMarcType .
   ?primaryAgent bflc:marcKey ?primaryAgentMarcKey .
   ?workGenre rdfs:label ?workGenreLabel .
   # Music medium (MARC 382): one canonical URI per MediumOfPerformance
@@ -181,6 +182,20 @@ WHERE {
     # everything as $a — the ``Mikki Hiiri (fiktiivinen hahmo)``
     # concatenation bug.
     OPTIONAL { ?bfSubject bflc:marcKey ?subjectMarcKey }
+    # Route the subject's ``rdf:type`` so the round-trip converter
+    # can pick MARC 648 (bf:Temporal), 651 (bf:Place), 600
+    # (bf:Person), 610 (bf:Organization), 611 (bf:Meeting), or 650
+    # (bf:Topic / default) from typed cataloguer ``$0`` URIs that
+    # don't carry namespace hints. Filtered to the BIBFRAME classes
+    # the converter routes on; everything else (madsrdf:Topic,
+    # owl:Thing, …) is uninteresting noise for round-trip.
+    OPTIONAL {
+      ?bfSubject a ?subjectMarcType .
+      FILTER(?subjectMarcType IN (
+        bf:Topic, bf:Place, bf:Temporal,
+        bf:Person, bf:Organization, bf:Meeting
+      ))
+    }
     BIND(COALESCE(?bfSubjectAuth, ?bfSubject) AS ?subject)
     # P-36 Phase C: route the cataloguer-supplied label off ?bfSubject
     # (the source node). See CONSTRUCT comment above for the routing
