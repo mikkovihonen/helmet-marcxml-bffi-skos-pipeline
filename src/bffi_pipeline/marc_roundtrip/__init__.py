@@ -17,10 +17,16 @@ from bffi_pipeline.marc_roundtrip.converter import (
     reconstruct_marc,
     serialize_marc,
 )
+from bffi_pipeline.marc_roundtrip.diff import RecordDiff, diff_records
+from bffi_pipeline.marc_roundtrip.runner import RoundtripSummary, run
 
 __all__ = [
     "MARC_NAMESPACE",
     "ReconstructedRecord",
+    "RecordDiff",
+    "RoundtripSummary",
+    "diff_records",
     "reconstruct_marc",
+    "run",
     "serialize_marc",
 ]

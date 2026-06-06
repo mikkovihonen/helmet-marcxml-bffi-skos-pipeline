@@ -68,7 +68,13 @@ from bffi_pipeline.cli import (
     skosify_command,
 )
 from bffi_pipeline.config import get_settings
-from bffi_pipeline.observability.events import emit_failed, emit_plan, emit_skipped
+from bffi_pipeline.marc_roundtrip import run as roundtrip_run
+from bffi_pipeline.observability.events import (
+    emit_failed,
+    emit_if_active,
+    emit_plan,
+    emit_skipped,
+)
 
 #: Canonical stage order, matching the dashboard's per-stage panels and
 #: the existing ``bffi-pipeline plan`` convention. ``m4`` (workkey-stats)
@@ -82,6 +88,7 @@ CANONICAL_STAGES: Final[tuple[str, ...]] = (
     "m9",
     "skosify",
     "load",
+    "marc-roundtrip",
     "export",
     "cataloguer-bundle",
 )
@@ -106,6 +113,7 @@ STAGE_PHASES: Final[dict[str, tuple[str, ...]]] = {
     "m9": ("phase1", "phase2", "phase3"),
     "skosify": ("_",),
     "load": ("_",),
+    "marc-roundtrip": ("_",),
     "export": ("_",),
     "cataloguer-bundle": ("_",),
 }
@@ -204,6 +212,29 @@ def _dispatch_load() -> None:
     load_command()
 
 
+def _dispatch_marc_roundtrip(*, input_dir: Path | None = None) -> None:
+    """Reconstruct + diff every Manifestation's MARC record against the
+    original. Outputs into ``runs/<uuid>/marc-roundtrip/`` which the
+    cataloguer-bundle stage picks up for the round-trip review tab.
+    Soft-skips when no input MARCXML dir is configured."""
+    settings = get_settings()
+    if input_dir is None:
+        emit_if_active(
+            stage="marc-roundtrip",
+            event="skipped",
+            extra={"reason": "no-input-dir"},
+        )
+        return
+    canonical_path = settings.data_dir / "canonical-skosified.ttl"
+    if not canonical_path.is_file():
+        canonical_path = settings.data_dir / "canonical.ttl"
+    roundtrip_run(
+        canonical_path=canonical_path,
+        marcxml_dir=input_dir,
+        output_dir=settings.data_dir / "marc-roundtrip",
+    )
+
+
 def _dispatch_export() -> None:
     # Default export = concatenated BFFI TTL + README only. Operators
     # who also want the per-record archive run
@@ -296,6 +327,7 @@ _DISPATCHERS: Final[dict[str, Callable[..., None]]] = {
     "m9": _dispatch_m9,
     "skosify": _dispatch_skosify,
     "load": _dispatch_load,
+    "marc-roundtrip": _dispatch_marc_roundtrip,
     "export": _dispatch_export,
     "cataloguer-bundle": _dispatch_cataloguer_bundle,
 }
@@ -331,6 +363,10 @@ def _call_dispatcher(
         # at the run's actual source dir (matches the audit logs'
         # MARC-001-verbatim bib ids). Falls back to the bundle
         # builder's default when input_dir is None (resumed runs).
+        dispatcher(input_dir=input_dir)
+    elif stage == "marc-roundtrip":
+        # Same rationale as cataloguer-bundle: needs input_dir to find
+        # the originals against which to diff the reconstructed MARC.
         dispatcher(input_dir=input_dir)
     else:  # m8, m9, load, export
         dispatcher()
