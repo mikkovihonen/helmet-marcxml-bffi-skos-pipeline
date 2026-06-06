@@ -77,6 +77,17 @@ def _propagate_manifestations(g: Graph, raw_graph: Graph) -> int:
             count += 1
             if isinstance(o, BNode) and o not in visited:
                 queue.append(o)
+    # Materialise the inverse ``bffi:manifestationOfExpression`` triple
+    # on each Expression so Skosmos's Expression page surfaces a
+    # clickable backlink to its Manifestation. BFFI 1.0.0 declares
+    # ``owl:inverseOf`` between the two predicates but Skosmos does not
+    # run an OWL reasoner — without the materialised triple the
+    # Expression page has no path to its Manifestations because all
+    # the link triples are stored on the Manifestation side.
+    for manif in raw_graph.subjects(RDF.type, V.BFFI.Manifestation):
+        for expr in raw_graph.objects(manif, V.BFFI.expressionManifested):
+            g.add((expr, V.BFFI.manifestationOfExpression, manif))
+            count += 1
     return count
 
 

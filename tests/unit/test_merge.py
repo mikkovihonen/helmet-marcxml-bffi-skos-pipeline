@@ -2018,3 +2018,9 @@ def test_p45_manifestation_subgraphs_propagate_into_canonical_ttl(tmp_path: Path
     assert len(idents) == 1
     assert (idents[0], V.BF.source, URIRef(HELMET)) in out
     assert (idents[0], RDF.value, Literal("b10000001")) in out
+    # Materialised inverse: the Expression must carry a
+    # bffi:manifestationOfExpression backlink so Skosmos's Expression
+    # page surfaces a clickable link to the Manifestation (BFFI 1.0.0
+    # declares owl:inverseOf but Skosmos doesn't run a reasoner).
+    expr_uri = URIRef("urn:expr/A")
+    assert (expr_uri, V.BFFI.manifestationOfExpression, manif_uri) in out
