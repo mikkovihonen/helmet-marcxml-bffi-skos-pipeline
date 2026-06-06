@@ -331,6 +331,37 @@ class _Reconstructor:
             sf = SubElement(df, f"{{{MARC_NAMESPACE}}}subfield", attrib={"code": "5"})
             sf.text = ROUNDTRIP_MARKER
 
+    #: Subfields routed by separate helpers (``_collect_role_subs``,
+    #: ``_collect_agent_id_subs``, ``_first_source``). When parsing
+    #: ``bflc:marcKey`` for name-component subfields on 6XX subjects
+    #: and 7XX added entries, we filter these out so they don't
+    #: double-emit alongside the dedicated routing.
+    _MARC_KEY_NON_NAME_SUBFIELDS: Final[frozenset[str]] = frozenset({"e", "4", "0", "2"})
+
+    def _name_subfields_from_marc_key(self, node: Node) -> list[tuple[str, str]] | None:
+        """Parse ``bflc:marcKey`` on ``node`` and return the
+        name-component subfields in source-MARC order, excluding
+        subfields that route through dedicated helpers (``$e`` /
+        ``$4`` role, ``$0`` identifier, ``$2`` source).
+
+        Returns ``None`` when no marcKey is present so callers can
+        fall back to the label-only path. Use to recover ``$c``,
+        ``$d``, ``$q``, ``$t``, ``$n``, ``$l`` etc. that marc2bibframe2
+        collapses into a single ``rdfs:label`` on agent / subject
+        nodes — e.g. source ``600 $aMikki Hiiri $c(fiktiivinen hahmo)``
+        becomes ``rdfs:label "Mikki Hiiri (fiktiivinen hahmo)"`` +
+        ``bflc:marcKey "60004$aMikki Hiiri$c(fiktiivinen hahmo)"``,
+        and only marcKey preserves the $a/$c boundary.
+        """
+        for mk in self.graph.objects(node, V.BFLC.marcKey):
+            if not isinstance(mk, Literal):
+                continue
+            parsed = _parse_marc_key_subfields(str(mk))
+            if not parsed:
+                continue
+            return [(c, v) for c, v in parsed if c not in self._MARC_KEY_NON_NAME_SUBFIELDS]
+        return None
+
     def _emit_isbns(self, record: Element) -> None:
         # bf:identifiedBy → bf:Isbn → rdf:value on the Manifestation.
         # Plus ``bf:qualifier`` (MARC 020 $q, "kovakantinen" /
@@ -467,15 +498,25 @@ class _Reconstructor:
             if V.BFFI.PrimaryContribution not in types:
                 continue
             for agent in self.graph.objects(contrib, V.BFFI.agent):
-                label = self._first_label(agent)
-                if not label:
-                    continue
+                name_subs = self._name_subfields_from_marc_key(agent)
+                if name_subs is None:
+                    label = self._first_label(agent)
+                    if not label:
+                        continue
+                    name_subs = [("a", label)]
                 role_subs = self._collect_role_subs(contrib)
                 id_subs = self._collect_agent_id_subs(agent)
                 # 100 ind1=1 ("surname"-form name) is the dominant
                 # cataloguer choice for Helmet personal names. ind2 is
                 # undefined in current MARC ⇒ blank.
-                self._emit_datafield(record, "100", ("a", label), *role_subs, *id_subs, ind1="1")
+                self._emit_datafield(
+                    record,
+                    "100",
+                    *name_subs,
+                    *role_subs,
+                    *id_subs,
+                    ind1="1",
+                )
                 return  # only one primary
 
     def _collect_agent_id_subs(self, agent: Node) -> list[tuple[str, str]]:
@@ -1044,52 +1085,74 @@ class _Reconstructor:
         (raw URI shadowed by a sibling authority binding on the same
         Work; the authority will emit its own row independently)."""
         if isinstance(target, URIRef) and str(target).startswith(_RAW_BIB_URI_PREFIX):
-            # Raw bib URI. Follow skos:exactMatch when M9 attached one
-            # — that becomes the row's $0. Otherwise emit the row WITHOUT
-            # $0 (the raw URI is pipeline-internal; cataloguers don't
-            # want it in MARC).
-            redirected = self._first_authority_redirect(target)
-            if redirected is not None:
-                # Honest cataloguer view: the row "is" the authority's
-                # row — let the authority's own iteration emit it
-                # (which is guaranteed since M9 also adds <work>
-                # predicate <auth> alongside the redirect).
-                return None
-            # Look for a same-Work authority whose label matches —
-            # M9-pre-skos-exactMatch back-compat. The match drops this
-            # raw row in favour of the authority's own iteration.
-            label = self._first_label(target)
-            if label is not None and any(
-                self._target_label_matches(auth, label) for auth in authorities_on_work
-            ):
-                return None
-            label = self._first_label(target)
-            source = self._first_source(target)
-            subs: list[tuple[str, str]] = []
-            if label:
-                subs.append(("a", label))
-            if source:
-                subs.append(("2", source))
-            return tuple(subs) if subs else None
-        # Authority URI (or blank node) — emit normally. Use the
-        # language-aware authority lookup (prefer fi > sv > en) so
-        # YSO / KANTO / SLM URIs resolve to their Finnish prefLabel
-        # in $a. Falls back to walking back to the originating raw
-        # URI's rdfs:label (the cataloguer's typed text) when the
-        # authority itself has no label — happens when the Finto
-        # vocab dump for the URI's namespace wasn't loaded.
+            return self._raw_subject_row(target, authorities_on_work)
+        return self._authority_subject_row(target)
+
+    def _raw_subject_row(
+        self, target: URIRef, authorities_on_work: set[URIRef]
+    ) -> tuple[tuple[str, str], ...] | None:
+        """Subject-row builder for raw-bib URI targets.
+
+        Follows ``skos:exactMatch`` to suppress when an authority
+        twin emits its own row, prefers parsed ``bflc:marcKey`` over
+        ``rdfs:label`` for $a / $c / $d subfield structure, falls back
+        to single $a from the label."""
+        redirected = self._first_authority_redirect(target)
+        if redirected is not None:
+            return None
+        label = self._first_label(target)
+        if label is not None and any(
+            self._target_label_matches(auth, label) for auth in authorities_on_work
+        ):
+            return None
+        name_subs = self._name_subfields_from_marc_key(target)
+        source = self._first_source(target)
+        subs: list[tuple[str, str]] = []
+        if name_subs:
+            subs.extend(name_subs)
+        elif label:
+            subs.append(("a", label))
+        if source:
+            subs.append(("2", source))
+        return tuple(subs) if subs else None
+
+    def _authority_subject_row(self, target: Node) -> tuple[tuple[str, str], ...] | None:
+        """Subject-row builder for authority-URI / blank-node targets.
+
+        Tries marcKey on the target first; falls back to walking
+        inverse ``skos:exactMatch`` to find a raw-bib origin with
+        marcKey (so $a/$c survive M9-bound subjects). Otherwise emits
+        a single $a from the authority's prefLabel (or, last-resort,
+        the raw URI's label)."""
+        name_subs = self._name_subfields_from_marc_key(target)
+        if name_subs is None and isinstance(target, URIRef):
+            name_subs = self._name_subfields_from_raw_origin(target)
         label = self._authority_label(target)
         if label is None and isinstance(target, URIRef):
             label = self._raw_origin_label(target)
         source = self._first_source(target)
-        subs = []
-        if label:
+        subs: list[tuple[str, str]] = []
+        if name_subs:
+            subs.extend(name_subs)
+        elif label:
             subs.append(("a", label))
         if source:
             subs.append(("2", source))
         if isinstance(target, URIRef):
             subs.append(("0", str(target)))
         return tuple(subs) if subs else None
+
+    def _name_subfields_from_raw_origin(self, authority: URIRef) -> list[tuple[str, str]] | None:
+        """Walk inverse ``skos:exactMatch`` from an authority URI to a
+        raw-bib URI and return its marcKey-parsed subfields. Returns
+        ``None`` when no raw origin carries marcKey."""
+        for raw in self.graph.subjects(V.SKOS.exactMatch, authority):
+            if not (isinstance(raw, URIRef) and str(raw).startswith(_RAW_BIB_URI_PREFIX)):
+                continue
+            name_subs = self._name_subfields_from_marc_key(raw)
+            if name_subs is not None:
+                return name_subs
+        return None
 
     def _raw_origin_label(self, authority: URIRef) -> str | None:
         """Walk inverse ``skos:exactMatch`` from an authority URI back
@@ -1151,9 +1214,12 @@ class _Reconstructor:
             if V.BFFI.PrimaryContribution in types:
                 continue  # already emitted as 100
             for agent in self.graph.objects(contrib, V.BFFI.agent):
-                label = self._first_label(agent)
-                if not label:
-                    continue
+                name_subs = self._name_subfields_from_marc_key(agent)
+                if name_subs is None:
+                    label = self._first_label(agent)
+                    if not label:
+                        continue
+                    name_subs = [("a", label)]
                 role_subs = self._collect_role_subs(contrib)
                 id_subs = self._collect_agent_id_subs(agent)
                 tag = self._added_entry_tag(agent)
@@ -1161,7 +1227,7 @@ class _Reconstructor:
                 self._emit_datafield(
                     record,
                     tag,
-                    ("a", label),
+                    *name_subs,
                     *role_subs,
                     *id_subs,
                     ind1="1",
@@ -1252,30 +1318,43 @@ class _Reconstructor:
         self._emit_datafield(record, "907", ("a", f".{bib_id}"))
 
 
-def _parse_marc_key_subfields(marc_key: str, codes: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
+def _parse_marc_key_subfields(
+    marc_key: str, codes: tuple[str, ...] | None = None
+) -> tuple[tuple[str, str], ...]:
     """Parse a ``bflc:marcKey`` string like ``"73000 $aTitle$gAuthor"``
-    into ``(($a, "Title"), ($g, "Author"))``.
+    or ``"60004$aMikki$c(fictional)"`` into
+    ``(($a, "Title"), ($g, "Author"))``.
 
-    Returns an empty tuple when the string doesn't start with the
-    expected indicator-prefix pattern (``\\d{2}\\s+``) or when no
-    requested subfields are present. ``codes`` filters which
-    subfields are extracted (order-preserving)."""
-    # Drop the leading "XX " indicator pair (e.g. "73000 ")
-    if " " not in marc_key:
+    Accepts both the space-separated form (``"73000 $a..."``) and the
+    no-space form (``"60004$a..."``) that marc2bibframe2 alternates
+    between. Everything from the first ``$`` onwards is parsed; the
+    leading tag + indicator prefix is dropped.
+
+    ``codes=(code1, code2, …)`` filters + reorders the output to
+    those codes. ``codes=None`` returns all parsed subfields in
+    source-MARC encounter order. Returns an empty tuple when no
+    ``$`` is present.
+    """
+    first_dollar = marc_key.find("$")
+    if first_dollar < 0:
         return ()
-    _, _, body = marc_key.partition(" ")
-    if "$" not in body:
-        return ()
-    parts: dict[str, str] = {}
-    # Split on "$" — first piece is anything before the first subfield
-    # (typically empty); subsequent pieces start with the subfield code.
+    body = marc_key[first_dollar:]
+    # Split on "$" — first piece is empty (we sliced from $);
+    # subsequent pieces start with the subfield code.
+    encounter: list[tuple[str, str]] = []
+    seen_codes: set[str] = set()
     for chunk in body.split("$")[1:]:
         if not chunk:
             continue
         code, value = chunk[0], chunk[1:]
-        if code not in parts:  # keep first occurrence
-            parts[code] = value
-    return tuple((c, parts[c]) for c in codes if c in parts)
+        if code in seen_codes:
+            continue  # keep first occurrence
+        seen_codes.add(code)
+        encounter.append((code, value))
+    if codes is None:
+        return tuple(encounter)
+    code_to_value = dict(encounter)
+    return tuple((c, code_to_value[c]) for c in codes if c in code_to_value)
 
 
 def _split_title_responsibility(text: str) -> tuple[tuple[str, str], ...]:

@@ -34,7 +34,8 @@ CONSTRUCT {
                 bffi:agent ?otherAgent ;
                 bf:role    ?otherRole .
   ?otherAgent rdfs:label     ?otherAgentLabel ;
-              bf:identifiedBy ?otherAgentIdent .
+              bf:identifiedBy ?otherAgentIdent ;
+              bflc:marcKey    ?otherAgentMarcKey .
   ?otherAgentIdent a         bf:Identifier ;
                    rdf:value ?otherAgentIdentValue ;
                    bf:source ?otherAgentIdentSource .
@@ -97,6 +98,11 @@ WHERE {
     FILTER NOT EXISTS { ?c a bf:PrimaryContribution }
     ?c bf:agent ?otherAgent .
     OPTIONAL { ?otherAgent rdfs:label ?otherAgentLabel }
+    # ``bflc:marcKey`` on the added-entry agent — preserves the
+    # source 700 / 710 / 711 $a / $c / $d / $q / $t subfield
+    # structure so the round-trip can split them back out instead of
+    # emitting everything as one collapsed $a.
+    OPTIONAL { ?otherAgent bflc:marcKey ?otherAgentMarcKey }
     # Route MARC 700/710/711 $0 ASTERI / FINAF identifiers. Source
     # MARC ``$0 (FI-ASTERI-N)NNNNNN`` lands as
     # ``bf:identifiedBy → bf:Identifier → rdf:value + bf:source →

@@ -1409,6 +1409,74 @@ def test_040_falls_back_to_fi_helme_a_when_no_admin_metadata(
     assert _subfield(df, "d") == "FI-HELME/bffi-roundtrip"
 
 
+def test_600_emits_separate_a_and_c_from_marcKey_on_subject() -> None:
+    """The b12191139 / b22522396 "(fiktiivinen hahmo)" bug: source 600
+    ``$a "Mikki Hiiri" $c "(fiktiivinen hahmo)"`` was collapsing to
+    a single ``$a "Mikki Hiiri (fiktiivinen hahmo)"`` because
+    marc2bibframe2 concatenates the subfields into ``rdfs:label`` and
+    only ``bflc:marcKey`` preserves the boundary. The converter now
+    parses marcKey and emits $a and $c as separate subfields."""
+    g = _build_minimal_graph()
+    subj = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Agent600-3")
+    g.add((WORK, V.BFFI.subject, subj))
+    g.add((subj, V.RDFS.label, Literal("Mikki Hiiri (fiktiivinen hahmo)")))
+    g.add((subj, V.BFLC.marcKey, Literal("60004$aMikki Hiiri$c(fiktiivinen hahmo)")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='600']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Mikki Hiiri"
+    assert _subfield(df, "c") == "(fiktiivinen hahmo)"
+
+
+def test_700_emits_separate_a_and_d_from_marcKey_on_added_entry() -> None:
+    """Same fix for 7XX added entries — source
+    ``700 $aSibelius, Jean, $d1865-1957$ekirjoittaja`` round-trips
+    with $a / $d split + $e from the role chain (no double-emit
+    since marcKey-derived $e is filtered out)."""
+    g = _build_minimal_graph()
+    contrib = URIRef("urn:contrib/marckey")
+    agent = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/bX#Agent700-9")
+    g.add((EXPR, V.BFFI.contribution, contrib))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Sibelius, Jean, 1865-1957")))
+    g.add(
+        (
+            agent,
+            V.BFLC.marcKey,
+            Literal("7001 $aSibelius, Jean,$d1865-1957$ekirjoittaja"),
+        )
+    )
+    # Add a role separately (via bf:role blank node, like M3 emits).
+    role = BNode()
+    g.add((contrib, V.BF.role, role))
+    g.add((role, V.RDFS.label, Literal("kirjoittaja")))
+    rec = reconstruct_marc(g, MANIF)
+    df = next(
+        df
+        for df in rec.element.findall("m:datafield[@tag='700']", NS)
+        if _subfield(df, "a") and "Sibelius" in (_subfield(df, "a") or "")
+    )
+    assert _subfield(df, "a") == "Sibelius, Jean,"
+    assert _subfield(df, "d") == "1865-1957"
+    assert _subfield(df, "e") == "kirjoittaja"
+    # $e must appear EXACTLY once even though it's in marcKey AND in
+    # the role chain — the marcKey parser filters out $e since the
+    # role helper owns it.
+    e_subs = [sf.text for sf in df.findall("m:subfield", NS) if sf.attrib.get("code") == "e"]
+    assert e_subs == ["kirjoittaja"]
+
+
+def test_100_emits_separate_a_and_d_from_marcKey_on_primary() -> None:
+    """Same fix for MARC 100 primary contribution."""
+    g = _build_minimal_graph()
+    g.add((AGENT, V.BFLC.marcKey, Literal("1001 $aKrag, Thomas Peter,$d1868-1913")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='100']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Krag, Thomas Peter,"
+    assert _subfield(df, "d") == "1868-1913"
+
+
 def test_skipped_tags_lists_852_and_336(minimal_record: ET.Element) -> None:
     # Smoke: we explicitly skip 852 (holdings) and 336 (content type
     # — not currently forwarded onto BFFI). Pin so adding either to

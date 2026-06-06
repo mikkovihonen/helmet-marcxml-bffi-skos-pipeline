@@ -56,7 +56,9 @@ CONSTRUCT {
   # node — routing it to ``?subject`` would misattribute the label to
   # the authority URI in our graph. Authority labels stay label-free
   # here so Skosmos can resolve them from Finto at render time.
-  ?bfSubject rdfs:label ?subjectLabel .
+  ?bfSubject rdfs:label  ?subjectLabel ;
+             bflc:marcKey ?subjectMarcKey .
+  ?primaryAgent bflc:marcKey ?primaryAgentMarcKey .
   ?workGenre rdfs:label ?workGenreLabel .
   # Music medium (MARC 382): one canonical URI per MediumOfPerformance
   # label, minted locally because marc2bibframe2 leaves the
@@ -125,6 +127,11 @@ WHERE {
     ?c a bf:PrimaryContribution ;
        bf:agent ?primaryAgent .
     OPTIONAL { ?primaryAgent rdfs:label ?primaryAgentLabel }
+    # ``bflc:marcKey`` on the primary agent — preserves the source
+    # 100 $a / $c / $d / $q subfield structure so the round-trip
+    # doesn't collapse them into one $a (same fix as for 6XX
+    # subjects above).
+    OPTIONAL { ?primaryAgent bflc:marcKey ?primaryAgentMarcKey }
     # Route MARC 100 $0 ASTERI / FINAF identifiers — the cataloguer's
     # authority binding via the source-coded ID block
     # ``bf:identifiedBy → bf:Identifier → rdf:value + bf:source →
@@ -167,6 +174,13 @@ WHERE {
   OPTIONAL {
     ?bfWork bf:subject ?bfSubject .
     OPTIONAL { ?bfSubject madsrdf:isIdentifiedByAuthority ?bfSubjectAuth }
+    # ``bflc:marcKey`` on the subject node carries the original
+    # subfield structure ("60004$aMikki Hiiri$c(fiktiivinen hahmo)").
+    # marc2bibframe2 collapses source $a + $c + $d etc. into a single
+    # rdfs:label, so without parsing marcKey the round-trip emits
+    # everything as $a — the ``Mikki Hiiri (fiktiivinen hahmo)``
+    # concatenation bug.
+    OPTIONAL { ?bfSubject bflc:marcKey ?subjectMarcKey }
     BIND(COALESCE(?bfSubjectAuth, ?bfSubject) AS ?subject)
     # P-36 Phase C: route the cataloguer-supplied label off ?bfSubject
     # (the source node). See CONSTRUCT comment above for the routing
