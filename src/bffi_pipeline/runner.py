@@ -299,6 +299,13 @@ def _dispatch_cataloguer_bundle(*, input_dir: Path | None = None) -> None:
     marc_kwargs: dict[str, Path] = {}
     if input_dir is not None:
         marc_kwargs["marc_dir"] = input_dir
+    # P-47: include the marc-roundtrip output dir in the bundle (when
+    # produced by the marc-roundtrip stage earlier in this run) so the
+    # HTML reviewer's MARC-diff tab has the data it needs without the
+    # cataloguer needing access to anything outside the bundle.zip.
+    roundtrip_dir = run_dir / "marc-roundtrip"
+    if roundtrip_dir.is_dir():
+        marc_kwargs["marc_roundtrip_dir"] = roundtrip_dir
     result = review_bundle.build_bundle(
         output_path=bundle_path,
         operator=f"pipeline-run:{settings.run_uuid}",

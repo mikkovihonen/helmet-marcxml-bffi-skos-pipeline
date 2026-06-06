@@ -77,6 +77,11 @@ class Manifest(BaseModel):
     #: ``Manifest`` model so the import side can read either shape.
     reviewed_by: str | None = None
     reviewed_at: str | None = None
+    #: P-47: true when the bundle includes the marc-roundtrip review
+    #: directory. The HTML reviewer reads this flag to decide whether
+    #: to add the "MARC round-trip" tab. Absent (false) on older
+    #: bundles built before P-47 — graceful degrade, no tab.
+    marc_roundtrip_present: bool = False
 
     @classmethod
     def new(cls, *, operator: str, stages: list[StageEntry]) -> Manifest:

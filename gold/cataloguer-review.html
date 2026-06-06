@@ -545,6 +545,43 @@
     text-align: center;
   }
 
+  /* MARC round-trip tab (P-47) */
+  .diff-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 6px;
+    background: var(--hover);
+    color: var(--fg);
+  }
+  .diff-chip.identical { background: #e6f4ea; color: #1e7e34; }
+  .diff-chip.changed   { background: #fff3cd; color: #856404; }
+  .diff-chip.lost      { background: #f8d7da; color: #b21f2d; }
+  .diff-chip.added     { background: #d6e9f8; color: #1e5180; }
+  .diff-chip.gap       { background: #e9ecef; color: #5a6268; }
+
+  table.marc-diff {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 16px;
+    font-size: 13px;
+  }
+  table.marc-diff th, table.marc-diff td {
+    border-bottom: 1px solid var(--border);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  table.marc-diff th { color: var(--muted); font-weight: 600; }
+  table.marc-diff tr.diff-identical          { background: rgba(46, 125, 50, 0.04); }
+  table.marc-diff tr.diff-changed            { background: rgba(245, 166, 35, 0.10); }
+  table.marc-diff tr.diff-lost               { background: rgba(220, 53, 69, 0.10); }
+  table.marc-diff tr.diff-added              { background: rgba(13, 110, 253, 0.08); }
+  table.marc-diff tr.diff-lost-converter-gap { background: rgba(108, 117, 125, 0.08); }
+  table.marc-diff tr.diff-notes td           { border-bottom: 1px solid var(--border); }
+
   /* Judge tab: side-by-side pair layout + LLM banner */
   .pair-grid {
     display: grid;
@@ -1039,6 +1076,28 @@ function buildStages(manifest, files) {
     currentIdx: 0,
     filter: "",
   });
+  // P-47: MARC round-trip review tab. Present when the manifest flags
+  // ``marc_roundtrip_present`` true (bundle includes the marc-roundtrip
+  // directory from the M10 stage). The tab's candidates are the per-bib
+  // diff JSONs in marc-roundtrip/diffs/; the renderer is bespoke and
+  // doesn't go through STAGE_SURFACES.
+  if (manifest.marc_roundtrip_present) {
+    const roundtripCandidates = collectMarcRoundtripCandidates(files);
+    out.push({
+      stage: {
+        id: "__marc_roundtrip",
+        label: "MARC round-trip",
+        schema: "__marc_roundtrip",
+        marc_dir: null,
+      },
+      surface: null,
+      surfaceId: "__marc_roundtrip",
+      candidates: roundtripCandidates,
+      results: {},
+      currentIdx: 0,
+      filter: "",
+    });
+  }
   for (const stage of manifest.stages) {
     const surface = STAGE_SURFACES[stage.schema];
     const candidatesBytes = files[stage.candidates];
@@ -1104,6 +1163,11 @@ function render() {
     renderManifestTab();
     return;
   }
+  if (active.surfaceId === "__marc_roundtrip") {
+    renderMarcRoundtripSidebar(active);
+    renderMarcRoundtripTab(active);
+    return;
+  }
   renderSidebar(active);
   if (active.surface) {
     renderCard(active);
@@ -1120,6 +1184,13 @@ function renderTabs() {
     const btn = document.createElement("button");
     if (s.surfaceId === "__manifest") {
       btn.textContent = "Manifest";
+    } else if (s.surfaceId === "__marc_roundtrip") {
+      btn.appendChild(document.createTextNode("MARC round-trip"));
+      const total = s.candidates.length;
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = `${total}`;
+      btn.appendChild(badge);
     } else if (s.surface) {
       btn.appendChild(document.createTextNode(s.surface.label));
       const total = s.candidates.length;
@@ -1253,6 +1324,182 @@ function renderManifestTab() {
     tbody.appendChild(tr);
   }
   div.querySelector("#manifest-raw").textContent = JSON.stringify(state.manifest, null, 2);
+}
+
+// =====================================================================
+// MARC round-trip tab (P-47)
+//
+// One sidebar entry per bib in marc-roundtrip/diffs/. The active
+// bib's diff JSON drives a side-by-side rendering: original MARC on
+// the left, reconstructed MARC on the right, paired field-by-field,
+// status-coloured (identical / changed / lost / added / lost-converter-gap).
+// =====================================================================
+
+function collectMarcRoundtripCandidates(files) {
+  // One candidate per bib JSON. Pre-parse the diff to extract bib_id +
+  // counts for the sidebar; the full diff is reloaded on selection
+  // (cheap; the parser is the heaviest cost and we already paid it).
+  const out = [];
+  for (const arcname of Object.keys(files)) {
+    if (!arcname.startsWith("marc-roundtrip/diffs/") || !arcname.endsWith(".json")) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(bytesToText(files[arcname]));
+    } catch (e) {
+      console.error(`Failed to parse ${arcname}:`, e);
+      continue;
+    }
+    out.push({
+      bib_id: parsed.bib_id || arcname.slice("marc-roundtrip/diffs/".length, -".json".length),
+      diff: parsed,
+      arcname,
+    });
+  }
+  out.sort((a, b) => a.bib_id.localeCompare(b.bib_id, "fi"));
+  return out;
+}
+
+function renderMarcRoundtripSidebar(active) {
+  const ul = document.getElementById("sidebar-list");
+  ul.innerHTML = "";
+  for (let i = 0; i < active.candidates.length; i++) {
+    const c = active.candidates[i];
+    const li = document.createElement("li");
+    li.className = "sidebar-row";
+    if (i === active.currentIdx) li.classList.add("active");
+    const summary = c.diff?.summary || {};
+    const totalDiffs =
+      (summary.changed || 0) + (summary.lost || 0) +
+      (summary.added || 0) + (summary["lost-converter-gap"] || 0);
+    li.innerHTML = `
+      <div class="row-main">
+        <span class="entry-text">${escapeHtml(c.bib_id)}</span>
+        <span class="badge">${totalDiffs}Δ</span>
+      </div>
+    `;
+    li.addEventListener("click", () => {
+      active.currentIdx = i;
+      persistState();
+      render();
+    });
+    ul.appendChild(li);
+  }
+}
+
+function renderMarcRoundtripTab(active) {
+  const host = document.getElementById("card-host");
+  host.innerHTML = "";
+  if (!active.candidates.length) {
+    host.innerHTML = "<p style='color:var(--muted)'>No round-trip data in this bundle.</p>";
+    return;
+  }
+  const c = active.candidates[active.currentIdx];
+  const diff = c.diff;
+  // Corpus summary header
+  const summaryFile = state.files["marc-roundtrip/summary.json"];
+  let corpusSummary = null;
+  if (summaryFile) {
+    try { corpusSummary = JSON.parse(bytesToText(summaryFile)); } catch (e) { /* shrug */ }
+  }
+  if (corpusSummary) {
+    const header = document.createElement("div");
+    header.className = "manifest-view";
+    header.style.marginBottom = "16px";
+    const ps = corpusSummary.per_status || {};
+    header.innerHTML = `
+      <h3 style="margin-top:0">MARC round-trip — corpus summary</h3>
+      <p style="color:var(--muted); font-size:13px">
+        ${corpusSummary.reconstructed} reconstructed · ${corpusSummary.diffed} diffed ·
+        ${corpusSummary.missing_original} missing source MARC
+      </p>
+      <p>
+        <span class="diff-chip identical">${ps.identical || 0} identical</span>
+        <span class="diff-chip changed">${ps.changed || 0} changed</span>
+        <span class="diff-chip lost">${ps.lost || 0} lost</span>
+        <span class="diff-chip added">${ps.added || 0} added</span>
+        <span class="diff-chip gap">${ps["lost-converter-gap"] || 0} converter gap</span>
+      </p>
+    `;
+    host.appendChild(header);
+  }
+  // Stub case: original MARC missing
+  if (diff.error) {
+    const note = document.createElement("p");
+    note.style.color = "var(--muted)";
+    note.textContent = `Bib ${c.bib_id}: ${diff.error} (${diff.marcxml_path || "no path"})`;
+    host.appendChild(note);
+    return;
+  }
+  // Per-bib breakdown
+  const bibSummary = diff.summary || {};
+  const subhead = document.createElement("h3");
+  subhead.textContent = `Bib ${c.bib_id}`;
+  host.appendChild(subhead);
+  const subline = document.createElement("p");
+  subline.style.color = "var(--muted)";
+  subline.style.fontSize = "13px";
+  subline.innerHTML = `
+    <span class="diff-chip identical">${bibSummary.identical || 0} identical</span>
+    <span class="diff-chip changed">${bibSummary.changed || 0} changed</span>
+    <span class="diff-chip lost">${bibSummary.lost || 0} lost</span>
+    <span class="diff-chip added">${bibSummary.added || 0} added</span>
+    <span class="diff-chip gap">${bibSummary["lost-converter-gap"] || 0} converter gap</span>
+  `;
+  host.appendChild(subline);
+  // Side-by-side table
+  const tbl = document.createElement("table");
+  tbl.className = "marc-diff";
+  tbl.innerHTML = `
+    <thead>
+      <tr>
+        <th style="width: 80px">Tag</th>
+        <th>Original</th>
+        <th>Reconstructed (BFFI)</th>
+        <th style="width: 90px">Status</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const tbody = tbl.querySelector("tbody");
+  for (const f of diff.fields || []) {
+    const tr = document.createElement("tr");
+    tr.className = "diff-row diff-" + f.status;
+    tr.innerHTML = `
+      <td><code>${escapeHtml(f.tag)}</code></td>
+      <td>${renderMarcField(f.original)}</td>
+      <td>${renderMarcField(f.reconstructed)}</td>
+      <td><span class="diff-chip ${f.status.replace("lost-converter-gap", "gap")}">${f.status}</span></td>
+    `;
+    if (f.notes?.length) {
+      const noteRow = document.createElement("tr");
+      noteRow.className = "diff-notes";
+      noteRow.innerHTML = `<td colspan="4" style="color:var(--muted); font-size:12px; padding-left:40px">${f.notes.map(escapeHtml).join(" · ")}</td>`;
+      tbody.appendChild(tr);
+      tbody.appendChild(noteRow);
+    } else {
+      tbody.appendChild(tr);
+    }
+  }
+  host.appendChild(tbl);
+}
+
+function renderMarcField(field) {
+  if (!field) return "<em style='color:var(--muted)'>(absent)</em>";
+  if (field.is_control) {
+    return `<code style="font-size:12px">${escapeHtml(field.value || "")}</code>`;
+  }
+  const subs = (field.subfields || [])
+    .map(sf => `<span style="margin-right:6px"><code>$${escapeHtml(sf.code)}</code> ${escapeHtml(sf.value)}</span>`)
+    .join("");
+  const indStr = `${escapeHtml(field.ind1 || " ")}${escapeHtml(field.ind2 || " ")}`;
+  return `<code style="color:var(--muted); font-size:11px">[${indStr}]</code> ${subs}`;
+}
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return "";
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // =====================================================================

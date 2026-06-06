@@ -148,6 +148,7 @@ def build_bundle(
     seed: str | None = None,
     marc_dir: Path = DEFAULT_HELMET_MARC_DIR,
     pool_overrides: dict[str, Path] | None = None,
+    marc_roundtrip_dir: Path | None = None,
 ) -> BundleResult:
     """Assemble a review bundle zip.
 
@@ -245,11 +246,14 @@ def build_bundle(
             )
         )
 
+    marc_roundtrip_present = _include_marc_roundtrip(file_map, marc_roundtrip_dir, marc_dir)
+
     manifest = Manifest(
         schema=MANIFEST_SCHEMA,
         created=datetime.now(UTC).isoformat(),
         operator=operator,
         stages=stage_entries,
+        marc_roundtrip_present=marc_roundtrip_present,
     )
     file_map["manifest.json"] = json.dumps(
         manifest.model_dump(by_alias=True), ensure_ascii=False, indent=2
@@ -270,6 +274,34 @@ def build_bundle(
         per_stage_marc_attached=marc_attached,
         per_stage_marc_missing=marc_missing,
     )
+
+
+def _include_marc_roundtrip(
+    file_map: dict[str, bytes],
+    marc_roundtrip_dir: Path | None,
+    marc_dir: Path,
+) -> bool:
+    """Mutate ``file_map`` to add the marc-roundtrip output dir (P-47
+    commit 4) — originals + reconstructed + per-bib diffs + summary
+    so the HTML reviewer can render the side-by-side MARC diff tab
+    from the same bundle the cataloguer downloads. Returns ``True``
+    when the dir was found and packed (the manifest then flags
+    ``marc_roundtrip_present`` true)."""
+    if marc_roundtrip_dir is None or not marc_roundtrip_dir.is_dir():
+        return False
+    for path in sorted(marc_roundtrip_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(marc_roundtrip_dir)).replace("\\", "/")
+        file_map[f"marc-roundtrip/{rel}"] = path.read_bytes()
+    # Also include the matching original MARCXML so the HTML can render
+    # both sides client-side without needing the source dir.
+    for diff_path in sorted((marc_roundtrip_dir / "diffs").glob("*.json")):
+        bib_id = diff_path.stem
+        original = marc_dir / f"{bib_id}.xml"
+        if original.is_file():
+            file_map[f"marc-roundtrip/originals/{bib_id}.xml"] = original.read_bytes()
+    return True
 
 
 # --- Read (smoke / debug) -----------------------------------------------
