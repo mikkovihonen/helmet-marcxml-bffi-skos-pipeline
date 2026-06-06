@@ -1054,7 +1054,7 @@ def test_langchain_picker_returns_uncertain_when_no_candidates() -> None:
 # --- M9 phase 3: subject + genre/form reconciliation ---------------------
 
 
-def _build_subject_canonical_graph(
+def _build_subject_canonical_graph(  # noqa: PLR0912 — test helper, one branch per optional target type.
     *,
     subject_label: str | None = "Tampere",
     subject_source: str | None = "yso/fin",
@@ -1067,6 +1067,8 @@ def _build_subject_canonical_graph(
     intended_audience_source: str | None = None,
     creator_characteristic_label: str | None = None,
     creator_characteristic_source: str | None = None,
+    origin_place_label: str | None = None,
+    origin_place_source: str | None = None,
 ) -> Graph:
     """Build a canonical graph with optional subject + genreForm + musicMedium targets.
 
@@ -1110,6 +1112,12 @@ def _build_subject_canonical_graph(
         g.add((cnode, V.RDFS.label, Literal(creator_characteristic_label)))
         if creator_characteristic_source is not None:
             g.add((cnode, V.BF.source, Literal(creator_characteristic_source)))
+    if origin_place_label is not None:
+        opnode = BNode()
+        g.add((work, V.BFFI.originPlace, opnode))
+        g.add((opnode, V.RDFS.label, Literal(origin_place_label)))
+        if origin_place_source is not None:
+            g.add((opnode, V.BF.source, Literal(origin_place_source)))
     return g
 
 
@@ -1240,6 +1248,22 @@ def test_iter_subject_requests_yields_creator_characteristic_as_subject() -> Non
     assert requests[0].kind == "subject"
     assert requests[0].literal == "naiset"
     assert requests[0].predicate_uri == str(V.BFFI.creatorCharacteristic)
+
+
+def test_iter_subject_requests_yields_origin_place_as_subject() -> None:
+    """MARC 257 origin-place targets (hoisted from the BIBFRAME
+    Instance by M3) route through tier-0 YSO. Place names hit
+    YSO-paikat via the loaded YSO graph; kind is ``subject``."""
+    g = _build_subject_canonical_graph(
+        subject_label=None,
+        origin_place_label="Yhdysvallat",
+        origin_place_source="yso/fin",
+    )
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "subject"
+    assert requests[0].literal == "Yhdysvallat"
+    assert requests[0].predicate_uri == str(V.BFFI.originPlace)
 
 
 def test_iter_subject_requests_classifies_bella_source_as_genre_form() -> None:

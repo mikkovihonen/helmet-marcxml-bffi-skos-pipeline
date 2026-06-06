@@ -478,6 +478,83 @@ def test_construct_extracts_creator_characteristic_from_marc_386() -> None:
     assert Literal("naiset") in set(bffi.objects(cc, V.RDFS.label))
 
 
+def test_construct_extracts_origin_place_from_marc_257_via_instance() -> None:
+    """MARC 257 (Country of Producing Entity) → marc2bibframe2 emits
+    ``bf:originPlace`` on the ``bf:Instance``, NOT the Work (per the
+    BIBFRAME three-class data model). M3 hoists the property from the
+    Instance up to the Work via the inverse ``bf:instanceOf`` link
+    because lkd.rdf's ``bffi:originPlace`` has ``rdfs:domain bffi:Work``.
+
+    Tests the hoist by building a BIBFRAME graph where the Work has no
+    direct ``bf:originPlace`` (just like real marc2bibframe2 output) —
+    the property lives on the related Instance."""
+    instance_uri = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/10000001#Instance")
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Past lives" ] .
+
+            <{instance_uri}> a bf:Instance ;
+                bf:instanceOf <{BF_WORK}> ;
+                bf:originPlace [
+                    a bf:Place ;
+                    rdfs:label "Yhdysvallat" ;
+                    bf:source <http://urn.fi/URN:NBN:fi:au:yso>
+                ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    places = list(bffi.objects(EXPECTED_WORK, V.BFFI.originPlace))
+    assert len(places) == 1, (
+        f"expected one bffi:originPlace hoisted from the Instance; got {places}"
+    )
+    place = places[0]
+    assert isinstance(place, URIRef)
+    # Fragment scheme distinguishes 257 origins from 651 place subjects.
+    assert "#OriginPlace257-" in str(place)
+    assert str(place).startswith("http://urn.fi/URN:NBN:fi:bib:raw/10000001")
+    assert (place, RDF.type, V.BFFI.Place) in bffi
+    assert Literal("Yhdysvallat") in set(bffi.objects(place, V.RDFS.label))
+
+
+def test_construct_extracts_multiple_origin_places_from_one_instance() -> None:
+    """Cataloguers tag multiple 257 fields when an AV work has more than
+    one producing country (Past Lives = US + South Korea). Each surfaces
+    as its own ``bffi:originPlace`` link with a distinct minted URI
+    (different label hashes)."""
+    instance_uri = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/10000001#Instance")
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Past lives" ] .
+
+            <{instance_uri}> a bf:Instance ;
+                bf:instanceOf <{BF_WORK}> ;
+                bf:originPlace [ a bf:Place ; rdfs:label "Yhdysvallat" ] ;
+                bf:originPlace [ a bf:Place ; rdfs:label "Korean tasavalta" ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    places = list(bffi.objects(EXPECTED_WORK, V.BFFI.originPlace))
+    assert len(places) == 2, f"expected two distinct originPlaces; got {places}"
+    labels = {str(lab) for place in places for lab in bffi.objects(place, V.RDFS.label)}
+    assert labels == {"Yhdysvallat", "Korean tasavalta"}
+
+
 def test_construct_routes_genreform_label() -> None:
     """P-36 Phase C: bf:genreForm targets must round-trip their
     ``rdfs:label`` through M3's CONSTRUCT so M9 has something to walk.

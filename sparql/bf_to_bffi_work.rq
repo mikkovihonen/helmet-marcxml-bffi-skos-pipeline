@@ -32,6 +32,7 @@ CONSTRUCT {
            bffi:musicMedium         ?mediumURI ;
            bffi:intendedAudience    ?audienceURI ;
            bffi:creatorCharacteristic ?creatorCharURI ;
+           bffi:originPlace         ?originPlaceURI ;
            bffi:marcKey             ?marcKey ;
            skos:prefLabel           ?workLabel ;
            bf:identifiedBy          ?ident ;
@@ -73,6 +74,15 @@ CONSTRUCT {
   ?creatorCharURI a         bffi:CreatorCharacteristic ;
                   rdfs:label    ?creatorCharLabel ;
                   bf:source     ?bfCreatorCharSource .
+  # MARC 257 (Country of Producing Entity) — marc2bibframe2 puts
+  # ``bf:originPlace`` on the ``bf:Instance``, but lkd.rdf's
+  # ``bffi:originPlace`` has ``rdfs:domain bffi:Work``. We hoist the
+  # property from the Instance up to the Work to honour the BFFI
+  # ontology while still extracting the data marc2bibframe2 produces.
+  # Target type is ``bffi:Place`` (the range declared in lkd.rdf).
+  ?originPlaceURI a       bffi:Place ;
+                  rdfs:label  ?originPlaceLabel ;
+                  bf:source   ?bfOriginPlaceSource .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -196,6 +206,24 @@ WHERE {
     BIND( IRI(CONCAT(?ccRecordRoot,
                      "#CreatorCharacteristic386-",
                      arq:sha1(STR(?creatorCharLabel)))) AS ?creatorCharURI )
+  }
+  # MARC 257 (Country of Producing Entity) — marc2bibframe2 emits
+  # ``bf:originPlace`` on the ``bf:Instance`` (not the Work) per the
+  # BIBFRAME data model. We walk the inverse ``bf:instanceOf`` link
+  # from any Instance pointing AT this Work, grab the originPlace
+  # triple, and hoist it onto the BFFI Work — BFFI's ``bffi:originPlace``
+  # has ``rdfs:domain bffi:Work``, so this restores the home the BFFI
+  # ontology expects. Target is typed ``bffi:Place`` (the range).
+  # Reconciles against YSO-paikat at M9 tier-0 with kind=subject.
+  OPTIONAL {
+    ?bfInstance bf:instanceOf ?bfWork ;
+                bf:originPlace ?bfOriginPlace .
+    ?bfOriginPlace rdfs:label ?originPlaceLabel .
+    OPTIONAL { ?bfOriginPlace bf:source ?bfOriginPlaceSource }
+    BIND( STRBEFORE(STR(?bfWork), "#") AS ?opRecordRoot )
+    BIND( IRI(CONCAT(?opRecordRoot,
+                     "#OriginPlace257-",
+                     arq:sha1(STR(?originPlaceLabel)))) AS ?originPlaceURI )
   }
 
   # Helmet identifier preservation (added by M2 post-process).

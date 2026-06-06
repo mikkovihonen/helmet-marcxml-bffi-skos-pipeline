@@ -216,6 +216,7 @@ def _collect_subject_labels(graph: Graph, work: URIRef) -> list[str]:
         V.BFFI.musicMedium,
         V.BFFI.intendedAudience,
         V.BFFI.creatorCharacteristic,
+        V.BFFI.originPlace,
     ):
         for target in graph.objects(work, predicate):
             if len(out) >= _WORK_CONTEXT_FIELD_CAP:
@@ -329,6 +330,7 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
             V.BFFI.musicMedium,
             V.BFFI.intendedAudience,
             V.BFFI.creatorCharacteristic,
+            V.BFFI.originPlace,
         ):
             for target in graph.objects(work, predicate):
                 # Skip URIs that already resolve to an authority graph
