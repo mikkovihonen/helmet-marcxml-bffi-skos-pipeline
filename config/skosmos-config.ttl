@@ -73,6 +73,9 @@ bffi:Work       rdfs:label      "Work"@en, "Teos"@fi, "Verk"@sv ;
 bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
                 rdfs:subClassOf skos:Concept .
 
+bffi:Manifestation rdfs:label   "Manifestation"@en, "Manifestaatio"@fi, "Manifestation"@sv ;
+                   rdfs:subClassOf skos:Concept .
+
 # ---------------------------------------------------------------------------
 # Subject categorisation entry — referenced by the vocabulary's
 # dc:subject so the Skosmos sidebar can group vocabularies by topic.
@@ -106,9 +109,9 @@ bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
 # ---------------------------------------------------------------------------
 
 :bffiWorks a skosmos:Vocabulary, void:Dataset ;
-    dc:title          "Finnish Authority Works and Expressions"@en,
-                      "Suomalaiset auktoriteettiteokset ja -ekspressiot"@fi,
-                      "Finska auktoritetsverk och uttryck"@sv ;
+    dc:title          "Finnish Authority Works"@en,
+                      "Suomalaiset auktoriteettiteokset"@fi,
+                      "Finska auktoritetsverk"@sv ;
     skosmos:shortName "bffi-works"@en ;
     dc:subject        :catBibliographic ;
     void:uriSpace     "http://urn.fi/URN:NBN:fi:bib:work:" ;
@@ -127,6 +130,57 @@ bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
     # Group view — Works clustered with their Expressions via
     # skos:narrower (lifted from bffi:hasExpression by the Skosify overlay).
     skosmos:groupClass      isothes:ConceptGroup ;
+
+    skosmos:showTopConcepts       true ;
+    skosmos:fullAlphabeticalIndex true .
+
+# ---------------------------------------------------------------------------
+# Three-class BFFI 1.0.0 ontology (P-45): Works, Expressions and
+# Manifestations each get their own Skosmos vocabulary page so the URL
+# routing (via ``void:uriSpace``) lands a user on the right entity-type
+# index. All three share the SAME Fuseki named graph (``bffi-works``)
+# because they're a single connected RDF graph in storage — the
+# vocabulary separation is purely a UI navigation concern. The Work
+# vocab keeps the original ``:bffiWorks`` short name so existing links
+# (cataloguer-review bundles, judge audits) don't break.
+# ---------------------------------------------------------------------------
+
+:bffiExpressions a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "Finnish Authority Expressions"@en,
+                      "Suomalaiset auktoriteettiekspressiot"@fi,
+                      "Finska auktoritetsuttryck"@sv ;
+    skosmos:shortName "bffi-expressions"@en ;
+    dc:subject        :catBibliographic ;
+    void:uriSpace     "http://urn.fi/URN:NBN:fi:bib:expression:" ;
+
+    skosmos:language        "fi", "sv", "en" ;
+    skosmos:defaultLanguage "fi" ;
+
+    skosmos:sparqlGraph     <http://urn.fi/URN:NBN:fi:bib:graph:bffi-works> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+
+    skosmos:indexShowClass  bffi:Expression ;
+
+    skosmos:showTopConcepts       true ;
+    skosmos:fullAlphabeticalIndex true .
+
+:bffiManifestations a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "Finnish Authority Manifestations"@en,
+                      "Suomalaiset auktoriteettimanifestaatiot"@fi,
+                      "Finska auktoritetsmanifestationer"@sv ;
+    skosmos:shortName "bffi-manifestations"@en ;
+    dc:subject        :catBibliographic ;
+    void:uriSpace     "http://urn.fi/URN:NBN:fi:bib:manifestation:" ;
+
+    skosmos:language        "fi", "sv", "en" ;
+    skosmos:defaultLanguage "fi" ;
+
+    skosmos:sparqlGraph     <http://urn.fi/URN:NBN:fi:bib:graph:bffi-works> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+
+    skosmos:indexShowClass  bffi:Manifestation ;
 
     skosmos:showTopConcepts       true ;
     skosmos:fullAlphabeticalIndex true .
@@ -295,6 +349,34 @@ bffi:Expression rdfs:label      "Expression"@en, "Ekspressio"@fi, "Uttryck"@sv ;
     skosmos:language        "sv" ;
     skosmos:defaultLanguage "sv" ;
     skosmos:sparqlGraph     <http://www.yso.fi/onto/allars/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+# RDA Media Types — labels the bf:media URIs forwarded onto each
+# bffi:Manifestation by M3 (P-45 commit 4). One of two LoC RDA vocabs
+# the Manifestation page leans on; ``rda-media`` matches the
+# ``vocab_id`` in ``load-finto``'s ``FINTO_VOCABS``.
+:rda-media a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "RDA Media Types"@en ;
+    skosmos:shortName "rda-media"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/mediaTypes/" ;
+    skosmos:language        "en" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/mediaTypes/> ;
+    skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
+    skosmos:sparqlDialect   "JenaText" ;
+    skosmos:fullAlphabeticalIndex true .
+
+# RDA Carrier Types — labels the bf:carrier URIs forwarded onto each
+# bffi:Manifestation by M3 (P-45 commit 4).
+:rda-carrier a skosmos:Vocabulary, void:Dataset ;
+    dc:title          "RDA Carrier Types"@en ;
+    skosmos:shortName "rda-carrier"@en ;
+    void:uriSpace     "http://id.loc.gov/vocabulary/carriers/" ;
+    skosmos:language        "en" ;
+    skosmos:defaultLanguage "en" ;
+    skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/carriers/> ;
     skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
     skosmos:sparqlDialect   "JenaText" ;
     skosmos:fullAlphabeticalIndex true .

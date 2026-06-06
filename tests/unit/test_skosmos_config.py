@@ -62,6 +62,7 @@ def _vocabulary_subject(g: Graph) -> URIRef:
     [
         (BFFI.Work, "Teos", "Verk", "Work"),
         (BFFI.Expression, "Ekspressio", "Uttryck", "Expression"),
+        (BFFI.Manifestation, "Manifestaatio", "Manifestation", "Manifestation"),
     ],
 )
 def test_bffi_types_have_multilingual_labels(
@@ -84,6 +85,7 @@ def test_bffi_types_have_multilingual_labels(
 def test_bffi_types_are_subclass_of_skos_concept(graph: Graph) -> None:
     assert (BFFI.Work, RDFS.subClassOf, SKOS.Concept) in graph
     assert (BFFI.Expression, RDFS.subClassOf, SKOS.Concept) in graph
+    assert (BFFI.Manifestation, RDFS.subClassOf, SKOS.Concept) in graph
 
 
 # --- Vocabulary entry --------------------------------------------------
@@ -208,6 +210,8 @@ _FINTO_VOCAB_ASSERTIONS: list[tuple[str, str]] = [
     ("slm", "http://urn.fi/URN:NBN:fi:au:slm:"),
     ("allars", "http://www.yso.fi/onto/allars/"),
     ("relators", "http://id.loc.gov/vocabulary/relators/"),
+    ("rda-media", "http://id.loc.gov/vocabulary/mediaTypes/"),
+    ("rda-carrier", "http://id.loc.gov/vocabulary/carriers/"),
     ("lcgft", "http://id.loc.gov/authorities/genreForms/"),
     ("lcsh", "http://id.loc.gov/authorities/subjects/"),
     ("childrensSubjects", "http://id.loc.gov/authorities/childrensSubjects/"),
@@ -239,6 +243,42 @@ def test_finto_vocabulary_entries_point_at_local_fuseki(
     [vocab] = [s for s, _, _ in graph.triples((None, VOID.uriSpace, Literal(uri_space)))]
     assert (vocab, SKOSMOS.sparqlEndpoint, URIRef("http://fuseki:3030/bffi/sparql")) in graph
     assert (vocab, SKOSMOS.sparqlGraph, URIRef(uri_space)) in graph
+
+
+# --- BFFI 4-class siblings (P-45 commit 5) -----------------------------
+#
+# Works, Expressions and Manifestations each get their own Skosmos vocab
+# entry so the URL routing (via ``void:uriSpace``) lands a user on the
+# right entity-type page when they click a URI. All three share the
+# same Fuseki named graph (``bffi-works``) because they're a single
+# connected RDF graph in storage.
+
+_BFFI_SIBLING_VOCABS: list[tuple[str, str, URIRef]] = [
+    ("bffi-works", "http://urn.fi/URN:NBN:fi:bib:work:", BFFI.Work),
+    ("bffi-expressions", "http://urn.fi/URN:NBN:fi:bib:expression:", BFFI.Expression),
+    (
+        "bffi-manifestations",
+        "http://urn.fi/URN:NBN:fi:bib:manifestation:",
+        BFFI.Manifestation,
+    ),
+]
+
+
+@pytest.mark.parametrize(("short_name", "uri_space", "show_class"), _BFFI_SIBLING_VOCABS)
+def test_bffi_sibling_vocabularies_share_bffi_works_named_graph(
+    graph: Graph, short_name: str, uri_space: str, show_class: URIRef
+) -> None:
+    """All three BFFI vocab entries point at the same Fuseki named
+    graph — separation is purely a UI navigation concern."""
+    [vocab] = [s for s, _, _ in graph.triples((None, VOID.uriSpace, Literal(uri_space)))]
+    short_names = {str(o) for _, _, o in graph.triples((vocab, SKOSMOS.shortName, None))}
+    assert short_name in short_names
+    assert (
+        vocab,
+        SKOSMOS.sparqlGraph,
+        URIRef("http://urn.fi/URN:NBN:fi:bib:graph:bffi-works"),
+    ) in graph
+    assert (vocab, SKOSMOS.indexShowClass, show_class) in graph
 
 
 def test_finto_vocabulary_kanto_is_finnish_only(graph: Graph) -> None:
