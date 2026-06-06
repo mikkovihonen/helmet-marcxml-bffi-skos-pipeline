@@ -389,6 +389,79 @@ def test_run_converts_rdfxml_dump_to_turtle_before_uploading(tmp_path: Path) -> 
     assert b"<?xml" not in body
 
 
+# --- MADS → SKOS lifting (RDA mediaTypes / carriers) --------------------
+
+
+def test_run_lifts_mads_authority_to_skos_concept_with_multilang_label(
+    tmp_path: Path,
+) -> None:
+    """LoC's RDA mediaTypes / carriers dumps use MADS rather than SKOS
+    — concepts are typed ``mads:Authority`` with
+    ``mads:authoritativeLabel``. Without lifting, Skosmos can't resolve
+    URIs that link into the graph (cross-vocab label lookups target
+    ``skos:prefLabel``). The download path detects MADS and lifts each
+    Authority to also be a ``skos:Concept`` with ``skos:prefLabel``
+    tagged ``@en``, ``@fi``, ``@sv`` (same English string in all three
+    — RDA labels exist only in English, but Skosmos's cross-vocab
+    lookup filters by the calling page's UI language)."""
+    rda_media = FintoVocab(
+        vocab_id="rda-media",
+        dump_url="https://example.test/mediaTypes.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/mediaTypes/",
+        languages=("en",),
+    )
+    mads_xml = (
+        b"<?xml version='1.0' encoding='UTF-8'?>"
+        b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#' "
+        b"xmlns:mads='http://www.loc.gov/mads/rdf/v1#'>"
+        b"<rdf:Description rdf:about='http://id.loc.gov/vocabulary/mediaTypes/n'>"
+        b"<rdf:type rdf:resource='http://www.loc.gov/mads/rdf/v1#Authority'/>"
+        b"<mads:authoritativeLabel>unmediated</mads:authoritativeLabel>"
+        b"</rdf:Description>"
+        b"</rdf:RDF>"
+    )
+
+    @dataclass
+    class _Recorder3:
+        requests: list[_RecordedRequest] = field(default_factory=list)
+
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            self.requests.append(
+                _RecordedRequest(
+                    method=request.method,
+                    url=str(request.url),
+                    accept=request.headers.get("accept"),
+                    body=request.content,
+                    params=dict(request.url.params),
+                )
+            )
+            if request.method == "GET":
+                return httpx.Response(
+                    200,
+                    content=mads_xml,
+                    headers={"content-type": "application/rdf+xml"},
+                )
+            return httpx.Response(204)
+
+    rec = _Recorder3()
+    with httpx.Client(transport=httpx.MockTransport(rec), follow_redirects=True) as c:
+        run(
+            output_dir=tmp_path,
+            fuseki_url="http://localhost:3030/bffi",
+            vocabs=(rda_media,),
+            http_client=c,
+        )
+
+    put = next(r for r in rec.requests if r.method == "PUT")
+    body = put.body or b""
+    # The body must declare the URI as skos:Concept (not just mads:Authority)
+    # and carry skos:prefLabel under each project UI language.
+    assert b"skos:Concept" in body
+    assert b'"unmediated"@en' in body
+    assert b'"unmediated"@fi' in body
+    assert b'"unmediated"@sv' in body
+
+
 # --- Gzipped Turtle dumps (LoC LCGFT / LCSH) ----------------------------
 
 

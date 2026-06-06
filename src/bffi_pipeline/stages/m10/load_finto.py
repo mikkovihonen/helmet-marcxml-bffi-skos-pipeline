@@ -27,6 +27,7 @@ from typing import Final
 from urllib.parse import quote
 
 import httpx
+from rdflib import Graph
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.stages.m10.load import upload_graph
@@ -374,6 +375,36 @@ _RDFXML_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 
+def _lift_mads_to_skos(graph: Graph) -> None:
+    """In-place: lift LoC MADS-shaped authority data to SKOS.
+
+    LoC publishes the RDA vocabs (mediaTypes, carriers, similar
+    issuance / frequency lists) using MADS rather than SKOS — concepts
+    are typed ``mads:Authority`` and labelled via
+    ``mads:authoritativeLabel``. Skosmos's renderer targets SKOS, so
+    a MADS-only graph shows URIs as ``prefix:code`` instead of the
+    label text. This helper dual-types every ``mads:Authority`` as
+    ``skos:Concept`` and lifts ``mads:authoritativeLabel`` to
+    ``skos:prefLabel`` tagged with ``@en``, ``@fi``, and ``@sv`` (same
+    English string in all three tags — the data is English-only, but
+    declaring the label under all three project UI languages lets
+    Skosmos's cross-vocab label lookup resolve from a Finnish /
+    Swedish concept page that links into a MADS vocab).
+
+    No-op on graphs that don't contain ``mads:Authority``.
+    """
+    from rdflib import Literal, Namespace
+    from rdflib.namespace import RDF, SKOS
+
+    MADS = Namespace("http://www.loc.gov/mads/rdf/v1#")
+    for s in list(graph.subjects(RDF.type, MADS.Authority)):
+        graph.add((s, RDF.type, SKOS.Concept))
+        for label in graph.objects(s, MADS.authoritativeLabel):
+            text = str(label)
+            for lang in ("en", "fi", "sv"):
+                graph.add((s, SKOS.prefLabel, Literal(text, lang=lang)))
+
+
 def _download_dump(
     client: httpx.Client,
     vocab: FintoVocab,
@@ -405,14 +436,17 @@ def _download_dump(
     """
     import gzip
 
-    from rdflib import Graph
-
     response = client.get(vocab.dump_url, headers={"Accept": "text/turtle"})
     response.raise_for_status()
     content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type in _RDFXML_CONTENT_TYPES:
         graph = Graph()
         graph.parse(data=response.content, format="xml")
+        # Lift LoC MADS authority data to SKOS so Skosmos's
+        # cross-vocab label lookup can resolve URIs that link into
+        # MADS-published vocabs (RDA mediaTypes / carriers / etc.).
+        # No-op on non-MADS graphs.
+        _lift_mads_to_skos(graph)
         payload = graph.serialize(format="turtle").encode("utf-8")
     elif vocab.dump_url.endswith(".gz"):
         payload = gzip.decompress(response.content)

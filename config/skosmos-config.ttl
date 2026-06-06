@@ -361,7 +361,7 @@ bffi:Manifestation rdfs:label   "Manifestation"@en, "Manifestaatio"@fi, "Manifes
     dc:title          "RDA Media Types"@en ;
     skosmos:shortName "rda-media"@en ;
     void:uriSpace     "http://id.loc.gov/vocabulary/mediaTypes/" ;
-    skosmos:language        "en" ;
+    skosmos:language        "en", "fi", "sv" ;
     skosmos:defaultLanguage "en" ;
     skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/mediaTypes/> ;
     skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
@@ -374,7 +374,7 @@ bffi:Manifestation rdfs:label   "Manifestation"@en, "Manifestaatio"@fi, "Manifes
     dc:title          "RDA Carrier Types"@en ;
     skosmos:shortName "rda-carrier"@en ;
     void:uriSpace     "http://id.loc.gov/vocabulary/carriers/" ;
-    skosmos:language        "en" ;
+    skosmos:language        "en", "fi", "sv" ;
     skosmos:defaultLanguage "en" ;
     skosmos:sparqlGraph     <http://id.loc.gov/vocabulary/carriers/> ;
     skosmos:sparqlEndpoint  <http://fuseki:3030/bffi/sparql> ;
