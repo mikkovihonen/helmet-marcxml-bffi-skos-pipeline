@@ -231,6 +231,36 @@ FINTO_VOCABS: Final[tuple[FintoVocab, ...]] = (
         graph_uri="http://id.loc.gov/vocabulary/relators/",
         languages=("en",),
     ),
+    # RDA Media Types — LoC's vocabulary at
+    # ``id.loc.gov/vocabulary/mediaTypes`` covers the RDA "media type"
+    # axis ("computer", "audio", "video", "unmediated", etc.). MARC 337
+    # ``$b`` carries the two-letter code (``c`` = computer, ``s`` =
+    # audio) that resolves to a URI in this namespace. Loaded as a
+    # named-graph in Fuseki so M9 can reconcile ``bffi:media`` targets
+    # against it (P-45 commit 4) and so Skosmos renders Manifestation
+    # media-type URIs as labelled clickable concepts on the new
+    # ``:bffiManifestations`` vocab page. Same RDF/XML wire format as
+    # relators; ~10 KB. English-only.
+    FintoVocab(
+        vocab_id="rda-media",
+        dump_url="https://id.loc.gov/vocabulary/mediaTypes.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/mediaTypes/",
+        languages=("en",),
+    ),
+    # RDA Carrier Types — LoC's vocabulary at
+    # ``id.loc.gov/vocabulary/carriers`` covers the RDA "carrier type"
+    # axis ("volume", "online resource", "audio disc", "computer disc",
+    # etc.). MARC 338 ``$b`` carries the carrier code (``nc`` = volume,
+    # ``cr`` = online resource) that resolves to a URI in this
+    # namespace. Same loading + Skosmos wiring rationale as RDA Media
+    # above. Same RDF/XML wire format as relators; ~25 KB.
+    # English-only.
+    FintoVocab(
+        vocab_id="rda-carrier",
+        dump_url="https://id.loc.gov/vocabulary/carriers.rdf",
+        graph_uri="http://id.loc.gov/vocabulary/carriers/",
+        languages=("en",),
+    ),
     # LC Genre/Form Terms — Helmet cataloguers cite English genre/form
     # URIs (e.g. ``http://id.loc.gov/authorities/genreForms/gf2015026020``
     # for "Novels", ``.../gf2014026542`` for "Short stories") on MARC

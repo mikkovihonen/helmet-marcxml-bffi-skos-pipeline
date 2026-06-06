@@ -317,6 +317,8 @@ def test_canonical_vocab_list_covers_expected_authority_vocabularies() -> None:
         "mts",
         "seko",
         "relators",
+        "rda-media",
+        "rda-carrier",
         "lcgft",
         "lcmpt",
         "lcsh",
