@@ -59,11 +59,20 @@ VOCAB_CHILDRENS_SUBJECTS: Final[str] = "childrensSubjects"
 VOCAB_VIA_YSA: Final[str] = "via-ysa"
 VOCAB_VIA_MUSA: Final[str] = "via-musa"
 VOCAB_VIA_ALLARS: Final[str] = "via-allars"
+#: ``genre_form`` post-tier-0 redirect tag. Different shape from the
+#: subject-side bridges: a literal that lexically matches a KAUNO
+#: prefLabel STILL hits tier-0 first (KAUNO is in
+#: ``_KIND_TO_GRAPHS["genre_form"]``); the redirect then checks whether
+#: the matched KAUNO concept has a ``skos:exactMatch`` / ``dct:isReplacedBy``
+#: triple pointing into YSO and, if so, swaps the URI to the YSO target.
+#: Closes the "KAUNO is partly deprecated" gap (6,554 of KAUNO's concepts
+#: are now also in YSO; modernised records should bind to the YSO URI).
+VOCAB_VIA_KAUNO: Final[str] = "via-kauno"
 
 #: Set of all legacy-bridge tags, used by provenance code to test
 #: whether a hit's vocab tag indicates a legacy-mapping resolution.
 LEGACY_BRIDGE_VOCABS: Final[frozenset[str]] = frozenset(
-    {VOCAB_VIA_YSA, VOCAB_VIA_MUSA, VOCAB_VIA_ALLARS}
+    {VOCAB_VIA_YSA, VOCAB_VIA_MUSA, VOCAB_VIA_ALLARS, VOCAB_VIA_KAUNO}
 )
 
 #: Named graph URIs for the legacy thesauri loaded by ``load-finto``.
@@ -71,6 +80,7 @@ LEGACY_BRIDGE_VOCABS: Final[frozenset[str]] = frozenset(
 _LEGACY_GRAPH_YSA: Final[str] = "http://www.yso.fi/onto/ysa/"
 _LEGACY_GRAPH_MUSA: Final[str] = "http://www.yso.fi/onto/musa/"
 _LEGACY_GRAPH_ALLARS: Final[str] = "http://www.yso.fi/onto/allars/"
+_LEGACY_GRAPH_KAUNO: Final[str] = "http://www.yso.fi/onto/kauno/"
 _YSO_GRAPH_URI: Final[str] = "http://www.yso.fi/onto/yso/"
 
 #: Authority kind → (source-vocabulary tag, named-graph URI) tuples.
@@ -261,6 +271,48 @@ def _build_legacy_mapping_query(literal: str) -> str:
     )
 
 
+def _build_kauno_redirect_query(kauno_uri: str) -> str:
+    """Build the post-tier-0 KAUNO → YSO redirect SPARQL.
+
+    Used after a ``genre_form`` tier-0 hit that landed in the KAUNO graph
+    (``http://www.yso.fi/onto/kauno/``). KAUNO is partly deprecated:
+    4,917 of its concepts carry ``skos:exactMatch yso:…`` (semantic
+    equivalents in the modern YSO) and 1,636 carry ``dct:isReplacedBy
+    yso:…`` (formally replaced). Both forms get followed; the YSO URI is
+    the modern canonical form we want to bind.
+
+    ``FILTER (STRSTARTS(?yso, "yso:"))`` guards against
+    ``dct:isReplacedBy`` triples that point back into KAUNO itself
+    (~110 internal-disambiguation edges) — those would keep us in the
+    deprecated namespace and aren't the modernisation we're after.
+
+    Also returns the YSO prefLabel for the redirected hit so downstream
+    rendering shows the modern label instead of the deprecated KAUNO
+    one.
+    """
+    quoted_uri = f"<{kauno_uri}>"
+    yso_ns = _YSO_GRAPH_URI
+    return (
+        "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+        "PREFIX dct:  <http://purl.org/dc/terms/>\n"
+        "SELECT ?yso ?label WHERE {\n"
+        f"  GRAPH <{_LEGACY_GRAPH_KAUNO}> {{\n"
+        f"    {quoted_uri} (skos:exactMatch | skos:closeMatch | dct:isReplacedBy) ?yso .\n"
+        "  }\n"
+        f'  FILTER (STRSTARTS(STR(?yso), "{yso_ns}"))\n'
+        "  OPTIONAL {\n"
+        f"    GRAPH <{yso_ns}> {{\n"
+        "      ?yso skos:prefLabel ?label .\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+        'ORDER BY DESC(IF(LANG(?label) = "fi", 3, '
+        'IF(LANG(?label) = "sv", 2, '
+        'IF(LANG(?label) = "en", 1, 0))))\n'
+        "LIMIT 1\n"
+    )
+
+
 @dataclass
 class FusekiConceptResolver:
     """Tier-0 resolver backed by a SPARQL endpoint.
@@ -280,21 +332,27 @@ class FusekiConceptResolver:
     def resolve(self, *, literal: str, kind: AuthorityKind) -> LocalConceptHit | None:
         """SPARQL the local authority graphs for an exact prefLabel match.
 
-        Two-tier resolution chain:
+        Multi-tier resolution chain:
 
-        1. Lexical: literal must match the ``skos:prefLabel`` of a
+        1. **Lexical**: literal must match the ``skos:prefLabel`` of a
            concept in one of the kind's authoritative graphs (YSO,
            Allärs, KAUNO, etc.).
-        2. Legacy mapping (subject-kind only): if lexical fails, look
-           up the literal in the deprecated YSA / MUSA / Allärs graphs
-           and follow ``skos:exactMatch`` / ``skos:closeMatch`` or
-           ``dct:isReplacedBy``+``exactMatch`` to a YSO concept. The
-           returned ``source_vocabulary`` carries ``via-ysa`` /
-           ``via-musa`` / ``via-allars`` so downstream provenance
-           records the bridge.
+        2. **Subject legacy-mapping** (subject-kind only, fires on a
+           lexical miss): looks up the literal in the deprecated YSA /
+           MUSA / Allärs graphs and follows ``skos:exactMatch`` /
+           ``skos:closeMatch`` or ``dct:isReplacedBy``+``exactMatch`` to
+           a YSO concept. Returned ``source_vocabulary`` is
+           ``via-ysa`` / ``via-musa`` / ``via-allars``.
+        3. **KAUNO → YSO redirect** (genre_form-kind only, fires after a
+           tier-0 hit that landed in KAUNO): if the matched KAUNO
+           concept has a ``skos:exactMatch`` / ``dct:isReplacedBy``
+           triple into YSO, swaps the hit to the YSO URI with
+           ``source_vocabulary = via-kauno``. Canonicalises legacy
+           fiction-subject literals to the modern YSO concept where one
+           exists.
 
         Tier-2 (Finto API) and tier-3 (LLM picker) follow downstream
-        when both tiers here miss.
+        when this resolver returns ``None``.
         """
         graphs = _KIND_TO_GRAPHS.get(kind)
         if not graphs:
@@ -306,10 +364,16 @@ class FusekiConceptResolver:
         graph_uris = tuple(g for _, g in graphs)
         hit = self._exact_match(literal=literal, graph_uris=graph_uris, graphs=graphs)
         if hit is None and kind == "subject":
-            # Legacy-bridge tier is subject-only — YSA / MUSA / Allärs
-            # are all subject vocabularies; person / corporate-body
-            # authorities go through KANTO at tier-2 instead.
+            # Subject legacy-bridge tier — YSA / MUSA / Allärs are all
+            # subject vocabularies; person / corporate-body authorities
+            # go through KANTO at tier-2 instead.
             hit = self._legacy_mapping_match(literal=literal)
+        elif hit is not None and kind == "genre_form" and hit.uri.startswith(_LEGACY_GRAPH_KAUNO):
+            # Post-tier-0 KAUNO → YSO redirect — canonicalises the
+            # ~6,554 KAUNO concepts whose modern equivalent lives in YSO.
+            redirected = self._kauno_redirect_match(kauno_hit=hit)
+            if redirected is not None:
+                hit = redirected
         self._cache[cache_key] = hit
         return hit
 
@@ -371,6 +435,34 @@ class FusekiConceptResolver:
             is_fuzzy_match=False,
         )
 
+    def _kauno_redirect_match(self, *, kauno_hit: LocalConceptHit) -> LocalConceptHit | None:
+        """Follow a KAUNO hit's ``exactMatch`` / ``isReplacedBy`` into YSO.
+
+        Called from :meth:`resolve` when ``kind == "genre_form"`` and the
+        tier-0 lexical match landed in the KAUNO graph. Returns a hit
+        with the YSO URI + ``via-kauno`` source_vocabulary tag when a
+        YSO bridge exists; otherwise returns ``None`` and the original
+        KAUNO hit stays.
+
+        Falls back to the original KAUNO prefLabel when the YSO concept
+        has no prefLabel in the loaded YSO graph (which shouldn't happen
+        in practice — every YSO concept carries one).
+        """
+        bindings = self._post_sparql(_build_kauno_redirect_query(kauno_hit.uri))
+        if not bindings:
+            return None
+        row = bindings[0]
+        yso_uri = row.get("yso", {}).get("value")
+        yso_label = row.get("label", {}).get("value", "")
+        if not yso_uri:
+            return None
+        return LocalConceptHit(
+            uri=str(yso_uri),
+            pref_label=str(yso_label) or kauno_hit.pref_label,
+            source_vocabulary=VOCAB_VIA_KAUNO,
+            is_fuzzy_match=False,
+        )
+
     def _hit_from_row(
         self,
         row: dict[str, Any],
@@ -412,6 +504,7 @@ __all__ = [
     "VOCAB_LCSH",
     "VOCAB_SLM",
     "VOCAB_VIA_ALLARS",
+    "VOCAB_VIA_KAUNO",
     "VOCAB_VIA_MUSA",
     "VOCAB_VIA_YSA",
     "FusekiConceptResolver",

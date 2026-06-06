@@ -91,11 +91,17 @@ Touched in the initial ship:
 - `tests/unit/test_load_finto.py` — regression pin updated
 - `docs/tech-stack.md` — Authority vocabularies table
 
+Touched in the follow-up (genre_form extension):
+
+- `src/bffi_pipeline/stages/m9/local_concept_resolver.py` — new `_build_kauno_redirect_query` + `_kauno_redirect_match` method, `VOCAB_VIA_KAUNO` constant. Different shape from the subject-side bridges: fires **after** a tier-0 lexical hit that lands in KAUNO (KAUNO is the first entry in `_KIND_TO_GRAPHS["genre_form"]`), checks for `skos:exactMatch` / `dct:isReplacedBy` into YSO, and swaps the URI when a bridge exists.
+- `tests/unit/test_local_concept_resolver.py` — 6 new tests covering the KAUNO redirect (hit-with-bridge, hit-without-bridge, kind-isolation, label fallback).
+
 Untouched (intentionally):
 
 - `src/bffi_pipeline/stages/m9/ysa_disambiguation_report.py` — still useful as the "did anything still slip through" diagnostic after the tier lands; can be enriched in a follow-up
 - `prompts/` — no prompt changes; the LLM picker doesn't see the bridge
 - Source MARC — never rewritten; the bridge is runtime-only
+- **Kaunokki internal disambiguation** — researched but skipped. Kaunokki has 2,803 `dct:isReplacedBy` triples but they point only to other kaunokki concepts (no bridge to KAUNO or YSO). Dereferencing would canonicalise deprecated kaunokki literals to live kaunokki, but the destination URI stays in the deprecated namespace. Low value vs the KAUNO→YSO redirect.
 
 ## Verification
 

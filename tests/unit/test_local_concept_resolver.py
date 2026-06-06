@@ -22,11 +22,13 @@ from bffi_pipeline.stages.m9.local_concept_resolver import (
     _KIND_TO_GRAPHS,
     LEGACY_BRIDGE_VOCABS,
     VOCAB_VIA_ALLARS,
+    VOCAB_VIA_KAUNO,
     VOCAB_VIA_MUSA,
     VOCAB_VIA_YSA,
     FusekiConceptResolver,
     LocalConceptHit,
     StubLocalConceptResolver,
+    _build_kauno_redirect_query,
     _build_legacy_mapping_query,
     _build_query,
     _quote_sparql_literal,
@@ -419,6 +421,175 @@ def test_resolve_returns_none_when_both_tiers_miss() -> None:
         fuseki_url="http://localhost:3030/bffi",
     )
     assert resolver.resolve(literal="nonsense", kind="subject") is None
+
+
+# --- KAUNO → YSO redirect (genre_form-kind post-tier-0) ----------------
+
+
+def _kauno_redirect_bindings(yso_uri: str, label: str, lang: str) -> dict[str, Any]:
+    """Build the SPARQL JSON-results envelope for a KAUNO→YSO redirect row."""
+    return {
+        "results": {
+            "bindings": [
+                {
+                    "yso": {"type": "uri", "value": yso_uri},
+                    "label": {"type": "literal", "value": label, "xml:lang": lang},
+                }
+            ]
+        }
+    }
+
+
+def test_build_kauno_redirect_query_has_all_bridge_predicates() -> None:
+    q = _build_kauno_redirect_query("http://www.yso.fi/onto/kauno/p1248")
+    assert "http://www.yso.fi/onto/kauno/" in q
+    assert "http://www.yso.fi/onto/kauno/p1248" in q
+    # Filter to YSO destinations
+    assert 'STRSTARTS(STR(?yso), "http://www.yso.fi/onto/yso/")' in q
+    # Follow all three bridge predicates (exactMatch, closeMatch, isReplacedBy)
+    assert "skos:exactMatch" in q
+    assert "skos:closeMatch" in q
+    assert "dct:isReplacedBy" in q
+
+
+def test_genre_form_kauno_hit_redirects_to_yso_when_bridge_exists() -> None:
+    """The headline case: cataloguer literal matches a KAUNO prefLabel
+    via tier-0; the matched KAUNO concept has ``skos:exactMatch yso:…``;
+    the resolver swaps to the YSO URI with ``source_vocabulary=via-kauno``.
+    """
+    kauno_uri = "http://www.yso.fi/onto/kauno/p1248"
+    yso_uri = "http://www.yso.fi/onto/yso/p19569"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        # The redirect query references the kauno graph URI directly.
+        if kauno_uri in sparql:
+            return httpx.Response(
+                200, json=_kauno_redirect_bindings(yso_uri, "kunnianloukkaus", "fi")
+            )
+        # Lexical tier-0 returns the KAUNO hit.
+        return httpx.Response(
+            200,
+            json=_bindings(kauno_uri, "kunnianloukkaus", "fi", "http://www.yso.fi/onto/kauno/"),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="kunnianloukkaus", kind="genre_form")
+    assert hit is not None
+    assert hit.uri == yso_uri
+    assert hit.source_vocabulary == VOCAB_VIA_KAUNO
+    assert hit.source_vocabulary in LEGACY_BRIDGE_VOCABS
+    # The hit's prefLabel reflects the YSO label (so downstream
+    # rendering surfaces the modern form).
+    assert hit.pref_label == "kunnianloukkaus"
+
+
+def test_genre_form_kauno_hit_without_yso_bridge_keeps_kauno_uri() -> None:
+    """When the matched KAUNO concept has no YSO bridge (some KAUNO
+    concepts are KAUNO-native and never modernised), the original
+    KAUNO URI stays. No data loss; bridge is opportunistic."""
+    kauno_uri = "http://www.yso.fi/onto/kauno/p999"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if kauno_uri in sparql:
+            # No bridge — empty results.
+            return httpx.Response(200, json={"results": {"bindings": []}})
+        return httpx.Response(
+            200,
+            json=_bindings(kauno_uri, "kauno-only-concept", "fi", "http://www.yso.fi/onto/kauno/"),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="kauno-only-concept", kind="genre_form")
+    assert hit is not None
+    assert hit.uri == kauno_uri  # original KAUNO URI, unmodified
+    assert hit.source_vocabulary == "kauno"
+
+
+def test_genre_form_slm_hit_does_not_trigger_kauno_redirect() -> None:
+    """When tier-0 lands in SLM or another non-KAUNO graph, the redirect
+    does NOT fire (the redirect is keyed on the KAUNO namespace)."""
+    slm_uri = "http://urn.fi/URN:NBN:fi:au:slm:s123"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if "http://www.yso.fi/onto/kauno/" in sparql and slm_uri in sparql:
+            pytest.fail("KAUNO redirect must NOT fire when tier-0 hit landed in SLM")
+        return httpx.Response(
+            200,
+            json=_bindings(slm_uri, "muistelmat", "fi", "http://urn.fi/URN:NBN:fi:au:slm:"),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="muistelmat", kind="genre_form")
+    assert hit is not None
+    assert hit.uri == slm_uri
+    assert hit.source_vocabulary == "slm"
+
+
+def test_subject_kind_kauno_hit_does_not_trigger_redirect() -> None:
+    """The KAUNO redirect is genre_form-only. A subject-kind tier-0 hit
+    that happens to land on a kauno URI (shouldn't happen given
+    ``_KIND_TO_GRAPHS``, but defensive) doesn't fire the redirect."""
+    yso_uri = "http://www.yso.fi/onto/yso/p1"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if "http://www.yso.fi/onto/kauno/" in sparql:
+            pytest.fail("KAUNO redirect must NOT fire for kind=subject")
+        return httpx.Response(
+            200, json=_bindings(yso_uri, "Tampere", "fi", "http://www.yso.fi/onto/yso/")
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="Tampere", kind="subject")
+    assert hit is not None
+    assert hit.uri == yso_uri
+
+
+def test_kauno_redirect_falls_back_to_original_label_when_yso_lacks_one() -> None:
+    """If the YSO concept doesn't carry a prefLabel (edge case — every
+    YSO concept SHOULD have one), the hit reuses the original KAUNO
+    prefLabel so rendering doesn't silently lose the label."""
+    kauno_uri = "http://www.yso.fi/onto/kauno/p2496"
+    yso_uri = "http://www.yso.fi/onto/yso/p16156"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if kauno_uri in sparql:
+            # Bridge exists but no YSO prefLabel returned.
+            return httpx.Response(
+                200,
+                json={"results": {"bindings": [{"yso": {"type": "uri", "value": yso_uri}}]}},
+            )
+        return httpx.Response(
+            200,
+            json=_bindings(kauno_uri, "automatkailu", "fi", "http://www.yso.fi/onto/kauno/"),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="automatkailu", kind="genre_form")
+    assert hit is not None
+    assert hit.uri == yso_uri
+    assert hit.source_vocabulary == VOCAB_VIA_KAUNO
+    # Fallback label from the original KAUNO hit kicks in.
+    assert hit.pref_label == "automatkailu"
 
 
 # --- StubLocalConceptResolver -------------------------------------------
