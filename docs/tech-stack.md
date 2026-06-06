@@ -118,7 +118,7 @@ Loaded into Fuseki by `bffi-pipeline load-finto`. Each vocab lives in its own na
 | KAUNO | Fiction genre/form. ~6,554 concepts carry `skos:exactMatch` / `dct:isReplacedBy` triples into YSO (KAUNO is partly deprecated; many concepts now live in the unified YSO ontology). M9's genre_form lookup follows these bridges via a post-tier-0 redirect that swaps the KAUNO URI for the YSO target where one exists. | `http://www.yso.fi/onto/kauno/` |
 | MUSO | Music genre/form | `http://www.yso.fi/onto/muso/` |
 | SLM | Subject category | `http://urn.fi/URN:NBN:fi:au:slm:` |
-| ALLARS | Subject (Swedish-language alternate to YSO) | `http://www.yso.fi/onto/allars/` |
+| ALLARS | Subject (Swedish-language; the Swedish-labelled side of what's now published as ALLFO / YSO-with-Swedish-labels). ~36,460 concepts carry `skos:exactMatch` / `skos:closeMatch` triples into YSO. M9's subject lookup follows these via a post-tier-0 redirect that swaps the Allars URI for the YSO target where one exists; the original Allars URI is kept for Swedish-only concepts (Åland-specific place names, etc.). | `http://www.yso.fi/onto/allars/` |
 | YSA | Legacy subject thesaurus (frozen 2019). Bridges to YSO via `skos:exactMatch` / `skos:closeMatch` triples consumed by the M9 legacy-mapping tier in `local_concept_resolver.py`. | `http://www.yso.fi/onto/ysa/` |
 | MUSA | Legacy Music + Visual Arts (CILLA merged in) subject headings (frozen 2019). Two-hop bridge to YSO via `dct:isReplacedBy` → YSA → `skos:exactMatch`. | `http://www.yso.fi/onto/musa/` |
 | KAUNOKKI | Fiction subjects (Finnish; legacy KAUNO with Swedish Bella sub-vocab). Internal `dct:isReplacedBy` only — no published bridge to KAUNO or YSO. Stays as a `kaunokki:` URI when matched. | `http://urn.fi/URN:NBN:fi:au:kaunokki:` |

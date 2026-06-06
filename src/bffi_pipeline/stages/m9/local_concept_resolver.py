@@ -186,13 +186,30 @@ def _build_query(literal: str, graph_uris: tuple[str, ...]) -> str:
     via ``ORDER BY`` so a Finnish prefLabel match sorts above a Swedish
     one for the same literal — unlikely in practice (cataloguer text is
     almost always Finnish), but cheap insurance.
+
+    Graph priority is the secondary ``ORDER BY`` key: a literal that
+    matches the same-language prefLabel in multiple graphs (e.g.
+    ``"historia"`` exists in both YSO ``@sv`` and Allars ``@sv``) binds
+    to the graph declared first in ``_KIND_TO_GRAPHS``. Without this
+    tiebreaker, Fuseki's choice was undefined and Allars tended to win
+    Swedish-language ties — the 500-record smoke saw 186 chosen URIs in
+    the Allars namespace where ~all of them have YSO equivalents. With
+    the tiebreaker, YSO wins ties for ``subject`` kind (YSO is the
+    first entry).
     """
-    values_clause = " ".join(f"<{uri}>" for uri in graph_uris)
+    values_lines = []
+    for rank, uri in enumerate(graph_uris):
+        # Higher rank = higher priority; declaration order maps to N-1, N-2, ...
+        priority = len(graph_uris) - rank
+        values_lines.append(f"    (<{uri}> {priority})")
+    values_block = "\n".join(values_lines)
     quoted = _quote_sparql_literal(literal)
     return (
         "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
         "SELECT ?uri ?label ?graph WHERE {\n"
-        f"  VALUES ?graph {{ {values_clause} }}\n"
+        "  VALUES (?graph ?graphRank) {\n"
+        f"{values_block}\n"
+        "  }\n"
         "  GRAPH ?graph {\n"
         "    ?uri skos:prefLabel ?label .\n"
         f"    FILTER (str(?label) = {quoted})\n"
@@ -200,7 +217,7 @@ def _build_query(literal: str, graph_uris: tuple[str, ...]) -> str:
         "}\n"
         'ORDER BY DESC(IF(LANG(?label) = "fi", 3, '
         'IF(LANG(?label) = "sv", 2, '
-        'IF(LANG(?label) = "en", 1, 0))))\n'
+        'IF(LANG(?label) = "en", 1, 0)))) DESC(?graphRank)\n'
         "LIMIT 1\n"
     )
 
@@ -263,6 +280,46 @@ def _build_legacy_mapping_query(literal: str) -> str:
         '    BIND ("via-allars" AS ?via)\n'
         "  }\n"
         f'  FILTER (STRSTARTS(STR(?uri), "{yso_ns}"))\n'
+        "}\n"
+        'ORDER BY DESC(IF(LANG(?label) = "fi", 3, '
+        'IF(LANG(?label) = "sv", 2, '
+        'IF(LANG(?label) = "en", 1, 0))))\n'
+        "LIMIT 1\n"
+    )
+
+
+def _build_allars_redirect_query(allars_uri: str) -> str:
+    """Build the post-tier-0 Allars → YSO redirect SPARQL.
+
+    Used after a ``subject``-kind tier-0 hit that landed in the Allars
+    graph (``http://www.yso.fi/onto/allars/``). Allars carries ~36,460
+    ``skos:exactMatch`` / ``skos:closeMatch`` triples pointing into
+    YSO — Allars is the Swedish-labelled side of what's now published
+    as ALLFO (YSO with Swedish labels). Modernised records should bind
+    to the YSO URI; Allars URIs are kept only when no YSO equivalent
+    exists (Swedish-only place names like ``Ålandsfrågan``).
+
+    ``FILTER (STRSTARTS(?yso, "yso:"))`` guards against any
+    ``skos:closeMatch`` between Allars and a non-YSO target.
+
+    Returns the YSO prefLabel for the redirected hit so downstream
+    rendering shows the modern label instead of the Allars-side Swedish
+    one.
+    """
+    quoted_uri = f"<{allars_uri}>"
+    yso_ns = _YSO_GRAPH_URI
+    return (
+        "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+        "SELECT ?yso ?label WHERE {\n"
+        f"  GRAPH <{_LEGACY_GRAPH_ALLARS}> {{\n"
+        f"    {quoted_uri} (skos:exactMatch | skos:closeMatch) ?yso .\n"
+        "  }\n"
+        f'  FILTER (STRSTARTS(STR(?yso), "{yso_ns}"))\n'
+        "  OPTIONAL {\n"
+        f"    GRAPH <{yso_ns}> {{\n"
+        "      ?yso skos:prefLabel ?label .\n"
+        "    }\n"
+        "  }\n"
         "}\n"
         'ORDER BY DESC(IF(LANG(?label) = "fi", 3, '
         'IF(LANG(?label) = "sv", 2, '
@@ -368,6 +425,16 @@ class FusekiConceptResolver:
             # subject vocabularies; person / corporate-body authorities
             # go through KANTO at tier-2 instead.
             hit = self._legacy_mapping_match(literal=literal)
+        elif hit is not None and kind == "subject" and hit.uri.startswith(_LEGACY_GRAPH_ALLARS):
+            # Post-tier-0 Allars → YSO redirect — canonicalises the
+            # ~36,460 Allars concepts that have a YSO equivalent
+            # (Allars is the Swedish-labelled side of what's now
+            # published as ALLFO / YSO-with-Swedish-labels). Keeps the
+            # Allars URI when the concept is Swedish-only (no YSO
+            # bridge), e.g. Åland-specific place names.
+            redirected = self._allars_redirect_match(allars_hit=hit)
+            if redirected is not None:
+                hit = redirected
         elif hit is not None and kind == "genre_form" and hit.uri.startswith(_LEGACY_GRAPH_KAUNO):
             # Post-tier-0 KAUNO → YSO redirect — canonicalises the
             # ~6,554 KAUNO concepts whose modern equivalent lives in YSO.
@@ -432,6 +499,40 @@ class FusekiConceptResolver:
             uri=str(uri),
             pref_label=str(label),
             source_vocabulary=str(via),
+            is_fuzzy_match=False,
+        )
+
+    def _allars_redirect_match(self, *, allars_hit: LocalConceptHit) -> LocalConceptHit | None:
+        """Follow an Allars hit's ``exactMatch`` / ``closeMatch`` into YSO.
+
+        Called from :meth:`resolve` when ``kind == "subject"`` and the
+        tier-0 lexical match landed in the Allars graph. Returns a hit
+        with the YSO URI + ``via-allars`` source_vocabulary tag when a
+        YSO bridge exists; otherwise returns ``None`` and the original
+        Allars hit stays.
+
+        The ``via-allars`` tag is shared with the tier-0-miss bridge
+        path in :meth:`_legacy_mapping_match` — same semantics
+        ("matched an Allars prefLabel, followed exactMatch to YSO"),
+        different code path. The provenance writer treats both
+        identically.
+
+        Falls back to the original Allars prefLabel when the YSO
+        concept has no prefLabel in the loaded YSO graph (defensive —
+        every YSO concept SHOULD carry one).
+        """
+        bindings = self._post_sparql(_build_allars_redirect_query(allars_hit.uri))
+        if not bindings:
+            return None
+        row = bindings[0]
+        yso_uri = row.get("yso", {}).get("value")
+        yso_label = row.get("label", {}).get("value", "")
+        if not yso_uri:
+            return None
+        return LocalConceptHit(
+            uri=str(yso_uri),
+            pref_label=str(yso_label) or allars_hit.pref_label,
+            source_vocabulary=VOCAB_VIA_ALLARS,
             is_fuzzy_match=False,
         )
 

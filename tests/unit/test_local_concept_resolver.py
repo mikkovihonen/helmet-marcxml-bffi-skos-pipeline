@@ -28,6 +28,7 @@ from bffi_pipeline.stages.m9.local_concept_resolver import (
     FusekiConceptResolver,
     LocalConceptHit,
     StubLocalConceptResolver,
+    _build_allars_redirect_query,
     _build_kauno_redirect_query,
     _build_legacy_mapping_query,
     _build_query,
@@ -59,8 +60,29 @@ def test_quote_sparql_literal_keeps_unicode_intact() -> None:
 def test_build_query_includes_all_graph_uris() -> None:
     q = _build_query("Venäjä", ("http://www.yso.fi/onto/yso/",))
     assert "http://www.yso.fi/onto/yso/" in q
-    assert "VALUES ?graph" in q
+    # Multi-valued VALUES: each row pairs a graph URI with a numeric
+    # priority used by the secondary ORDER BY tiebreaker.
+    assert "VALUES (?graph ?graphRank)" in q
     assert '"Venäjä"' in q
+
+
+def test_build_query_graph_priority_descends_with_declaration_order() -> None:
+    """The first graph in the tuple gets the highest ?graphRank; ties
+    on language priority break in favour of the earlier-declared graph."""
+    q = _build_query(
+        "x",
+        (
+            "http://www.yso.fi/onto/yso/",
+            "http://www.yso.fi/onto/allars/",
+            "http://id.loc.gov/authorities/subjects/",
+        ),
+    )
+    # First graph → rank 3; second → 2; third → 1.
+    assert "(<http://www.yso.fi/onto/yso/> 3)" in q
+    assert "(<http://www.yso.fi/onto/allars/> 2)" in q
+    assert "(<http://id.loc.gov/authorities/subjects/> 1)" in q
+    # And the ORDER BY uses ?graphRank as the secondary key.
+    assert "DESC(?graphRank)" in q
 
 
 def test_build_query_unions_multiple_graphs_for_genre_form() -> None:
@@ -316,7 +338,7 @@ def test_resolve_falls_back_to_legacy_mapping_when_lexical_misses() -> None:
     assert hit.source_vocabulary == VOCAB_VIA_YSA
     assert hit.source_vocabulary in LEGACY_BRIDGE_VOCABS
     assert len(bodies) == 2  # Lexical THEN legacy mapping
-    assert "VALUES ?graph" in bodies[0]
+    assert "VALUES (?graph ?graphRank)" in bodies[0]
     assert "dct:isReplacedBy" in bodies[1]
 
 
@@ -421,6 +443,139 @@ def test_resolve_returns_none_when_both_tiers_miss() -> None:
         fuseki_url="http://localhost:3030/bffi",
     )
     assert resolver.resolve(literal="nonsense", kind="subject") is None
+
+
+# --- Allars → YSO redirect (subject-kind post-tier-0) ------------------
+
+
+def _allars_redirect_bindings(yso_uri: str, label: str, lang: str) -> dict[str, Any]:
+    """SPARQL JSON-results envelope for an Allars→YSO redirect row."""
+    return {
+        "results": {
+            "bindings": [
+                {
+                    "yso": {"type": "uri", "value": yso_uri},
+                    "label": {"type": "literal", "value": label, "xml:lang": lang},
+                }
+            ]
+        }
+    }
+
+
+def test_build_allars_redirect_query_has_bridge_predicates() -> None:
+    q = _build_allars_redirect_query("http://www.yso.fi/onto/allars/Y22080")
+    assert "http://www.yso.fi/onto/allars/" in q
+    assert "http://www.yso.fi/onto/allars/Y22080" in q
+    assert 'STRSTARTS(STR(?yso), "http://www.yso.fi/onto/yso/")' in q
+    # Allars uses skos:exactMatch / skos:closeMatch only; no dct:isReplacedBy
+    # path to YSO is published for Allars (cf. KAUNO which uses both).
+    assert "skos:exactMatch" in q
+    assert "skos:closeMatch" in q
+
+
+def test_subject_allars_hit_redirects_to_yso_when_bridge_exists() -> None:
+    """Headline case: cataloguer literal `$2 allars` matches an Allars
+    prefLabel; the matched Allars concept has ``skos:exactMatch yso:…``;
+    the resolver swaps to the YSO URI with ``source_vocabulary=via-allars``."""
+    allars_uri = "http://www.yso.fi/onto/allars/Y22080"
+    yso_uri = "http://www.yso.fi/onto/yso/p1780"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if allars_uri in sparql:
+            return httpx.Response(200, json=_allars_redirect_bindings(yso_uri, "historia", "fi"))
+        return httpx.Response(
+            200,
+            json=_bindings(allars_uri, "lokalhistoria", "sv", "http://www.yso.fi/onto/allars/"),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="lokalhistoria", kind="subject")
+    assert hit is not None
+    assert hit.uri == yso_uri
+    assert hit.source_vocabulary == VOCAB_VIA_ALLARS
+    assert hit.source_vocabulary in LEGACY_BRIDGE_VOCABS
+
+
+def test_subject_allars_hit_without_yso_bridge_keeps_allars_uri() -> None:
+    """When the matched Allars concept has no YSO bridge (Swedish-only
+    place names like Ålandsfrågan), the original Allars URI stays."""
+    allars_uri = "http://www.yso.fi/onto/allars/Y23647"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        if allars_uri in sparql:
+            return httpx.Response(200, json={"results": {"bindings": []}})
+        return httpx.Response(
+            200,
+            json=_bindings(allars_uri, "Ålandsfrågan", "sv", "http://www.yso.fi/onto/allars/"),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="Ålandsfrågan", kind="subject")
+    assert hit is not None
+    assert hit.uri == allars_uri
+    assert hit.source_vocabulary == "allars"  # original tag, not redirected
+
+
+def test_subject_yso_hit_does_not_trigger_allars_redirect() -> None:
+    """When tier-0 returns a YSO hit directly, the Allars redirect must
+    not fire (the redirect is keyed on the Allars namespace)."""
+    yso_uri = "http://www.yso.fi/onto/yso/p1780"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        # Redirect-only marker: the redirect SPARQL has the
+        # ``STRSTARTS(STR(?yso)`` filter; the tier-0 lexical query
+        # doesn't. (Tier-0 references the Allars graph URI in its
+        # ``VALUES`` clause, so a naive substring check would fire.)
+        if "STRSTARTS(STR(?yso)" in sparql:
+            pytest.fail("Allars redirect must NOT fire when tier-0 hit YSO directly")
+        return httpx.Response(
+            200, json=_bindings(yso_uri, "historia", "fi", "http://www.yso.fi/onto/yso/")
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    hit = resolver.resolve(literal="historia", kind="subject")
+    assert hit is not None
+    assert hit.uri == yso_uri
+    assert hit.source_vocabulary == "yso"
+
+
+def test_genre_form_allars_hit_does_not_trigger_allars_redirect() -> None:
+    """The Allars redirect is subject-kind-only (Allars is a topical
+    subject vocabulary). A genre_form tier-0 hit that lands in Allars
+    (defensive: shouldn't happen given `_KIND_TO_GRAPHS["genre_form"]`)
+    doesn't trigger the redirect."""
+    allars_uri = "http://www.yso.fi/onto/allars/Y99"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sparql = _decoded_body(request)
+        # Same redirect-only discriminator as the YSO-hit test above.
+        if "STRSTARTS(STR(?yso)" in sparql:
+            pytest.fail("Allars redirect must NOT fire for kind=genre_form")
+        return httpx.Response(
+            200,
+            json=_bindings(allars_uri, "fake-genre", "sv", "http://www.yso.fi/onto/allars/"),
+        )
+
+    resolver = FusekiConceptResolver(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        fuseki_url="http://localhost:3030/bffi",
+    )
+    # Stub the tier-0 result; whether kind=genre_form actually returns
+    # this hit is _KIND_TO_GRAPHS-dependent — the assertion lives in the
+    # handler's pytest.fail above.
+    resolver.resolve(literal="fake-genre", kind="genre_form")
 
 
 # --- KAUNO → YSO redirect (genre_form-kind post-tier-0) ----------------

@@ -96,6 +96,25 @@ Touched in the follow-up (genre_form extension):
 - `src/bffi_pipeline/stages/m9/local_concept_resolver.py` — new `_build_kauno_redirect_query` + `_kauno_redirect_match` method, `VOCAB_VIA_KAUNO` constant. Different shape from the subject-side bridges: fires **after** a tier-0 lexical hit that lands in KAUNO (KAUNO is the first entry in `_KIND_TO_GRAPHS["genre_form"]`), checks for `skos:exactMatch` / `dct:isReplacedBy` into YSO, and swaps the URI when a bridge exists.
 - `tests/unit/test_local_concept_resolver.py` — 6 new tests covering the KAUNO redirect (hit-with-bridge, hit-without-bridge, kind-isolation, label fallback).
 
+Touched in the follow-up (subject-Allars canonicalisation):
+
+- `_build_query` — added a numeric graph-priority tiebreaker to the
+  tier-0 `ORDER BY`. The 500-record smoke surfaced 186 chosen URIs in
+  the Allars namespace where ~all have YSO equivalents; without a
+  tiebreaker Fuseki's choice was undefined and Allars often won
+  Swedish-language ties. With the tiebreaker, YSO (declared first in
+  `_KIND_TO_GRAPHS["subject"]`) wins ties deterministically.
+- `_build_allars_redirect_query` + `_allars_redirect_match` — mirror
+  of the KAUNO redirect. Fires after a `subject`-kind tier-0 hit
+  landing in the Allars namespace; follows `skos:exactMatch` /
+  `skos:closeMatch` to YSO. The `via-allars` tag is shared with the
+  tier-0-miss bridge in `_legacy_mapping_match` — same semantics,
+  different code path.
+- Allars URIs are kept only for Swedish-only concepts with no YSO
+  bridge (e.g. Åland-specific place names like `Ålandsfrågan`).
+- 6 new tests covering the Allars redirect; 2 new tests for the
+  graph-priority tiebreaker.
+
 Untouched (intentionally):
 
 - `src/bffi_pipeline/stages/m9/ysa_disambiguation_report.py` — still useful as the "did anything still slip through" diagnostic after the tier lands; can be enriched in a follow-up
