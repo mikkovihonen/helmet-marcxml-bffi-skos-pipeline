@@ -138,21 +138,32 @@ def _is_fictional_character_literal(literal: str) -> bool:
 
 
 def _classify_subject_target(
-    target: URIRef | None, source: str | None, literal: str | None = None
+    target: URIRef | None,
+    source: str | None,
+    literal: str | None = None,
+    *,
+    predicate: URIRef | None = None,
 ) -> AuthorityKind:
     """Decide kind for a subject-target node.
 
     Order:
 
-    1. Fictional-character qualifier in the literal (``"X (fiktiivinen
-       hahmo)"``) → ``fictional_character``. Highest priority — no
-       authority carries fictional persons; routing to KANTO would
-       just spend a Finto call to learn nothing.
-    2. ``Agent6XX`` URI-fragment pattern from marc2bibframe2 → ``person``
+    1. ``bffi:musicMedium`` predicate → ``music_form``. The predicate
+       itself is the kind discriminator — MARC 382 medium-of-performance
+       labels always reconcile against the music-medium vocabularies
+       (MUSO / SEKO / LCMPT) regardless of which ``$2`` source token
+       the cataloguer used.
+    2. Fictional-character qualifier in the literal (``"X (fiktiivinen
+       hahmo)"``) → ``fictional_character``. No authority carries
+       fictional persons; routing to KANTO would just spend a Finto
+       call to learn nothing.
+    3. ``Agent6XX`` URI-fragment pattern from marc2bibframe2 → ``person``
        / ``corporate_body`` so tier-1 hits KANTO instead of YSO.
-    3. Fall back to :func:`_classify_subject_source` (``bf:source``
+    4. Fall back to :func:`_classify_subject_source` (``bf:source``
        token routing).
     """
+    if predicate is not None and predicate == V.BFFI.musicMedium:
+        return "music_form"
     if literal is not None and _is_fictional_character_literal(literal):
         return "fictional_character"
     if target is not None:
@@ -185,9 +196,16 @@ def _collect_contributor_labels(graph: Graph, work: URIRef) -> list[str]:
 
 
 def _collect_subject_labels(graph: Graph, work: URIRef) -> list[str]:
-    """Walk ``bffi:subject`` + ``bffi:genreForm`` target labels, capped."""
+    """Walk ``bffi:subject`` + ``bffi:genreForm`` + ``bffi:musicMedium``
+    target labels, capped.
+
+    Music-medium labels (e.g. ``"kantele"``, ``"5-rivinen harmonikka"``)
+    join the Work context so the LLM picker can use them as
+    disambiguation evidence — a Work tagged with ``"sello"`` as music
+    medium is plausibly a chamber-music work, which helps narrow
+    contributor / subject reconciliation."""
     out: list[str] = []
-    for predicate in (V.BFFI.subject, V.BFFI.genreForm):
+    for predicate in (V.BFFI.subject, V.BFFI.genreForm, V.BFFI.musicMedium):
         for target in graph.objects(work, predicate):
             if len(out) >= _WORK_CONTEXT_FIELD_CAP:
                 return out
@@ -294,7 +312,7 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
         # carry only pre-resolved YSO/KANTO URIs, so the work_context
         # would otherwise be built and thrown away.
         work_context: WorkContext | None = None
-        for predicate in (V.BFFI.subject, V.BFFI.genreForm):
+        for predicate in (V.BFFI.subject, V.BFFI.genreForm, V.BFFI.musicMedium):
             for target in graph.objects(work, predicate):
                 # Skip URIs that already resolve to an authority graph
                 # we have loaded locally (YSO/KANTO/KAUNO/MUSO/SLM via
@@ -325,7 +343,9 @@ def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:
                 yield EntityRequest(
                     work_uri=str(work),
                     literal=literal_str,
-                    kind=_classify_subject_target(target_uri, source, literal_str),
+                    kind=_classify_subject_target(
+                        target_uri, source, literal_str, predicate=predicate
+                    ),
                     predicate_uri=str(predicate),
                     work_context=work_context,
                 )

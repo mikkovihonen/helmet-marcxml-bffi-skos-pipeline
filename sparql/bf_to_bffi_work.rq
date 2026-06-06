@@ -29,6 +29,7 @@ CONSTRUCT {
            bffi:classification ?class ;
            bffi:originDate     ?originDate ;
            bffi:genreForm      ?workGenre ;
+           bffi:musicMedium    ?mediumURI ;
            bffi:marcKey        ?marcKey ;
            skos:prefLabel      ?workLabel ;
            bf:identifiedBy     ?ident ;
@@ -47,6 +48,16 @@ CONSTRUCT {
   # here so Skosmos can resolve them from Finto at render time.
   ?bfSubject rdfs:label ?subjectLabel .
   ?workGenre rdfs:label ?workGenreLabel .
+  # Music medium (MARC 382): one canonical URI per MediumOfPerformance
+  # label, minted locally because marc2bibframe2 leaves the
+  # ensemble / mediumComponent / mediumOfPerformance nodes as blank
+  # nodes (no #MusicMedium382-N URIs the way 6XX subjects get
+  # #Topic650-N / #Place651-N). The hash is SHA-1 of the label so
+  # identical labels on the same Work coalesce; the bib:raw record
+  # root carries the bib_id prefix.
+  ?mediumURI a              bffi:MusicMedium ;
+             rdfs:label     ?mediumLabel ;
+             bf:source      ?bfMediumSource .
   ?ident   a               bf:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
@@ -119,6 +130,28 @@ WHERE {
   OPTIONAL { ?bfWork bflc:marcKey      ?marcKey }
   OPTIONAL {
     ?bfWork bf:title ?t . ?t bf:mainTitle ?workLabel .
+  }
+  # MARC 382 → bf:ensemble → bf:mediumComponent → bf:mediumOfPerformance
+  # → rdfs:label. marc2bibframe2 emits this as a three-level nested
+  # blank-node structure (no fragment URIs minted), so we walk the
+  # chain and hoist the reconcilable label onto a flat bffi:musicMedium
+  # link. ``$2`` source-vocab tag (e.g. seko, lcmpt) survives on the
+  # ``bf:source`` triple so M9's resolver can route by vocab.
+  OPTIONAL {
+    ?bfWork bf:ensemble ?bfEnsemble .
+    ?bfEnsemble bf:mediumComponent ?bfMediumComponent .
+    ?bfMediumComponent bf:mediumOfPerformance ?bfMediumOfPerformance .
+    ?bfMediumOfPerformance rdfs:label ?mediumLabel .
+    OPTIONAL { ?bfMediumOfPerformance bf:source ?bfMediumSource }
+    # Mint a local URI for the medium: ``<record-root>#MusicMedium382-<sha1(label)>``.
+    # Hashing the label means two 382 fields on the same record with the
+    # same label coalesce into one BFFI URI (defensible — they're the
+    # same instrument). Different records get different URIs because
+    # the record-root prefix carries the bib_id.
+    BIND( STRBEFORE(STR(?bfWork), "#") AS ?recordRoot )
+    BIND( IRI(CONCAT(?recordRoot,
+                     "#MusicMedium382-",
+                     arq:sha1(STR(?mediumLabel)))) AS ?mediumURI )
   }
 
   # Helmet identifier preservation (added by M2 post-process).

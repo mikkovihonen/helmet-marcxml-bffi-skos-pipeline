@@ -1061,8 +1061,10 @@ def _build_subject_canonical_graph(
     subject_uri: str | None = None,
     genre_label: str | None = None,
     genre_source: str | None = None,
+    music_medium_label: str | None = None,
+    music_medium_source: str | None = None,
 ) -> Graph:
-    """Build a canonical graph with optional subject + genreForm targets.
+    """Build a canonical graph with optional subject + genreForm + musicMedium targets.
 
     ``subject_uri`` (when given) emits a URI-resolved subject target;
     blank-node targets are emitted from ``*_label`` + ``*_source``. The
@@ -1086,6 +1088,12 @@ def _build_subject_canonical_graph(
         g.add((gnode, V.RDFS.label, Literal(genre_label)))
         if genre_source is not None:
             g.add((gnode, V.BF.source, Literal(genre_source)))
+    if music_medium_label is not None:
+        mnode = BNode()
+        g.add((work, V.BFFI.musicMedium, mnode))
+        g.add((mnode, V.RDFS.label, Literal(music_medium_label)))
+        if music_medium_source is not None:
+            g.add((mnode, V.BF.source, Literal(music_medium_source)))
     return g
 
 
@@ -1136,6 +1144,55 @@ def test_iter_subject_requests_classifies_allars_source_as_subject() -> None:
     requests = list(_iter_subject_requests(g))
     assert len(requests) == 1
     assert requests[0].kind == "subject"
+
+
+def test_iter_subject_requests_classifies_musicmedium_predicate_as_music_form() -> None:
+    """A ``bffi:musicMedium`` target from MARC 382 always reconciles
+    against the music-medium vocabularies (MUSO / SEKO / LCMPT). The
+    predicate is the kind discriminator, not the ``$2`` source token."""
+    g = _build_subject_canonical_graph(
+        subject_label=None,  # no other subjects
+        music_medium_label="5-kielinen kantele",
+        music_medium_source="seko",
+    )
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "music_form"
+    assert requests[0].literal == "5-kielinen kantele"
+    assert requests[0].predicate_uri == str(V.BFFI.musicMedium)
+
+
+def test_iter_subject_requests_musicmedium_predicate_overrides_other_source_tokens() -> None:
+    """Even if a cataloguer attached a weird ``$2`` token to a 382 field
+    (e.g. ``$2 lcmpt`` or ``$2 yso``), the predicate routing wins. A
+    musicMedium triple ALWAYS reconciles as ``music_form`` because
+    that's what the predicate semantically encodes."""
+    g = _build_subject_canonical_graph(
+        subject_label=None,
+        music_medium_label="violin",
+        music_medium_source="yso/fin",  # weird but possible — predicate wins
+    )
+    requests = list(_iter_subject_requests(g))
+    assert len(requests) == 1
+    assert requests[0].kind == "music_form"
+
+
+def test_iter_subject_requests_yields_all_three_subject_predicates_together() -> None:
+    """When a Work carries subject + genreForm + musicMedium, the
+    walker yields one request per target with the correct kind for each."""
+    g = _build_subject_canonical_graph(
+        subject_label="kamarimusiikki",
+        subject_source="yso/fin",
+        genre_label="sonaatit",
+        genre_source="slm/fin",
+        music_medium_label="sello",
+        music_medium_source="seko",
+    )
+    requests = list(_iter_subject_requests(g))
+    by_predicate = {r.predicate_uri: r for r in requests}
+    assert by_predicate[str(V.BFFI.subject)].kind == "subject"
+    assert by_predicate[str(V.BFFI.genreForm)].kind == "genre_form"
+    assert by_predicate[str(V.BFFI.musicMedium)].kind == "music_form"
 
 
 def test_iter_subject_requests_classifies_bella_source_as_genre_form() -> None:

@@ -314,6 +314,101 @@ def test_construct_does_not_route_subject_label_for_authority_uri_subjects() -> 
     )
 
 
+def test_construct_extracts_music_medium_from_marc_382_ensemble() -> None:
+    """MARC 382 → ``bf:ensemble`` → ``bf:mediumComponent`` →
+    ``bf:mediumOfPerformance`` → ``rdfs:label``. marc2bibframe2 emits a
+    three-level nested blank-node structure for 382; M3 flattens it to
+    a single ``bffi:musicMedium`` link with the reconcilable label.
+
+    Mints a local URI ``<record-root>#MusicMedium382-<sha1(label)>``
+    because the source nodes are bnodes (no #MusicMedium382-N fragments
+    the way 6XX subjects get #Topic650-N URIs from marc2bibframe2)."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Kantelekonsertti" ] ;
+                bf:ensemble [
+                    a bf:Ensemble ;
+                    bf:mediumComponent [
+                        a bf:MediumComponent ;
+                        bf:mediumOfPerformance [
+                            a bf:MediumOfPerformance ;
+                            rdfs:label "kantele" ;
+                            bf:source <http://id.loc.gov/authorities/performanceMediums>
+                        ]
+                    ]
+                ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    media = list(bffi.objects(EXPECTED_WORK, V.BFFI.musicMedium))
+    assert len(media) == 1, f"expected exactly one bffi:musicMedium link; got {media}"
+    medium = media[0]
+    assert isinstance(medium, URIRef), (
+        f"expected a minted URI (not a blank node); got {type(medium).__name__}"
+    )
+    # The URI must follow ``<bib:raw/.../#MusicMedium382-<hash>>`` shape.
+    assert "#MusicMedium382-" in str(medium), (
+        f"expected #MusicMedium382-<hash> fragment; got {medium}"
+    )
+    # The bib_id prefix from the source Work URI carries through.
+    assert str(medium).startswith("http://urn.fi/URN:NBN:fi:bib:raw/10000001"), (
+        f"music-medium URI must inherit the source Work's record root; got {medium}"
+    )
+    # Type + label + source round-trip onto the minted URI.
+    assert (medium, RDF.type, V.BFFI.MusicMedium) in bffi
+    assert Literal("kantele") in set(bffi.objects(medium, V.RDFS.label))
+    sources = set(bffi.objects(medium, V.BF.source))
+    assert any("performanceMediums" in str(s) for s in sources), (
+        f"expected bf:source to round-trip with the LCMPT base URI; got {sources}"
+    )
+
+
+def test_construct_music_medium_coalesces_same_label_on_one_work() -> None:
+    """Two 382 fields on the same Work with the same label (e.g. cataloguer
+    duplicates the entry) should mint the SAME ``bffi:musicMedium`` URI so
+    the BFFI graph has one node per distinct instrument, not two."""
+    source = Graph()
+    source.parse(
+        data=textwrap.dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{BF_WORK}> a bf:Work ;
+                bf:title [ a bf:Title ; bf:mainTitle "Pianokvartet" ] ;
+                bf:ensemble [
+                    a bf:Ensemble ;
+                    bf:mediumComponent [
+                        bf:mediumOfPerformance [ rdfs:label "piano" ]
+                    ]
+                ] ;
+                bf:ensemble [
+                    a bf:Ensemble ;
+                    bf:mediumComponent [
+                        bf:mediumOfPerformance [ rdfs:label "piano" ]
+                    ]
+                ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    bffi = construct_bffi(source)
+    media = set(bffi.objects(EXPECTED_WORK, V.BFFI.musicMedium))
+    assert len(media) == 1, (
+        f"expected the two duplicate 'piano' entries to coalesce into one "
+        f"bffi:musicMedium URI; got {media}"
+    )
+
+
 def test_construct_routes_genreform_label() -> None:
     """P-36 Phase C: bf:genreForm targets must round-trip their
     ``rdfs:label`` through M3's CONSTRUCT so M9 has something to walk.

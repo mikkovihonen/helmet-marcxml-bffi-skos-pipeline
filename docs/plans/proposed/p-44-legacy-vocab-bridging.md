@@ -96,6 +96,35 @@ Touched in the follow-up (genre_form extension):
 - `src/bffi_pipeline/stages/m9/local_concept_resolver.py` — new `_build_kauno_redirect_query` + `_kauno_redirect_match` method, `VOCAB_VIA_KAUNO` constant. Different shape from the subject-side bridges: fires **after** a tier-0 lexical hit that lands in KAUNO (KAUNO is the first entry in `_KIND_TO_GRAPHS["genre_form"]`), checks for `skos:exactMatch` / `dct:isReplacedBy` into YSO, and swaps the URI when a bridge exists.
 - `tests/unit/test_local_concept_resolver.py` — 6 new tests covering the KAUNO redirect (hit-with-bridge, hit-without-bridge, kind-isolation, label fallback).
 
+Touched in the follow-up (MARC 382 → `bffi:musicMedium` walker extension):
+
+- `sparql/bf_to_bffi_work.rq` — new OPTIONAL block walking
+  `?bfWork bf:ensemble/bf:mediumComponent/bf:mediumOfPerformance/rdfs:label`
+  and minting a local `<record-root>#MusicMedium382-<sha1(label)>` URI.
+  marc2bibframe2 emits 382 as a three-level nested blank-node structure
+  (no fragment URIs the way 6XX subjects get `#Topic650-N`), so M3
+  flattens the chain and hashes the label so duplicates coalesce.
+  Carries `bffi:MusicMedium` type + `rdfs:label` + optional
+  `bf:source` (the `$2` tag) through to the canonical graph.
+- `src/bffi_pipeline/stages/m9/requests.py` —
+  `_classify_subject_target` now takes a keyword-only `predicate=`
+  argument; `bffi:musicMedium` short-circuits to `music_form`
+  regardless of source token. `_iter_subject_requests` walks all
+  three predicates `(subject, genreForm, musicMedium)` in the same
+  loop. `_collect_subject_labels` joins music-medium labels to the
+  Work context so the LLM picker can use them as disambiguation
+  signal (a Work tagged with `"sello"` as medium-of-performance is
+  plausibly chamber music — useful when reconciling a shared-name
+  contributor).
+- `tests/unit/test_bf_to_bffi.py` — 2 new tests covering the M3
+  CONSTRUCT extraction (single 382 → bffi:musicMedium link with
+  minted URI + label + source; duplicate labels coalesce into one
+  URI per Work).
+- `tests/unit/test_reconcile.py` — 3 new tests covering the M9
+  walker (musicMedium predicate → music_form kind; predicate
+  routing overrides odd `$2` tokens; all three subject predicates
+  yield together with the correct per-target kind).
+
 Touched in the follow-up (subject-Allars canonicalisation):
 
 - `_build_query` — added a numeric graph-priority tiebreaker to the
