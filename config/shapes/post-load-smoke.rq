@@ -25,12 +25,22 @@ ASK {
        bffi:expressionOf ?w .
 }
 
-# === Helmet identifiers preserved on canonical Works ===
+# === Helmet identifiers reachable from canonical Works via Manifestation ===
 PREFIX bf:   <http://id.loc.gov/ontologies/bibframe/>
 PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>
 
+# P-45 commit 2: bf:identifiedBy moved from canonical Work onto
+# Manifestation (each Manifestation is 1:1 with one Helmet bib record).
+# This ASK pins the new invariant AND the Work → Expression ← Manifestation
+# walk that lets cataloguer tooling rediscover the bib_id from a Work:
+#   Work --bffi:hasExpression--> Expression
+#        <--bffi:expressionManifested-- Manifestation
+#        --bf:identifiedBy--> Helmet-sourced identifier
 ASK {
     ?w a bffi:Work ;
+       bffi:hasExpression ?e .
+    ?m a bffi:Manifestation ;
+       bffi:expressionManifested ?e ;
        bf:identifiedBy [
            bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet>
        ] .

@@ -30,6 +30,7 @@ from bffi_pipeline.stages.m8.helmet_map import _load_helmet_map
 from bffi_pipeline.stages.m8.mint import (
     _bind_prefixes,
     _emit_canonical_work,
+    _propagate_manifestations,
     _select_description_modifier,
 )
 from bffi_pipeline.stages.m8.schemas import (
@@ -111,8 +112,17 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
     ]
     uncertain_count = sum(1 for d in decisions if d.decision == "uncertain")
 
+    raw_corpus_graph: Graph | None = None
     if work_records is None:
-        work_records = _load_work_records_from_corpus(bffi_corpus_dir)
+        work_records, raw_corpus_graph = _load_work_records_from_corpus(bffi_corpus_dir)
+    elif (bffi_corpus_dir / "bffi").is_dir():
+        # work_records overridden (typically a test fixture) but the
+        # corpus dir still has per-record TTLs — parse them anyway so
+        # ``_propagate_manifestations`` finds the Manifestation
+        # subgraphs. Without this branch, tests that supply synthetic
+        # work_records would silently miss the Manifestation
+        # propagation invariant.
+        _, raw_corpus_graph = _load_work_records_from_corpus(bffi_corpus_dir)
     if helmet_entries is None:
         helmet_entries = _load_helmet_map(helmet_map_path)
 
@@ -202,6 +212,14 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
                 counters={"processed": processed, "total": len(sorted_roots)},
                 extra={"canonical_works": len(canonical_entries)},
             )
+
+    # P-45: propagate Manifestation subgraphs from M3 verbatim.
+    # Manifestations are 1:1 with bib records and never merge, so this
+    # is a straight passthrough — but it's needed because the canonical
+    # graph is built from scratch above; without this step Manifestations
+    # would silently drop on the floor between M3 and Skosify.
+    if raw_corpus_graph is not None:
+        _propagate_manifestations(g, raw_corpus_graph)
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label

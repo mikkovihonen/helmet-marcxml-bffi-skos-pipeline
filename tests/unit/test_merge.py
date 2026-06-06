@@ -1863,7 +1863,7 @@ def test_p19_load_work_records_uses_corpus_fast_path(tmp_path: Path) -> None:
     # from the parsed graph. Neither sample triple set is a real
     # ``bffi:Work`` shape, so we expect an empty dict either way —
     # the assertion above proves the fast-path reads the concat.
-    records = _load_work_records_from_corpus(tmp_path)
+    records, _ = _load_work_records_from_corpus(tmp_path)
     assert isinstance(records, dict)
 
 
@@ -1891,7 +1891,7 @@ def test_p19_load_work_records_falls_back_when_concat_stale(tmp_path: Path) -> N
     # Should not raise — both files are well-formed Turtle. The
     # behavioural assertion is that the function doesn't choke on the
     # stale-concat case.
-    records = _load_work_records_from_corpus(tmp_path)
+    records, _ = _load_work_records_from_corpus(tmp_path)
     assert isinstance(records, dict)
 
 
@@ -1927,5 +1927,94 @@ def test_p19_load_work_records_ignores_bibframe_dir(tmp_path: Path) -> None:
 
     # Must not raise. Pre-Phase-B this would have surfaced a parse
     # error from the poison.rdf walk.
-    records = _load_work_records_from_corpus(tmp_path)
+    records, _ = _load_work_records_from_corpus(tmp_path)
     assert isinstance(records, dict)
+
+
+def test_p45_manifestation_subgraphs_propagate_into_canonical_ttl(tmp_path: Path) -> None:
+    """P-45: Manifestations don't merge — they're 1:1 with Helmet bib
+    records. M8 must copy every ``bffi:Manifestation`` subgraph from
+    the M3 per-record output into ``canonical.ttl`` verbatim, including
+    the reachable ``bf:identifiedBy`` blank-node block. Without this
+    propagation Skosify reads a canonical graph with zero Manifestations
+    and the Work → Expression ← Manifestation walk that lets cataloguer
+    tooling rediscover the bib_id from a canonical Work is broken end-
+    to-end. The 500-record P-45 corpus smoke caught this in production
+    via the Boundary-5 post-load ASK; the unit test pins the invariant.
+    """
+    BFFI = "http://urn.fi/URN:NBN:fi:schema:bffi:"
+    BF = "http://id.loc.gov/ontologies/bibframe/"
+    HELMET = "http://urn.fi/URN:NBN:fi:bib:source:helmet"
+    bffi_dir = tmp_path / "bffi"
+    bffi_dir.mkdir()
+    (bffi_dir / "10000001.ttl").write_text(
+        dedent(
+            f"""\
+            @prefix bf:   <{BF}> .
+            @prefix bffi: <{BFFI}> .
+            @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix dct:  <http://purl.org/dc/terms/> .
+
+            <urn:work/A>  a bffi:Work ;
+                          bffi:hasExpression <urn:expr/A> .
+            <urn:expr/A>  a bffi:Expression ;
+                          bffi:expressionOf <urn:work/A> .
+            <urn:manif/A> a bffi:Manifestation ;
+                          bffi:expressionManifested <urn:expr/A> ;
+                          dct:identifier "b10000001" ;
+                          bf:identifiedBy [ a bf:Local ;
+                                            rdf:value "b10000001" ;
+                                            bf:source <{HELMET}> ] .
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    # Synthetic CanonicalWorkInputs corresponding to the same Work so
+    # M8's union-find produces a canonical Work that resolves to the
+    # raw URI (singleton group, no actual merge).
+    work_records = {
+        "urn:work/A": CanonicalWorkInputs(
+            work_uri="urn:work/A",
+            creator_uri="urn:agent/Tolstoy",
+            pref_label="Sota ja rauha",
+            expression_uris=["urn:expr/A"],
+            helmet_identifiers=[("urn:helmet/A1", "b10000001")],
+        ),
+    }
+    helmet_entries = {
+        "urn:work/A": HelmetMapEntry("urn:work/A", "b10000001", "2026-04-12T08:31:02+00:00"),
+    }
+
+    # apply_merge with work_records / helmet_entries overridden but
+    # bffi_corpus_dir pointed at tmp_path so the Manifestation
+    # propagator reads the per-record TTL above.
+    canonical_path = tmp_path / "canonical.ttl"
+    decisions_path = tmp_path / "judge-decisions.jsonl"
+    decisions_path.write_text("", encoding="utf-8")
+    apply_merge(
+        decisions_path,
+        tmp_path,
+        output_path=canonical_path,
+        map_path=tmp_path / "canonical-map.jsonl",
+        conflicts_path=tmp_path / "canonical-conflicts.jsonl",
+        helmet_map_path=tmp_path / "helmet-map.jsonl",
+        work_records=work_records,
+        helmet_entries=helmet_entries,
+        now=datetime(2026, 6, 6, 12, 0, tzinfo=UTC),
+    )
+
+    # Re-parse canonical.ttl. The Manifestation + reachable blank node
+    # MUST be in the output graph.
+    out = Graph()
+    out.parse(canonical_path, format="turtle")
+    manif_uri = URIRef("urn:manif/A")
+    assert (manif_uri, RDF.type, V.BFFI.Manifestation) in out
+    assert (manif_uri, V.BFFI.expressionManifested, URIRef("urn:expr/A")) in out
+    assert (manif_uri, DCTERMS.identifier, Literal("b10000001")) in out
+    # Reachable blank node: the bf:identifiedBy block must be copied with
+    # rdf:value + bf:source intact.
+    idents = list(out.objects(manif_uri, V.BF.identifiedBy))
+    assert len(idents) == 1
+    assert (idents[0], V.BF.source, URIRef(HELMET)) in out
+    assert (idents[0], RDF.value, Literal("b10000001")) in out

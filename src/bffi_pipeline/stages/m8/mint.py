@@ -42,6 +42,44 @@ def _admin_metadata_uri(canonical_uri: str) -> URIRef:
     return URIRef(f"{get_settings().graph_base}adminmeta/{digest}")
 
 
+def _propagate_manifestations(g: Graph, raw_graph: Graph) -> int:
+    """Copy ``bffi:Manifestation`` subgraphs from M3 per-record output
+    into the canonical M8 graph verbatim.
+
+    Manifestations are 1:1 with Helmet bib records and never merge
+    (unlike Works, which the union-find collapses across editions).
+    So the propagation is a straight passthrough: every triple whose
+    subject is a Manifestation gets copied, plus every triple whose
+    subject is a blank node reachable from a Manifestation (the
+    ``bf:identifiedBy`` blank nodes carrying ``rdf:value`` /
+    ``bf:source``). The ``bffi:expressionManifested`` link still
+    resolves because :func:`_propagate_expressions` keeps every
+    member Expression URI alive on the canonical graph; M8 only
+    rewrites Expression → Work links, not the Expression URIs
+    themselves.
+
+    Returns the triple count copied (for observability).
+    """
+    visited: set[URIRef | BNode] = set()
+    queue: list[URIRef | BNode] = [
+        s
+        for s in raw_graph.subjects(RDF.type, V.BFFI.Manifestation)
+        if isinstance(s, URIRef | BNode)
+    ]
+    count = 0
+    while queue:
+        node = queue.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        for p, o in raw_graph.predicate_objects(node):
+            g.add((node, p, o))
+            count += 1
+            if isinstance(o, BNode) and o not in visited:
+                queue.append(o)
+    return count
+
+
 def _propagate_subject_targets(
     g: Graph,
     *,

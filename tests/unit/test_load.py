@@ -221,7 +221,7 @@ def test_load_smoke_queries_splits_on_section_markers() -> None:
     names = [q.name for q in queries]
     assert "Skosify dual-typing" in names
     assert "Expressions linked to Works" in names
-    assert "Helmet identifiers preserved on canonical Works" in names
+    assert "Helmet identifiers reachable from canonical Works via Manifestation" in names
     assert "Skosify-inferred SKOS inverses (narrower/broader)" in names
     assert len(queries) == 4
     for q in queries:

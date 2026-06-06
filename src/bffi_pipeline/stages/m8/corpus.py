@@ -26,8 +26,17 @@ from bffi_pipeline.stages.m8.schemas import CanonicalWorkInputs
 _BFFI_CORPUS_FILENAME: Final[str] = "bffi-corpus.ttl"
 
 
-def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, CanonicalWorkInputs]:
+def _load_work_records_from_corpus(
+    corpus_dir: Path,
+) -> tuple[dict[str, CanonicalWorkInputs], Graph]:
     """Read every BFFI Turtle under ``corpus_dir`` into a single graph.
+
+    Returns ``(work_records, raw_graph)`` — the structured
+    :class:`CanonicalWorkInputs` dict that M8 needs to mint canonical
+    Works, plus the raw parsed graph itself so M8 can also propagate
+    Manifestation triples (which never merge) verbatim into
+    ``canonical.ttl``. Sharing the parse across both consumers avoids
+    a second corpus read.
 
     Fast-path (P-19 Phase A): when ``<corpus_dir>/bffi-corpus.ttl``
     exists AND is at least as new as every per-record ``bffi/*.ttl``,
@@ -61,4 +70,4 @@ def _load_work_records_from_corpus(corpus_dir: Path) -> dict[str, CanonicalWorkI
         for path in sorted(bffi_dir.glob("*.ttl")):
             g.parse(str(path), format="turtle")
 
-    return extract_work_metadata(g)
+    return extract_work_metadata(g), g
