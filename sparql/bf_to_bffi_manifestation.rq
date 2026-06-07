@@ -83,6 +83,11 @@ CONSTRUCT {
   ?extentNote a          bf:Note ;
               rdf:type   ?extentNoteType ;
               rdfs:label ?extentNoteLabel .
+  ?provisionActivity a   ?provisionActivityType ;
+                     bflc:simplePlace ?provisionPlace ;
+                     bflc:simpleAgent ?provisionAgent ;
+                     bflc:simpleDate  ?provisionDate ;
+                     bflc:marcKey     ?provisionMarcKey .
   ?instanceNote a        bf:Note ;
                 rdf:type ?instanceNoteType ;
                 rdfs:label ?instanceNoteLabel .
@@ -186,7 +191,30 @@ WHERE {
   # BFFI so the round-trip MARC reconstruction (P-47) can rebuild
   # 260 / 264 / 300 / 245 $c subfields from the canonical graph.
   # Each OPTIONAL — the source bib may not have any given subfield.
-  OPTIONAL { ?bfInstance bf:provisionActivity      ?provisionActivity }
+  # MARC 260 / 264 — provision activity (publication / production /
+  # distribution / manufacture). marc2bibframe2 emits one
+  # ``bf:ProvisionActivity`` blank node per source field with:
+  #   - ``rdf:type bf:Publication`` (or Production, Manufacture, ...)
+  #   - ``bflc:simplePlace`` → $a
+  #   - ``bflc:simpleAgent`` → $b
+  #   - ``bflc:simpleDate``  → $c
+  #   - ``bflc:marcKey`` carrying the source MARC tag (260 vs 264)
+  # We route the inner subfield literals + type so the round-trip
+  # converter can emit ``$a $b $c`` separately (rather than
+  # collapsing them into the ``bffi:publicationStatement`` literal
+  # which marc2bibframe2 also emits as a flat string).
+  OPTIONAL {
+    ?bfInstance bf:provisionActivity ?provisionActivity .
+    OPTIONAL {
+      ?provisionActivity a ?provisionActivityType .
+      FILTER(STRSTARTS(STR(?provisionActivityType),
+                       "http://id.loc.gov/ontologies/bibframe/"))
+    }
+    OPTIONAL { ?provisionActivity bflc:simplePlace ?provisionPlace }
+    OPTIONAL { ?provisionActivity bflc:simpleAgent ?provisionAgent }
+    OPTIONAL { ?provisionActivity bflc:simpleDate  ?provisionDate }
+    OPTIONAL { ?provisionActivity bflc:marcKey     ?provisionMarcKey }
+  }
   OPTIONAL { ?bfInstance bf:publicationStatement   ?publicationStatement }
   OPTIONAL { ?bfInstance bf:responsibilityStatement ?responsibilityStatement }
   # MARC 300 $a (extent) lives on ``bf:Extent.rdfs:label``; MARC
