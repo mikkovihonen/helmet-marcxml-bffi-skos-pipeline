@@ -56,7 +56,10 @@ CONSTRUCT {
   ?contentType rdfs:label ?contentTypeLabel .
   ?uniformTitleHub a bf:Hub ;
                    bflc:marcKey ?uniformTitleMarcKey ;
-                   bf:title     ?uniformTitleNode .
+                   bf:title     ?uniformTitleNode ;
+                   bf:language  ?uniformTitleLanguage .
+  ?uniformTitleLanguage a       bf:Language ;
+                        rdfs:label ?uniformTitleLanguageLabel .
   ?uniformTitleNode a bf:Title ;
                     bf:mainTitle  ?uniformMainTitle ;
                     bf:partNumber ?uniformPartNumber ;
@@ -275,6 +278,15 @@ WHERE {
                         bf:mainTitle ?uniformMainTitle .
       OPTIONAL { ?uniformTitleNode bf:partNumber ?uniformPartNumber }
       OPTIONAL { ?uniformTitleNode bf:partName   ?uniformPartName }
+    }
+    # P-168 — route MARC 240 ``$l`` from the Hub's BIBFRAME
+    # ``bf:language → bf:Language → rdfs:label`` chain. Without this
+    # the converter falls back to parsing marcKey for ``$l``; with
+    # it the row stays BFFI-native (no ``marckey_bypass`` flag).
+    OPTIONAL {
+      ?uniformTitleHub bf:language ?uniformTitleLanguage .
+      ?uniformTitleLanguage a bf:Language ;
+                            rdfs:label ?uniformTitleLanguageLabel .
     }
   }
 

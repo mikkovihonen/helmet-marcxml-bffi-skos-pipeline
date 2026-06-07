@@ -180,10 +180,21 @@ class ContributionTarget:
     Only ``PrimaryContribution`` is propagated here — other
     contributions (translators, illustrators, contained-work creators)
     are left on the raw Works for downstream consumers that care.
+
+    Role carries the same two-form pattern as :class:`ExpressionContribution`:
+    ``role_uri`` is a LoC relator URI (when the post-M3 enrichment
+    pass resolved one); ``role_label`` is the cataloguer's free-text
+    ``$e`` term (Finnish "kirjoittaja" / Swedish "författare" /
+    "ohjaaja" / etc.). Without these on the canonical Work, MARC 100
+    ``$4`` + ``$e`` round-trip silently drops. Both default to
+    ``None`` so older fixture / test code without role data still
+    works.
     """
 
     agent_uri: str
     agent_label: str
+    role_uri: str | None = None
+    role_label: str | None = None
 
 
 @dataclass(frozen=True)

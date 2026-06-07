@@ -105,6 +105,27 @@ _ORG_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/organizations/"
 #: MARC code. Covers the dominant Helmet cases. Unknown tails fall
 #: back to ``tail.upper()`` (surfaces in the round-trip diff so
 #: cataloguers see the heuristic's reach).
+#: LoC mnotetype URI tail → MARC 5XX tag mapping. marc2bibframe2
+#: emits ``rdf:type <mnotetype/<tail>>`` on each bf:Note to
+#: categorise it; ``_marc_5xx_tag_for_note`` uses this table to route
+#: notes to the right MARC 5XX field. Tails not in this table fall
+#: through to MARC 500 (general note). ``physical`` / ``accmat`` are
+#: excluded because they route to MARC 300 $b / $e from
+#: ``_emit_extent_and_dimensions``.
+_MNOTETYPE_TO_MARC_5XX: Final[dict[str, str]] = {
+    "biblio": "504",  # bibliography note
+    "thesis": "502",  # dissertation note
+    "creditNote": "508",  # creation / production credits
+    "participants": "511",  # participants / performers
+    "typeOfReport": "513",  # type of report / period
+    "summary": "520",  # summary / abstract
+    "language": "546",  # language note
+    "provenance": "561",  # provenance / immediate source
+    "awards": "586",  # awards
+    "accessRestrict": "506",  # restrictions on access
+}
+
+
 _ORG_URI_TO_MARC_CODE: Final[dict[str, str]] = {
     "fimelinda": "FI-MELINDA",
     "fihelme": "FI-HELME",
@@ -1171,7 +1192,7 @@ class _Reconstructor:
             return next(iter(labels_by_lang.values()))
         return None
 
-    def _emit_uniform_title(self, record: Element) -> None:
+    def _emit_uniform_title(self, record: Element) -> None:  # noqa: PLR0912 — three-tier shape (BFFI-native mainTitle+language → marcKey-parse → structured-only) on top of the existing Hub-walk; splitting fragments shared state.
         """MARC 240 — uniform title for the work.
 
         Source data lives on a per-record ``bf:Hub`` (``#Hub240-N``)
@@ -1201,23 +1222,40 @@ class _Reconstructor:
             if (hub, V.RDF.type, V.BF.Hub) not in self.graph:
                 continue
             structured = self._hub_title_part_subs(hub)
-            mk_lit = self._first_marc_key(hub)
-            if mk_lit is None:
-                # No marcKey at all — emit whatever structured parts
-                # exist (rare; defensive).
-                if structured:
+            # P-168 — BFFI-native first when the Hub has no
+            # structured ``$n``/``$p``: mainTitle IS the clean ``$a``
+            # value (modulo the trailing language-label suffix).
+            # When structured ``$n``/``$p`` ARE present, mainTitle is
+            # the concatenated form (``"$a $n, $p"``) and we can't
+            # recover clean ``$a`` by subtraction — fall through to
+            # marcKey for that case.
+            if not structured:
+                language_label = self._hub_language_label(hub)
+                main_title_a = self._hub_main_title_a(hub, language_label)
+                bffi_subs: list[tuple[str, str]] = []
+                if main_title_a:
+                    bffi_subs.append(("a", main_title_a))
+                if language_label:
+                    bffi_subs.append(("l", language_label))
+                if bffi_subs:
                     self._emit_datafield(
                         record,
                         "240",
-                        *structured,
+                        *bffi_subs,
                         ind1="1",
                         ind2="0",
                         lineage=self._lineage_token(hub),
                     )
                     return
+            # Fallback — structured ``$n``/``$p`` present (mainTitle is
+            # concatenated, ``$a`` not derivable by subtraction) or no
+            # BFFI predicates available at all. Parse marcKey to
+            # recover ``$a`` (from ``$t``) and ``$l``. Flagged as
+            # marckey_bypass so the audit shows the dependency on the
+            # legacy path.
+            mk_lit = self._first_marc_key(hub)
+            if mk_lit is None:
                 continue
-            # Parse marcKey to recover $a (from $t) and $l. Use
-            # structured for $n / $p when present.
             structured_codes = {code for code, _ in structured}
             parsed = _parse_marc_key_subfields(str(mk_lit))
             base: list[tuple[str, str]] = []
@@ -1267,6 +1305,45 @@ class _Reconstructor:
             if out:
                 return out
         return out
+
+    def _hub_language_label(self, hub: Node) -> str | None:
+        """Read ``hub → bf:language → rdfs:label`` and return the
+        human-readable language label that MARC 240 ``$l`` / 730
+        ``$l`` carry (``"suomi"``, ``"englanti"``, etc.).
+
+        marc2bibframe2 mints ``bf:language → bf:Language`` blocks on
+        Hub240 / Hub730 entities to capture MARC ``$l`` natively in
+        BIBFRAME, so this is the BFFI-native path — no ``marcKey``
+        parsing needed.
+        """
+        for lang in self.graph.objects(hub, V.BF.language):
+            for lbl in self.graph.objects(lang, V.RDFS.label):
+                if isinstance(lbl, Literal):
+                    return str(lbl)
+        return None
+
+    def _hub_main_title_a(self, hub: Node, language_label: str | None) -> str | None:
+        """Extract a clean ``$a`` value from the Hub's structured
+        ``bf:title → bf:Title → bf:mainTitle``.
+
+        marc2bibframe2 concatenates source ``$a`` + ``$l`` into the
+        mainTitle (e.g. source ``240 $aForward the Foundation,
+        $lsuomi`` becomes ``"Forward the Foundation, suomi"``). When
+        a language label is provided, strip the trailing ``", <lang>"``
+        suffix so the returned ``$a`` matches the source verbatim.
+        """
+        for title in self.graph.objects(hub, V.BF.title):
+            for mt in self.graph.objects(title, V.BF.mainTitle):
+                if not isinstance(mt, Literal):
+                    continue
+                text = str(mt)
+                if language_label and text.endswith(language_label):
+                    # Strip the appended " " + language_label.
+                    stripped = text[: -len(language_label)].rstrip()
+                    if stripped.endswith(","):
+                        return stripped
+                return text
+        return None
 
     def _first_marc_key(self, node: Node) -> Literal | None:
         for mk in self.graph.objects(node, V.BFLC.marcKey):
@@ -1367,6 +1444,28 @@ class _Reconstructor:
                 break
         return main_title, subtitle, picked_node
 
+    def _source_marc_tag_from_lineage(self, node: Node, *, default: str) -> str:
+        """Pick the source MARC tag from the entity's P-50
+        ``bffi-prov:fromMarcField`` token (format
+        ``"<bib_id>:<tag>:<ord>"``). Returns ``default`` when no token
+        is available.
+
+        Used by paths where the BIBFRAME → BFFI shape collapses
+        multiple source-MARC tags onto one entity (260 vs 264 both
+        become ``bf:ProvisionActivity``; 240 vs 730 both become
+        ``bf:Hub``; etc.). The token's tag half is the only
+        round-trip signal that survives the collapse.
+        """
+        # Token shape: "<bib_id>:<tag>:<ordinal>" — split from the right
+        # since bib_id can contain colons (URN-style identifiers).
+        _expected_parts = 3
+        for token in self.graph.objects(node, V.fromMarcField):
+            if isinstance(token, Literal):
+                parts = str(token).rsplit(":", 2)
+                if len(parts) >= _expected_parts - 1 and parts[-2].isdigit():
+                    return parts[-2]
+        return default
+
     def _emit_publication_statement(self, record: Element) -> None:
         """MARC 264 publication / production / distribution / manufacture.
 
@@ -1384,7 +1483,13 @@ class _Reconstructor:
         (264 ind2=1, single $c) when no structured data is present.
         Last-resort: parse the prefLabel suffix for older M3 output.
         """
-        # Structured path: one 264 per provisionActivity bnode.
+        # Structured path: one row per provisionActivity bnode. The
+        # MARC tag (260 vs 264) is recovered from the source-MARC
+        # token: ``bffi-prov:fromMarcField "<bib>:<tag>:<ord>"`` carries
+        # the original tag (P-50 token format). When no token is
+        # available (records pre-dating P-50 Phase B, or
+        # ProvisionActivities M2-post couldn't match), default to 264
+        # — RDA-modern emission matches Helmet's dominant practice.
         emitted_structured = False
         for prov in self.graph.objects(self.manifestation, V.BFFI.provisionActivity):
             if isinstance(prov, Literal):
@@ -1393,7 +1498,14 @@ class _Reconstructor:
             if not subs:
                 continue
             ind2 = self._provision_activity_ind2(prov)
-            self._emit_datafield(record, "264", *subs, ind2=ind2, lineage=self._lineage_token(prov))
+            tag = self._source_marc_tag_from_lineage(prov, default="264")
+            # 260 doesn't use ind2; clear it. 264 keeps the
+            # production / publication / distribution / manufacture
+            # discriminator.
+            emit_ind2 = " " if tag == "260" else ind2
+            self._emit_datafield(
+                record, tag, *subs, ind2=emit_ind2, lineage=self._lineage_token(prov)
+            )
             emitted_structured = True
         if emitted_structured:
             return
@@ -1545,6 +1657,23 @@ class _Reconstructor:
         target = URIRef(self._MARC_NOTE_TYPE_NS + suffix)
         return target in set(self.graph.objects(node, RDF.type))
 
+    def _marc_5xx_tag_for_note(self, note: Node) -> str:
+        """Pick the MARC 5XX tag a ``bf:Note`` should round-trip into,
+        based on its ``rdf:type <mnotetype/<tail>>`` discriminator.
+        Defaults to MARC 500 (general note) when no categorical type
+        is present (the source 500 ``$a`` case).
+        """
+        for t in self.graph.objects(note, RDF.type):
+            if not isinstance(t, URIRef):
+                continue
+            s = str(t)
+            if s.startswith(self._MARC_NOTE_TYPE_NS):
+                tail = s[len(self._MARC_NOTE_TYPE_NS) :]
+                tag = _MNOTETYPE_TO_MARC_5XX.get(tail)
+                if tag is not None:
+                    return tag
+        return "500"
+
     def _emit_content_type(self, record: Element) -> None:
         # 336 content type — lifted from bf:Work via bffi:content (URI
         # in the LoC contentTypes vocab). Emit $a label from the URI's
@@ -1613,7 +1742,14 @@ class _Reconstructor:
                     note_lineage = (
                         self._lineage_token(note) if not isinstance(note, Literal) else None
                     )
-                    self._emit_datafield(record, "500", ("a", text), lineage=note_lineage)
+                    # P-168 — route by mnotetype discriminator. bf:Note
+                    # nodes carrying ``rdf:type <mnotetype/biblio>`` /
+                    # ``<mnotetype/participants>`` / ``<mnotetype/language>``
+                    # etc. land on MARC 504 / 511 / 546 instead of the
+                    # default 500. Literal-form notes (no node, no
+                    # type) keep the 500 default.
+                    tag = "500" if isinstance(note, Literal) else self._marc_5xx_tag_for_note(note)
+                    self._emit_datafield(record, tag, ("a", text), lineage=note_lineage)
 
     def _emit_table_of_contents(self, record: Element) -> None:
         # MARC 505 formatted contents note. M3 hoists
@@ -2416,32 +2552,44 @@ class _Reconstructor:
     def _related_title_subfields(self, hub: Node) -> tuple[tuple[tuple[str, str], ...], bool]:
         """Build the 730 / 740 subfield tuple for one related title.
 
-        Returns ``(subfields, used_marckey)``. Combines:
+        Returns ``(subfields, used_marckey)``. Three tiers, preferring
+        BFFI-native paths (no ``marckey_bypass`` flag) before falling
+        back to ``bflc:marcKey`` parsing:
 
-        - **Structured** (P-49 Layer 1): ``bf:partNumber`` / ``bf:partName``
-          from the Hub's ``bf:Title`` for ``$n`` / ``$p`` when present.
-          No bypass flag because the source is a structured BFFI
-          predicate.
+        Tier 1 — **bf:mainTitle split** (P-168 BFFI-native): take the
+        ``bf:title → bf:Title → bf:mainTitle`` literal and split on
+        ``" / "`` for ``$a`` (title proper) + ``$g`` (responsibility /
+        composer reference). Combined with structured
+        ``bf:partNumber`` / ``bf:partName`` for ``$n`` / ``$p``. No
+        marckey_bypass — both ``mainTitle`` and the part predicates
+        are dedicated BFFI predicates marc2bibframe2 emits natively.
 
-        - **bflc:marcKey** (legacy): parses ``$a`` (title proper) +
-          ``$g`` (responsibility / misc). When this path supplies any
-          subfield the row is flagged ``marckey_bypass`` — both $a and
-          $g are P-49 Layer 3 gaps (no dedicated BFFI predicate).
+        Tier 2 — **bflc:marcKey** (legacy fallback): parses ``$a`` +
+        ``$g`` + ``$n`` + ``$p`` from the marcKey string. Used only
+        when the Hub has no ``bf:title`` / ``bf:mainTitle`` chain.
+        Flagged as ``marckey_bypass`` so the audit shows the
+        dependency.
 
-        - **bf:mainTitle split** (last-resort fallback): splits the
-          concatenated main title on `` / `` for ``$a`` / ``$g``. The
-          music-collection idiom where marc2bibframe2 produced a Hub
-          but no marcKey survived M3 propagation.
+        Tier 3 — **structured only**: ``$n`` / ``$p`` only when the
+        Hub has neither marcKey nor title. Defensive.
         """
         structured = self._hub_title_part_subs(hub)
         structured_codes = {code for code, _ in structured}
+        # Tier 1 — BFFI-native bf:mainTitle split
+        for title in self.graph.objects(hub, V.BF.title):
+            for mt in self.graph.objects(title, V.BF.mainTitle):
+                if isinstance(mt, Literal):
+                    base = list(_split_title_responsibility(str(mt)))
+                    if base:
+                        return _merge_structured_parts(base, structured), False
+        # Tier 2 — marcKey fallback
         for mk in self.graph.objects(hub, V.BFLC.marcKey):
             if not isinstance(mk, Literal):
                 continue
             parsed = _parse_marc_key_subfields(str(mk), ("a", "n", "p", "g"))
             if not parsed:
                 continue
-            base: list[tuple[str, str]] = []
+            base = []
             used_marckey = False
             for code, value in parsed:
                 if code in ("n", "p") and code in structured_codes:
@@ -2449,14 +2597,7 @@ class _Reconstructor:
                 base.append((code, value))
                 used_marckey = True
             return _merge_structured_parts(base, structured), used_marckey
-        # Fall back to bf:mainTitle split. Structured $n / $p still
-        # apply (rare combo, defensible).
-        for title in self.graph.objects(hub, V.BF.title):
-            for mt in self.graph.objects(title, V.BF.mainTitle):
-                if isinstance(mt, Literal):
-                    return _merge_structured_parts(
-                        list(_split_title_responsibility(str(mt))), structured
-                    ), False
+        # Tier 3 — structured only
         return tuple(structured), False
 
     def _emit_bib_id_local(self, record: Element, bib_id: str | None) -> None:

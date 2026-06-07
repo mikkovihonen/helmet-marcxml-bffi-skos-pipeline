@@ -645,6 +645,20 @@ def _propagate_primary_contributions(
         g.add((contrib, RDF.type, V.BFFI.PrimaryContribution))
         g.add((contrib, V.BFFI.agent, agent))
         g.add((agent, V.RDFS.label, Literal(target.agent_label)))
+        # P-168 — restore MARC 100 ``$4`` + ``$e`` round-trip. The
+        # raw-Work side has ``contrib bf:role <URI>`` (LoC relator
+        # URI, post-M3 enrichment) and ``contrib bf:role [a bf:Role;
+        # rdfs:label "kirjoittaja"]`` (cataloguer ``$e`` term) but the
+        # M8 canonical-mint loses both. Re-emit both shapes here so
+        # ``_collect_role_subs`` finds them on the canonical
+        # PrimaryContribution.
+        if target.role_uri is not None:
+            g.add((contrib, V.BF.role, URIRef(target.role_uri)))
+        if target.role_label is not None:
+            role_node = BNode(f"role{digest}")
+            g.add((contrib, V.BF.role, role_node))
+            g.add((role_node, RDF.type, V.BF.Role))
+            g.add((role_node, V.RDFS.label, Literal(target.role_label)))
 
 
 def _emit_mint_anchor(g: Graph, canonical_uri: URIRef, mint_anchor: MintAnchorKind | None) -> None:

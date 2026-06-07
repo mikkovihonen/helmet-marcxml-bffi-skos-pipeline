@@ -214,7 +214,9 @@ def _collect_contribution_agent_uris(graph: Graph, subject: URIRef) -> list[str]
     return out
 
 
-def _primary_contribution_targets(graph: Graph, work: URIRef) -> list[ContributionTarget]:
+def _primary_contribution_targets(  # noqa: PLR0912 — walks two-axis role shape (URI for $4 + bnode-with-label for $e) on top of the existing agent+label scan; splitting fragments the per-contrib state.
+    graph: Graph, work: URIRef
+) -> list[ContributionTarget]:
     """Collect ``PrimaryContribution → agent → rdfs:label`` triples on ``work``.
 
     Deduplicates by ``agent_uri`` because marc2bibframe2's MARC-100 lift
@@ -225,6 +227,14 @@ def _primary_contribution_targets(graph: Graph, work: URIRef) -> list[Contributi
     Returns an empty list when the Work has no PrimaryContribution with
     a URI agent and rdfs:label — those records are surfaced as M8
     conflicts and don't reach M9 anyway.
+
+    Also collects ``bf:role`` data per the
+    :class:`ContributionTarget` contract: ``role_uri`` from any
+    URIRef role triple (a LoC relator URI added by the post-M3
+    enrichment pass), ``role_label`` from a blank-node role with
+    ``rdfs:label`` (the cataloguer's MARC 100 ``$e`` Finnish /
+    Swedish term). Without these, MARC 100 ``$4`` + ``$e`` silently
+    drop at the M3 → canonical boundary.
     """
     out: list[ContributionTarget] = []
     seen: set[str] = set()
@@ -244,8 +254,26 @@ def _primary_contribution_targets(graph: Graph, work: URIRef) -> list[Contributi
                     break
             if label is None:
                 continue
+            role_uri: str | None = None
+            role_label: str | None = None
+            for role in graph.objects(contrib, V.BF.role):
+                if isinstance(role, URIRef):
+                    if role_uri is None:
+                        role_uri = str(role)
+                else:
+                    for rlab in graph.objects(role, V.RDFS.label):
+                        if isinstance(rlab, RdfLiteral) and role_label is None:
+                            role_label = str(rlab)
+                            break
             seen.add(agent_uri)
-            out.append(ContributionTarget(agent_uri=agent_uri, agent_label=label))
+            out.append(
+                ContributionTarget(
+                    agent_uri=agent_uri,
+                    agent_label=label,
+                    role_uri=role_uri,
+                    role_label=role_label,
+                )
+            )
     return out
 
 
