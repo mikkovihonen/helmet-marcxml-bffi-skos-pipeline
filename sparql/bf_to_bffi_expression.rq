@@ -23,6 +23,9 @@ PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 CONSTRUCT {
   ?exprURI a bffi:Expression ;
            a                 ?exprSubclass ;
+           a                 ?issuanceExprSubclass ;
+           a                 ?aggregatingExprSubclass ;
+           bffi:aggregates   ?componentExprURI ;
            bffi:expressionOf ?workURI ;
            bffi:title        ?uniformTitleHub ;
            bffi:title        ?variantTitle ;
@@ -33,6 +36,10 @@ CONSTRUCT {
            bffi:summary      ?summary ;
            bffi:note         ?note ;
            skos:prefLabel    ?exprLabel .
+  ?componentExprURI a bffi:Expression ;
+                    bffi:aggregatedBy ?exprURI ;
+                    skos:prefLabel    ?componentLabel ;
+                    bflc:marcKey      ?componentMarcKey .
   ?otherContrib a bffi:Contribution ;
                 bffi:agent ?otherAgent ;
                 bf:role    ?otherRole .
@@ -82,20 +89,23 @@ WHERE {
 
   OPTIONAL { ?bfWork bf:language        ?language }
 
-  # P-52 Phase A — Expression-axis BFFI subclass typing. marc2bibframe2
-  # emits content-shape secondary types on ``bf:Work`` (BIBFRAME has no
-  # Expression class; everything piggybacks on Work). BFFI's split puts
-  # content / realisation-form classes on the Expression axis, so we
-  # mirror each ``bf:Text`` / ``bf:NotatedMusic`` / etc. triple onto
-  # ``?exprURI`` with its ``owl:equivalentClass`` BFFI counterpart.
-  # The 9 BFFI subclasses below are all declared
-  # ``owl:equivalentClass`` of their BIBFRAME source class in
-  # ``docs/lkd.rdf``; the typing is purely a mirror — no semantic
-  # transformation. The existing BIBFRAME-class triple on the bffi:Work
-  # is retained for tools expecting it (the work CONSTRUCT carries it).
+  # P-52 Phases A + B — Expression-axis BFFI subclass typing.
+  # marc2bibframe2 emits content-shape secondary types on ``bf:Work``
+  # (BIBFRAME has no Expression class; everything piggybacks on Work).
+  # BFFI's split puts content / realisation-form classes on the
+  # Expression axis, so we mirror each ``bf:Text`` / ``bf:NotatedMusic``
+  # / etc. triple onto ``?exprURI`` with its BFFI counterpart.
+  #
+  # Phase A rows are ``owl:equivalentClass`` (semantically identical);
+  # Phase B rows are ``bffi-meta:broadMatch`` (BFFI broadens or narrows
+  # the meaning per ``docs/lkd.rdf``).
+  #
+  # The existing BIBFRAME-class triple on the bffi:Work is retained
+  # for tools expecting it (the work CONSTRUCT carries it).
   OPTIONAL {
     ?bfWork a ?bfExprClass .
     VALUES (?bfExprClass ?exprSubclass) {
+      # Phase A — OWL-equivalent (mirror)
       (bf:Text             bffi:Text)
       (bf:NotatedMusic     bffi:NotatedMusic)
       (bf:NotatedMovement  bffi:NotatedMovement)
@@ -105,7 +115,79 @@ WHERE {
       (bf:MixedMaterial    bffi:MixedMaterial)
       (bf:Multimedia       bffi:Multimedia)
       (bf:Arrangement      bffi:Arrangement)
+      # Phase B — broadMatch (content-shape derived realisations)
+      (bf:Cartography      bffi:CartographyExpression)
+      (bf:MovingImage      bffi:MovingImageExpression)
+      (bf:MusicAudio       bffi:MusicAudioExpression)
+      (bf:Audio            bffi:NonMusicAudioExpression)
     }
+  }
+
+  # P-52 Phase C — issuance-derived Expression-axis typing. Mirrors
+  # the Work-axis routing in ``bf_to_bffi_work.rq``. The
+  # ``Integrating`` Work has no Expression-side counterpart in BFFI
+  # (no ``bffi:IntegratingExpression``), so that row is omitted here.
+  OPTIONAL {
+    ?bfInstanceForIssuance bf:instanceOf ?bfWork ;
+                           bf:issuance ?issuanceUri .
+    VALUES (?issuanceUri ?issuanceExprSubclass) {
+      (<http://id.loc.gov/vocabulary/issuance/mono>       bffi:MonographExpression)
+      (<http://id.loc.gov/vocabulary/issuance/serial>     bffi:SerialExpression)
+      (<http://id.loc.gov/vocabulary/issuance/collection> bffi:CollectionExpression)
+    }
+  }
+
+  # P-52 Phase E — Aggregating Expression typing. Mirrors the
+  # ``bffi:AggregatingWork`` detection in ``bf_to_bffi_work.rq``:
+  # ≥2 source ``bf:relation → bf:Hub`` chains OR ``bf:partNumber``
+  # / ``bf:partName`` on the title.
+  OPTIONAL {
+    FILTER EXISTS {
+      ?bfWork bf:relation ?aggRelE1 .
+      ?aggRelE1 bf:associatedResource ?aggHubE1 .
+      ?aggHubE1 a bf:Hub .
+      ?bfWork bf:relation ?aggRelE2 .
+      ?aggRelE2 bf:associatedResource ?aggHubE2 .
+      ?aggHubE2 a bf:Hub .
+      FILTER(?aggHubE1 != ?aggHubE2)
+    }
+    BIND(bffi:AggregatingExpression AS ?aggregatingExprSubclass)
+  }
+  OPTIONAL {
+    FILTER EXISTS {
+      ?bfWork bf:title ?aggTitleE .
+      ?aggTitleE bf:partNumber|bf:partName ?aggPartE .
+    }
+    BIND(bffi:AggregatingExpression AS ?aggregatingExprSubclass)
+  }
+
+  # P-52 Phase F — component-Expression minting + ``bffi:aggregates``
+  # edges. For each ``bf:Hub`` reachable via the parent's ``bf:relation
+  # → bf:associatedResource`` chain, mint a derivative
+  # ``bffi:Expression`` URI from the Hub URI's SHA-1 and link via
+  # ``bffi:aggregates`` (forward, on the parent) +
+  # ``bffi:aggregatedBy`` (reverse, on the component). The ``bffi:aggregates``
+  # predicate has ``rdfs:domain bffi:AggregatingExpression`` so we
+  # gate the entire branch on the same multi-Hub detection rule
+  # Phase E uses for typing. Hub label survives via ``skos:prefLabel``;
+  # marcKey rides through for round-trip ``$a`` / ``$g`` recovery.
+  OPTIONAL {
+    FILTER EXISTS {
+      ?bfWork bf:relation ?_compDetectRel1 .
+      ?_compDetectRel1 bf:associatedResource ?_compDetectHub1 .
+      ?_compDetectHub1 a bf:Hub .
+      ?bfWork bf:relation ?_compDetectRel2 .
+      ?_compDetectRel2 bf:associatedResource ?_compDetectHub2 .
+      ?_compDetectHub2 a bf:Hub .
+      FILTER(?_compDetectHub1 != ?_compDetectHub2)
+    }
+    ?bfWork bf:relation ?compRel .
+    ?compRel bf:associatedResource ?compHub .
+    ?compHub a bf:Hub .
+    OPTIONAL { ?compHub rdfs:label ?componentLabel }
+    OPTIONAL { ?compHub bflc:marcKey ?componentMarcKey }
+    BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:expression:",
+              arq:sha1(STR(?compHub)))) AS ?componentExprURI )
   }
 
   OPTIONAL {

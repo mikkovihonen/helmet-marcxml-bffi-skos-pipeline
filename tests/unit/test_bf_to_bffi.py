@@ -220,12 +220,201 @@ def test_construct_mirrors_manifestation_axis_bibframe_classes_from_work() -> No
     assert (EXPECTED_MANIF, RDF.type, V.BFFI.Print) in bffi
 
 
-def test_construct_emits_zero_subclass_typing_when_no_bibframe_signal() -> None:
-    """No matching BIBFRAME class on source → no BFFI subclass
-    typing on the BFFI entity. The base bffi:Work / Expression /
-    Manifestation typing is unaffected (still emitted)."""
+def test_construct_emits_phase_b_broadmatch_two_axis_typing() -> None:
+    """P-52 Phase B — content-shape classes that map to BFFI Work +
+    Expression subclass pairs via ``bffi-meta:broadMatch``. Each
+    BIBFRAME class produces typing on BOTH the bffi:Work and the
+    bffi:Expression (different BFFI subclasses, same source signal).
+    """
+    pairs = [
+        ("Cartography", V.BFFI.CartographyWork, V.BFFI.CartographyExpression),
+        ("MovingImage", V.BFFI.MovingImageWork, V.BFFI.MovingImageExpression),
+        ("MusicAudio", V.BFFI.MusicWork, V.BFFI.MusicAudioExpression),
+        ("Audio", V.BFFI.NonMusicAudioWork, V.BFFI.NonMusicAudioExpression),
+    ]
+    for bf_name, work_class, expr_class in pairs:
+        source = _build_source()
+        source.add((URIRef(BF_WORK), RDF.type, V.BF[bf_name]))
+        bffi = construct_bffi(source)
+        assert (EXPECTED_WORK, RDF.type, work_class) in bffi, (
+            f"bf:{bf_name} not routed to {work_class!r} on Work axis"
+        )
+        assert (EXPECTED_EXPR, RDF.type, expr_class) in bffi, (
+            f"bf:{bf_name} not routed to {expr_class!r} on Expression axis"
+        )
+
+
+def test_construct_emits_phase_b_notatedmusic_routes_to_musicwork_on_work_axis() -> None:
+    """bf:NotatedMusic produces ``bffi:NotatedMusic`` on the
+    Expression (Phase A OWL-equivalent) AND ``bffi:MusicWork`` on
+    the Work (Phase B broadMatch, since sheet music IS a music
+    work, just realised in notated form rather than as audio)."""
+    source = _build_source()
+    source.add((URIRef(BF_WORK), RDF.type, V.BF.NotatedMusic))
+    bffi = construct_bffi(source)
+    assert (EXPECTED_EXPR, RDF.type, V.BFFI.NotatedMusic) in bffi
+    assert (EXPECTED_WORK, RDF.type, V.BFFI.MusicWork) in bffi
+
+
+def test_construct_emits_phase_c_issuance_derived_typing() -> None:
+    """P-52 Phase C — Work + Expression typing routed from
+    ``bf:Instance bf:issuance <…/issuance/{mono,serial,collection,integrating}>``.
+
+    The Helmet fixture's bf:Instance has no bf:issuance set; we add
+    it per test case and assert the matching axis subclass appears.
+    """
+    cases = [
+        ("mono", V.BFFI.MonographWork, V.BFFI.MonographExpression, None),
+        ("serial", V.BFFI.SerialWork, V.BFFI.SerialExpression, None),
+        (
+            "collection",
+            V.BFFI.CollectionWork,
+            V.BFFI.CollectionExpression,
+            V.BFFI.CollectionManifestation,
+        ),
+        # Integrating has no Expression / Manifestation counterpart in BFFI.
+        ("integrating", V.BFFI.Integrating, None, None),
+    ]
+    for issuance, work_class, expr_class, manif_class in cases:
+        source = _build_source()
+        issuance_uri = URIRef(f"http://id.loc.gov/vocabulary/issuance/{issuance}")
+        source.add((URIRef(BF_INSTANCE), V.BF.issuance, issuance_uri))
+        bffi = construct_bffi(source)
+        assert (EXPECTED_WORK, RDF.type, work_class) in bffi, (
+            f"issuance/{issuance} not routed to {work_class!r} on Work"
+        )
+        if expr_class is not None:
+            assert (EXPECTED_EXPR, RDF.type, expr_class) in bffi
+        if manif_class is not None:
+            assert (EXPECTED_MANIF, RDF.type, manif_class) in bffi
+
+
+def test_construct_emits_phase_d_carrier_derived_manifestation_typing() -> None:
+    """P-52 Phase D — Manifestation-axis class inferred from
+    ``bffi:carrier`` URI. Tests the four dominant routings."""
+    cases = [
+        ("nc", V.BFFI.Print),
+        ("cr", V.BFFI.Electronic),
+        ("he", V.BFFI.Microform),
+    ]
+    for carrier_tail, manif_class in cases:
+        source = _build_source()
+        # Replace the fixture's existing nc carrier with the test case
+        for o in list(source.objects(URIRef(BF_INSTANCE), V.BF.carrier)):
+            source.remove((URIRef(BF_INSTANCE), V.BF.carrier, o))
+        carrier_uri = URIRef(f"http://id.loc.gov/vocabulary/carriers/{carrier_tail}")
+        source.add((URIRef(BF_INSTANCE), V.BF.carrier, carrier_uri))
+        bffi = construct_bffi(source)
+        assert (EXPECTED_MANIF, RDF.type, manif_class) in bffi, (
+            f"carriers/{carrier_tail} not routed to {manif_class!r}"
+        )
+
+
+def test_construct_emits_phase_e_aggregating_typing_with_multiple_hubs() -> None:
+    """P-52 Phase E — ≥2 ``bf:Hub`` linked via ``bf:relation`` →
+    parent gets ``bffi:AggregatingWork`` + ``bffi:AggregatingExpression``
+    typing."""
+    source = _build_source()
+    # Add 2 distinct Hubs reachable via bf:relation
+    bf_work = URIRef(BF_WORK)
+    for i in range(2):
+        rel = URIRef(f"urn:test:rel/{i}")
+        hub = URIRef(f"urn:test:hub/{i}")
+        source.add((bf_work, V.BF.relation, rel))
+        source.add((rel, V.BF.associatedResource, hub))
+        source.add((hub, RDF.type, V.BF.Hub))
+    bffi = construct_bffi(source)
+    assert (EXPECTED_WORK, RDF.type, V.BFFI.AggregatingWork) in bffi
+    assert (EXPECTED_EXPR, RDF.type, V.BFFI.AggregatingExpression) in bffi
+
+
+def test_construct_emits_phase_e_aggregating_typing_with_partnumber() -> None:
+    """P-52 Phase E — ``bf:partNumber``/``bf:partName`` on a title is
+    a multipart-record signal; parent gets AggregatingWork +
+    AggregatingExpression typing."""
+    source = _build_source()
+    title = URIRef("urn:test:title")
+    source.add((URIRef(BF_WORK), V.BF.title, title))
+    source.add((title, V.BF.partNumber, Literal("2")))
+    bffi = construct_bffi(source)
+    assert (EXPECTED_WORK, RDF.type, V.BFFI.AggregatingWork) in bffi
+    assert (EXPECTED_EXPR, RDF.type, V.BFFI.AggregatingExpression) in bffi
+
+
+def test_construct_does_not_emit_aggregating_typing_for_single_hub() -> None:
+    """A single source Hub (one related uniform title) is NOT
+    aggregation. Phase E detection requires ≥2 distinct Hubs."""
+    source = _build_source()
+    rel = URIRef("urn:test:rel/0")
+    hub = URIRef("urn:test:hub/0")
+    source.add((URIRef(BF_WORK), V.BF.relation, rel))
+    source.add((rel, V.BF.associatedResource, hub))
+    source.add((hub, RDF.type, V.BF.Hub))
+    bffi = construct_bffi(source)
+    assert (EXPECTED_WORK, RDF.type, V.BFFI.AggregatingWork) not in bffi
+    assert (EXPECTED_EXPR, RDF.type, V.BFFI.AggregatingExpression) not in bffi
+
+
+def test_construct_emits_phase_f_component_expressions_for_aggregating_parent() -> None:
+    """P-52 Phase F — when parent is AggregatingExpression-typed,
+    each source Hub gets a derived component bffi:Expression URI
+    linked via ``bffi:aggregates`` (forward) and ``bffi:aggregatedBy``
+    (reverse)."""
+    source = _build_source()
+    bf_work = URIRef(BF_WORK)
+    hubs = []
+    for i in range(2):
+        rel = URIRef(f"urn:test:rel/{i}")
+        hub = URIRef(f"urn:test:hub/component-{i}")
+        source.add((bf_work, V.BF.relation, rel))
+        source.add((rel, V.BF.associatedResource, hub))
+        source.add((hub, RDF.type, V.BF.Hub))
+        source.add((hub, V.RDFS.label, Literal(f"Component {i}")))
+        hubs.append(hub)
+    bffi = construct_bffi(source)
+    # bffi:aggregates count matches Hub count
+    components = list(bffi.objects(EXPECTED_EXPR, V.BFFI.aggregates))
+    assert len(components) == 2, f"Expected 2 components, got {len(components)}: {components!r}"
+    # Each component is a bffi:Expression with the reverse bffi:aggregatedBy
+    for comp in components:
+        assert (comp, RDF.type, V.BFFI.Expression) in bffi
+        assert (comp, V.BFFI.aggregatedBy, EXPECTED_EXPR) in bffi
+        # Label survives via skos:prefLabel
+        labels = list(bffi.objects(comp, V.SKOS.prefLabel))
+        assert any("Component" in str(lbl) for lbl in labels), (
+            f"Component label missing on {comp!r}: {labels!r}"
+        )
+
+
+def test_construct_does_not_emit_components_for_non_aggregating_parent() -> None:
+    """A non-aggregating parent (single Hub) gets no
+    ``bffi:aggregates`` edges — the predicate's domain is
+    AggregatingExpression and the SPARQL gates on the multi-Hub
+    detection rule."""
+    source = _build_source()
+    rel = URIRef("urn:test:rel/0")
+    hub = URIRef("urn:test:hub/0")
+    source.add((URIRef(BF_WORK), V.BF.relation, rel))
+    source.add((rel, V.BF.associatedResource, hub))
+    source.add((hub, RDF.type, V.BF.Hub))
+    source.add((hub, V.RDFS.label, Literal("Solo component")))
+    bffi = construct_bffi(source)
+    components = list(bffi.objects(EXPECTED_EXPR, V.BFFI.aggregates))
+    assert components == [], (
+        f"Non-aggregating parent should have no bffi:aggregates edges; got {components!r}"
+    )
+
+
+def test_construct_emits_only_signal_supported_subclass_typing() -> None:
+    """The baseline fixture has ``bf:carrier <carriers/nc>`` (regular
+    printed volume) but no content-type secondary class, no
+    ``bf:issuance``, no ``bf:Manuscript`` / ``bf:Tactile`` / etc.
+    Only Phase D's carrier-derived ``bffi:Print`` should fire from
+    the fixture's signals; no other BFFI subclass should appear.
+    """
     bffi = construct_bffi(_build_source())
-    bffi_subclasses = {
+    all_bffi_subclasses = {
+        # Phase A — OWL-equivalent
         V.BFFI.Text,
         V.BFFI.NotatedMusic,
         V.BFFI.NotatedMovement,
@@ -237,20 +426,37 @@ def test_construct_emits_zero_subclass_typing_when_no_bibframe_signal() -> None:
         V.BFFI.Arrangement,
         V.BFFI.Manuscript,
         V.BFFI.Integrating,
-        V.BFFI.Print,
         V.BFFI.Electronic,
         V.BFFI.Microform,
         V.BFFI.Tactile,
         V.BFFI.Archival,
+        # Phase B — broadMatch
+        V.BFFI.CartographyWork,
+        V.BFFI.CartographyExpression,
+        V.BFFI.MovingImageWork,
+        V.BFFI.MovingImageExpression,
+        V.BFFI.MusicWork,
+        V.BFFI.MusicAudioExpression,
+        V.BFFI.NonMusicAudioWork,
+        V.BFFI.NonMusicAudioExpression,
+        # Phase C — issuance
+        V.BFFI.MonographWork,
+        V.BFFI.MonographExpression,
+        V.BFFI.SerialWork,
+        V.BFFI.SerialExpression,
+        V.BFFI.CollectionWork,
+        V.BFFI.CollectionExpression,
+        V.BFFI.CollectionManifestation,
     }
     emitted_types = (
         set(bffi.objects(EXPECTED_WORK, RDF.type))
         | set(bffi.objects(EXPECTED_EXPR, RDF.type))
         | set(bffi.objects(EXPECTED_MANIF, RDF.type))
     )
-    assert not (emitted_types & bffi_subclasses), (
-        f"Unexpected BFFI subclass typing in baseline fixture: {emitted_types & bffi_subclasses!r}"
-    )
+    expected_from_fixture = {V.BFFI.Print}  # carriers/nc → Phase D
+    extras = (emitted_types & all_bffi_subclasses) - expected_from_fixture
+    assert not extras, f"Unexpected BFFI subclass typing in baseline fixture: {extras!r}"
+    assert V.BFFI.Print in emitted_types, "Expected Phase D Print typing from bf:carrier/nc"
 
 
 def test_expression_links_back_to_work() -> None:

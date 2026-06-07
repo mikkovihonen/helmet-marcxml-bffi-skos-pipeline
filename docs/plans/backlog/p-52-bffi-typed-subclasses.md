@@ -17,15 +17,55 @@ to confirm no in-flight work has reshaped the typing surfaces.
 
 **Phase commits**: (filled in as each phase ships)
 
-- Phase A (OWL-equivalent subclass typing — 16 mirrored classes): pending
-- Phase B (broadMatch Work/Expression typing — Cartography, MovingImage, Music, NonMusicAudio): pending
-- Phase C (issuance-derived typing — Monograph / Serial / Integrating / Collection on Work + Expression): pending
-- Phase D (form-of-item Manifestation typing — Print / Electronic / Microform / Tactile, from MARC 008/23): pending
-- Phase E (Aggregating detection + Work/Expression typing): pending
-- Phase F (`bffi:aggregates` / `bffi:aggregatedBy` edges + component Expression CONSTRUCT): pending
-- Phase G (round-trip emit of 700 ind2=2 / 730 / 740 analytics): pending
-- Phase H (M9 component-Expression reconciliation): pending
-- Phase I (cataloguer-review subclass-typing + aggregation tab): pending
+- Phase A (OWL-equivalent subclass typing — 16 mirrored classes): shipped 2026-06-07 (`0689c10`)
+- Phase B (broadMatch Work/Expression typing — Cartography, MovingImage, Music, NonMusicAudio): shipped 2026-06-07
+- Phase C (issuance-derived typing — Monograph / Serial / Integrating / Collection on Work + Expression): shipped 2026-06-07
+- Phase D (carrier-form Manifestation typing — Print / Electronic / Microform): shipped 2026-06-07 (inferred from `bffi:carrier` URI rather than direct MARC 008/23 read — see implementation note below)
+- Phase E (Aggregating detection + Work/Expression typing): shipped 2026-06-07
+- Phase F (`bffi:aggregates` / `bffi:aggregatedBy` edges + component Expression CONSTRUCT): shipped 2026-06-07
+- Phase G (round-trip emit of 730 / 740 analytics): subsumed by existing converter (see below)
+- Phase G.bis (700 ind2=2 analytical-entry emit): deferred — requires component-side `bffi:contribution` enrichment
+- Phase H (M9 component-Expression reconciliation): deferred — blocked on Phase G.bis (no contributions on components yet)
+- Phase I (cataloguer-review subclass-typing + aggregation tab): deferred — additive reviewer tooling; ship when typing data has been in production long enough to be worth visualising
+
+## Implementation notes (Phase A-F, post-ship)
+
+**Phase D** ended up inferring carrier form from the existing
+``bffi:carrier`` URI (which marc2bibframe2 emits from 338 / 008/23)
+rather than reading MARC 008/23 directly. The carrier-URI route
+avoids adding a second MARC parser to M3 and covers the dominant
+Helmet carriers (regular print = ``carriers/nc``; online =
+``carriers/cr``; microfilm reel = ``carriers/he``; etc.). The
+mapping table in ``bf_to_bffi_manifestation.rq`` is non-exhaustive
+— extending it adds rows to the ``VALUES`` block, no other code
+change needed. ``bffi:Tactile`` (Braille) typing isn't yet wired
+because Helmet's Braille carriers aren't in our 500-sample probe;
+the BFFI ``owl:equivalentClass`` for ``bf:Tactile`` is already
+covered by Phase A's manifestation-side OWL-equivalence pass.
+
+**Phase G** (round-trip emit of 730 / 740): the existing
+``_emit_related_uniform_titles`` already walks
+``bffi:Manifestation → bffi:relation → bffi:Relation →
+bffi:associatedResource → bf:Hub | bf:Work`` and emits 730 / 740
+rows. After Phase F, the same source-Hub data is ALSO reachable
+via ``bffi:Expression → bffi:aggregates → component_Expression``,
+but the existing path stays the primary emit channel and the new
+component triples are additive (no round-trip impact). 700 ind2=2
+analytical-entry emit is not yet wired and is tracked separately
+as Phase G.bis.
+
+**Phase H** depends on components carrying ``bffi:contribution``
+triples to drive M9 reconciliation. Today components are minted
+from ``bf:Hub`` URIs with only an ``rdfs:label`` (passed through
+as ``skos:prefLabel``) and an optional ``bflc:marcKey``; no
+structured agent. Enriching components with contributions is a
+follow-on (extract agent from Hub's ``$g`` subfield via marcKey
+parsing or from ``bflc:simpleAgent`` literal) that gates Phase H.
+
+**Phase I** can ship any time the typing data has been in
+production long enough for reviewer visualisation to be useful.
+Sidecar JSONL during the pipeline run + HTML tab in
+``cataloguer-review.html``.
 
 **Owner**: Mikko, by default.
 

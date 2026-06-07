@@ -26,6 +26,8 @@ CONSTRUCT {
   ?workURI a bffi:Work ;
            a                        ?workTypeURI ;
            a                        ?workSubclass ;
+           a                        ?issuanceWorkSubclass ;
+           a                        ?aggregatingWorkSubclass ;
            bffi:hasExpression       ?exprURI ;
            bffi:contribution        ?contrib ;
            bffi:subject             ?subject ;
@@ -143,19 +145,80 @@ WHERE {
     ))
   }
 
-  # P-52 Phase A — Work-axis BFFI subclass typing. Mirrors the
-  # BIBFRAME class onto the ``bffi:Work`` URI with the ``owl:equivalentClass``
-  # BFFI counterpart. Two classes carried on the Work axis:
-  #   - bf:Manuscript  → bffi:Manuscript  (RDA: handwritten / typescript content)
-  #   - bf:Integrating → bffi:Integrating (RDA: updating resource, e.g. loose-leaf)
-  # Both are declared ``owl:equivalentClass`` in ``docs/lkd.rdf``.
-  # See the longer comment in bf_to_bffi_expression.rq's VALUES block.
+  # P-52 Phases A + B — Work-axis BFFI subclass typing. Phase A
+  # rows are ``owl:equivalentClass`` (semantically identical to the
+  # BIBFRAME source class); Phase B rows are ``bffi-meta:broadMatch``
+  # (BFFI broadens or narrows the meaning, but the routing intent
+  # is clear from the ontology declarations in ``docs/lkd.rdf``).
+  #
+  # Phase A — OWL-equivalent (mirror):
+  #   - bf:Manuscript  → bffi:Manuscript      (handwritten / typescript content)
+  #   - bf:Integrating → bffi:Integrating     (updating resource, e.g. loose-leaf)
+  #
+  # Phase B — broadMatch (content-shape derived):
+  #   - bf:Cartography → bffi:CartographyWork (atlases, maps)
+  #   - bf:MovingImage → bffi:MovingImageWork (films, videos)
+  #   - bf:MusicAudio  → bffi:MusicWork       (music sound recording)
+  #   - bf:NotatedMusic → bffi:MusicWork      (sheet music; same Work, different Expression)
+  #   - bf:Audio       → bffi:NonMusicAudioWork (spoken-word recording, environmental sound)
   OPTIONAL {
     ?bfWork a ?bfWorkClass .
     VALUES (?bfWorkClass ?workSubclass) {
-      (bf:Manuscript  bffi:Manuscript)
-      (bf:Integrating bffi:Integrating)
+      (bf:Manuscript   bffi:Manuscript)
+      (bf:Integrating  bffi:Integrating)
+      (bf:Cartography  bffi:CartographyWork)
+      (bf:MovingImage  bffi:MovingImageWork)
+      (bf:MusicAudio   bffi:MusicWork)
+      (bf:NotatedMusic bffi:MusicWork)
+      (bf:Audio        bffi:NonMusicAudioWork)
     }
+  }
+
+  # P-52 Phase C — issuance-derived Work-axis typing. ``bf:issuance``
+  # lives on the ``bf:Instance`` (LDR/07 routing); walk the inverse
+  # ``bf:instanceOf`` to reach this Work. Two-axis emit: the matching
+  # Expression-side typing is in ``bf_to_bffi_expression.rq``. The
+  # issuance LoC URIs are stable; we pin the four Helmet sees.
+  OPTIONAL {
+    ?bfInstanceForIssuance bf:instanceOf ?bfWork ;
+                           bf:issuance ?issuanceUri .
+    VALUES (?issuanceUri ?issuanceWorkSubclass) {
+      (<http://id.loc.gov/vocabulary/issuance/mono>        bffi:MonographWork)
+      (<http://id.loc.gov/vocabulary/issuance/serial>      bffi:SerialWork)
+      (<http://id.loc.gov/vocabulary/issuance/integrating> bffi:Integrating)
+      (<http://id.loc.gov/vocabulary/issuance/collection>  bffi:CollectionWork)
+    }
+  }
+
+  # P-52 Phase E — Aggregating Work detection. A record is an
+  # aggregation when its source ``bf:Work`` has ≥2 outgoing
+  # ``bf:relation → bf:associatedResource → bf:Hub`` chains
+  # (compilation pattern, dominant 730 / 740 routing) OR carries
+  # ``bf:partNumber`` / ``bf:partName`` on the title (multipart
+  # designator, 245 ``$n``/``$p``).
+  #
+  # 15% of the 500-record sample matches one of these triggers
+  # (76% compilation, 27% multipart). Typing is additive — an
+  # AggregatingWork is also still a MonographWork (issuance) and
+  # a MusicWork etc. (content), routed by Phases A-C.
+  OPTIONAL {
+    FILTER EXISTS {
+      ?bfWork bf:relation ?aggRel1 .
+      ?aggRel1 bf:associatedResource ?aggHub1 .
+      ?aggHub1 a bf:Hub .
+      ?bfWork bf:relation ?aggRel2 .
+      ?aggRel2 bf:associatedResource ?aggHub2 .
+      ?aggHub2 a bf:Hub .
+      FILTER(?aggHub1 != ?aggHub2)
+    }
+    BIND(bffi:AggregatingWork AS ?aggregatingWorkSubclass)
+  }
+  OPTIONAL {
+    FILTER EXISTS {
+      ?bfWork bf:title ?aggTitle .
+      ?aggTitle bf:partNumber|bf:partName ?aggPart .
+    }
+    BIND(bffi:AggregatingWork AS ?aggregatingWorkSubclass)
   }
 
   # Primary creator only (translators, editors -> Expression, see Pass 2).

@@ -31,6 +31,8 @@ PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 CONSTRUCT {
   ?manifURI a bffi:Manifestation ;
             a                          ?manifSubclass ;
+            a                          ?issuanceManifSubclass ;
+            a                          ?carrierManifSubclass ;
             bffi:expressionManifested  ?exprURI ;
             bf:identifiedBy            ?ident ;
             bf:identifiedBy            ?isbn ;
@@ -158,6 +160,48 @@ WHERE {
       (bf:Microform  bffi:Microform)
       (bf:Tactile    bffi:Tactile)
       (bf:Archival   bffi:Archival)
+    }
+  }
+
+  # P-52 Phase C — issuance-derived Manifestation-axis typing.
+  # ``bffi:CollectionManifestation`` for collection-issuance records.
+  # Other issuance values don't carry a Manifestation-axis class in
+  # BFFI (mono/serial are Work + Expression axes only).
+  OPTIONAL {
+    ?bfInstance bf:issuance ?issuanceUri .
+    VALUES (?issuanceUri ?issuanceManifSubclass) {
+      (<http://id.loc.gov/vocabulary/issuance/collection> bffi:CollectionManifestation)
+    }
+  }
+
+  # P-52 Phase D — carrier-form-derived Manifestation typing.
+  # MARC 008/23 form-of-item is the canonical source signal, but
+  # marc2bibframe2 doesn't emit ``bf:Print`` / ``bf:Electronic`` etc.
+  # on the bf:Instance. We infer from the LoC ``bffi:carrier`` URI
+  # (which marc2bibframe2 DOES emit, derived from 338 / 008/23).
+  # The mapping covers the dominant Helmet carriers; unmapped
+  # carriers fall through to no Manifestation-axis typing — better
+  # than guessing.
+  OPTIONAL {
+    ?bfInstance bf:carrier ?carrierUri .
+    VALUES (?carrierUri ?carrierManifSubclass) {
+      # nide / nb / no = regular printed volume / pamphlet / volume
+      (<http://id.loc.gov/vocabulary/carriers/nc> bffi:Print)
+      (<http://id.loc.gov/vocabulary/carriers/nb> bffi:Print)
+      (<http://id.loc.gov/vocabulary/carriers/no> bffi:Print)
+      # cr = online resource (typically electronic journals / ebooks)
+      (<http://id.loc.gov/vocabulary/carriers/cr> bffi:Electronic)
+      # cb = computer chip cartridge
+      (<http://id.loc.gov/vocabulary/carriers/cb> bffi:Electronic)
+      # ce = computer disc cartridge
+      (<http://id.loc.gov/vocabulary/carriers/ce> bffi:Electronic)
+      # he / hd / hf = microfilm reel / microfilm slip / microfilm cassette
+      (<http://id.loc.gov/vocabulary/carriers/he> bffi:Microform)
+      (<http://id.loc.gov/vocabulary/carriers/hd> bffi:Microform)
+      (<http://id.loc.gov/vocabulary/carriers/hf> bffi:Microform)
+      # hc / hb = microfiche cassette / microfiche
+      (<http://id.loc.gov/vocabulary/carriers/hc> bffi:Microform)
+      (<http://id.loc.gov/vocabulary/carriers/hb> bffi:Microform)
     }
   }
 
