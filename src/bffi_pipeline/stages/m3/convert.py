@@ -60,11 +60,16 @@ def _write_bffi_corpus(bffi_dir: Path, corpus_path: Path) -> int:
     every per-record ``.ttl``. The per-record layout stays canonical
     — the concat is a derived view.
 
-    ``@prefix`` declarations are deduplicated (single block at the
-    top, per-record headers stripped) to avoid a multi-millionfold
-    redeclaration that rdflib's parser would walk on a full-corpus
-    parse. Returns the number of per-record files concatenated, or
-    ``0`` when the concat was skipped or no input files existed.
+    Each per-record file's ``@prefix`` declarations are kept INLINE
+    with its body (not pooled at the top of the corpus). Pooling
+    silently corrupts the graph when different files use the same
+    prefix name (e.g. ``ns1:``) for different namespaces — see the
+    expanded comment inside the function for the failure mode. Mid-
+    file ``@prefix`` redeclaration is legal Turtle and rdflib's
+    parser handles it correctly.
+
+    Returns the number of per-record files concatenated, or ``0``
+    when the concat was skipped or no input files existed.
     """
     if not bffi_dir.is_dir():
         return 0
@@ -76,28 +81,34 @@ def _write_bffi_corpus(bffi_dir: Path, corpus_path: Path) -> int:
         if all(p.stat().st_mtime <= corpus_mtime for p in per_record):
             return 0
 
-    seen_prefixes: set[str] = set()
-    prefix_lines: list[str] = []
+    # Keep each per-record file's ``@prefix`` declarations INLINE
+    # with its body — do not pool them at the top of the concat.
+    #
+    # The previous global-prefix-dedup approach silently corrupted
+    # output when different files serialised the same namespace
+    # under different prefix names. rdflib auto-assigns short prefix
+    # names per-Graph; the same namespace (e.g. ``bflc`` /
+    # ``bffi-prov``) can serialise as ``ns1:`` in one file and
+    # ``ns2:`` in another — and vice versa. Pooling all
+    # ``@prefix`` declarations meant both
+    # ``@prefix ns1: <bflc>`` and ``@prefix ns1: <bffi-prov>`` could
+    # land in the same block; per Turtle spec the LAST declaration
+    # wins for the rest of the file. Bodies that used ``ns1:`` for
+    # bflc then got parsed under bffi-prov (or vice versa), silently
+    # rewriting ~36% of ``bflc:simple*`` triples into the wrong
+    # namespace. The round-trip converter's MARC 264 path then
+    # missed those triples and emitted everything into ``$c``.
+    #
+    # Mid-file ``@prefix`` redeclaration is legal Turtle and rdflib's
+    # parser honours it. Per-chunk-inline prefixes keep each body's
+    # prefix-to-URI mapping consistent with the file it came from.
     body_chunks: list[str] = []
     for path in per_record:
-        with path.open("r", encoding="utf-8") as fh:
-            body_lines: list[str] = []
-            for line in fh:
-                stripped = line.strip()
-                if stripped.startswith("@prefix") or stripped.startswith("@base"):
-                    if stripped not in seen_prefixes:
-                        seen_prefixes.add(stripped)
-                        prefix_lines.append(line.rstrip("\n"))
-                    continue
-                body_lines.append(line)
-            body_chunks.append("".join(body_lines).rstrip("\n"))
+        body_chunks.append(path.read_text(encoding="utf-8").rstrip("\n"))
 
     tmp = corpus_path.with_suffix(corpus_path.suffix + ".tmp")
     corpus_path.parent.mkdir(parents=True, exist_ok=True)
     with tmp.open("w", encoding="utf-8") as fh:
-        for line in prefix_lines:
-            fh.write(line + "\n")
-        fh.write("\n")
         for chunk in body_chunks:
             if not chunk.strip():
                 continue

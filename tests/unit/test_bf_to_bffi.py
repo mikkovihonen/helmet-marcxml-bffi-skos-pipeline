@@ -1538,12 +1538,9 @@ def test_convert_one_survives_record_with_malformed_date(tmp_path: Path) -> None
 # --- P-19 corpus concat ---------------------------------------------------
 
 
-def test_p19_write_bffi_corpus_concatenates_with_deduped_prefixes(tmp_path: Path) -> None:
+def test_p19_write_bffi_corpus_concatenates_per_record_files(tmp_path: Path) -> None:
     """P-19 Phase A — _write_bffi_corpus collapses N per-record Turtle
-    files into one stream with prefix declarations deduplicated.
-    Without dedup, an 800 k-record concat would carry N copies of the
-    same ``@prefix`` lines and slow rdflib's parser on M8's load.
-    """
+    files into one stream parseable by rdflib in a single open()."""
     bffi_dir = tmp_path / "bffi"
     bffi_dir.mkdir()
     (bffi_dir / "a.ttl").write_text(
@@ -1565,10 +1562,14 @@ def test_p19_write_bffi_corpus_concatenates_with_deduped_prefixes(tmp_path: Path
     written = _write_bffi_corpus(bffi_dir, corpus)
     assert written == 2
 
+    # Each per-record file's prefix block stays inline with its body
+    # (one ``@prefix bf:`` per file). Pooling them at the top of the
+    # corpus would silently corrupt the graph when different files
+    # use the same prefix name (e.g. ``ns1:``) for different
+    # namespaces — see ``test_p19_corpus_handles_conflicting_prefix_names``.
     body = corpus.read_text(encoding="utf-8")
-    # Each prefix appears exactly once at the top.
-    assert body.count("@prefix bf:") == 1
-    assert body.count("@prefix bffi:") == 1
+    assert body.count("@prefix bf:") == 2
+    assert body.count("@prefix bffi:") == 2
     # Both record bodies survive into the concat.
     assert "<http://example.invalid/a>" in body
     assert "<http://example.invalid/b>" in body
@@ -1578,6 +1579,63 @@ def test_p19_write_bffi_corpus_concatenates_with_deduped_prefixes(tmp_path: Path
     subjects = {str(s) for s in g.subjects()}
     assert "http://example.invalid/a" in subjects
     assert "http://example.invalid/b" in subjects
+
+
+def test_p19_corpus_handles_conflicting_prefix_names(tmp_path: Path) -> None:
+    """Regression guard for the bug observed in run 20260607-1049-3f262f:
+    rdflib serialises a Graph with auto-assigned short prefix names
+    (``ns1:``, ``ns2:``, etc.) — and the same namespace can be
+    serialised under different prefix names by different files. If the
+    corpus concat pools ``@prefix`` declarations at the top, the
+    Turtle parser sees conflicting declarations for the same prefix
+    name and the LAST one wins for the whole file. Bodies that meant
+    to use ``ns1:`` for bflc get parsed as ``bffi-prov:`` (or
+    vice-versa), silently rewriting predicate URIs across ~36% of
+    records and breaking MARC 264 round-trip (everything dumped in
+    ``$c``).
+
+    This test simulates the failure mode: file A serialises bflc as
+    ``ns1:``; file B serialises bflc as ``ns2:`` (and bffi-prov as
+    ``ns1:``). After concat, both files' ``ns1:simpleAgent`` triples
+    must still resolve to bflc:simpleAgent in their respective
+    contexts.
+    """
+    bffi_dir = tmp_path / "bffi"
+    bffi_dir.mkdir()
+    (bffi_dir / "a.ttl").write_text(
+        "@prefix ns1: <http://id.loc.gov/ontologies/bflc/> .\n"
+        "@prefix ns2: <http://urn.fi/URN:NBN:fi:schema:bffi-prov#> .\n"
+        "\n"
+        '<http://example.invalid/a> ns1:simpleAgent "PublisherA" .\n',
+        encoding="utf-8",
+    )
+    (bffi_dir / "b.ttl").write_text(
+        "@prefix ns1: <http://urn.fi/URN:NBN:fi:schema:bffi-prov#> .\n"
+        "@prefix ns2: <http://id.loc.gov/ontologies/bflc/> .\n"
+        "\n"
+        '<http://example.invalid/b> ns2:simpleAgent "PublisherB" .\n',
+        encoding="utf-8",
+    )
+
+    corpus = tmp_path / BFFI_CORPUS_FILENAME
+    _write_bffi_corpus(bffi_dir, corpus)
+
+    g = Graph()
+    g.parse(str(corpus), format="turtle")
+
+    bflc_simple_agent = URIRef("http://id.loc.gov/ontologies/bflc/simpleAgent")
+    bffi_prov_simple_agent = URIRef("http://urn.fi/URN:NBN:fi:schema:bffi-prov#simpleAgent")
+
+    # Both records should resolve to bflc:simpleAgent — the
+    # cataloguer's intent in each per-record file.
+    a_values = {str(o) for o in g.objects(URIRef("http://example.invalid/a"), bflc_simple_agent)}
+    b_values = {str(o) for o in g.objects(URIRef("http://example.invalid/b"), bflc_simple_agent)}
+    assert a_values == {"PublisherA"}, a_values
+    assert b_values == {"PublisherB"}, b_values
+
+    # Neither record should leak into bffi-prov:simpleAgent.
+    assert not any(g.triples((None, bffi_prov_simple_agent, Literal("PublisherA"))))
+    assert not any(g.triples((None, bffi_prov_simple_agent, Literal("PublisherB"))))
 
 
 def test_p19_write_bffi_corpus_is_idempotent_when_fresh(tmp_path: Path) -> None:
