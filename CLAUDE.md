@@ -11,7 +11,7 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - `docs/archived/marcxml-to-bffi-skosmos-pipeline.md` — original end-to-end technical specification (archived). Section-level back-references from older commits, plans, and source comments still point here; live successors are listed at the top of that document.
 - `docs/external-dependencies.md` — records and confirmations to request from Helmet cataloguers.
 - `docs/ci-strategy.md` — CI rationale and PR template.
-- `docs/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions; consult before adding any `bffi:*` term to spec, code, or shapes.**
+- `docs/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions, AND the closed set of terms we may emit under the `bffi:` namespace.** See the BFFI namespace discipline rule in Conventions.
 - `docs/plans/` — committed-to-action plans of record (`p-<NN>-<slug>.md`). Each plan has sequenced phases with verification checkpoints, a risk register, and a rollback procedure, plus a `Plan-base commit` and `Phase commits` for tying execution to git history. **State is encoded by sub-folder**: `proposed/` (forward-looking ideas, proposal-shape content, status `proposed | rejected (reason)`), `backlog/` (graduated, drafted, not started), `in-progress/` (at least one phase shipped), `completed/` (done), `abandoned/` (dropped, with reason). Filenames use the `p-<NN>-<slug>.md` convention uniformly across every sub-folder so state transitions are a single `git mv` (plus a content rewrite from proposal-shape to plan-shape on first graduation). `git log --follow <path>` traces a document's lineage end-to-end. Completed plans with `Source proposal: prop-<NN>-...` fields predate the 2026-05-14 naming unification and are historically accurate — don't rewrite them. **Consult `docs/plans/proposed/` and the current plans before recommending an architectural change** — the idea may already be on record.
 - `docs/archived/` — historical / superseded documents kept for reference only. Includes `BUILD_PLAN.md` (original build-order checklist for M0-M13 — superseded by `docs/plans/`; **don't cite it as the source of M-number meanings in new code or docs**, the M-prefix today means pipeline stage, not build milestone) and `marcxml-to-bffi-skosmos-pipeline.md` (original technical spec; live successors are listed in the document's archived banner). Path references from source code or live docs may point here; do not edit archived material except for typos or to add a supersede pointer.
 
@@ -39,6 +39,14 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 ## Conventions
 
 - **URIs:** All minted via `src/bffi_pipeline/uris.py`. Never concatenate URI strings elsewhere. Deterministic SHA-1 of canonical inputs; UUIDs only for `prov:Activity` records.
+- **BFFI namespace discipline:** The `bffi:` namespace (`http://urn.fi/URN:NBN:fi:schema:bffi:`) is **closed**. We may only emit classes and properties that exist in `docs/lkd.rdf`. When we need something not in `lkd.rdf`, pick in this order:
+    1. **Reuse an existing standard term.** RDF (`rdf:Statement` reification), RDFS, OWL, SKOS, PROV-O (`prov:hadPrimarySource`, `prov:wasGeneratedBy`, etc.), BIBFRAME (`bf:*` — also closed; consult its ontology), DC Terms. Prefer this path.
+    2. **Use the `bffi-prov:` namespace** (`http://urn.fi/URN:NBN:fi:schema:bffi-prov#`) for *pipeline-internal* metadata — Activity classes, decision audit predicates, synthetic-sentinel flags. This namespace is ours; extending it is fine.
+    3. **Propose adding the term to BFFI through NLF.** Open a proposal in `docs/plans/proposed/` (precedent: P-49 Layer 3). Until ratified, do not emit it under `bffi:`.
+
+  Test `tests/unit/test_bffi_namespace_discipline.py` enforces this: scans `src/bffi_pipeline/provenance/vocab.py` and `sparql/*.rq` for every `bffi:<name>` reference and asserts each one appears as `rdf:about="http://urn.fi/URN:NBN:fi:schema:bffi:<name>"` in `docs/lkd.rdf`. CI breaks on any local mint.
+
+  An ``_GRANDFATHERED`` allowlist in that test carries a handful of pre-existing local mints (AdminMetadata dates, series/title linking predicates) inherited from earlier work — each annotated with its target replacement. **Don't add to it.** New code goes through the three legitimate paths above.
 - **Prompts:** All in `prompts/` as versioned files. Hashed at runtime; hash logged to provenance. Never inline in Python code.
 - **SPARQL:** All in `sparql/` as versioned files. Read at startup; parametrize with Jinja2 if needed (autoescape off).
 - **Idempotency:** Every stage has deterministic outputs and writes atomically (`.tmp` then rename). Re-runs skip when output is newer than input unless `--force`.
@@ -62,5 +70,6 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
 - Don't introduce a workflow engine (Airflow, Prefect, Dagster). The Makefile + typer CLI is the orchestration.
 - Don't reach for async unless a stage genuinely benefits.
 - Don't modify `third_party/marc2bibframe2/` (git submodule). Wrap, don't fork.
+- Don't mint local `bffi:` terms. The namespace is closed to what `docs/lkd.rdf` declares — see the **BFFI namespace discipline** rule in Conventions for the legitimate alternatives (standard W3C / PROV-O / BIBFRAME terms; `bffi-prov:` for pipeline metadata; NLF proposal for genuine ontology gaps).
 - Don't merge silent failures into provenance. Log `uncertain` with the actual error.
 - Don't add features that aren't covered by an active plan in `docs/plans/`. Surface new directions as a proposal in `docs/plans/proposed/` first; only graduate into a plan under `docs/plans/backlog/` after the trade-off is on the record.
