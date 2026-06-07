@@ -94,7 +94,7 @@ def _first_pref_label(graph: Graph, subject: URIRef | None) -> str | None:
     return None
 
 
-def _first_rdfs_label(graph: Graph, subject: URIRef | None) -> str | None:
+def _first_rdfs_label(graph: Graph, subject: Node | None) -> str | None:
     if subject is None:
         return None
     for label in graph.objects(subject, V.RDFS.label):
@@ -256,9 +256,13 @@ def build_aggregation_report(canonical_path: Path, output_path: Path) -> int:
             agent_name: str | None = None
             for contrib in graph.objects(comp, V.BFFI.contribution):
                 for agent in graph.objects(contrib, V.BFFI.agent):
+                    # Agents synthesised by Phase G.bis from Hub
+                    # marcKey ``$g`` subfields are blank nodes; agents
+                    # from other paths (e.g. M9-bound authority URIs)
+                    # are URIRefs. The label walk works for both.
+                    agent_name = _first_rdfs_label(graph, agent)
                     if isinstance(agent, URIRef):
                         agent_uri = agent
-                        agent_name = _first_rdfs_label(graph, agent)
                     break
                 break
             status, authority = _reconciliation_status_for_agent(graph, agent_uri)
