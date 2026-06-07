@@ -23,7 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final, cast
 
-from rdflib import Graph, URIRef
+from rdflib import Graph
 from rdflib.term import Node
 
 from bffi_pipeline.provenance import vocab as V
@@ -56,22 +56,24 @@ def construct_bffi(source: Graph) -> Graph:
         result = source.query(query)
         for triple in cast("Iterable[tuple[Node, Node, Node]]", result):
             out.add(triple)
-    # P-50 fromMarcField passthrough for URI-keyed source entities.
-    # M2-post attaches ``bffi-prov:fromMarcField`` to raw-bib URIs of
-    # entities marc2bibframe2 mints from each source field (#Agent700-N,
-    # #Hub730-N, #Topic650-N, #Place651-N, etc.). Those URIs survive
-    # verbatim through the M3 CONSTRUCTs (the BFFI Contribution / Subject
-    # links target the same raw URI), so a flat identity copy at the M3
-    # boundary lands the token on the BFFI-side counterpart with zero
-    # SPARQL touch. Phase C's Statement-subject token is already emitted
-    # by the work CONSTRUCT and would be duplicated here — set semantics
-    # means it's a no-op. Blank-node-keyed entities (bf:Isbn / bf:Note /
-    # bf:Title / bf:Extent / bf:ProvisionActivity that M2-post matched
-    # via flat-literal-* paths) are excluded: their bnode identity isn't
-    # preserved across rdflib serialise/parse cycles, so a flat copy
-    # wouldn't survive the M8 corpus concat. Coverage for those needs a
-    # separate URI-minting redesign (tracked separately).
+    # P-50 fromMarcField passthrough. M2-post attaches
+    # ``bffi-prov:fromMarcField`` to raw-bib URIs of marc2bibframe2-minted
+    # entities (``#Agent700-N`` / ``#Hub730-N`` / ``#Topic650-N`` /
+    # ``#Place651-N`` etc.) and to source blank nodes for flat-field
+    # entities (``bf:Isbn`` / ``bf:Note`` / ``bf:Title`` / ``bf:Extent`` /
+    # ``bf:ProvisionActivity`` from MARC 020 / 500 / 245 / 300 / 264 …).
+    # The M3 CONSTRUCTs reference these source nodes verbatim as targets
+    # of ``bffi:agent`` / ``bffi:subject`` / ``bf:identifiedBy`` / nested
+    # Manifestation links, so a flat identity copy at the M3 boundary
+    # lands the token on the BFFI-side counterpart with zero SPARQL
+    # touch. URI-keyed subjects survive trivially; bnode-keyed subjects
+    # also survive because rdflib preserves bnode identity within a
+    # single ``Graph`` and the per-record Turtle serialiser emits a
+    # consistent bnode label for each ``BNode`` instance, so the M8
+    # corpus concat round-trips the identity within the per-record
+    # scope (sufficient for the per-record round-trip diff consumer).
+    # Phase C's Statement-subject token is already emitted by the work
+    # CONSTRUCT — set semantics dedupes the duplicate.
     for s, _p, o in source.triples((None, V.fromMarcField, None)):
-        if isinstance(s, URIRef):
-            out.add((s, V.fromMarcField, o))
+        out.add((s, V.fromMarcField, o))
     return out

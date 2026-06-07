@@ -125,18 +125,21 @@ def test_construct_passes_through_uri_keyed_from_marc_field_tokens() -> None:
     assert tokens == [Literal("10000001:100:1")]
 
 
-def test_construct_skips_bnode_keyed_from_marc_field_tokens() -> None:
-    """Blank-node-keyed source entities (``bf:Isbn`` / ``bf:Note`` /
-    ``bf:Title`` / ``bf:Extent`` / ``bf:ProvisionActivity``) get fresh
-    bnodes in the M3 CONSTRUCT output — copying their fromMarcField
-    triple under the source bnode would dangle in the output graph.
-    Phase B tokens for these entities need a separate URI-minting
-    redesign; until then, the passthrough deliberately excludes them."""
+def test_construct_passes_through_bnode_keyed_from_marc_field_tokens() -> None:
+    """Phase B flat-field tokens (``bf:Isbn`` / ``bf:Note`` / ``bf:Title``
+    / ``bf:Extent`` / ``bf:ProvisionActivity``) live on source blank
+    nodes. rdflib preserves bnode identity within a single ``Graph``
+    so the same blank-node object that's emitted on the BFFI side via
+    the manifestation CONSTRUCT also carries the ``fromMarcField``
+    triple after the passthrough. The per-record Turtle serialiser
+    uses one consistent label per ``BNode``, so the M8 corpus concat
+    round-trips the identity within per-record scope — sufficient for
+    the round-trip diff comparator's per-Manifestation scan."""
     source = _build_source()
     bnode_subject = BNode()
     source.add((bnode_subject, V.fromMarcField, Literal("10000001:020:1")))
     bffi = construct_bffi(source)
-    assert (bnode_subject, V.fromMarcField, None) not in bffi
+    assert (bnode_subject, V.fromMarcField, Literal("10000001:020:1")) in bffi
 
 
 def test_expression_links_back_to_work() -> None:
