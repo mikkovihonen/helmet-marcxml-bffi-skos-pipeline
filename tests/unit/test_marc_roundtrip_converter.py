@@ -173,9 +173,12 @@ def _subfield(df: ET.Element, code: str) -> str | None:
 def test_leader_is_present(minimal_record: ET.Element) -> None:
     leader = _find(minimal_record, "m:leader")
     assert leader is not None
-    # Default: language material (LDR/06 'a'), monograph ('m'),
-    # full-level encoding (LDR/17 blank). 24 chars total.
-    assert leader.text == "00000nam  2200000   4500"
+    # Default leader, 24 chars: pos 5='n' (new), 6='a' (language
+    # material), 7='m' (monograph), 8=' ' (type of control blank),
+    # 9='a' (UTF-8 — we always emit MARCXML in UTF-8), 17=' '
+    # (full-level encoding default), 20-23='4500' (MARC structural
+    # suffix).
+    assert leader.text == "00000nam a2200000   4500"
     assert len(leader.text) == 24
 
 
@@ -224,6 +227,59 @@ def test_leader_pos17_reflects_encoding_level_from_admin_metadata() -> None:
     assert leader is not None and leader.text is not None
     assert leader.text[17] == "7"
     assert len(leader.text) == 24
+
+
+def test_leader_pos05_reflects_record_status_from_admin_metadata() -> None:
+    """LDR/05 = source record status — from ``bf:status`` URI on
+    the AdminMetadata block. URI tail is the LDR/05 character."""
+    g = _build_minimal_graph()
+    admin = BNode()
+    g.add((MANIF, V.BFFI.adminMetadata, admin))
+    g.add((admin, V.BF.status, URIRef("http://id.loc.gov/vocabulary/mstatus/c")))
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[5] == "c"
+
+
+def test_leader_pos05_defaults_to_n_when_no_status() -> None:
+    """No source ``bf:status`` → LDR/05 defaults to 'n' (new),
+    Helmet's dominant pattern."""
+    g = _build_minimal_graph()
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[5] == "n"
+
+
+def test_leader_pos07_reflects_bibliographic_level_from_issuance() -> None:
+    """LDR/07 = bibliographic level — from ``bf:issuance`` URI on
+    the Manifestation. ``issuance/serial`` → 's' (serial)."""
+    g = _build_minimal_graph()
+    g.add((MANIF, V.BF.issuance, URIRef("http://id.loc.gov/vocabulary/issuance/serial")))
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[7] == "s"
+
+
+def test_leader_pos07_defaults_to_m_when_no_issuance() -> None:
+    """Default LDR/07 'm' (monograph) when no ``bf:issuance``."""
+    g = _build_minimal_graph()
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[7] == "m"
+
+
+def test_leader_pos09_is_utf8_char_encoding_marker() -> None:
+    """LDR/09 = 'a' always — this pipeline emits MARCXML in UTF-8,
+    so the encoding flag must say so (legacy MARC-8 was blank)."""
+    g = _build_minimal_graph()
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[9] == "a"
 
 
 def test_leader_pos17_ignores_pipeline_internal_enc_level_marker() -> None:

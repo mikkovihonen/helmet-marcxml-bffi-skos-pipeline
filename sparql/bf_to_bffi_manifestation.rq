@@ -36,6 +36,7 @@ CONSTRUCT {
             bf:identifiedBy            ?audIssue ;
             bf:identifiedBy            ?sysCtrl ;
             dct:identifier             ?helmetBibIdLiteral ;
+            bf:issuance                ?issuance ;
             bffi:media                 ?mediaURI ;
             bffi:carrier               ?carrierURI ;
             bffi:digitalCharacteristic ?digitalCharURI ;
@@ -65,7 +66,8 @@ CONSTRUCT {
               bffi:descriptionLanguage    ?descLangURI ;
               bffi:descriptionConventions ?descConvURI ;
               bffi:changeDate             ?transactionDate ;
-              bffi:encodingLevel          ?sourceEncodingLevel .
+              bffi:encodingLevel          ?sourceEncodingLevel ;
+              bf:status                   ?recordStatus .
   ?adminAgent a bf:Agent ;
               bf:code ?adminAgencyCode .
   ?bfToc   a               bffi:TableOfContents ;
@@ -238,17 +240,17 @@ WHERE {
     }
   }
 
-  # MARC 008 pos 00-05 (date entered on file, YYMMDD). marc2bibframe2
-  # emits the source 005 transaction timestamp as
-  # ``bf:adminMetadata → bf:AdminMetadata (bf:status mstatus/n) →
-  # bf:date "YYYY-MM-DDThh:mm:ss"``. Filter on status=n to pick the
-  # SOURCE record's date rather than marc2bibframe2's own conversion
-  # date (which lives on a sibling AdminMetadata block with
-  # ``bf:status mstatus/c``).
+  # MARC 008 pos 00-05 (date entered on file, YYMMDD) + LDR/05
+  # (record status). marc2bibframe2 emits the source 005 timestamp
+  # AND the source LDR/05 status code on the same AdminMetadata
+  # block. The source-side block has ``bf:date`` (the source 005
+  # timestamp). A sibling block represents marc2bibframe2's own
+  # conversion event with ``bf:status mstatus/c`` and no source
+  # date — distinguishable by the presence of ``bf:date``.
   OPTIONAL {
     ?bfWork bf:adminMetadata ?txAdmin .
-    ?txAdmin bf:status <http://id.loc.gov/vocabulary/mstatus/n> ;
-             bf:date  ?transactionDate .
+    ?txAdmin bf:status ?recordStatus ;
+             bf:date   ?transactionDate .
   }
   # MARC LDR/17 — encoding level. marc2bibframe2 emits the
   # cataloguer-typed source value as ``bflc:encodingLevel`` on the
@@ -267,6 +269,16 @@ WHERE {
     FILTER(isIRI(?sourceEncodingLevel))
   }
   OPTIONAL { ?bfInstance bf:publicationStatement   ?publicationStatement }
+  # MARC LDR/07 — bibliographic level. marc2bibframe2 emits the
+  # source's issuance code as ``bf:issuance`` on the bf:Instance,
+  # pointing at ``http://id.loc.gov/vocabulary/issuance/<code>``
+  # (e.g. ``mono`` for monograph). Routed verbatim onto the canonical
+  # Manifestation; round-trip converter maps the URI tail to the
+  # LDR/07 character.
+  OPTIONAL {
+    ?bfInstance bf:issuance ?issuance .
+    FILTER(isIRI(?issuance))
+  }
   OPTIONAL { ?bfInstance bf:responsibilityStatement ?responsibilityStatement }
   # MARC 300 $a (extent) lives on ``bf:Extent.rdfs:label``; MARC
   # 300 $b (other physical details) lives in a nested

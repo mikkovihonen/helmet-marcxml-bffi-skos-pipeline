@@ -85,6 +85,17 @@ _INDICATOR_BLANK: Final[str] = " "
 #: internal scaffolding.
 _RAW_BIB_URI_PREFIX: Final[str] = "http://urn.fi/URN:NBN:fi:bib:raw/"
 
+#: BIBFRAME ``bf:issuance`` URI tail → MARC LDR/07 character.
+#: Covers the dominant Helmet bibliographic-level codes; unknown tails
+#: fall back to ``'m'`` (monograph) in :meth:`_bibliographic_level_code`.
+_BF_ISSUANCE_TO_LDR07: Final[dict[str, str]] = {
+    "mono": "m",  # monograph / single item
+    "serial": "s",  # serial
+    "integrating": "i",  # integrating resource
+    "single": "a",  # monographic component part
+    "multi": "m",  # multipart monograph maps to 'm' too
+}
+
 #: LoC ``organizations`` URI prefix. The URI tail reduces the MARC
 #: organization code by lower-casing and removing hyphens — the
 #: ``_ORG_URI_TO_MARC_CODE`` table reverses the dominant Helmet cases.
@@ -432,16 +443,20 @@ class _Reconstructor:
 
         Reconstructable positions:
 
-          05  record status — fixed at 'n' (new). BFFI doesn't carry
-              the new/changed/deleted bit, but 'n' is the dominant
-              Helmet case.
+          05  record status — derived from ``bf:status`` URI on the
+              AdminMetadata block whose ``bf:date`` is the source
+              005 timestamp (the source-side AdminMetadata).
+              Defaults to ``'n'`` (new) when no source signal.
           06  type of record (LDR/06) — derived from the canonical
               ``bffi:Work``'s BIBFRAME secondary ``rdf:type``
               (``bf:MusicAudio`` → 'j', ``bf:Cartography`` → 'e',
-              etc.). Defaults to 'a' (language material).
-          07  bibliographic level — fixed at 'm' (monograph). Helmet's
-              dominant pattern; multipart resources surface as
-              ``changed`` rows in the diff when the source disagrees.
+              etc.). Defaults to ``'a'`` (language material).
+          07  bibliographic level — derived from the Manifestation's
+              ``bf:issuance`` URI tail (``mono`` → 'm', ``serial``
+              → 's', etc.). Defaults to ``'m'`` (monograph).
+          09  character coding scheme — fixed at ``'a'`` (UTF-8).
+              MARCXML is always UTF-8 in this pipeline; the legacy
+              MARC-8 form (blank) doesn't apply.
           17  encoding level — derived from the AdminMetadata's
               ``bffi:encodingLevel`` triple pointing at
               ``id.loc.gov/vocabulary/menclvl/<code>``; the URI tail
@@ -449,23 +464,77 @@ class _Reconstructor:
               (full level).
           10-11, 20-23 — fixed (``22``, ``4500``); MARC structural.
 
+        Positions left blank (no reliable BIBFRAME signal):
+
+          08  type of control (archival flag — rare in Helmet)
+          18  descriptive cataloguing form (marc2bibframe2 emits
+              only the pipeline's own conventions, not the source's)
+          19  multipart resource record level (rare; defaults blank)
+
         Length placeholder positions 0-4 + base-address 12-16 stay
         zero-padded; serialisers usually rewrite these.
         """
+        status_char = self._record_status_code()
         type_char = self._record_type_code()
+        bib_level_char = self._bibliographic_level_code()
         enc_char = self._encoding_level_code()
         # MARC bib leader layout (24 chars total):
         # 00-04 record length placeholder ``00000``
-        # 05    record status ``n``
+        # 05    record status (this method computes)
         # 06    type of record (this method computes)
-        # 07    bibliographic level ``m`` (monograph)
-        # 08-09 spaces (type of control + char encoding)
+        # 07    bibliographic level (this method computes)
+        # 08    type of control (blank — no BIBFRAME signal)
+        # 09    character coding scheme (``a`` = UTF-8, fixed)
         # 10-11 ``22`` (indicator + subfield-code counts)
         # 12-16 base-address placeholder ``00000``
         # 17    encoding level (this method computes)
         # 18-19 spaces (descriptive cataloging form + multipart)
         # 20-23 ``4500`` (MARC structural fixed suffix)
-        return f"00000n{type_char}m  2200000{enc_char}  4500"
+        return f"00000{status_char}{type_char}{bib_level_char} a2200000{enc_char}  4500"
+
+    def _record_status_code(self) -> str:
+        """Return the MARC LDR/05 character (record status).
+
+        Walks the Manifestation's AdminMetadata blocks looking for
+        one with a ``bf:status`` URI from the LoC ``mstatus``
+        vocabulary — the URI tail IS the LDR/05 character. Defaults
+        to ``'n'`` (new) when no source signal.
+
+        M3 routes ``bf:status`` only from the source-side
+        AdminMetadata (the block with ``bf:date``), so this walk
+        won't pick up marc2bibframe2's own conversion-event status.
+        """
+        mstatus_prefix = "http://id.loc.gov/vocabulary/mstatus/"
+        for admin in self.graph.objects(self.manifestation, V.BFFI.adminMetadata):
+            for status in self.graph.objects(admin, V.BF.status):
+                if not isinstance(status, URIRef):
+                    continue
+                s = str(status)
+                if s.startswith(mstatus_prefix):
+                    tail = s[len(mstatus_prefix) :]
+                    if len(tail) == 1:
+                        return tail
+        return "n"
+
+    def _bibliographic_level_code(self) -> str:
+        """Return the MARC LDR/07 character (bibliographic level).
+
+        Walks the Manifestation's ``bf:issuance`` URIs; takes the
+        URI tail and maps it via :data:`_BF_ISSUANCE_TO_LDR07`.
+        Defaults to ``'m'`` (monograph) when no source signal —
+        Helmet's dominant pattern.
+        """
+        issuance_prefix = "http://id.loc.gov/vocabulary/issuance/"
+        for issuance in self.graph.objects(self.manifestation, V.BF.issuance):
+            if not isinstance(issuance, URIRef):
+                continue
+            s = str(issuance)
+            if s.startswith(issuance_prefix):
+                tail = s[len(issuance_prefix) :]
+                code = _BF_ISSUANCE_TO_LDR07.get(tail)
+                if code is not None:
+                    return code
+        return "m"
 
     #: BIBFRAME secondary ``rdf:type`` → MARC LDR/06 character.
     #: Priority is the iteration order: more specific types win when a
