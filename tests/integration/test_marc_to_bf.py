@@ -33,7 +33,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "data" / "sample-marcxml"
 #: with no 1XX/7XX and no parseable 245$c. M2 falls through to B3
 #: and links the record to the shared sentinel agent at
 #: ``http://urn.fi/URN:NBN:fi:bib:agent:unknown`` with the
-#: ``bffi:syntheticSentinel "true"`` flag attached.
+#: ``bffi-prov:syntheticSentinel "true"`` flag attached.
 VALID_IDS = {
     "10000001",
     "10000002",
@@ -192,7 +192,7 @@ def test_b3_sentinel_carries_synthetic_sentinel_flag(
 ) -> None:
     """P-41 Phase B.6 — the B3 salvage fixture (10000008) routes
     through to the shared sentinel agent. The BFFI graph must carry
-    ``bffi:syntheticSentinel "true"^^xsd:boolean`` on the sentinel
+    ``bffi-prov:syntheticSentinel "true"^^xsd:boolean`` on the sentinel
     agent URI so :func:`is_synthetic_sentinel` returns True (and
     P-39's M9 walker can short-circuit on it without wasting a
     KANTO call). The Synthesis Activity carries tier=B3 and

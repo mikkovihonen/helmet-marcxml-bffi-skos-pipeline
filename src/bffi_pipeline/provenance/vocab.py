@@ -61,35 +61,34 @@ converterVersion: URIRef = BFFI_PROV.converterVersion
 #: across editions (one token per contributing record).
 fromMarcField: URIRef = BFFI_PROV.fromMarcField
 
-# --- BFFI predicates added by P-50 Phase C (SubjectLink reification) -----
+# --- P-50 Phase C — subject reification via standard rdf:Statement -------
+#
+# Originally proposed as a triplet of locally-minted ``bffi:SubjectLink`` /
+# ``bffi:hasSubjectLink`` / ``bffi:subjectTarget`` terms (P-50 plan §
+# "Option L1"). Switched to W3C-standard ``rdf:Statement`` reification
+# at commit time so the BFFI namespace doesn't grow a private extension
+# for a problem RDF already solves.
+#
+# Shape:
+#
+#     <stmt> rdf:type rdf:Statement ;
+#            rdf:subject   <work-uri> ;
+#            rdf:predicate bffi:subject ;
+#            rdf:object    <target-uri> ;
+#            bffi-prov:fromMarcField "<bib>:<tag>:<ord>" .
+#
+# The reified statement URI is per-record per-occurrence
+# (``http://urn.fi/URN:NBN:fi:bib:subject-statement:<bib>:<tag>:<ord>``)
+# so each cataloguer-typed 6XX gets its own provenance anchor even
+# when the target URI is shared (YSO / finaf authority URIs).
+#
+# The flat ``<work> bffi:subject <target>`` triple is retained as the
+# derived shortcut Skosmos and most query consumers walk.
 
-#: P-50 Phase C — link-node class for per-record per-occurrence
-#: subject reification. A ``bffi:SubjectLink`` mediates between a
-#: ``bffi:Work`` and a subject target, carrying the per-record
-#: provenance triple ``bffi-prov:fromMarcField`` that cannot live on
-#: the (shared) target URI itself.
-#:
-#: Use case: when source MARC has ``$0 <yso-uri>`` on a 6XX, the
-#: target ``<yso-uri>`` is shared across every record using that YSO
-#: concept. Without an indirection, multiple records' provenance
-#: tokens would all collide on the same target URI. The link node
-#: gives each occurrence its own anchor.
-#:
-#: Coexists with the flat ``bffi:subject`` triple — the latter is
-#: kept as a derived shortcut so Skosmos and other consumers
-#: continue to see the flat shape.
-SubjectLink: URIRef = BFFI.SubjectLink
-
-#: P-50 Phase C — Work → SubjectLink edge. One per source 6XX / 655
-#: instance the cataloguer typed.
-hasSubjectLink: URIRef = BFFI.hasSubjectLink
-
-#: P-50 Phase C — SubjectLink → target URI edge. The target is the
-#: shared authority URI (YSO / finaf / etc.) or the raw bib URI for
-#: unresolved subjects. M9 reconciliation rewrites this predicate on
-#: each link node when it binds the raw URI to an authority URI;
-#: ``fromMarcField`` survives because it's on the link, not the target.
-subjectTarget: URIRef = BFFI.subjectTarget
+#: Property whose triples are the targets of subject reification.
+#: Stored here for parity with the older ``hasSubjectLink`` symbol —
+#: imported by M2-post and M3 SPARQL as the value of ``rdf:predicate``.
+reifiedSubjectPredicate: URIRef = BFFI.subject
 
 # --- bffi-prov predicates emitted by M6 (WorkMergeDecision) ---------------
 
@@ -170,14 +169,19 @@ syntheticValue: URIRef = BFFI_PROV.syntheticValue
 #: infer this from the method tag.
 syntheticMarcSource: URIRef = BFFI_PROV.syntheticMarcSource
 
-# --- BFFI-side predicates added by M2 salvage (P-41) ---------------------
+# --- bffi-prov predicates added by M2 salvage (P-41) --------------------
 
 #: P-41 Phase B — boolean flag marking synthetic-sentinel resources
 #: (Agents, Works) that downstream stages must NOT key on. The B3
 #: sentinel agent at :data:`SENTINEL_AGENT_UNKNOWN` carries this
 #: triple. M5/M6/M8/M9 honour it via the exclude rules wired in
 #: P-41 Phase B.6.
-syntheticSentinel: URIRef = BFFI.syntheticSentinel
+#:
+#: Lives in the ``bffi-prov:`` namespace (not ``bffi:``) because the
+#: flag is pipeline-internal metadata — it identifies a synthetic
+#: stand-in produced by our salvage logic, not a bibliographic
+#: property of the agent itself.
+syntheticSentinel: URIRef = BFFI_PROV.syntheticSentinel
 
 # --- Stable sentinel URIs (P-41 Phase A.4 — committed identifiers) -------
 
@@ -193,7 +197,7 @@ SENTINEL_AGENT_UNKNOWN: URIRef = URIRef("http://urn.fi/URN:NBN:fi:bib:agent:unkn
 
 def is_synthetic_sentinel(graph: Graph, resource: URIRef) -> bool:
     """P-41 Phase B.6 — return True if ``resource`` carries
-    ``bffi:syntheticSentinel "true"``.
+    ``bffi-prov:syntheticSentinel "true"``.
 
     Downstream stages call this to decide whether to skip a resource:
 
@@ -254,7 +258,13 @@ descriptionAuthentication: URIRef = BFFI.descriptionAuthentication
 generationProcess: URIRef = BFFI.generationProcess
 metadataLicensor: URIRef = BFFI.metadataLicensor
 recordingSource: URIRef = BFFI.recordingSource
-sourceMetadata: URIRef = BFFI.sourceMetadata
+#: Source-record pointer on an AdminMetadata block. Was previously
+#: minted as ``bffi:sourceMetadata`` (a local extension absent from
+#: ``docs/lkd.rdf``); migrated to standard PROV-O
+#: ``prov:hadPrimarySource`` — semantically exact and avoids a private
+#: ``bffi:`` term. Python attribute name retained so existing call
+#: sites (``V.sourceMetadata``) keep working without a renaming pass.
+sourceMetadata: URIRef = PROV.hadPrimarySource
 
 AdminMetadata: URIRef = BFFI.AdminMetadata
 
@@ -287,7 +297,6 @@ __all__ = [
     "HumanReview",
     "MarcConversion",
     "Reconciliation",
-    "SubjectLink",
     "Synthesis",
     "WorkMergeDecision",
     "adminMetadata",
@@ -310,7 +319,6 @@ __all__ = [
     "encodingLevel",
     "fromMarcField",
     "generationProcess",
-    "hasSubjectLink",
     "helmetBibId",
     "inputLiteral",
     "is_synthetic_sentinel",
@@ -326,13 +334,13 @@ __all__ = [
     "rationale",
     "rawResponse",
     "recordingSource",
+    "reifiedSubjectPredicate",
     "reviewNote",
     "seed",
     "sourceConsulted",
     "sourceMetadata",
     "sourceVocabulary",
     "stage",
-    "subjectTarget",
     "syntheticConfidence",
     "syntheticField",
     "syntheticMarcSource",

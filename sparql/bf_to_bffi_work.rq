@@ -27,7 +27,6 @@ CONSTRUCT {
            bffi:hasExpression       ?exprURI ;
            bffi:contribution        ?contrib ;
            bffi:subject             ?subject ;
-           bffi:hasSubjectLink      ?subjectLink ;
            bffi:classification      ?class ;
            bffi:originDate          ?originDate ;
            bffi:genreForm           ?workGenre ;
@@ -37,15 +36,18 @@ CONSTRUCT {
            bffi:originPlace         ?originPlaceURI ;
            bffi:marcKey             ?marcKey ;
            skos:prefLabel           ?workLabel .
-  # P-50 Phase C — per-record SubjectLink reification. The link node
-  # carries the ``bffi-prov:fromMarcField`` token M2-post attached, so
-  # each occurrence has its own provenance anchor independent of the
-  # (possibly shared) target URI. Flat ``bffi:subject ?subject`` above
-  # is retained as a derived shortcut for Skosmos and other consumers
-  # that walk the bare predicate.
-  ?subjectLink a               bffi:SubjectLink ;
-               bffi:subjectTarget ?subjectLinkTarget ;
-               bffi-prov:fromMarcField ?subjectLinkToken .
+  # P-50 Phase C — per-record subject reification via W3C-standard
+  # ``rdf:Statement``. Each reified statement URI is per-occurrence
+  # (one per source 6XX / 655 field), so it carries its own
+  # ``bffi-prov:fromMarcField`` token even when the (rdf:object) target
+  # URI is shared (YSO / finaf). The flat ``bffi:subject ?subject``
+  # triple above is retained as a derived shortcut for Skosmos and
+  # other consumers that walk the bare predicate.
+  ?subjectStmt a rdf:Statement ;
+               rdf:subject       ?workURI ;
+               rdf:predicate     bffi:subject ;
+               rdf:object        ?subjectStmtTarget ;
+               bffi-prov:fromMarcField ?subjectStmtToken .
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent ;
            bf:role         ?primaryRole .
@@ -216,15 +218,19 @@ WHERE {
     OPTIONAL { ?bfSubject rdfs:label ?subjectLabel }
   }
 
-  # P-50 Phase C — pass M2-post's per-record SubjectLink chain through
-  # to the canonical Work. Each link node binds one source 6XX / 655
-  # field to its subject target via ``bffi:subjectTarget`` and carries
-  # the ``bffi-prov:fromMarcField`` token. The flat ``bffi:subject``
-  # triple above is retained as a derived shortcut.
+  # P-50 Phase C — pass M2-post's per-record reified subject
+  # statements through to the canonical Work. Each statement URI is
+  # per-occurrence and carries the ``bffi-prov:fromMarcField`` token.
+  # M2-post emitted the rdf:subject pointing at the raw bf:Work URI;
+  # we rewrite it to ``?workURI`` (the canonical work) in the CONSTRUCT
+  # above. The flat ``bffi:subject`` triple is retained as a derived
+  # shortcut.
   OPTIONAL {
-    ?bfWork bffi:hasSubjectLink ?subjectLink .
-    ?subjectLink bffi:subjectTarget       ?subjectLinkTarget ;
-                 bffi-prov:fromMarcField  ?subjectLinkToken .
+    ?subjectStmt a              rdf:Statement ;
+                 rdf:subject    ?bfWork ;
+                 rdf:predicate  bffi:subject ;
+                 rdf:object     ?subjectStmtTarget ;
+                 bffi-prov:fromMarcField ?subjectStmtToken .
   }
   OPTIONAL { ?bfWork bf:classification ?class }
   OPTIONAL { ?bfWork bf:originDate     ?originDate }

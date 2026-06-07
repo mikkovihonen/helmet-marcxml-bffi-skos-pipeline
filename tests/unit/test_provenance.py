@@ -189,7 +189,7 @@ def test_log_review_chains_via_was_informed_by() -> None:
 
 def test_synthesis_activity_terms_round_trip_via_turtle(tmp_path: Path) -> None:
     """P-41 Phase A.2 — the four ``synthetic*`` predicates + the
-    Synthesis Activity class + the ``bffi:syntheticSentinel`` flag +
+    Synthesis Activity class + the ``bffi-prov:syntheticSentinel`` flag +
     the ``SENTINEL_AGENT_UNKNOWN`` URI must survive a Turtle write/read
     cycle without rdflib mangling. This guards the vocabulary contract
     Phase B + C consume."""

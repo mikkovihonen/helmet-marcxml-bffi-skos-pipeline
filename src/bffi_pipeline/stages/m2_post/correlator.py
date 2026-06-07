@@ -549,45 +549,46 @@ _SUBJECT_TAGS: Final[tuple[str, ...]] = (
 )
 
 
-def _subject_link_uri(bib_id: str, tag: str, ordinal: int) -> URIRef:
-    """Deterministic per-occurrence SubjectLink URI. Format:
-    ``http://urn.fi/URN:NBN:fi:bib:subject-link:<bib_id>:<tag>:<ord>``.
+def _subject_statement_uri(bib_id: str, tag: str, ordinal: int) -> URIRef:
+    """Deterministic per-occurrence ``rdf:Statement`` URI for subject
+    reification. Format:
+    ``http://urn.fi/URN:NBN:fi:bib:subject-statement:<bib_id>:<tag>:<ord>``.
 
     Lives in the bib namespace (per CLAUDE.md "Committed identifiers";
-    no separate namespace needed — link nodes are per-record and never
-    merge). The URI is also human-greppable: a cataloguer reading the
-    canonical graph can find every link node from one source record by
-    its bib_id prefix.
+    no separate namespace needed — statement URIs are per-record and
+    never merge). The URI is human-greppable: a cataloguer reading the
+    canonical graph can find every reified subject statement from one
+    source record by its bib_id prefix.
     """
-    return URIRef(f"http://urn.fi/URN:NBN:fi:bib:subject-link:{bib_id}:{tag}:{ordinal}")
+    return URIRef(f"http://urn.fi/URN:NBN:fi:bib:subject-statement:{bib_id}:{tag}:{ordinal}")
 
 
 def _mint_subject_links(
     graph: Graph,
     index: MarcFieldIndex,
 ) -> list[CorrelationResult]:
-    """For each source 6XX / 655 datafield, mint a per-record link
-    node that ties the source field to its subject target via:
+    """For each source 6XX / 655 datafield, emit a W3C-standard
+    ``rdf:Statement`` reification that ties the source field to its
+    subject target:
 
-    ``<work> bffi:hasSubjectLink <link> .``
-    ``<link> a bffi:SubjectLink ;``
-    ``        bffi:subjectTarget <target> ;``
-    ``        bffi-prov:fromMarcField "<token>" .``
+    ``<stmt> a rdf:Statement ;``
+    ``       rdf:subject   <work> ;``
+    ``       rdf:predicate bffi:subject ;``
+    ``       rdf:object    <target> ;``
+    ``       bffi-prov:fromMarcField "<token>" .``
 
     Matching strategy:
 
     1. **`$0` (authority URI) match** — when the source has
        ``$0 <uri>``, find the bf:subject pointing to that URI.
-    2. **`bflc:marcKey` match** — when the source field has a typed
-       BIBFRAME entity carrying its marcKey, find the entity that
-       Phase A already tokenised; reuse its token's tag/ordinal.
-    3. **Subject-typing match** — for the rare case where neither $0
-       nor marcKey match (cataloguer-only fields marc2bibframe2
-       dropped), audit as unmatched.
+    2. **`$a` label match** — bf:subject target with ``rdfs:label``
+       equal to source ``$a``.
+    3. **Raw URI fragment match** — bf:subject target URI whose
+       fragment contains the source tag + ordinal.
 
-    The link node's ``fromMarcField`` token is the same one Phase A
-    would have computed; the difference is the carrier (link node
-    instead of the shared target URI).
+    The reified statement's ``fromMarcField`` token is the same one
+    Phase A would have computed; the carrier is the reified statement
+    URI (per-occurrence) instead of the shared target URI.
     """
     results: list[CorrelationResult] = []
     bib_id = index.bib_id
@@ -608,7 +609,7 @@ def _mint_subject_links(
                 results.append(
                     CorrelationResult(
                         bib_id=bib_id,
-                        entity=f"(subject-link source-field {field.token})",
+                        entity=f"(subject-statement source-field {field.token})",
                         marc_key=f"(source {tag})",
                         matched_token=None,
                         matched_via="unmatched",
@@ -617,18 +618,19 @@ def _mint_subject_links(
                 )
                 continue
             targets_used.add(target)
-            link = _subject_link_uri(bib_id, tag, field.ordinal)
-            graph.add((primary_work, V.hasSubjectLink, link))
-            graph.add((link, RDF.type, V.SubjectLink))
-            graph.add((link, V.subjectTarget, target))
-            graph.add((link, V.fromMarcField, Literal(field.token)))
+            stmt = _subject_statement_uri(bib_id, tag, field.ordinal)
+            graph.add((stmt, RDF.type, RDF.Statement))
+            graph.add((stmt, RDF.subject, primary_work))
+            graph.add((stmt, RDF.predicate, V.reifiedSubjectPredicate))
+            graph.add((stmt, RDF.object, target))
+            graph.add((stmt, V.fromMarcField, Literal(field.token)))
             results.append(
                 CorrelationResult(
                     bib_id=bib_id,
-                    entity=str(link),
-                    marc_key=f"(subject-link tag={tag} ord={field.ordinal})",
+                    entity=str(stmt),
+                    marc_key=f"(subject-statement tag={tag} ord={field.ordinal})",
                     matched_token=field.token,
-                    matched_via="subject-link",
+                    matched_via="subject-statement",
                 )
             )
     return results

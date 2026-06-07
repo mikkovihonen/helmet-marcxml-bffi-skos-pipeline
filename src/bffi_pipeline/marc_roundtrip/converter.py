@@ -1425,13 +1425,18 @@ class _Reconstructor:
         seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.subject)
         raw_origin_hints = self._build_raw_origin_hints(work, V.BFFI.subject)
 
-        # P-50 Phase C — walk via SubjectLink first. Each link node
-        # binds the Work to a subject target via ``bffi:subjectTarget``
-        # and carries the per-record provenance token on the link
-        # itself (not on the shared target URI). One row per link.
+        # P-50 Phase C — walk via reified ``rdf:Statement`` first. Each
+        # statement has ``rdf:subject ?work ; rdf:predicate bffi:subject
+        # ; rdf:object ?target`` and carries the per-record provenance
+        # token on the statement URI (not on the shared target). One
+        # MARC 6XX row per reified statement.
         emitted_targets: set[Node] = set()
-        for link in self.graph.objects(work, V.BFFI.hasSubjectLink):
-            target = next(self.graph.objects(link, V.BFFI.subjectTarget), None)
+        for stmt in self.graph.subjects(RDF.subject, work):
+            if (stmt, RDF.type, RDF.Statement) not in self.graph:
+                continue
+            if (stmt, RDF.predicate, V.BFFI.subject) not in self.graph:
+                continue
+            target = next(self.graph.objects(stmt, RDF.object), None)
             if target is None:
                 continue
             row_result = self._subject_row(target, seen_authorities)
@@ -1439,10 +1444,11 @@ class _Reconstructor:
                 continue
             row, used_marckey = row_result
             tag = self._subject_marc_tag(target, raw_origin_hints)
-            # Lineage comes off the LINK node — that's where M2-post
-            # stamped the source-MARC-field token. Falling back to the
-            # target's own lineage if the link somehow has none.
-            lineage = self._lineage_token(link) or self._lineage_for_subject(
+            # Lineage comes off the STATEMENT URI — that's where
+            # M2-post stamped the source-MARC-field token. Falling
+            # back to the target's own lineage if the statement
+            # somehow has none.
+            lineage = self._lineage_token(stmt) or self._lineage_for_subject(
                 target, raw_origin_hints
             )
             self._emit_datafield(
@@ -1455,10 +1461,10 @@ class _Reconstructor:
             )
             emitted_targets.add(target)
 
-        # Fallback for subjects without a SubjectLink — records
+        # Fallback for subjects without a reified statement — records
         # processed before P-50 Phase C shipped, or shapes M2-post's
-        # link minter didn't reach. Walks the flat ``bffi:subject``
-        # predicate as before.
+        # statement minter didn't reach. Walks the flat
+        # ``bffi:subject`` predicate as before.
         for subject in self.graph.objects(work, V.BFFI.subject):
             if subject in emitted_targets:
                 continue

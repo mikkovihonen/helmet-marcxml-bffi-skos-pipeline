@@ -159,7 +159,7 @@ bffi:AdminMetadataM2Shape
     sh:property [ sh:path bffi:generationProcess ;         sh:minCount 1 ] ;
     sh:property [ sh:path bffi:metadataLicensor ;          sh:minCount 1 ] ;
     sh:property [ sh:path bffi:recordingSource ;           sh:minCount 1 ] ;
-    sh:property [ sh:path bffi:sourceMetadata ;            sh:minCount 1 ] ;
+    sh:property [ sh:path prov:hadPrimarySource ;          sh:minCount 1 ] ;
     sh:property [
         sh:path prov:wasGeneratedBy ;
         sh:minCount 1 ;

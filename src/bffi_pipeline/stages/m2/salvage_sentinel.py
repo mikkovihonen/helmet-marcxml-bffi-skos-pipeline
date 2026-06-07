@@ -6,7 +6,7 @@ the record falls through to the shared sentinel agent
 :data:`bffi_pipeline.provenance.vocab.SENTINEL_AGENT_UNKNOWN`. Multiple
 records sharing the sentinel URI is intentional: it expresses the
 property "no known author," not the claim of identity. Downstream
-stages (M5/M6/M8/M9) honour the ``bffi:syntheticSentinel`` flag on
+stages (M5/M6/M8/M9) honour the ``bffi-prov:syntheticSentinel`` flag on
 the agent and skip keying / reconciling on it — see the exclude-rule
 wiring added in P-41 Phase B.6.
 
@@ -17,7 +17,7 @@ an authority binding, so the marc2bibframe2 XSLT downstream emits a
 clean ``bf:contribution`` block without a custom code path.
 
 The sentinel Agent RDF block itself (``rdf:type bf:Agent``,
-``skos:prefLabel`` per language, ``bffi:syntheticSentinel "true"``)
+``skos:prefLabel`` per language, ``bffi-prov:syntheticSentinel "true"``)
 is emitted ONCE PER RUN by ``stages/m2/salvage.py`` — it's a
 graph-level construct, not a per-record one. The MARC 710 emitted by
 this module is the per-record link.

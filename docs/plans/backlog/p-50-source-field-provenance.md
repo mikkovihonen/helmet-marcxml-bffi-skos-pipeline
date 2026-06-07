@@ -15,6 +15,23 @@
 
 **Owner**: Mikko, by default.
 
+## Implementation note (post-graduation)
+
+The Phase C plan below describes a triplet of locally-minted BFFI terms (`bffi:SubjectLink` / `bffi:hasSubjectLink` / `bffi:subjectTarget`) as Option L1, with `rdf:Statement` reification listed as Option L3 with a "tooling risk" caveat. **At implementation time we reversed that decision** and shipped Option L3 instead — W3C-standard `rdf:Statement` reification works fine in our rdflib + Fuseki + Skosmos stack, and avoids growing the BFFI namespace with a private extension for a problem RDF already solves. The on-the-wire shape is:
+
+```turtle
+<stmt> rdf:type rdf:Statement ;
+       rdf:subject   <work-uri> ;
+       rdf:predicate bffi:subject ;
+       rdf:object    <target-uri> ;
+       bffi-prov:fromMarcField "<bib>:<tag>:<ord>" .
+```
+
+Statement URIs are minted per-record per-occurrence at
+`http://urn.fi/URN:NBN:fi:bib:subject-statement:<bib>:<tag>:<ord>`. Functionally identical to L1 (each occurrence gets its own anchor), zero new BFFI terms.
+
+Related: P-50 also moved `bffi:sourceMetadata` (AdminMetadata → source-record pointer) to standard `prov:hadPrimarySource`, and `bffi:syntheticSentinel` (B3 anonymous-agent flag) to `bffi-prov:syntheticSentinel` since the flag is pipeline-internal metadata, not a bibliographic property. The Python attribute names in `bffi_pipeline.provenance.vocab` are retained so call sites don't churn.
+
 ## Motivation
 
 Today's lineage scheme — committed in P-48 Phase A, exercised in production for the last week — has revealed three structural shortcomings while solving the problem it was designed for. The b10642122 case from run `20260607-0622-dfc03f` is the clearest demonstration:

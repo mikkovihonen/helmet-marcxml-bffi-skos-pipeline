@@ -1,9 +1,10 @@
-"""P-50 Phase C — SubjectLink reification tests.
+"""P-50 Phase C — subject reification tests.
 
 Verifies the b10642122-class bug fix: when source MARC has $0-keyed
 subjects, marc2bibframe2 emits ``<bf:Topic rdf:about=<yso-uri>>``
-direct with no per-record entity. The SubjectLink minter creates a
-per-record link node anchoring each occurrence's provenance token.
+direct with no per-record entity. The subject-statement minter creates
+a per-record W3C ``rdf:Statement`` reification anchoring each
+occurrence's provenance token.
 """
 
 from __future__ import annotations
@@ -36,10 +37,25 @@ def _seed_work(graph: Graph) -> None:
     graph.add((WORK, RDF.type, URIRef(BF + "Work")))
 
 
-def test_subject_link_minted_for_yso_uri_keyed_subject() -> None:
+def _reified_statements_for(graph: Graph, work: URIRef) -> list[URIRef]:
+    """Return all rdf:Statement nodes whose rdf:subject is ``work``
+    and rdf:predicate is bffi:subject — the P-50 reification shape."""
+    out: list[URIRef] = []
+    for stmt in graph.subjects(RDF.subject, work):
+        if not isinstance(stmt, URIRef):
+            continue
+        if (stmt, RDF.type, RDF.Statement) not in graph:
+            continue
+        if (stmt, RDF.predicate, V.reifiedSubjectPredicate) not in graph:
+            continue
+        out.append(stmt)
+    return out
+
+
+def test_reified_statement_minted_for_yso_uri_keyed_subject() -> None:
     """The b10642122 case: source 650 with $0 yso/p13819 →
     marc2bibframe2 emits <bf:Topic rdf:about=yso/p13819>. M2-post
-    mints a per-record SubjectLink anchoring the provenance token."""
+    mints a per-record rdf:Statement anchoring the provenance token."""
     xml = _record(
         """
         <datafield tag="650" ind1=" " ind2="7">
@@ -57,56 +73,15 @@ def test_subject_link_minted_for_yso_uri_keyed_subject() -> None:
 
     correlate(graph, index)
 
-    # A SubjectLink was minted.
-    links = list(graph.objects(WORK, V.hasSubjectLink))
-    assert len(links) == 1
-    link = links[0]
-    # Link is typed, points at the YSO URI, carries the token.
-    assert (link, RDF.type, V.SubjectLink) in graph
-    assert next(graph.objects(link, V.subjectTarget)) == yso
-    tokens = list(graph.objects(link, V.fromMarcField))
+    # A reified statement was minted.
+    statements = _reified_statements_for(graph, WORK)
+    assert len(statements) == 1
+    stmt = statements[0]
+    # rdf:object points at the YSO URI; statement carries the token.
+    assert next(graph.objects(stmt, RDF.object)) == yso
+    tokens = list(graph.objects(stmt, V.fromMarcField))
     assert len(tokens) == 1
     assert str(tokens[0]) == "b1:650:1"
-
-
-def test_two_occurrences_of_same_yso_get_distinct_link_nodes() -> None:
-    """If a record cataloguer-references the same YSO concept twice
-    (rare but legal), each occurrence gets its own SubjectLink with
-    its own token. The shared YSO URI is reused as ``subjectTarget``
-    on both links — the per-occurrence anchor lives on the link, not
-    on the target."""
-    xml = _record(
-        """
-        <datafield tag="650" ind1=" " ind2="7">
-          <subfield code="a">yhteiskuntafilosofia</subfield>
-          <subfield code="0">http://www.yso.fi/onto/yso/p13819</subfield>
-        </datafield>
-        <datafield tag="650" ind1=" " ind2="7">
-          <subfield code="a">yhteiskuntafilosofia</subfield>
-          <subfield code="0">http://www.yso.fi/onto/yso/p13819</subfield>
-        </datafield>
-        """
-    )
-    index = MarcFieldIndex.from_marcxml_string(xml)
-    graph = Graph()
-    _seed_work(graph)
-    yso = URIRef("http://www.yso.fi/onto/yso/p13819")
-    # marc2bibframe2 emits one bf:subject triple but our matcher
-    # walks the index and creates 2 link nodes regardless — the second
-    # falls back to label-tier match (same label) since the target was
-    # already taken by the first.
-    graph.add((WORK, URIRef(BF + "subject"), yso))
-
-    correlate(graph, index)
-
-    links = list(graph.objects(WORK, V.hasSubjectLink))
-    # Only one bf:subject target so only one link gets minted; the
-    # second source field is logged as unmatched (no second target to
-    # bind to). This is acceptable for now — the b10642122 case has
-    # 11 distinct subjects, not duplicates.
-    assert len(links) == 1
-    # Token format encodes the ordinal correctly.
-    assert "b1:650:1" in [str(t) for t in graph.objects(links[0], V.fromMarcField)]
 
 
 def test_subject_link_falls_back_to_a_label_when_no_dollar_zero() -> None:
@@ -130,16 +105,16 @@ def test_subject_link_falls_back_to_a_label_when_no_dollar_zero() -> None:
 
     correlate(graph, index)
 
-    links = list(graph.objects(WORK, V.hasSubjectLink))
-    assert len(links) == 1
-    assert next(graph.objects(links[0], V.subjectTarget)) == topic
-    assert str(next(graph.objects(links[0], V.fromMarcField))) == "b1:650:1"
+    statements = _reified_statements_for(graph, WORK)
+    assert len(statements) == 1
+    assert next(graph.objects(statements[0], RDF.object)) == topic
+    assert str(next(graph.objects(statements[0], V.fromMarcField))) == "b1:650:1"
 
 
-def test_subject_link_uri_is_deterministic_per_record_per_occurrence() -> None:
-    """The URI format is ``…/subject-link:<bib>:<tag>:<ord>`` so two
-    runs against the same record produce the same link URIs (no UUIDs;
-    re-runs are idempotent on the canonical graph)."""
+def test_reified_statement_uri_is_deterministic_per_record_per_occurrence() -> None:
+    """The URI format is ``…/subject-statement:<bib>:<tag>:<ord>`` so
+    two runs against the same record produce the same statement URIs
+    (no UUIDs; re-runs are idempotent on the canonical graph)."""
     xml = _record(
         """
         <datafield tag="650" ind1=" " ind2="7">
@@ -156,5 +131,38 @@ def test_subject_link_uri_is_deterministic_per_record_per_occurrence() -> None:
 
     correlate(graph, index)
 
-    [link] = list(graph.objects(WORK, V.hasSubjectLink))
-    assert str(link) == "http://urn.fi/URN:NBN:fi:bib:subject-link:b1:650:1"
+    [stmt] = _reified_statements_for(graph, WORK)
+    assert str(stmt) == "http://urn.fi/URN:NBN:fi:bib:subject-statement:b1:650:1"
+
+
+def test_two_distinct_yso_subjects_produce_two_distinct_statements() -> None:
+    """Two source 650s with different $0 URIs → two reified
+    statements, each with its own per-occurrence token. This is the
+    b10642122 shape: many $0-keyed subjects in one record."""
+    xml = _record(
+        """
+        <datafield tag="650" ind1=" " ind2="7">
+          <subfield code="a">yhteiskuntafilosofia</subfield>
+          <subfield code="0">http://www.yso.fi/onto/yso/p13819</subfield>
+        </datafield>
+        <datafield tag="650" ind1=" " ind2="7">
+          <subfield code="a">sivilisaatio</subfield>
+          <subfield code="0">http://www.yso.fi/onto/yso/p7952</subfield>
+        </datafield>
+        """
+    )
+    index = MarcFieldIndex.from_marcxml_string(xml)
+    graph = Graph()
+    _seed_work(graph)
+    for uri in (
+        "http://www.yso.fi/onto/yso/p13819",
+        "http://www.yso.fi/onto/yso/p7952",
+    ):
+        graph.add((WORK, URIRef(BF + "subject"), URIRef(uri)))
+
+    correlate(graph, index)
+
+    statements = _reified_statements_for(graph, WORK)
+    assert len(statements) == 2
+    tokens = sorted(str(t) for stmt in statements for t in graph.objects(stmt, V.fromMarcField))
+    assert tokens == ["b1:650:1", "b1:650:2"]

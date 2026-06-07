@@ -210,37 +210,35 @@ def _propagate_from_marc_field(g: Graph, raw_graph: Graph) -> int:
 
 
 def _propagate_subject_links(g: Graph, raw_graph: Graph) -> int:
-    """Copy the P-50 Phase C SubjectLink reification triples from the
-    raw graph to canonical.
+    """Copy the P-50 Phase C subject reification triples from the raw
+    graph to canonical.
 
-    For every M3-emitted ``?bfWork bffi:hasSubjectLink ?link`` (which
-    M3 routed from the M2-post-emitted link nodes on the raw bib
-    graph), copy:
+    Each reified statement is a per-record per-occurrence
+    ``rdf:Statement`` URI carrying:
 
-    - ``?canonicalWork bffi:hasSubjectLink ?link``
-    - ``?link rdf:type bffi:SubjectLink``
-    - ``?link bffi:subjectTarget ?target``
+    - ``rdf:type rdf:Statement``
+    - ``rdf:subject <canonical-work>``
+    - ``rdf:predicate bffi:subject``
+    - ``rdf:object <target>``
 
-    The ``fromMarcField`` triple on each link is already carried by
-    :func:`_propagate_from_marc_field`.
+    The ``bffi-prov:fromMarcField`` triple on each statement is already
+    carried by :func:`_propagate_from_marc_field`.
 
     Note: this pass copies from the *raw-bib BFFI* (M3 output) into
-    canonical. M3's CONSTRUCT keeps the link URI verbatim — it's a
+    canonical. M3's CONSTRUCT keeps the statement URI verbatim — it's a
     per-record bib-namespace URI, never minted as canonical because
-    SubjectLinks are inherently per-record.
+    reified subject statements are inherently per-record.
 
     Idempotent. Returns triples copied.
     """
     count = 0
-    for s, _p, o in raw_graph.triples((None, V.hasSubjectLink, None)):
-        g.add((s, V.hasSubjectLink, o))
+    for stmt in raw_graph.subjects(RDF.type, RDF.Statement):
+        g.add((stmt, RDF.type, RDF.Statement))
         count += 1
-    for link in raw_graph.subjects(RDF.type, V.SubjectLink):
-        g.add((link, RDF.type, V.SubjectLink))
-        count += 1
-        for target in raw_graph.objects(link, V.subjectTarget):
-            g.add((link, V.subjectTarget, target))
-            count += 1
+        for predicate in (RDF.subject, RDF.predicate, RDF.object):
+            for o in raw_graph.objects(stmt, predicate):
+                g.add((stmt, predicate, o))
+                count += 1
     return count
 
 
