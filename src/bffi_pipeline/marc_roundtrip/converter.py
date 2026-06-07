@@ -1714,12 +1714,36 @@ class _Reconstructor:
             return next(iter(labels.values()))
         return None
 
-    def _emit_subjects(self, record: Element) -> None:
+    def _raw_work_uris(self, work: URIRef) -> list[URIRef]:
+        """Return the M3-raw work URIs the canonical Work was minted
+        from. The Statement reifications (P-50 Phase C) carry
+        ``rdf:subject`` pointing at one of these raw URIs because
+        M2-post runs before M8's canonical-mint reshape. M8 emits
+        ``<canonical_work> prov:wasDerivedFrom <raw_work>`` for each
+        absorbed raw Work; this method walks that link so consumers
+        can find Statements anchored on either the canonical URI or
+        any of its raw predecessors.
+
+        Returns ``[canonical_work_uri]`` plus every raw URI reached
+        via ``prov:wasDerivedFrom``. The canonical URI is included
+        for the case where M2-post happened to emit a Statement with
+        the canonical URI directly (rare, but defensive)."""
+        result: list[URIRef] = [work]
+        for raw in self.graph.objects(work, V.PROV.wasDerivedFrom):
+            if isinstance(raw, URIRef):
+                result.append(raw)
+        return result
+
+    def _emit_subjects(self, record: Element) -> None:  # noqa: PLR0912 — orchestrates Phase C Statement walk + flat-subject fallback + per-anchor / per-tier filters; splitting fragments shared state across helpers.
         work = self.work
         if work is None:
             return
         seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.subject)
         raw_origin_hints = self._build_raw_origin_hints(work, V.BFFI.subject)
+        # Statement reifications anchor on the M3-raw work URI (M2-post
+        # ran before M8's canonical-mint reshape). Walk every raw URI
+        # the canonical Work was derived from via prov:wasDerivedFrom.
+        statement_anchors = self._raw_work_uris(work)
         # Pre-compute the set of targets that are emitted by
         # :meth:`_emit_genre_forms` so the Statement walk below skips
         # them. M2-post emits Statements with ``rdf:predicate
@@ -1737,42 +1761,48 @@ class _Reconstructor:
             genre_targets.add(URIRef(raw_str))
 
         # P-50 Phase C — walk via reified ``rdf:Statement`` first. Each
-        # statement has ``rdf:subject ?work ; rdf:predicate bffi:subject
-        # ; rdf:object ?target`` and carries the per-record provenance
-        # token on the statement URI (not on the shared target). One
-        # MARC 6XX row per reified statement.
+        # statement has ``rdf:subject ?raw-work ; rdf:predicate
+        # bffi:subject ; rdf:object ?target`` and carries the
+        # per-record provenance token on the statement URI (not on the
+        # shared target). One MARC 6XX row per reified statement.
+        # ``rdf:subject`` is the M3-raw work URI (M2-post ran before
+        # M8's reshape); walk every raw URI the canonical Work was
+        # derived from.
         emitted_targets: set[Node] = set()
-        for stmt in self.graph.subjects(RDF.subject, work):
-            if (stmt, RDF.type, RDF.Statement) not in self.graph:
-                continue
-            if (stmt, RDF.predicate, V.BFFI.subject) not in self.graph:
-                continue
-            target = next(self.graph.objects(stmt, RDF.object), None)
-            if target is None:
-                continue
-            if target in genre_targets:
-                continue
-            row_result = self._subject_row(target, seen_authorities)
-            if row_result is None:
-                continue
-            row, used_marckey = row_result
-            tag = self._subject_marc_tag(target, raw_origin_hints)
-            # Lineage comes off the STATEMENT URI — that's where
-            # M2-post stamped the source-MARC-field token. Falling
-            # back to the target's own lineage if the statement
-            # somehow has none.
-            lineage = self._lineage_token(stmt) or self._lineage_for_subject(
-                target, raw_origin_hints
-            )
-            self._emit_datafield(
-                record,
-                tag,
-                *row,
-                ind2="7",
-                lineage=lineage,
-                marckey_bypass=used_marckey,
-            )
-            emitted_targets.add(target)
+        for anchor in statement_anchors:
+            for stmt in self.graph.subjects(RDF.subject, anchor):
+                if (stmt, RDF.type, RDF.Statement) not in self.graph:
+                    continue
+                if (stmt, RDF.predicate, V.BFFI.subject) not in self.graph:
+                    continue
+                target = next(self.graph.objects(stmt, RDF.object), None)
+                if target is None:
+                    continue
+                if target in genre_targets:
+                    continue
+                if target in emitted_targets:
+                    continue
+                row_result = self._subject_row(target, seen_authorities)
+                if row_result is None:
+                    continue
+                row, used_marckey = row_result
+                tag = self._subject_marc_tag(target, raw_origin_hints)
+                # Lineage comes off the STATEMENT URI — that's where
+                # M2-post stamped the source-MARC-field token. Falling
+                # back to the target's own lineage if the statement
+                # somehow has none.
+                lineage = self._lineage_token(stmt) or self._lineage_for_subject(
+                    target, raw_origin_hints
+                )
+                self._emit_datafield(
+                    record,
+                    tag,
+                    *row,
+                    ind2="7",
+                    lineage=lineage,
+                    marckey_bypass=used_marckey,
+                )
+                emitted_targets.add(target)
 
         # Fallback for subjects without a reified statement — records
         # processed before P-50 Phase C shipped, or shapes M2-post's
@@ -1992,13 +2022,20 @@ class _Reconstructor:
            target to find any raw URI that maps to it, then look
            there.
         """
+        # M2-post Statements anchor on the M3-raw work URI, not on the
+        # M8-canonical Work URI the converter is walking. Walk every
+        # raw URI the canonical Work was derived from via
+        # prov:wasDerivedFrom (plus the canonical URI itself for the
+        # rare direct-anchor case).
+        anchors = self._raw_work_uris(work)
         # Tier 1: direct rdf:object match.
-        for stmt in self.graph.subjects(RDF.subject, work):
-            if (stmt, RDF.type, RDF.Statement) not in self.graph:
-                continue
-            if (stmt, RDF.object, target) not in self.graph:
-                continue
-            return stmt
+        for anchor in anchors:
+            for stmt in self.graph.subjects(RDF.subject, anchor):
+                if (stmt, RDF.type, RDF.Statement) not in self.graph:
+                    continue
+                if (stmt, RDF.object, target) not in self.graph:
+                    continue
+                return stmt
         if not isinstance(target, URIRef):
             return None
         # Tier 2: back-walk via raw_origin_hints (built once per emit
@@ -2007,22 +2044,24 @@ class _Reconstructor:
             raw = raw_origin_hints.get(target)
             if raw:
                 raw_uri = URIRef(raw)
-                for stmt in self.graph.subjects(RDF.subject, work):
-                    if (stmt, RDF.type, RDF.Statement) not in self.graph:
-                        continue
-                    if (stmt, RDF.object, raw_uri) not in self.graph:
-                        continue
-                    return stmt
+                for anchor in anchors:
+                    for stmt in self.graph.subjects(RDF.subject, anchor):
+                        if (stmt, RDF.type, RDF.Statement) not in self.graph:
+                            continue
+                        if (stmt, RDF.object, raw_uri) not in self.graph:
+                            continue
+                        return stmt
         # Tier 3: inverse skos:exactMatch — slower, only fires when
         # raw_origin_hints lacks an entry (rare; M9 should populate it).
         for raw_node in self.graph.subjects(V.SKOS.exactMatch, target):
             if isinstance(raw_node, URIRef) and str(raw_node).startswith(_RAW_BIB_URI_PREFIX):
-                for stmt in self.graph.subjects(RDF.subject, work):
-                    if (stmt, RDF.type, RDF.Statement) not in self.graph:
-                        continue
-                    if (stmt, RDF.object, raw_node) not in self.graph:
-                        continue
-                    return stmt
+                for anchor in anchors:
+                    for stmt in self.graph.subjects(RDF.subject, anchor):
+                        if (stmt, RDF.type, RDF.Statement) not in self.graph:
+                            continue
+                        if (stmt, RDF.object, raw_node) not in self.graph:
+                            continue
+                        return stmt
         return None
 
     def _emit_genre_forms(self, record: Element) -> None:
