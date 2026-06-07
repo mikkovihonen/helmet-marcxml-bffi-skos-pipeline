@@ -23,9 +23,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final, cast
 
-from rdflib import Graph
+from rdflib import Graph, URIRef
 from rdflib.term import Node
 
+from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.uris import register_sparql_functions
 
 _BFFI_PIPELINE_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
@@ -55,4 +56,22 @@ def construct_bffi(source: Graph) -> Graph:
         result = source.query(query)
         for triple in cast("Iterable[tuple[Node, Node, Node]]", result):
             out.add(triple)
+    # P-50 fromMarcField passthrough for URI-keyed source entities.
+    # M2-post attaches ``bffi-prov:fromMarcField`` to raw-bib URIs of
+    # entities marc2bibframe2 mints from each source field (#Agent700-N,
+    # #Hub730-N, #Topic650-N, #Place651-N, etc.). Those URIs survive
+    # verbatim through the M3 CONSTRUCTs (the BFFI Contribution / Subject
+    # links target the same raw URI), so a flat identity copy at the M3
+    # boundary lands the token on the BFFI-side counterpart with zero
+    # SPARQL touch. Phase C's Statement-subject token is already emitted
+    # by the work CONSTRUCT and would be duplicated here — set semantics
+    # means it's a no-op. Blank-node-keyed entities (bf:Isbn / bf:Note /
+    # bf:Title / bf:Extent / bf:ProvisionActivity that M2-post matched
+    # via flat-literal-* paths) are excluded: their bnode identity isn't
+    # preserved across rdflib serialise/parse cycles, so a flat copy
+    # wouldn't survive the M8 corpus concat. Coverage for those needs a
+    # separate URI-minting redesign (tracked separately).
+    for s, _p, o in source.triples((None, V.fromMarcField, None)):
+        if isinstance(s, URIRef):
+            out.add((s, V.fromMarcField, o))
     return out

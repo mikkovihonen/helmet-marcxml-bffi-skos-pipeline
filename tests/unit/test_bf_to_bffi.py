@@ -13,7 +13,7 @@ import textwrap
 import time
 from pathlib import Path
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF
 
 from bffi_pipeline.contrib_extract_llm import (
@@ -106,6 +106,37 @@ def test_construct_mints_paired_work_and_expression_uris() -> None:
     exprs = set(bffi.subjects(RDF.type, V.BFFI.Expression))
     assert works == {EXPECTED_WORK}
     assert exprs == {EXPECTED_EXPR}
+
+
+def test_construct_passes_through_uri_keyed_from_marc_field_tokens() -> None:
+    """M2-post attaches ``bffi-prov:fromMarcField`` tokens to raw-bib
+    URIs (``#Agent700-N``, ``#Hub730-N``, ``#Topic650-N``, ...) before
+    M3 runs. The M3 CONSTRUCTs reference those raw URIs verbatim as
+    targets of ``bffi:agent`` / ``bffi:subject`` / etc., so the token
+    triple should land on the BFFI-side graph unchanged. Without the
+    passthrough, M8's catch-all only sees the Phase C Statement-subject
+    tokens and the round-trip converter falls back to the legacy
+    rank-bucket scheme."""
+    source = _build_source()
+    agent = URIRef("urn:agent/Tolstoy")
+    source.add((agent, V.fromMarcField, Literal("10000001:100:1")))
+    bffi = construct_bffi(source)
+    tokens = list(bffi.objects(agent, V.fromMarcField))
+    assert tokens == [Literal("10000001:100:1")]
+
+
+def test_construct_skips_bnode_keyed_from_marc_field_tokens() -> None:
+    """Blank-node-keyed source entities (``bf:Isbn`` / ``bf:Note`` /
+    ``bf:Title`` / ``bf:Extent`` / ``bf:ProvisionActivity``) get fresh
+    bnodes in the M3 CONSTRUCT output — copying their fromMarcField
+    triple under the source bnode would dangle in the output graph.
+    Phase B tokens for these entities need a separate URI-minting
+    redesign; until then, the passthrough deliberately excludes them."""
+    source = _build_source()
+    bnode_subject = BNode()
+    source.add((bnode_subject, V.fromMarcField, Literal("10000001:020:1")))
+    bffi = construct_bffi(source)
+    assert (bnode_subject, V.fromMarcField, None) not in bffi
 
 
 def test_expression_links_back_to_work() -> None:
