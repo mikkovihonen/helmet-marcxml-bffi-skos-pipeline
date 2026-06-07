@@ -556,11 +556,23 @@
     background: var(--hover);
     color: var(--fg);
   }
-  .diff-chip.identical { background: #e6f4ea; color: #1e7e34; }
-  .diff-chip.changed   { background: #fff3cd; color: #856404; }
-  .diff-chip.lost      { background: #f8d7da; color: #b21f2d; }
-  .diff-chip.added     { background: #d6e9f8; color: #1e5180; }
-  .diff-chip.gap       { background: #e9ecef; color: #5a6268; }
+  .diff-chip.identical           { background: #e6f4ea; color: #1e7e34; }
+  .diff-chip.changed             { background: #fff3cd; color: #856404; }
+  .diff-chip.lost                { background: #f8d7da; color: #b21f2d; }
+  .diff-chip.added               { background: #d6e9f8; color: #1e5180; }
+  .diff-chip.gap                 { background: #e9ecef; color: #5a6268; }
+  /* P-48 tag-changed: misroute (source 651 → recon 650). More serious
+     than ``changed`` — the field landed in the wrong tag — so use a
+     stronger orange. */
+  .diff-chip.tag-changed         { background: #ffe5cc; color: #8a4a00; }
+  /* P-49 marckey-bypass: the recon row's subfields were built from
+     bflc:marcKey rather than BFFI structured properties (verification
+     failure, even when byte-equal). Purple = audit signal. */
+  .diff-chip.marckey-bypass      { background: #ede4f6; color: #5a3d8a; }
+  /* P-149 language-reconciled: byte differs but $0 authority URI
+     matches — M9-bound reconciliation, semantically equivalent.
+     Teal = informational, not a real change. */
+  .diff-chip.language-reconciled { background: #d8efea; color: #1e5e54; }
 
   table.marc-diff {
     width: 100%;
@@ -575,12 +587,15 @@
     vertical-align: top;
   }
   table.marc-diff th { color: var(--muted); font-weight: 600; }
-  table.marc-diff tr.diff-identical          { background: rgba(46, 125, 50, 0.04); }
-  table.marc-diff tr.diff-changed            { background: rgba(245, 166, 35, 0.10); }
-  table.marc-diff tr.diff-lost               { background: rgba(220, 53, 69, 0.10); }
-  table.marc-diff tr.diff-added              { background: rgba(13, 110, 253, 0.08); }
-  table.marc-diff tr.diff-lost-converter-gap { background: rgba(108, 117, 125, 0.08); }
-  table.marc-diff tr.diff-notes td           { border-bottom: 1px solid var(--border); }
+  table.marc-diff tr.diff-identical           { background: rgba(46, 125, 50, 0.04); }
+  table.marc-diff tr.diff-changed             { background: rgba(245, 166, 35, 0.10); }
+  table.marc-diff tr.diff-lost                { background: rgba(220, 53, 69, 0.10); }
+  table.marc-diff tr.diff-added               { background: rgba(13, 110, 253, 0.08); }
+  table.marc-diff tr.diff-lost-converter-gap  { background: rgba(108, 117, 125, 0.08); }
+  table.marc-diff tr.diff-tag-changed         { background: rgba(255, 130, 0, 0.12); }
+  table.marc-diff tr.diff-marckey-bypass      { background: rgba(120, 80, 180, 0.10); }
+  table.marc-diff tr.diff-language-reconciled { background: rgba(30, 150, 130, 0.08); }
+  table.marc-diff tr.diff-notes td            { border-bottom: 1px solid var(--border); }
 
   /* Judge tab: side-by-side pair layout + LLM banner */
   .pair-grid {
@@ -1332,7 +1347,19 @@ function renderManifestTab() {
 // One sidebar entry per bib in marc-roundtrip/diffs/. The active
 // bib's diff JSON drives a side-by-side rendering: original MARC on
 // the left, reconstructed MARC on the right, paired field-by-field,
-// status-coloured (identical / changed / lost / added / lost-converter-gap).
+// status-coloured. Eight diff statuses, ordered by reviewer attention:
+//   identical            — no change (green).
+//   language-reconciled  — $a differs but $0 authority URI matches; M9
+//                          binding (teal — informational).
+//   changed              — both sides have the field, subfields differ
+//                          (amber — needs review).
+//   tag-changed          — source field paired with a different recon
+//                          tag (orange — routing misroute, P-48).
+//   lost / added         — only one side has the field (red / blue).
+//   marckey-bypass       — recon subfields built from bflc:marcKey, not
+//                          BFFI structure (purple — verification flag,
+//                          P-49).
+//   lost-converter-gap   — converter explicitly skipped (grey).
 // =====================================================================
 
 function collectMarcRoundtripCandidates(files) {
@@ -1377,9 +1404,15 @@ function renderMarcRoundtripSidebar(active) {
     const li = document.createElement("li");
     if (i === active.currentIdx) li.className = "active";
     const summary = c.diff?.summary || {};
+    // Diff total shown in the navigation badge. Includes statuses
+    // the cataloguer actually needs to look at; excludes
+    // ``identical`` (no change) and ``language-reconciled`` (M9
+    // binding swapped the label but the concept is the same — not
+    // worth surfacing as a "diff to review").
     const totalDiffs =
       (summary.changed || 0) + (summary.lost || 0) +
-      (summary.added || 0) + (summary["lost-converter-gap"] || 0);
+      (summary.added || 0) + (summary["lost-converter-gap"] || 0) +
+      (summary["tag-changed"] || 0) + (summary["marckey-bypass"] || 0);
     li.innerHTML = `
       <div class="row-main">
         <span class="entry-text">${escapeHtml(c.bib_id)}</span>
@@ -1423,9 +1456,12 @@ function renderMarcRoundtripTab(active) {
       </p>
       <p>
         <span class="diff-chip identical">${ps.identical || 0} identical</span>
+        <span class="diff-chip language-reconciled">${ps["language-reconciled"] || 0} language-reconciled</span>
         <span class="diff-chip changed">${ps.changed || 0} changed</span>
+        <span class="diff-chip tag-changed">${ps["tag-changed"] || 0} tag-changed</span>
         <span class="diff-chip lost">${ps.lost || 0} lost</span>
         <span class="diff-chip added">${ps.added || 0} added</span>
+        <span class="diff-chip marckey-bypass">${ps["marckey-bypass"] || 0} marckey-bypass</span>
         <span class="diff-chip gap">${ps["lost-converter-gap"] || 0} converter gap</span>
       </p>
     `;
@@ -1449,9 +1485,12 @@ function renderMarcRoundtripTab(active) {
   subline.style.fontSize = "13px";
   subline.innerHTML = `
     <span class="diff-chip identical">${bibSummary.identical || 0} identical</span>
+    <span class="diff-chip language-reconciled">${bibSummary["language-reconciled"] || 0} language-reconciled</span>
     <span class="diff-chip changed">${bibSummary.changed || 0} changed</span>
+    <span class="diff-chip tag-changed">${bibSummary["tag-changed"] || 0} tag-changed</span>
     <span class="diff-chip lost">${bibSummary.lost || 0} lost</span>
     <span class="diff-chip added">${bibSummary.added || 0} added</span>
+    <span class="diff-chip marckey-bypass">${bibSummary["marckey-bypass"] || 0} marckey-bypass</span>
     <span class="diff-chip gap">${bibSummary["lost-converter-gap"] || 0} converter gap</span>
   `;
   host.appendChild(subline);
