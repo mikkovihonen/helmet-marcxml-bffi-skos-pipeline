@@ -235,11 +235,75 @@ class ReconstructedRecord:
 
 
 def reconstruct_marc(
-    graph: Graph, manifestation_uri: URIRef, *, bib_id: str | None = None
+    graph: Graph,
+    manifestation_uri: URIRef,
+    *,
+    bib_id: str | None = None,
+    lineage_rank_map: dict[str, str] | None = None,
 ) -> ReconstructedRecord:
     """Reconstruct a MARCXML record from the BFFI graph rooted at the
-    given Manifestation. See module docstring for the field coverage."""
-    return _Reconstructor(graph, manifestation_uri, bib_id=bib_id).build()
+    given Manifestation. See module docstring for the field coverage.
+
+    ``lineage_rank_map`` (optional) is a pre-built map from raw-bib
+    URI string → ``<tag>-<rank>`` lineage token. Pass it in when
+    processing many manifestations from the same graph to avoid
+    paying the O(graph) build cost per record — see
+    :func:`build_lineage_rank_map`. When ``None``, falls back to
+    a per-record build (correct but slow on multi-million-triple
+    graphs).
+    """
+    return _Reconstructor(
+        graph,
+        manifestation_uri,
+        bib_id=bib_id,
+        _lineage_rank_map=lineage_rank_map or {},
+        _lineage_rank_map_was_provided=lineage_rank_map is not None,
+    ).build()
+
+
+def build_lineage_rank_map(graph: Graph) -> dict[str, str]:
+    """Build a per-record lineage rank map for every Manifestation in
+    ``graph`` in a single pass.
+
+    Returns ``{raw_uri_string: "<tag>-<rank>"}`` where the rank is
+    1-indexed-within-tag-bucket per source record (keyed by bib_id
+    derived from the raw URI's path segment). Designed for the
+    runner to call ONCE after loading canonical + Finto dumps,
+    avoiding the O(graph) cost per-record that
+    :meth:`_Reconstructor._build_lineage_rank_map` would otherwise
+    pay 500x on a 500-record corpus.
+
+    Implementation: iterate the graph's distinct subjects once,
+    cheap prefix-reject everything not in the raw-bib namespace,
+    parse the matching ones, group by (bib_id, tag), sort by M3
+    ordinal, assign ranks.
+    """
+    by_record_tag: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    seen: set[URIRef] = set()
+    iterables = (graph.subjects(), graph.objects())
+    for source in iterables:
+        for node in source:
+            if not isinstance(node, URIRef) or node in seen:
+                continue
+            seen.add(node)
+            s_str = str(node)
+            if not s_str.startswith(_RAW_BIB_URI_PREFIX):
+                continue
+            suffix = s_str[len(_RAW_BIB_URI_PREFIX) :]
+            if "#" not in suffix:
+                continue
+            bib_id, fragment = suffix.split("#", 1)
+            m = _LINEAGE_FRAGMENT_RE.match("#" + fragment)
+            if m is None:
+                continue
+            by_record_tag.setdefault((bib_id, m.group("tag")), []).append(
+                (int(m.group("ord")), s_str)
+            )
+    out: dict[str, str] = {}
+    for (_bib_id, tag), items in by_record_tag.items():
+        for rank, (_, uri_str) in enumerate(sorted(items), start=1):
+            out[uri_str] = f"{tag}-{rank}"
+    return out
 
 
 def serialize_marc(record: ReconstructedRecord) -> bytes:
@@ -261,13 +325,18 @@ class _Reconstructor:
     bib_id: str | None = None
     skipped: list[str] = field(default_factory=list)
     #: Pre-computed translation from M3 raw URI (full string) to the
-    #: 1-indexed-within-tag lineage token (e.g. ``"700-3"``). Built
-    #: once per :meth:`build` call from the BFFI graph; consulted by
-    #: :meth:`_lineage_token` whenever an emitter stamps ``$9 src=…``.
+    #: 1-indexed-within-tag lineage token (e.g. ``"700-3"``). When
+    #: callers pass a pre-built map (via :func:`reconstruct_marc`'s
+    #: ``lineage_rank_map`` keyword), the per-record build below is
+    #: skipped — critical for performance on multi-million-triple
+    #: graphs where iterating the full subject/object index per
+    #: record would cost ~30 s x N records.
     _lineage_rank_map: dict[str, str] = field(default_factory=dict)
+    _lineage_rank_map_was_provided: bool = False
 
     def build(self) -> ReconstructedRecord:
-        self._lineage_rank_map = self._build_lineage_rank_map()
+        if not self._lineage_rank_map_was_provided:
+            self._lineage_rank_map = self._build_lineage_rank_map()
         bib_id = self.bib_id or self._discover_bib_id()
         record = Element(f"{{{MARC_NAMESPACE}}}record")
 

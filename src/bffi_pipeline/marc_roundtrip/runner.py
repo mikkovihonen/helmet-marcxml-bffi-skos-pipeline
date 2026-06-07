@@ -31,6 +31,7 @@ from rdflib import Graph, URIRef
 from bffi_pipeline.marc_roundtrip.converter import (
     MARC_NAMESPACE,
     ReconstructedRecord,
+    build_lineage_rank_map,
     reconstruct_marc,
     serialize_marc,
 )
@@ -105,6 +106,10 @@ def run(
     manifestation_uris = [
         s for s in graph.subjects(V.RDF.type, V.BFFI.Manifestation) if isinstance(s, URIRef)
     ]
+    # Pre-compute the lineage rank map ONCE for all manifestations.
+    # The per-record alternative iterates the full graph
+    # (~17M triples with Finto dumps loaded) costing ~30 s/record.
+    lineage_rank_map = build_lineage_rank_map(graph)
     summary = RoundtripSummary(total_manifestations=len(manifestation_uris))
     emit_if_active(
         stage="marc-roundtrip",
@@ -114,7 +119,7 @@ def run(
     )
 
     for processed, manif in enumerate(sorted(manifestation_uris, key=str), start=1):
-        record = reconstruct_marc(graph, manif)
+        record = reconstruct_marc(graph, manif, lineage_rank_map=lineage_rank_map)
         if not record.bib_id:
             continue
         summary.reconstructed += 1
