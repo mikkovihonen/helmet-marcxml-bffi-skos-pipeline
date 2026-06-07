@@ -1720,6 +1720,21 @@ class _Reconstructor:
             return
         seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.subject)
         raw_origin_hints = self._build_raw_origin_hints(work, V.BFFI.subject)
+        # Pre-compute the set of targets that are emitted by
+        # :meth:`_emit_genre_forms` so the Statement walk below skips
+        # them. M2-post emits Statements with ``rdf:predicate
+        # bffi:subject`` for all 6XX tags (including 655 genre-forms)
+        # for cross-shape uniformity. Without this skip, a 655
+        # Statement's target would land here, route through
+        # :meth:`_subject_marc_tag` (which defaults to "650" for
+        # ``#GenreForm655-N`` raw URIs and M9-bound kaunokki/SLM
+        # authorities), and emit as a 650 — duplicating what
+        # ``_emit_genre_forms`` emits at the right tag.
+        genre_targets: set[Node] = set(self.graph.objects(work, V.BFFI.genreForm))
+        # Include raw-URI back-walks so M9-rebound genres are caught.
+        genre_raw_hints = self._build_raw_origin_hints(work, V.BFFI.genreForm)
+        for raw_str in genre_raw_hints.values():
+            genre_targets.add(URIRef(raw_str))
 
         # P-50 Phase C — walk via reified ``rdf:Statement`` first. Each
         # statement has ``rdf:subject ?work ; rdf:predicate bffi:subject
@@ -1734,6 +1749,8 @@ class _Reconstructor:
                 continue
             target = next(self.graph.objects(stmt, RDF.object), None)
             if target is None:
+                continue
+            if target in genre_targets:
                 continue
             row_result = self._subject_row(target, seen_authorities)
             if row_result is None:
@@ -1940,7 +1957,12 @@ class _Reconstructor:
                     out[auth] = str(raw)
         return out
 
-    def _find_subject_statement_for_target(self, work: URIRef, target: Node) -> Node | None:
+    def _find_subject_statement_for_target(  # noqa: PLR0912 — three-tier fallback (direct → raw_origin_hints back-walk → inverse skos:exactMatch); splitting the tiers fragments shared state across helpers.
+        self,
+        work: URIRef,
+        target: Node,
+        raw_origin_hints: dict[URIRef, str] | None = None,
+    ) -> Node | None:
         """Locate the M2-post-minted ``rdf:Statement`` reification that
         links this ``work`` to ``target`` as a subject occurrence.
         Returns the statement URI (so the caller can read its
@@ -1953,13 +1975,54 @@ class _Reconstructor:
         for 600/610/611/648/650/651 — both are subject-shape
         reifications under the same ``rdf:predicate bffi:subject``
         contract.
+
+        Three lookup paths in order:
+
+        1. **Direct match** — ``rdf:object = target``. Hits when the
+           target is the same node M2-post tagged (no M9 binding has
+           moved the URI).
+        2. **Raw-URI back-walk** — M9 rebinds the genre target to its
+           authority URI (e.g. ``yso/p1234``); M2-post emitted the
+           Statement with the *raw* ``#GenreForm655-N`` as
+           ``rdf:object``. ``raw_origin_hints`` maps each authority
+           URI to its originating raw URI; we look up the Statement
+           by that raw URI instead.
+        3. **skos:exactMatch fallback** — if no ``raw_origin_hints``
+           entry exists, walk inverse ``skos:exactMatch`` from the
+           target to find any raw URI that maps to it, then look
+           there.
         """
+        # Tier 1: direct rdf:object match.
         for stmt in self.graph.subjects(RDF.subject, work):
             if (stmt, RDF.type, RDF.Statement) not in self.graph:
                 continue
             if (stmt, RDF.object, target) not in self.graph:
                 continue
             return stmt
+        if not isinstance(target, URIRef):
+            return None
+        # Tier 2: back-walk via raw_origin_hints (built once per emit
+        # pass; covers the M9-rebound-genre case at zero per-row cost).
+        if raw_origin_hints is not None:
+            raw = raw_origin_hints.get(target)
+            if raw:
+                raw_uri = URIRef(raw)
+                for stmt in self.graph.subjects(RDF.subject, work):
+                    if (stmt, RDF.type, RDF.Statement) not in self.graph:
+                        continue
+                    if (stmt, RDF.object, raw_uri) not in self.graph:
+                        continue
+                    return stmt
+        # Tier 3: inverse skos:exactMatch — slower, only fires when
+        # raw_origin_hints lacks an entry (rare; M9 should populate it).
+        for raw_node in self.graph.subjects(V.SKOS.exactMatch, target):
+            if isinstance(raw_node, URIRef) and str(raw_node).startswith(_RAW_BIB_URI_PREFIX):
+                for stmt in self.graph.subjects(RDF.subject, work):
+                    if (stmt, RDF.type, RDF.Statement) not in self.graph:
+                        continue
+                    if (stmt, RDF.object, raw_node) not in self.graph:
+                        continue
+                    return stmt
         return None
 
     def _emit_genre_forms(self, record: Element) -> None:
@@ -1982,7 +2045,7 @@ class _Reconstructor:
             # legacy direct-or-back-walk lineage when no Statement is
             # found (records processed before P-50 Phase C shipped,
             # or shapes M2-post's matcher doesn't cover).
-            stmt = self._find_subject_statement_for_target(work, genre)
+            stmt = self._find_subject_statement_for_target(work, genre, raw_origin_hints)
             lineage = (
                 self._lineage_token(stmt) if stmt is not None else None
             ) or self._lineage_for_subject(genre, raw_origin_hints)
