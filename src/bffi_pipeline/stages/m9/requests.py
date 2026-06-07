@@ -257,8 +257,27 @@ def _collect_work_context(graph: Graph, work: URIRef) -> WorkContext:
     )
 
 
-def _iter_creator_requests(graph: Graph) -> Iterator[EntityRequest]:
-    """Yield one creator-reconciliation request per canonical Work agent."""
+def _iter_creator_requests(  # noqa: PLR0912 — two contribution sources (PrimaryContribution + Phase H aggregation components) each walk a 3-level nested chain (work → contrib → agent → label) over heterogeneous graph shapes; splitting fragments work_context state across helpers.
+    graph: Graph,
+) -> Iterator[EntityRequest]:
+    """Yield one creator-reconciliation request per canonical Work agent.
+
+    Two contribution sources walked:
+
+    1. **Work's PrimaryContribution** — the main creator
+       (MARC 100 author). One request per Work.
+    2. **Aggregation component agents** (P-52 Phase H) — for each
+       Expression typed ``bffi:AggregatingExpression``, walk
+       ``bffi:aggregates → component → bffi:contribution →
+       bffi:agent → rdfs:label`` and yield one request per
+       component-agent pair. The parent canonical Work's
+       ``work_uri`` carries through so the picker prompt's
+       situational context (title + corpus + …) reflects the
+       aggregating record, not the component in isolation. The
+       picker cache dedupes by (literal, kind, finto_shas) so a
+       composer credited on multiple compilations only hits the
+       LLM tier once.
+    """
     for work in graph.subjects(RDF.type, V.BFFI.Work):
         if not isinstance(work, URIRef):
             continue
@@ -282,6 +301,22 @@ def _iter_creator_requests(graph: Graph) -> Iterator[EntityRequest]:
                             work_context=work_context,
                         )
                         break
+        # P-52 Phase H — aggregation component agents.
+        for expr in graph.objects(work, V.BFFI.hasExpression):
+            for component in graph.objects(expr, V.BFFI.aggregates):
+                for comp_contrib in graph.objects(component, V.BFFI.contribution):
+                    for comp_agent in graph.objects(comp_contrib, V.BFFI.agent):
+                        for label in graph.objects(comp_agent, V.RDFS.label):
+                            if isinstance(label, RdfLiteral):
+                                if work_context is None:
+                                    work_context = _collect_work_context(graph, work)
+                                yield EntityRequest(
+                                    work_uri=str(work),
+                                    literal=str(label),
+                                    kind="person",
+                                    work_context=work_context,
+                                )
+                                break
 
 
 def _iter_subject_requests(graph: Graph) -> Iterator[EntityRequest]:

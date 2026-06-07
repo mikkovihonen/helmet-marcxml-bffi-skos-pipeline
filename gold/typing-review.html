@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BFFI typing + aggregations review</title>
+<style>
+:root {
+  --bg: #fafafa;
+  --fg: #222;
+  --muted: #888;
+  --border: #ddd;
+  --hover: #eef3fb;
+  --accent: #2b4d8c;
+  --chip-bg: #eef3fb;
+  --chip-fg: #2b4d8c;
+  --chip-agg-bg: #fde9e9;
+  --chip-agg-fg: #8a3030;
+  --chip-music-bg: #e9f7e9;
+  --chip-music-fg: #2d6a2d;
+  --chip-status-resolved-bg: #d4edda;
+  --chip-status-resolved-fg: #155724;
+  --chip-status-unresolved-bg: #fff3cd;
+  --chip-status-unresolved-fg: #856404;
+  --chip-status-no-agent-bg: #f0f0f0;
+  --chip-status-no-agent-fg: #555;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg); color: var(--fg);
+  font-size: 14px;
+}
+header {
+  display: flex; align-items: center; gap: 24px;
+  padding: 16px 24px; border-bottom: 1px solid var(--border);
+  background: white;
+}
+header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+header .stats { color: var(--muted); font-size: 13px; }
+header input[type=file] { font-size: 13px; }
+.tabs {
+  display: flex; gap: 1px; background: var(--border);
+  padding: 0 24px;
+}
+.tabs button {
+  background: var(--bg); border: 0; padding: 10px 20px;
+  font-size: 13px; cursor: pointer; color: var(--muted);
+  border-top: 2px solid transparent;
+}
+.tabs button.active {
+  background: white; color: var(--fg);
+  border-top-color: var(--accent);
+}
+.tabs button:hover:not(.active) { color: var(--fg); }
+main { padding: 24px; }
+section.tab-content { display: none; }
+section.tab-content.active { display: block; }
+
+/* ---- Typing summary ---- */
+.summary-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px; margin-bottom: 24px;
+}
+.summary-card {
+  background: white; padding: 12px 16px; border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.summary-card h3 { margin: 0 0 6px 0; font-size: 13px; color: var(--muted); }
+.summary-card ul { margin: 0; padding-left: 16px; font-size: 13px; }
+.summary-card li { margin-bottom: 2px; }
+.summary-card .count { color: var(--muted); margin-left: 6px; }
+
+.typing-controls {
+  display: flex; gap: 12px; margin-bottom: 12px; align-items: center;
+}
+.typing-controls input[type=text] {
+  padding: 6px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 4px;
+  flex: 1; max-width: 320px;
+}
+table.typing-table {
+  width: 100%; border-collapse: collapse; background: white;
+  border: 1px solid var(--border);
+}
+table.typing-table th, table.typing-table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+table.typing-table th { background: var(--hover); font-weight: 600; font-size: 12px; }
+table.typing-table tbody tr:hover { background: var(--hover); }
+table.typing-table .bib-id { font-family: SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+.chip {
+  display: inline-block; padding: 2px 8px; margin: 1px 2px;
+  background: var(--chip-bg); color: var(--chip-fg);
+  border-radius: 10px; font-size: 11px; font-weight: 500;
+}
+.chip.aggregating { background: var(--chip-agg-bg); color: var(--chip-agg-fg); }
+.chip.music { background: var(--chip-music-bg); color: var(--chip-music-fg); }
+
+/* ---- Aggregations ---- */
+.aggregation-card {
+  background: white; border: 1px solid var(--border); border-radius: 6px;
+  margin-bottom: 16px; padding: 16px;
+}
+.aggregation-card header {
+  background: transparent; border: 0; padding: 0;
+  display: block; margin-bottom: 8px;
+}
+.aggregation-card header h3 {
+  margin: 0; font-size: 15px; font-weight: 600;
+}
+.aggregation-card .meta {
+  color: var(--muted); font-size: 12px; margin-bottom: 8px;
+}
+.aggregation-card table.components {
+  width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px;
+}
+.aggregation-card table.components th, .aggregation-card table.components td {
+  text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
+.aggregation-card table.components th { background: var(--bg); font-weight: 500; }
+.chip.status-reconciled { background: var(--chip-status-resolved-bg); color: var(--chip-status-resolved-fg); }
+.chip.status-unresolved { background: var(--chip-status-unresolved-bg); color: var(--chip-status-unresolved-fg); }
+.chip.status-no-agent { background: var(--chip-status-no-agent-bg); color: var(--chip-status-no-agent-fg); }
+
+.empty-state {
+  background: white; padding: 32px; text-align: center;
+  border: 1px dashed var(--border); border-radius: 6px;
+  color: var(--muted);
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>BFFI typing + aggregations</h1>
+  <div class="stats" id="stats">No data loaded</div>
+  <input type="file" id="file-input" accept=".jsonl" multiple title="Drop typing-summary.jsonl + aggregations.jsonl">
+</header>
+
+<div class="tabs">
+  <button class="active" data-tab="typing">Typing</button>
+  <button data-tab="aggregations">Aggregations</button>
+</div>
+
+<main>
+
+<section class="tab-content active" id="tab-typing">
+  <div class="summary-cards" id="summary-cards"></div>
+  <div class="typing-controls">
+    <input type="text" id="typing-filter" placeholder="Filter by bib_id or class name…">
+    <span id="typing-count" class="stats"></span>
+  </div>
+  <table class="typing-table">
+    <thead>
+      <tr>
+        <th>bib_id</th>
+        <th>Work types</th>
+        <th>Expression types</th>
+        <th>Manifestation types</th>
+      </tr>
+    </thead>
+    <tbody id="typing-rows"></tbody>
+  </table>
+</section>
+
+<section class="tab-content" id="tab-aggregations">
+  <div id="aggregation-cards"></div>
+</section>
+
+</main>
+
+<script>
+const state = {
+  typing: [],
+  aggregations: [],
+};
+
+function chipClass(typeName) {
+  const lower = typeName.toLowerCase();
+  if (lower.includes("aggregating")) return "chip aggregating";
+  if (lower.includes("music") || lower.includes("notatedmusic") ||
+      lower.includes("musicaudio")) return "chip music";
+  return "chip";
+}
+
+function chipsFor(types) {
+  return types.map(t => `<span class="${chipClass(t)}">${t}</span>`).join("");
+}
+
+function renderSummaryCards(rows) {
+  const cards = document.getElementById("summary-cards");
+  cards.innerHTML = "";
+  const counts = { work: {}, expression: {}, manifestation: {} };
+  for (const r of rows) {
+    for (const t of r.work_types) counts.work[t] = (counts.work[t] || 0) + 1;
+    for (const t of r.expression_types) counts.expression[t] = (counts.expression[t] || 0) + 1;
+    for (const t of r.manifestation_types) counts.manifestation[t] = (counts.manifestation[t] || 0) + 1;
+  }
+  for (const [axis, label] of [["work", "Work axis"], ["expression", "Expression axis"], ["manifestation", "Manifestation axis"]]) {
+    const entries = Object.entries(counts[axis]).sort((a, b) => b[1] - a[1]);
+    const ul = entries.map(([t, n]) => `<li><span class="${chipClass(t)}">${t}</span><span class="count">${n}</span></li>`).join("");
+    cards.insertAdjacentHTML("beforeend",
+      `<div class="summary-card"><h3>${label}</h3><ul>${ul || "<li><em>none</em></li>"}</ul></div>`);
+  }
+}
+
+function renderTypingRows(rows, filter) {
+  const tbody = document.getElementById("typing-rows");
+  const filterLower = (filter || "").toLowerCase();
+  let shown = 0;
+  const html = [];
+  for (const r of rows) {
+    if (filterLower) {
+      const hay = (r.bib_id + " " + r.work_types.join(" ") + " " +
+                   r.expression_types.join(" ") + " " + r.manifestation_types.join(" ")).toLowerCase();
+      if (!hay.includes(filterLower)) continue;
+    }
+    shown++;
+    html.push(`<tr>
+      <td class="bib-id">${r.bib_id}</td>
+      <td>${chipsFor(r.work_types)}</td>
+      <td>${chipsFor(r.expression_types)}</td>
+      <td>${chipsFor(r.manifestation_types)}</td>
+    </tr>`);
+  }
+  tbody.innerHTML = html.join("");
+  document.getElementById("typing-count").textContent =
+    filterLower ? `${shown} / ${rows.length} rows` : `${rows.length} rows`;
+}
+
+function renderAggregations(rows) {
+  const root = document.getElementById("aggregation-cards");
+  if (rows.length === 0) {
+    root.innerHTML = '<div class="empty-state">No aggregating records found in this run. Drop in <code>aggregations.jsonl</code> from a run that produced Phase E typing.</div>';
+    return;
+  }
+  const html = [];
+  for (const r of rows) {
+    const componentRows = r.components.map(c => `<tr>
+      <td>${c.title || "<em>—</em>"}</td>
+      <td>${c.agent_name || "<em>—</em>"}</td>
+      <td><span class="chip status-${c.reconciliation_status}">${c.reconciliation_status}</span></td>
+    </tr>`).join("");
+    html.push(`<div class="aggregation-card">
+      <header><h3>${r.parent_title || r.bib_id}</h3></header>
+      <div class="meta">
+        <code>${r.bib_id}</code> · ${r.component_count} component${r.component_count === 1 ? "" : "s"}
+      </div>
+      <table class="components">
+        <thead><tr><th>Component title</th><th>Agent</th><th>Status</th></tr></thead>
+        <tbody>${componentRows}</tbody>
+      </table>
+    </div>`);
+  }
+  root.innerHTML = html.join("");
+}
+
+function refresh() {
+  renderSummaryCards(state.typing);
+  renderTypingRows(state.typing, document.getElementById("typing-filter").value);
+  renderAggregations(state.aggregations);
+  const reconciled = state.aggregations.reduce((acc, r) =>
+    acc + r.components.filter(c => c.reconciliation_status === "reconciled").length, 0);
+  const totalComponents = state.aggregations.reduce((acc, r) => acc + r.component_count, 0);
+  document.getElementById("stats").textContent =
+    `${state.typing.length} records · ${state.aggregations.length} aggregating · ${reconciled}/${totalComponents} components reconciled`;
+}
+
+async function loadJsonl(file) {
+  const text = await file.text();
+  return text.split("\n").filter(line => line.trim()).map(line => JSON.parse(line));
+}
+
+document.getElementById("file-input").addEventListener("change", async (e) => {
+  for (const file of e.target.files) {
+    const rows = await loadJsonl(file);
+    if (file.name.includes("typing")) state.typing = rows;
+    else if (file.name.includes("aggregat")) state.aggregations = rows;
+  }
+  refresh();
+});
+
+document.querySelectorAll(".tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(s => s.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+  });
+});
+
+document.getElementById("typing-filter").addEventListener("input", (e) => {
+  renderTypingRows(state.typing, e.target.value);
+});
+
+// Auto-load sidecars when served alongside them (production layout in
+// runs/<id>/cataloguer-review/). Silently skip when files are absent
+// — the file picker still works as a fallback for drag-and-drop.
+(async () => {
+  for (const filename of ["typing-summary.jsonl", "aggregations.jsonl"]) {
+    try {
+      const res = await fetch(filename);
+      if (!res.ok) continue;
+      const text = await res.text();
+      const rows = text.split("\n").filter(line => line.trim()).map(line => JSON.parse(line));
+      if (filename.includes("typing")) state.typing = rows;
+      else if (filename.includes("aggregat")) state.aggregations = rows;
+    } catch (e) { /* CORS / file:// fallback; ignore */ }
+  }
+  if (state.typing.length || state.aggregations.length) refresh();
+})();
+</script>
+
+</body>
+</html>

@@ -331,6 +331,31 @@ def _dispatch_cataloguer_bundle(*, input_dir: Path | None = None) -> None:
     print(result.render())
     print(f"[cataloguer-bundle] HTML reviewer at {bundle_dir / 'cataloguer-review.html'}")
 
+    # P-52 Phase I — emit the BFFI subclass typing + aggregations
+    # sidecars alongside the standalone typing-review viewer. Both
+    # are read from canonical.ttl produced by M8; skipped when the
+    # canonical is absent (e.g. a tests-only run with no canonical
+    # output).
+    from bffi_pipeline.release.typing_review import (  # noqa: PLC0415
+        build_aggregation_report,
+        build_typing_summary,
+    )
+
+    canonical_path = run_dir / "canonical.ttl"
+    if canonical_path.is_file():
+        typing_count = build_typing_summary(canonical_path, bundle_dir / "typing-summary.jsonl")
+        agg_count = build_aggregation_report(canonical_path, bundle_dir / "aggregations.jsonl")
+        # Locate the typing-review.html template next to the existing
+        # cataloguer-review.html shipped from ``gold/``.
+        typing_viewer_src = review_bundle.bundle.HTML_REVIEWER_PATH.parent / "typing-review.html"
+        if typing_viewer_src.is_file():
+            shutil.copy2(typing_viewer_src, bundle_dir / "typing-review.html")
+        print(
+            f"[cataloguer-bundle] typing-review.html at "
+            f"{bundle_dir / 'typing-review.html'} "
+            f"(typing rows: {typing_count}, aggregating rows: {agg_count})"
+        )
+
 
 #: Module-level dispatch table — lets tests monkeypatch a single stage's
 #: invocation without monkeypatching the entire CLI module.

@@ -743,6 +743,69 @@ def test_655_emits_slm_genre_form(minimal_record: ET.Element) -> None:
     assert _subfield(df, "0") == "http://urn.fi/URN:NBN:fi:au:slm:s1044"
 
 
+def test_700_ind2_2_emits_analytical_added_entry_from_component_agent(tmp_path) -> None:
+    """P-52 Phase G.bis Sub-task B — converter walks ``bffi:Expression
+    bffi:aggregates ?component → bffi:contribution → bffi:agent →
+    rdfs:label`` and emits one ``700 ind1=1 ind2=2 $a <name>`` row
+    per component-agent pair. Indicators identify the row as an
+    analytical added entry."""
+    g = _build_minimal_graph()
+    # Synthesise a component Expression with a contribution chain
+    # (mimics what M3's _enrich_aggregation_components_with_agents
+    # would produce from a Hub's bflc:marcKey $g subfield).
+    component = URIRef("urn:expr/component-1")
+    g.add((EXPR, V.BFFI.aggregates, component))
+    g.add((component, RDF.type, V.BFFI.Expression))
+    g.add((component, V.BFFI.aggregatedBy, EXPR))
+    contrib = URIRef("urn:contrib/comp-1")
+    agent = URIRef("urn:agent/comp-1")
+    g.add((component, V.BFFI.contribution, contrib))
+    g.add((contrib, RDF.type, V.BFFI.Contribution))
+    g.add((contrib, V.BFFI.agent, agent))
+    g.add((agent, V.RDFS.label, Literal("Gore, Michael")))
+
+    rec = reconstruct_marc(g, MANIF)
+    # All 700 datafields in the record
+    dfs = rec.element.findall("m:datafield[@tag='700']", NS)
+    # Find the one with ind2=2
+    analytical = [df for df in dfs if df.attrib.get("ind2") == "2"]
+    assert len(analytical) == 1
+    assert _subfield(analytical[0], "a") == "Gore, Michael"
+    assert analytical[0].attrib["ind1"] == "1"
+
+
+def test_700_ind2_2_emits_one_row_per_component_dedupes_repeated_agent(tmp_path) -> None:
+    """Two components with the same agent name emit one row (dedupe
+    by name). Prevents double-emit on shared composers across a
+    compilation's songs."""
+    g = _build_minimal_graph()
+    for i in range(2):
+        component = URIRef(f"urn:expr/component-{i}")
+        g.add((EXPR, V.BFFI.aggregates, component))
+        g.add((component, RDF.type, V.BFFI.Expression))
+        contrib = URIRef(f"urn:contrib/comp-{i}")
+        agent = URIRef(f"urn:agent/comp-{i}")
+        g.add((component, V.BFFI.contribution, contrib))
+        g.add((contrib, V.BFFI.agent, agent))
+        # Same label on both agents → single 700 ind2=2 row
+        g.add((agent, V.RDFS.label, Literal("Same Composer")))
+
+    rec = reconstruct_marc(g, MANIF)
+    all_700 = rec.element.findall("m:datafield[@tag='700']", NS)
+    analytical = [df for df in all_700 if df.attrib.get("ind2") == "2"]
+    assert len(analytical) == 1
+    assert _subfield(analytical[0], "a") == "Same Composer"
+
+
+def test_700_ind2_2_not_emitted_when_no_aggregating_components(tmp_path) -> None:
+    """Non-aggregating records emit zero 700 ind2=2 rows — the walk
+    over ``bffi:aggregates`` finds nothing."""
+    rec = reconstruct_marc(_build_minimal_graph(), MANIF)
+    all_700 = rec.element.findall("m:datafield[@tag='700']", NS)
+    analytical = [df for df in all_700 if df.attrib.get("ind2") == "2"]
+    assert analytical == []
+
+
 def test_700_emits_translator_added_entry(minimal_record: ET.Element) -> None:
     df = _datafield(minimal_record, "700")
     assert df is not None

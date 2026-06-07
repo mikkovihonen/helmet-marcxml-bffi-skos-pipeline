@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.provenance import vocab as V
@@ -73,6 +73,78 @@ def _primary_record_language(source: Graph) -> str | None:
             if code is not None:
                 return code
     return None
+
+
+def _extract_g_subfield(marc_key: str) -> str | None:
+    """Parse a MARC marcKey literal (e.g. ``"73000 $aFame /$gGore,
+    Michael"``) and return the ``$g`` subfield value with trailing
+    ISBD punctuation stripped. Returns ``None`` when no ``$g`` is
+    present or the extracted value is empty.
+
+    MARC marcKey format: leading tag (3 digits) + indicators (2 chars)
+    + space + subfield-delimiter pairs (``$<code><value>``). The next
+    ``$`` after ``$g`` marks the end of the agent value. ISBD
+    punctuation that the previous subfield carried at its tail (``/``,
+    ``,``, ``;``, ``:`` etc.) is also stripped from the ``$g`` value.
+    """
+    idx = marc_key.find("$g")
+    if idx < 0:
+        return None
+    after_g = marc_key[idx + 2 :]
+    next_delim = after_g.find("$")
+    g_value = after_g if next_delim < 0 else after_g[:next_delim]
+    return g_value.strip().rstrip("/.,;:").strip() or None
+
+
+def _enrich_aggregation_components_with_agents(bffi_graph: Graph) -> None:
+    """For each aggregation component Expression that carries a source
+    ``bflc:marcKey`` literal, parse the ``$g`` subfield and synthesise
+    a contribution chain on the component:
+
+        <component> bffi:contribution _:c .
+        _:c        a              bffi:Contribution ;
+                   bffi:agent     _:agent .
+        _:agent    a              bf:Agent ;
+                   rdfs:label     "<agent name>" .
+
+    Drives two downstream consumers:
+
+    1. **Round-trip 700 ind2=2 emit** (P-52 Phase G.bis). The
+       converter walks ``bffi:Expression bffi:aggregates ?component``
+       and, for each component with a contribution, emits a
+       ``700 ind2=2 $a <name>`` analytical-entry row.
+
+    2. **M9 component-agent reconciliation** (P-52 Phase H). M9's
+       ``_iter_creator_requests`` already walks every
+       ``bffi:Expression bffi:contribution → bffi:agent`` chain;
+       component agents flow through automatically.
+
+    Idempotent: skips components that already have any
+    ``bffi:contribution`` (re-runs against an already-enriched graph
+    are no-ops).
+    """
+    seen_components: set[URIRef] = set()
+    for _parent, _p, component in bffi_graph.triples((None, V.BFFI.aggregates, None)):
+        if not isinstance(component, URIRef) or component in seen_components:
+            continue
+        seen_components.add(component)
+        if (component, V.BFFI.contribution, None) in bffi_graph:
+            continue
+        agent_label: str | None = None
+        for mk in bffi_graph.objects(component, V.BFLC.marcKey):
+            if isinstance(mk, Literal):
+                agent_label = _extract_g_subfield(str(mk))
+                if agent_label:
+                    break
+        if not agent_label:
+            continue
+        contrib = BNode()
+        agent = BNode()
+        bffi_graph.add((component, V.BFFI.contribution, contrib))
+        bffi_graph.add((contrib, RDF.type, V.BFFI.Contribution))
+        bffi_graph.add((contrib, V.BFFI.agent, agent))
+        bffi_graph.add((agent, RDF.type, V.BF.Agent))
+        bffi_graph.add((agent, RDFS.label, Literal(agent_label)))
 
 
 def _tag_manifestation_pref_labels_with_primary_language(bffi_graph: Graph, source: Graph) -> None:
@@ -197,6 +269,11 @@ def post_process(
         audit_log_path=audit_log_path,
         now=now,
     )
+    # P-52 Phase G.bis — synthesise component-Expression contribution
+    # chains from each aggregation component's ``bflc:marcKey`` ``$g``
+    # subfield. Drives the round-trip 700 ind2=2 analytical-entry emit
+    # path and feeds M9 component-agent reconciliation.
+    _enrich_aggregation_components_with_agents(bffi_graph)
     # Resolve Finnish / Swedish ``$e`` role terms on every bf:role
     # blank node to a LoC relator URI when the curated mapping
     # matches. Sibling URI lives next to the original

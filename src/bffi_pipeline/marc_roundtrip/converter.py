@@ -398,6 +398,7 @@ class _Reconstructor:
         self._emit_subjects(record)  # 6XX
         self._emit_genre_forms(record)  # 655
         self._emit_added_entries(record)  # 700/710 etc.
+        self._emit_aggregated_component_analytical_entries(record)  # 700 ind2=2
         self._emit_related_uniform_titles(record)  # 730
         self._emit_bib_id_local(record, bib_id)  # 907 Helmet display form
 
@@ -2315,6 +2316,49 @@ class _Reconstructor:
         if "#Agent711" in s:
             return "711"
         return "700"
+
+    def _emit_aggregated_component_analytical_entries(self, record: Element) -> None:
+        """MARC 700 ind2=2 — analytical added entry for an aggregating
+        record's component agents (P-52 Phase G.bis).
+
+        Walks ``bffi:Expression bffi:aggregates ?component →
+        bffi:contribution → bffi:agent → rdfs:label`` and emits one
+        ``700 ind1=1 ind2=2 $a <agent name>`` row per component-agent
+        pair. The component contribution chain is synthesised by M3's
+        ``_enrich_aggregation_components_with_agents`` from each
+        Hub's ``bflc:marcKey`` ``$g`` subfield (which carries the
+        analytical agent name in MARC 730 / 740 source rows like
+        ``"73000 $aFame /$gGore, Michael"``).
+
+        Lineage rides on the component Expression's
+        ``bffi-prov:fromMarcField`` token when present (Phase F's
+        component-minting flows the token through from the source
+        ``bf:Hub``); otherwise no lineage emit.
+
+        Source records that aren't aggregating produce zero rows
+        (the walk simply finds no ``bffi:aggregates`` edges).
+        """
+        expr = self.expression
+        if expr is None:
+            return
+        seen: set[str] = set()
+        for component in self.graph.objects(expr, V.BFFI.aggregates):
+            if not isinstance(component, URIRef | BNode):
+                continue
+            for contrib in self.graph.objects(component, V.BFFI.contribution):
+                for agent in self.graph.objects(contrib, V.BFFI.agent):
+                    label = self._first_label(agent)
+                    if not label or label in seen:
+                        continue
+                    seen.add(label)
+                    self._emit_datafield(
+                        record,
+                        "700",
+                        ("a", label),
+                        ind1="1",
+                        ind2="2",
+                        lineage=self._lineage_token(component),
+                    )
 
     def _emit_related_uniform_titles(self, record: Element) -> None:
         """MARC 730 / 740 (added entry — title).

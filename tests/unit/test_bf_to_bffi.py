@@ -29,6 +29,9 @@ from bffi_pipeline.stages.m3 import (
     construct_bffi,
     post_process,
 )
+from bffi_pipeline.stages.m3.post_process import (
+    _enrich_aggregation_components_with_agents,
+)
 from bffi_pipeline.stages.m3.runner import (
     _convert_one,
     _emit_validation_tsv,
@@ -384,6 +387,108 @@ def test_construct_emits_phase_f_component_expressions_for_aggregating_parent() 
         assert any("Component" in str(lbl) for lbl in labels), (
             f"Component label missing on {comp!r}: {labels!r}"
         )
+
+
+def test_phase_g_bis_extracts_g_subfield_from_component_marckey() -> None:
+    """P-52 Phase G.bis Sub-task A — components carrying source
+    ``bflc:marcKey`` with a ``$g`` subfield (e.g. MARC 730 ``$aTitle
+    /$gAgent Name``) get a synthesised ``bffi:contribution →
+    bffi:agent → rdfs:label`` chain. Drives the round-trip 700 ind2=2
+    emit + M9 component-agent reconciliation."""
+    source = _build_source()
+    bf_work = URIRef(BF_WORK)
+    # Two source 730 hubs, each with an $a title and $g agent
+    hubs_and_agents = [
+        ("Component One", "Author One"),
+        ("Component Two", "Author Two"),
+    ]
+    for i, (title, agent_name) in enumerate(hubs_and_agents):
+        rel = URIRef(f"urn:test:rel/{i}")
+        hub = URIRef(f"urn:test:hub/{i}")
+        source.add((bf_work, V.BF.relation, rel))
+        source.add((rel, V.BF.associatedResource, hub))
+        source.add((hub, RDF.type, V.BF.Hub))
+        source.add((hub, V.RDFS.label, Literal(title)))
+        source.add(
+            (
+                hub,
+                V.BFLC.marcKey,
+                Literal(f"73000 $a{title} /$g{agent_name}"),
+            )
+        )
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+
+    components = list(bffi.objects(EXPECTED_EXPR, V.BFFI.aggregates))
+    assert len(components) == 2
+    # Collect agent labels from each component's contribution chain.
+    agent_labels: set[str] = set()
+    for comp in components:
+        for contrib in bffi.objects(comp, V.BFFI.contribution):
+            assert (contrib, RDF.type, V.BFFI.Contribution) in bffi
+            for agent in bffi.objects(contrib, V.BFFI.agent):
+                assert (agent, RDF.type, V.BF.Agent) in bffi
+                for lbl in bffi.objects(agent, V.RDFS.label):
+                    agent_labels.add(str(lbl))
+    assert agent_labels == {"Author One", "Author Two"}
+
+
+def test_phase_g_bis_skips_components_without_g_subfield() -> None:
+    """A component whose marcKey has no ``$g`` (e.g. 730 with only
+    ``$a``) gets no contribution chain — there's no agent signal to
+    synthesise from. The component still has skos:prefLabel +
+    bflc:marcKey."""
+    source = _build_source()
+    bf_work = URIRef(BF_WORK)
+    for i in range(2):
+        rel = URIRef(f"urn:test:rel/{i}")
+        hub = URIRef(f"urn:test:hub/{i}")
+        source.add((bf_work, V.BF.relation, rel))
+        source.add((rel, V.BF.associatedResource, hub))
+        source.add((hub, RDF.type, V.BF.Hub))
+        source.add((hub, V.RDFS.label, Literal(f"Component {i}")))
+        # marcKey with $a only, no $g
+        source.add((hub, V.BFLC.marcKey, Literal(f"73000 $aComponent {i}")))
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+
+    for comp in bffi.objects(EXPECTED_EXPR, V.BFFI.aggregates):
+        contribs = list(bffi.objects(comp, V.BFFI.contribution))
+        assert contribs == [], f"Component without $g should have no contribution; got {contribs!r}"
+
+
+def test_phase_g_bis_is_idempotent_on_already_enriched_components() -> None:
+    """Re-running the enrichment pass on a graph that already has
+    component contributions is a no-op (no duplicate contributions
+    or agents emitted)."""
+    source = _build_source()
+    bf_work = URIRef(BF_WORK)
+    rel = URIRef("urn:test:rel/0")
+    hub = URIRef("urn:test:hub/0")
+    rel2 = URIRef("urn:test:rel/1")
+    hub2 = URIRef("urn:test:hub/1")
+    for r, h, agent in [(rel, hub, "X"), (rel2, hub2, "Y")]:
+        source.add((bf_work, V.BF.relation, r))
+        source.add((r, V.BF.associatedResource, h))
+        source.add((h, RDF.type, V.BF.Hub))
+        source.add((h, V.BFLC.marcKey, Literal(f"73000 $aTitle /$g{agent}")))
+    bffi = construct_bffi(source)
+
+    _enrich_aggregation_components_with_agents(bffi)
+    first_pass_count = len(list(bffi.triples((None, V.BFFI.contribution, None))))
+    _enrich_aggregation_components_with_agents(bffi)
+    second_pass_count = len(list(bffi.triples((None, V.BFFI.contribution, None))))
+    # Counts equal across passes — re-running adds no new contributions.
+    # Absolute count includes the fixture's primary + non-primary
+    # contributions plus the 2 we synthesised.
+    assert first_pass_count == second_pass_count
+    # And the 2 component contributions specifically are present.
+    component_contribs = [
+        c
+        for comp in bffi.objects(EXPECTED_EXPR, V.BFFI.aggregates)
+        for c in bffi.objects(comp, V.BFFI.contribution)
+    ]
+    assert len(component_contribs) == 2
 
 
 def test_construct_does_not_emit_components_for_non_aggregating_parent() -> None:
