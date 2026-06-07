@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Final
 
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import DCTERMS, RDF, RDFS
+from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m3.contributions import _emit_extracted_contributions
@@ -208,11 +208,5 @@ def post_process(
     # (and Skosify's default_language=fi) don't merge a Finnish $a
     # and a Swedish $a into one ambiguous bucket. See helper docstring.
     _tag_loc_vocab_labels_with_primary_language(bffi_graph, source)
-    bffi_graph.bind("bf", V.BF)
-    bffi_graph.bind("bffi", V.BFFI)
-    bffi_graph.bind("bib", V.BIB)
-    bffi_graph.bind("dct", DCTERMS)
-    bffi_graph.bind("rdf", RDF)
-    bffi_graph.bind("rdfs", RDFS)
-    bffi_graph.bind("skos", V.SKOS)
+    V.bind_canonical_prefixes(bffi_graph)
     return bffi_graph

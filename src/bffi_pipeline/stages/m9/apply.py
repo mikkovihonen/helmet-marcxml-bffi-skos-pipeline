@@ -29,6 +29,7 @@ from rdflib import Graph
 from bffi_pipeline.cataloguer_review import append_target_row
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.observability.events import emit_if_active
+from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m9.authority_clients import AuthorityClient
 from bffi_pipeline.stages.m9.candidate_context import CandidateContextFetcher
 from bffi_pipeline.stages.m9.decisions import (
@@ -690,6 +691,7 @@ def apply_reconciliation(  # noqa: PLR0912, PLR0915 — three-phase orchestrator
 
     if own_graph:
         tmp = output_path.with_suffix(output_path.suffix + ".tmp")
+        V.bind_canonical_prefixes(target_graph)
         target_graph.serialize(destination=str(tmp), format="turtle")
         tmp.replace(output_path)
 

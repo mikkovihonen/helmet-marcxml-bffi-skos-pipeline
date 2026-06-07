@@ -22,7 +22,7 @@ from typing import Literal as LiteralType
 from typing import TypeGuard
 
 from rdflib import BNode, Graph, Literal, URIRef
-from rdflib.namespace import DCTERMS, RDF
+from rdflib.namespace import RDF
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.provenance import vocab as V
@@ -740,14 +740,7 @@ def _earliest_converted_at(
 
 
 def _bind_prefixes(g: Graph) -> None:
-    g.bind("bffi", V.BFFI)
-    g.bind("bffi-prov", V.BFFI_PROV)
-    g.bind("bf", V.BF)
-    g.bind("bib", V.BIB)
-    g.bind("dct", DCTERMS)
-    g.bind("prov", V.PROV)
-    g.bind("skos", V.SKOS)
-    g.bind("xsd", V.XSD)
+    V.bind_canonical_prefixes(g)
 
 
 def _select_description_modifier(

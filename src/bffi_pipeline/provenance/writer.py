@@ -62,6 +62,7 @@ def default_provenance_meta_path() -> Path:
 
 def _atomic_serialize(graph: Graph, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    V.bind_canonical_prefixes(graph)
     tmp = path.with_suffix(path.suffix + ".tmp")
     graph.serialize(destination=str(tmp), format="turtle")
     tmp.replace(path)
@@ -94,13 +95,7 @@ class ProvenanceWriter:
             self.graph.parse(str(self.path), format="turtle")
 
     def _bind_prefixes(self) -> None:
-        self.graph.bind("prov", V.PROV)
-        self.graph.bind("bffi", V.BFFI)
-        self.graph.bind("bffi-prov", V.BFFI_PROV)
-        self.graph.bind("bib", V.BIB)
-        self.graph.bind("bf", V.BF)
-        self.graph.bind("rdfs", V.RDFS)
-        self.graph.bind("xsd", V.XSD)
+        V.bind_canonical_prefixes(self.graph)
 
     # --- Activity / agent emission ---------------------------------------
 
@@ -166,8 +161,7 @@ def write_last_compacted_at(
     """Replace the meta graph's ``lastCompactedAt`` value with ``moment``."""
     target = meta_path or default_provenance_meta_path()
     g = Graph()
-    g.bind("bffi-prov", V.BFFI_PROV)
-    g.bind("xsd", V.XSD)
+    V.bind_canonical_prefixes(g)
     g.add(
         (
             _provenance_graph_subject(),
@@ -198,7 +192,7 @@ def compact_provenance(
     """
     target = provenance_path or default_provenance_path()
     g = Graph()
-    g.bind("bffi-prov", V.BFFI_PROV)
+    V.bind_canonical_prefixes(g)
     if target.is_file():
         g.parse(str(target), format="turtle")
 

@@ -231,6 +231,7 @@ def run(
     # so canonical.ttl stays BFFI 1.0.0-pure.
     _synthesise_display_predicates(skosified)
 
+    V.bind_canonical_prefixes(skosified)
     tmp = output_path.with_suffix(output_path.suffix + ".tmp")
     skosified.serialize(destination=str(tmp), format="turtle")
     tmp.replace(output_path)

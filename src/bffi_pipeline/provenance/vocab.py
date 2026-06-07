@@ -11,8 +11,10 @@ so it stays cheap to import from any stage.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from rdflib import Graph, Literal, Namespace, URIRef
-from rdflib.namespace import DCTERMS, RDF, RDFS, XSD
+from rdflib.namespace import DCTERMS, OWL, RDF, RDFS, XSD
 
 # --- Namespaces -----------------------------------------------------------
 
@@ -23,6 +25,82 @@ BIB = Namespace("http://urn.fi/URN:NBN:fi:bib:")
 BF = Namespace("http://id.loc.gov/ontologies/bibframe/")
 BFLC = Namespace("http://id.loc.gov/ontologies/bflc/")
 SKOS = Namespace("http://www.w3.org/2004/02/skos/core#")
+MADSRDF = Namespace("http://www.loc.gov/mads/rdf/v1#")
+
+
+#: Canonical short prefix → namespace mapping for every vocabulary the
+#: pipeline emits in serialised output. The union covers BIBFRAME
+#: (``bf``, ``bflc``), BFFI (``bffi``, our private ``bffi-prov``,
+#: ``bib`` for record-scoped URIs), W3C standards (``rdf``, ``rdfs``,
+#: ``skos``, ``owl``, ``xsd``, ``prov``), the Dublin Core terms set
+#: (``dct``), and MADS/RDF (``madsrdf``, surfaces on subject authority
+#: cross-links via ``madsrdf:isIdentifiedByAuthority``).
+#:
+#: Two reasons to keep this list one place:
+#:
+#: 1. **Stable serialiser output.** Without an explicit ``Graph.bind``,
+#:    rdflib's Turtle serialiser invents ``ns1`` / ``ns2`` placeholders
+#:    in graph-iteration order — non-deterministic across processes.
+#:    Two records emitted by the same stage can land different
+#:    ``@prefix ns1: …`` declarations; concatenating their Turtle then
+#:    silently reinterprets the local-name half of any ``ns1:…`` triple
+#:    in whichever record's prefix block lost the redeclaration race.
+#:    The 2026-06-07 corpus-concat bug
+#:    (commit ``2103de3`` and its companion fix) was exactly this
+#:    failure mode.
+#:
+#: 2. **Per-file consistency.** A stage that binds 7 of the 13
+#:    namespaces it emits leaves the other 6 prone to auto-prefixing.
+#:    The historical per-stage bind lists drifted (m3 missed
+#:    ``bffi-prov``, m2 missed ``skos``/``dct``/``xsd``, m8 missed
+#:    ``rdfs``/``rdf``) — every fresh predicate addition reopened the
+#:    same audit. One central list collapses the audit to "did the
+#:    new predicate's namespace make it into this dict?"
+#:
+#: Order is informational — the serialiser writes ``@prefix`` lines in
+#: the order ``Graph.bind`` was called, so this dict's iteration order
+#: shows up in output Turtle. Group W3C standards first, then BIBFRAME
+#: family, then BFFI / pipeline-specific.
+CANONICAL_TURTLE_PREFIXES: dict[str, object] = {
+    "rdf": RDF,
+    "rdfs": RDFS,
+    "skos": SKOS,
+    "owl": OWL,
+    "xsd": XSD,
+    "dct": DCTERMS,
+    "prov": PROV,
+    "bf": BF,
+    "bflc": BFLC,
+    "madsrdf": MADSRDF,
+    "bffi": BFFI,
+    "bffi-prov": BFFI_PROV,
+    "bib": BIB,
+}
+
+
+def bind_canonical_prefixes(graph: Graph) -> Graph:
+    """Bind every namespace in :data:`CANONICAL_TURTLE_PREFIXES` on
+    ``graph``. Returns the same graph for fluent use.
+
+    Call this immediately before any ``graph.serialize(format="turtle")``
+    in the pipeline so the output has stable, human-readable
+    ``@prefix`` declarations and zero auto-generated ``ns1``/``ns2``
+    placeholders. Idempotent — calling multiple times is harmless;
+    binding a prefix that's already bound is a no-op.
+
+    Binding namespaces the graph doesn't actually use is harmless: the
+    Turtle serialiser only emits ``@prefix`` lines for namespaces that
+    appear in at least one triple. The extra ``Graph.bind`` calls are
+    O(1) each, so the cost is negligible.
+    """
+    for short, ns in CANONICAL_TURTLE_PREFIXES.items():
+        # ``ns`` is a heterogeneous mix of ``Namespace`` instances and
+        # rdflib's ``DefinedNamespace`` metaclasses (e.g. ``RDF``,
+        # ``DCTERMS``); both work with ``Graph.bind`` at runtime, but
+        # the type stubs only narrow at the call site.
+        graph.bind(short, cast("Any", ns))
+    return graph
+
 
 # --- Activity classes -----------------------------------------------------
 
@@ -288,12 +366,15 @@ __all__ = [
     "BF",
     "BFFI",
     "BFFI_PROV",
+    "BFLC",
     "BIB",
+    "CANONICAL_TURTLE_PREFIXES",
     "DESC_CONV_BFFI_1_0_0",
     "DESC_LEVEL_MINIMUM",
     "ENC_LEVEL_AUTO",
     "GEN_PROCESS_PIPELINE_V0_1_0",
     "HELMET_SOURCE_URI",
+    "MADSRDF",
     "METADATA_LICENSOR_CC0",
     "MINT_ANCHOR_ANONYMOUS_WORK",
     "MINT_ANCHOR_FIRST_CONTRIBUTOR",
@@ -313,6 +394,7 @@ __all__ = [
     "WorkMergeDecision",
     "adminMetadata",
     "adminMetadataFor",
+    "bind_canonical_prefixes",
     "cacheHit",
     "candidateAuthorityUri",
     "chosenAuthorityUri",

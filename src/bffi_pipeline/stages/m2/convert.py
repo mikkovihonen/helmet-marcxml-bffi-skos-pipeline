@@ -25,7 +25,6 @@ from pathlib import Path
 
 from lxml import etree
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import RDFS
 
 from bffi_pipeline.config import get_settings
 from bffi_pipeline.export_synthesis import append_synthesis_row
@@ -138,12 +137,7 @@ def post_process(
             used_activity=activity,
             generated=work,
         )
-    g.bind("bf", V.BF)
-    g.bind("bffi", V.BFFI)
-    g.bind("bffi-prov", V.BFFI_PROV)
-    g.bind("bib", V.BIB)
-    g.bind("prov", V.PROV)
-    g.bind("rdfs", RDFS)
+    V.bind_canonical_prefixes(g)
     return work, instance
 
 
