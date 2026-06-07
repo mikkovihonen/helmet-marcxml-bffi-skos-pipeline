@@ -1336,37 +1336,15 @@ class _Reconstructor:
         return None
 
     def _build_lineage_rank_map(self) -> dict[str, str]:
-        """Walk every raw-bib URI in the graph, group by MARC tag,
-        sort by M3 ordinal, and assign 1-indexed-within-tag ranks.
-
-        Returns ``{raw_uri_string: "<tag>-<rank>"}``. The rank is
-        what the diff comparator's source-side counter produces
-        (it walks the source MARCXML once and numbers each tag's
-        instances in encounter order), so by emitting ``$9 src=<tag>-
-        <rank>`` we get an exact pairing key. M3's per-record entity
-        counter is monotonic in source-MARC encounter order within a
-        tag bucket (verified on the 500-sample corpus), so the sort
-        recovers source order even though the absolute numbers carry
-        cross-tag offsets (e.g. b10068004: 9x 700 stamped 27..35).
-        """
-        by_tag: dict[str, set[tuple[int, str]]] = {}
-        # Walk every URI mentioned by the graph (subject + object).
-        for s in self.graph.subjects():
-            if isinstance(s, URIRef):
-                parsed = _parse_lineage_fragment(s)
-                if parsed is not None:
-                    by_tag.setdefault(parsed[0], set()).add((parsed[1], str(s)))
-        for o in self.graph.objects():
-            if isinstance(o, URIRef):
-                parsed = _parse_lineage_fragment(o)
-                if parsed is not None:
-                    by_tag.setdefault(parsed[0], set()).add((parsed[1], str(o)))
-
-        out: dict[str, str] = {}
-        for tag, items in by_tag.items():
-            for rank, (_, uri_str) in enumerate(sorted(items), start=1):
-                out[uri_str] = f"{tag}-{rank}"
-        return out
+        """Per-record fallback when ``reconstruct_marc`` is invoked
+        without a pre-built ``lineage_rank_map``. Delegates to the
+        module-level :func:`build_lineage_rank_map` which buckets by
+        ``(bib_id, tag)`` — preserves correct per-record ranking
+        whether the graph holds one record or 500. The runner always
+        passes a pre-built map (the production path); this fallback
+        only runs for ad-hoc callers (synthetic-graph unit tests,
+        scripts inspecting one record at a time)."""
+        return build_lineage_rank_map(self.graph)
 
     def _lineage_token(self, node: Node | None) -> str | None:
         """Look up the rank-normalised lineage token for a raw-bib URI.
