@@ -37,6 +37,7 @@ from bffi_pipeline.stages.m8.mint import (
     _propagate_raw_agent_identifiers,
     _propagate_subject_links,
     _propagate_subject_typing,
+    _propagate_work_typing,
     _select_description_modifier,
 )
 from bffi_pipeline.stages.m8.schemas import (
@@ -266,6 +267,17 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
         # rode through above; this copies the structural triples that
         # make the link queryable.
         _propagate_subject_links(g, raw_corpus_graph)
+        # P-52 Phases A-E — Work-axis BFFI subclass typing emitted by
+        # M3 lives on the M3-raw Work URI. The M8 canonical-mint
+        # produces a different URI (sha1 of the canonical-mint key,
+        # not of the source bf:Work URI), so the typing must be
+        # forwarded explicitly. Phase F's ``bffi:aggregates`` /
+        # ``aggregatedBy`` Expression edges + Expression-axis
+        # subclass typing ride through via the Expression
+        # passthrough above (the new ``RDF.type`` /
+        # ``bffi:aggregates`` / ``bffi:aggregatedBy`` allowlist
+        # entries).
+        _propagate_work_typing(g, raw_corpus_graph, canonical_entries)
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label

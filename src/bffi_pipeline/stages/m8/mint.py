@@ -125,6 +125,24 @@ _EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
     V.BFFI.summary,
     V.BFFI.classification,
     V.BFFI.marcKey,
+    # P-52 Phase A-F — Expression-axis BFFI subclass typing
+    # (bffi:Text / bffi:NotatedMusic / etc., bffi:MonographExpression
+    # / bffi:SerialExpression, bffi:AggregatingExpression) lives on
+    # the M3-emitted Expression. ``rdf:type`` carries every subclass
+    # triple at once; without it the base ``bffi:Expression`` typing
+    # survives but the subclasses drop at the M8 boundary.
+    RDF.type,
+    # P-52 Phase F — component Expression edges. Both the forward
+    # (``parent → bffi:aggregates → component``) and reverse
+    # (``component → bffi:aggregatedBy → parent``) survive only via
+    # this allowlist. Component Expressions themselves carry
+    # ``skos:prefLabel`` (Hub label, from MARC 730 ``$a``) and
+    # ``bflc:marcKey`` (raw subfield structure for round-trip $a/$g
+    # recovery). Both need to ride through as well.
+    V.BFFI.aggregates,
+    V.BFFI.aggregatedBy,
+    V.SKOS.prefLabel,
+    V.BFLC.marcKey,
 )
 
 
@@ -313,6 +331,44 @@ def _propagate_raw_agent_identifiers(g: Graph, raw_graph: Graph) -> int:
                         count += 1
                         if isinstance(o2, BNode) and o2 not in visited_bnodes:
                             queue.append(o2)
+    return count
+
+
+def _propagate_work_typing(
+    g: Graph,
+    raw_graph: Graph,
+    canonical_entries: list[CanonicalEntry],
+) -> int:
+    """P-52 Phases A-E — copy Work-axis BFFI subclass typing from the
+    M3-raw Work URIs onto the M8-canonical Work URIs they merged into.
+
+    M3 emits ``rdf:type`` triples for Phase A (Manuscript, Integrating),
+    Phase B (CartographyWork, MovingImageWork, MusicWork,
+    NonMusicAudioWork), Phase C (MonographWork, SerialWork,
+    Integrating, CollectionWork), and Phase E (AggregatingWork) on
+    each raw Work URI. M8's canonical-mint creates a different URI
+    (sha1 of the canonical-mint key, not of the raw bf:Work URI), so
+    the typing doesn't survive without explicit forwarding.
+
+    This pass walks every ``canonical_entry.raw_work_uris`` entry,
+    collects the BFFI subclass triples on each raw URI in the M3
+    graph, and emits them on the canonical Work URI. Skips
+    ``bffi:Work`` itself (already emitted by ``_emit_canonical_work``)
+    and ``skos:Concept`` (M8 emits that too). Returns triples copied.
+    """
+    count = 0
+    bffi_ns = str(V.BFFI)
+    for entry in canonical_entries:
+        canonical_uri = URIRef(entry.canonical_work_uri)
+        for raw_uri_str in entry.raw_work_uris:
+            raw_uri = URIRef(raw_uri_str)
+            for t in raw_graph.objects(raw_uri, RDF.type):
+                if not (isinstance(t, URIRef) and str(t).startswith(bffi_ns)):
+                    continue
+                if t == V.BFFI.Work:
+                    continue
+                g.add((canonical_uri, RDF.type, t))
+                count += 1
     return count
 
 

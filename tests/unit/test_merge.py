@@ -42,6 +42,10 @@ from bffi_pipeline.stages.m8 import (
     SubjectTarget,
     apply_merge,
 )
+from bffi_pipeline.stages.m8.mint import (
+    _propagate_expression_passthrough,
+    _propagate_work_typing,
+)
 from bffi_pipeline.stages.m8.runner import (
     _anonymous_work_anchor_uri,
     _apply_contrib_variants,
@@ -2307,3 +2311,89 @@ def test_p48_730_hub_subgraph_propagates_via_raw_bib_uri_passthrough(
     titles = list(out.objects(hub_uri, V.BF.title))
     assert len(titles) == 1
     assert (titles[0], V.BF.mainTitle, Literal("Fame / Gore, Michael")) in out
+
+
+def test_propagate_work_typing_routes_bffi_subclasses_to_canonical() -> None:
+    """P-52 Phases A-E — Work-axis BFFI subclass typing emitted by
+    M3 on a raw Work URI must propagate onto the canonical Work URI
+    via :func:`_propagate_work_typing`. The function takes a list
+    of ``CanonicalEntry`` rows and uses
+    ``CanonicalEntry.raw_work_uris`` as the map from canonical → raws.
+    """
+    raw_graph = Graph()
+    raw_work_a = URIRef("http://urn.fi/URN:NBN:fi:bib:work:rawA")
+    raw_work_b = URIRef("http://urn.fi/URN:NBN:fi:bib:work:rawB")
+    # rawA carries Phase A (Manuscript), C (MonographWork) and E (AggregatingWork)
+    raw_graph.add((raw_work_a, RDF.type, V.BFFI.Work))
+    raw_graph.add((raw_work_a, RDF.type, V.BFFI.Manuscript))
+    raw_graph.add((raw_work_a, RDF.type, V.BFFI.MonographWork))
+    raw_graph.add((raw_work_a, RDF.type, V.BFFI.AggregatingWork))
+    # rawB carries Phase B (MusicWork) only
+    raw_graph.add((raw_work_b, RDF.type, V.BFFI.Work))
+    raw_graph.add((raw_work_b, RDF.type, V.BFFI.MusicWork))
+    # Both rawA and rawB merge into one canonical Work
+    canonical = URIRef("http://urn.fi/URN:NBN:fi:bib:work:canonical1")
+    entries = [
+        CanonicalEntry(
+            canonical_work_uri=str(canonical),
+            raw_work_uris=[str(raw_work_a), str(raw_work_b)],
+            helmet_bib_ids=["b00000001", "b00000002"],
+            merged_at="2026-06-07T12:00:00+00:00",
+        )
+    ]
+    g = Graph()
+    _propagate_work_typing(g, raw_graph, entries)
+    # All BFFI subclass typing from BOTH raw URIs lands on canonical.
+    assert (canonical, RDF.type, V.BFFI.Manuscript) in g
+    assert (canonical, RDF.type, V.BFFI.MonographWork) in g
+    assert (canonical, RDF.type, V.BFFI.AggregatingWork) in g
+    assert (canonical, RDF.type, V.BFFI.MusicWork) in g
+    # The base bffi:Work typing is NOT propagated (already emitted by
+    # ``_emit_canonical_work``; duplicating would be harmless but
+    # adds noise to the audit).
+    assert (canonical, RDF.type, V.BFFI.Work) not in g
+
+
+def test_propagate_expression_passthrough_carries_subclass_typing_and_aggregates() -> None:
+    """P-52 Phases A-F — Expression-axis subclass typing
+    (bffi:Text / bffi:MonographExpression / bffi:AggregatingExpression
+    / etc.) and ``bffi:aggregates`` / ``bffi:aggregatedBy`` edges ride
+    through the Expression passthrough now that ``RDF.type`` and the
+    two aggregation predicates are in the allowlist."""
+    raw_graph = Graph()
+    expr = URIRef("http://urn.fi/URN:NBN:fi:bib:expression:e1")
+    component = URIRef("http://urn.fi/URN:NBN:fi:bib:expression:c1")
+    raw_graph.add((expr, RDF.type, V.BFFI.Expression))
+    raw_graph.add((expr, RDF.type, V.BFFI.AggregatingExpression))
+    raw_graph.add((expr, RDF.type, V.BFFI.MonographExpression))
+    raw_graph.add((expr, RDF.type, V.BFFI.Text))
+    raw_graph.add((expr, V.BFFI.aggregates, component))
+    raw_graph.add((component, RDF.type, V.BFFI.Expression))
+    raw_graph.add((component, V.BFFI.aggregatedBy, expr))
+    raw_graph.add((component, V.SKOS.prefLabel, Literal("Component One")))
+    raw_graph.add(
+        (
+            component,
+            URIRef("http://id.loc.gov/ontologies/bflc/marcKey"),
+            Literal("73000 $aComponent /$gAuthor"),
+        )
+    )
+
+    g = Graph()
+    _propagate_expression_passthrough(g, raw_graph)
+
+    # Parent Expression typing survives all 4 BFFI subclasses.
+    assert (expr, RDF.type, V.BFFI.AggregatingExpression) in g
+    assert (expr, RDF.type, V.BFFI.MonographExpression) in g
+    assert (expr, RDF.type, V.BFFI.Text) in g
+    # Parent → component edge survives.
+    assert (expr, V.BFFI.aggregates, component) in g
+    # Component → parent reverse edge survives.
+    assert (component, V.BFFI.aggregatedBy, expr) in g
+    # Component skos:prefLabel + bflc:marcKey survive.
+    assert (component, V.SKOS.prefLabel, Literal("Component One")) in g
+    assert (
+        component,
+        URIRef("http://id.loc.gov/ontologies/bflc/marcKey"),
+        Literal("73000 $aComponent /$gAuthor"),
+    ) in g
