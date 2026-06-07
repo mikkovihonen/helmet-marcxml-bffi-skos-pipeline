@@ -173,7 +173,78 @@ def _subfield(df: ET.Element, code: str) -> str | None:
 def test_leader_is_present(minimal_record: ET.Element) -> None:
     leader = _find(minimal_record, "m:leader")
     assert leader is not None
+    # Default: language material (LDR/06 'a'), monograph ('m'),
+    # full-level encoding (LDR/17 blank). 24 chars total.
     assert leader.text == "00000nam  2200000   4500"
+    assert len(leader.text) == 24
+
+
+def test_leader_pos06_reflects_work_type_music_audio() -> None:
+    """LDR/06 = 'j' when the canonical Work carries ``bf:MusicAudio``
+    rdf:type — the music-recording case (b1411382x source pattern)."""
+    g = _build_minimal_graph()
+    g.add((WORK, RDF.type, V.BF.MusicAudio))
+    rec = reconstruct_marc(g, WORK)  # WORK works too since manif resolves
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[6] == "j"
+    assert len(leader.text) == 24
+
+
+def test_leader_pos06_picks_most_specific_type() -> None:
+    """When a Work has both ``bf:MusicAudio`` and ``bf:Audio``, the
+    more-specific ``MusicAudio`` ('j' musical sound recording) wins
+    over generic ``Audio`` ('i' nonmusical)."""
+    g = _build_minimal_graph()
+    g.add((WORK, RDF.type, V.BF.Audio))
+    g.add((WORK, RDF.type, V.BF.MusicAudio))
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[6] == "j"
+
+
+def test_leader_pos17_reflects_encoding_level_from_admin_metadata() -> None:
+    """LDR/17 = source encoding-level character, from
+    ``bffi:encodingLevel`` URI on the AdminMetadata block pointing at
+    ``id.loc.gov/vocabulary/menclvl/<n>``."""
+    g = _build_minimal_graph()
+    admin = BNode()
+    g.add((MANIF, V.BFFI.adminMetadata, admin))
+    g.add(
+        (
+            admin,
+            V.BFFI.encodingLevel,
+            URIRef("http://id.loc.gov/vocabulary/menclvl/7"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[17] == "7"
+    assert len(leader.text) == 24
+
+
+def test_leader_pos17_ignores_pipeline_internal_enc_level_marker() -> None:
+    """Our pipeline's own ``bib:enc-level/auto`` marker (a
+    ``bffi:EncodingLevel`` URI outside the LoC menclvl vocab) must
+    NOT land in LDR/17 — only the LoC ``menclvl/<n>`` URI is a valid
+    MARC encoding-level source. Falls back to blank."""
+    g = _build_minimal_graph()
+    admin = BNode()
+    g.add((MANIF, V.BFFI.adminMetadata, admin))
+    g.add(
+        (
+            admin,
+            V.BFFI.encodingLevel,
+            URIRef("http://urn.fi/URN:NBN:fi:bib:enc-level/auto"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[17] == " "
 
 
 def test_controlfields_001_003_carry_bib_id_and_helmet(minimal_record: ET.Element) -> None:

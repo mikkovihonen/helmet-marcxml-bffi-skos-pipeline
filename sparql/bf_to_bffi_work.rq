@@ -24,6 +24,7 @@ PREFIX arq:       <http://jena.apache.org/ARQ/function#>
 
 CONSTRUCT {
   ?workURI a bffi:Work ;
+           a                        ?workTypeURI ;
            bffi:hasExpression       ?exprURI ;
            bffi:contribution        ?contrib ;
            bffi:subject             ?subject ;
@@ -122,6 +123,24 @@ WHERE {
             arq:sha1(STR(?bfWork)))) AS ?workURI )
   BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:expression:",
             arq:sha1(STR(?bfWork)))) AS ?exprURI )
+
+  # BIBFRAME work-type secondary rdf:type — used by the round-trip
+  # converter to pick MARC LDR/06 (type of record). marc2bibframe2
+  # emits these alongside ``bf:Work`` to qualify the work content
+  # (``bf:Text``, ``bf:MusicAudio``, ``bf:Cartography``, etc).
+  # Filtered to the BIBFRAME types LDR/06 routes on; other typing
+  # noise (``bf:Hub``, ``bf:Monograph``, ``bf:NotatedMusic`` and
+  # related) passes through too when present, which is harmless —
+  # the converter's mapping table only acts on routable types.
+  OPTIONAL {
+    ?bfWork a ?workTypeURI .
+    FILTER(?workTypeURI IN (
+      bf:Text, bf:NotatedMusic, bf:NotatedMovement, bf:Cartography,
+      bf:MovingImage, bf:StillImage, bf:Audio, bf:MusicAudio,
+      bf:Multimedia, bf:Object, bf:Dataset, bf:MixedMaterial,
+      bf:Manuscript, bf:Tactile
+    ))
+  }
 
   # Primary creator only (translators, editors -> Expression, see Pass 2).
   # ?contrib must be BIND'ed inside the OPTIONAL so it stays unbound when

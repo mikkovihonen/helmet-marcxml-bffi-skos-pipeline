@@ -64,7 +64,8 @@ CONSTRUCT {
               bf:agent ?adminAgent ;
               bffi:descriptionLanguage    ?descLangURI ;
               bffi:descriptionConventions ?descConvURI ;
-              bffi:changeDate             ?transactionDate .
+              bffi:changeDate             ?transactionDate ;
+              bffi:encodingLevel          ?sourceEncodingLevel .
   ?adminAgent a bf:Agent ;
               bf:code ?adminAgencyCode .
   ?bfToc   a               bffi:TableOfContents ;
@@ -248,6 +249,22 @@ WHERE {
     ?bfWork bf:adminMetadata ?txAdmin .
     ?txAdmin bf:status <http://id.loc.gov/vocabulary/mstatus/n> ;
              bf:date  ?transactionDate .
+  }
+  # MARC LDR/17 — encoding level. marc2bibframe2 emits the
+  # cataloguer-typed source value as ``bflc:encodingLevel`` on the
+  # ``bf:Instance``'s AdminMetadata sibling, pointing at
+  # ``http://id.loc.gov/vocabulary/menclvl/<code>`` where ``<code>``
+  # is the LDR/17 character verbatim. lkd.rdf declares
+  # ``bffi:encodingLevel`` as ``owl:equivalentProperty`` of
+  # ``bflc:encodingLevel`` so we route under the BFFI name onto the
+  # canonical AdminMetadata block. Coexists with the pipeline's own
+  # ``bffi:encodingLevel <…/enc-level/auto>`` marker — multiple
+  # values are legal on the predicate; the round-trip converter
+  # picks the menclvl-namespaced one.
+  OPTIONAL {
+    ?bfInstance bf:adminMetadata ?encAdmin .
+    ?encAdmin bflc:encodingLevel ?sourceEncodingLevel .
+    FILTER(isIRI(?sourceEncodingLevel))
   }
   OPTIONAL { ?bfInstance bf:publicationStatement   ?publicationStatement }
   OPTIONAL { ?bfInstance bf:responsibilityStatement ?responsibilityStatement }

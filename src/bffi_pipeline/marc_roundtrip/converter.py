@@ -428,14 +428,114 @@ class _Reconstructor:
     # --- Field emitters -------------------------------------------------
 
     def _make_leader(self) -> str:
-        # Minimal synthesised leader. Real leader carries a/c/p/m/i
-        # type-of-record + bibliographic-level codes that we can't
-        # always recover; we emit a generic "language material /
-        # monograph" shape (``nam``) which matches the dominant
-        # Helmet pattern. Fields the original leader carries that we
-        # cannot reconstruct (encoding level, descriptive cataloguing
-        # form, multipart resource) stay as blanks.
-        return "00000nam  2200000   4500"
+        """Build a 24-char MARC bib leader.
+
+        Reconstructable positions:
+
+          05  record status — fixed at 'n' (new). BFFI doesn't carry
+              the new/changed/deleted bit, but 'n' is the dominant
+              Helmet case.
+          06  type of record (LDR/06) — derived from the canonical
+              ``bffi:Work``'s BIBFRAME secondary ``rdf:type``
+              (``bf:MusicAudio`` → 'j', ``bf:Cartography`` → 'e',
+              etc.). Defaults to 'a' (language material).
+          07  bibliographic level — fixed at 'm' (monograph). Helmet's
+              dominant pattern; multipart resources surface as
+              ``changed`` rows in the diff when the source disagrees.
+          17  encoding level — derived from the AdminMetadata's
+              ``bffi:encodingLevel`` triple pointing at
+              ``id.loc.gov/vocabulary/menclvl/<code>``; the URI tail
+              is the LDR/17 character verbatim. Defaults to blank
+              (full level).
+          10-11, 20-23 — fixed (``22``, ``4500``); MARC structural.
+
+        Length placeholder positions 0-4 + base-address 12-16 stay
+        zero-padded; serialisers usually rewrite these.
+        """
+        type_char = self._record_type_code()
+        enc_char = self._encoding_level_code()
+        # MARC bib leader layout (24 chars total):
+        # 00-04 record length placeholder ``00000``
+        # 05    record status ``n``
+        # 06    type of record (this method computes)
+        # 07    bibliographic level ``m`` (monograph)
+        # 08-09 spaces (type of control + char encoding)
+        # 10-11 ``22`` (indicator + subfield-code counts)
+        # 12-16 base-address placeholder ``00000``
+        # 17    encoding level (this method computes)
+        # 18-19 spaces (descriptive cataloging form + multipart)
+        # 20-23 ``4500`` (MARC structural fixed suffix)
+        return f"00000n{type_char}m  2200000{enc_char}  4500"
+
+    #: BIBFRAME secondary ``rdf:type`` → MARC LDR/06 character.
+    #: Priority is the iteration order: more specific types win when a
+    #: Work carries multiple typing triples (e.g. ``bf:MusicAudio``
+    #: beats ``bf:Audio`` so a CD reads 'j' not 'i').
+    _BF_TYPE_TO_LDR06: Final[tuple[tuple[str, str], ...]] = (
+        ("MusicAudio", "j"),  # musical sound recording
+        ("NotatedMusic", "c"),  # notated music
+        ("NotatedMovement", "c"),  # notated movement (also code 'c')
+        ("Cartography", "e"),  # cartographic material
+        ("MovingImage", "g"),  # projected medium
+        ("StillImage", "k"),  # 2-D nonprojectable graphic
+        ("Audio", "i"),  # nonmusical sound recording
+        ("Multimedia", "m"),  # computer file
+        ("Dataset", "m"),  # computer file (data-only)
+        ("Object", "r"),  # 3-D artifact
+        ("MixedMaterial", "p"),  # mixed material
+        ("Text", "a"),  # language material (text)
+    )
+
+    def _record_type_code(self) -> str:
+        """Return the MARC LDR/06 character for this record's Work.
+
+        Walks the canonical Work's ``rdf:type`` triples and picks the
+        most specific BIBFRAME type that maps to a known LDR/06 code.
+        Defaults to ``'a'`` (language material) — Helmet's dominant
+        pattern when no specific type is recorded.
+        """
+        work = self.work
+        if work is None:
+            return "a"
+        present: set[str] = set()
+        bf_prefix = str(V.BF)
+        for t in self.graph.objects(work, RDF.type):
+            if isinstance(t, URIRef):
+                s = str(t)
+                if s.startswith(bf_prefix):
+                    present.add(s[len(bf_prefix) :])
+        for kind, code in self._BF_TYPE_TO_LDR06:
+            if kind in present:
+                return code
+        return "a"
+
+    def _encoding_level_code(self) -> str:
+        """Return the MARC LDR/17 character.
+
+        Walks the Manifestation's AdminMetadata blocks for any
+        ``bffi:encodingLevel`` triple pointing at
+        ``id.loc.gov/vocabulary/menclvl/<code>``; the URI tail IS the
+        LDR/17 character. Coexists with our pipeline's
+        ``enc-level/auto`` marker (a separate ``bffi:EncodingLevel``
+        URI in the ``bib:`` namespace) — we ignore non-``menclvl``
+        URIs since only the LoC menclvl vocab values are valid
+        LDR/17 characters.
+
+        Returns ``' '`` (blank — "full level") when no source value is
+        available; this matches the cataloguing default for records
+        without an explicit encoding-level mark.
+        """
+        menclvl_prefix = "http://id.loc.gov/vocabulary/menclvl/"
+        for admin in self.graph.objects(self.manifestation, V.BFFI.adminMetadata):
+            for lvl in self.graph.objects(admin, V.BFFI.encodingLevel):
+                if not isinstance(lvl, URIRef):
+                    continue
+                s = str(lvl)
+                if s.startswith(menclvl_prefix):
+                    tail = s[len(menclvl_prefix) :]
+                    if len(tail) == 1:
+                        return tail
+        return " "
 
     def _make_008(self) -> str:
         """MARC 008 — 40-char fixed-length data elements. Positions we
