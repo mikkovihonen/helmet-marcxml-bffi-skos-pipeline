@@ -556,6 +556,138 @@ def test_diff_falls_back_to_legacy_rank_when_p50_token_absent() -> None:
     assert paired[0].original.primary_a() == "Second"
 
 
+def test_language_reconciled_when_same_dollar_zero_only_dollar_a_differs() -> None:
+    """When orig + recon share ``$0`` but ``$a`` differs (typically
+    Swedish source $a → YSO Finnish prefLabel), the row is
+    ``language-reconciled`` instead of ``changed``. M9-bound
+    reconciliation; semantically equivalent."""
+    orig_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">konst</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
+      <subfield code="2">yso</subfield>
+    </datafield>
+    """
+    recon_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">taide</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
+      <subfield code="2">yso</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    [row] = diff.fields
+    assert row.status == "language-reconciled"
+    assert diff.summary.get("language-reconciled") == 1
+    assert diff.summary.get("changed", 0) == 0
+
+
+def test_language_reconciled_does_not_apply_when_dollar_zero_differs() -> None:
+    """Different ``$0`` URIs → real change, not reconciliation. Two
+    distinct YSO concepts are not "translations of the same thing"."""
+    orig_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">konst</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
+    </datafield>
+    """
+    recon_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">taide</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p9999</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    [row] = diff.fields
+    assert row.status == "changed"
+
+
+def test_language_reconciled_does_not_apply_when_dollar_2_differs() -> None:
+    """``$2`` vocabulary divergence (e.g. one side says ``yso`` and
+    the other ``kauno``) is substantive — keep as ``changed``."""
+    orig_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">konst</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
+      <subfield code="2">yso</subfield>
+    </datafield>
+    """
+    recon_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">taide</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
+      <subfield code="2">kauno</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    [row] = diff.fields
+    assert row.status == "changed"
+
+
+def test_language_reconciled_requires_dollar_zero_on_both_sides() -> None:
+    """The M9-reconciliation case applies when both sides carry the
+    same authority URI. If only one side has ``$0``, the difference
+    isn't a reconciliation — it's a real diff (or a separate
+    cataloguer-vs-pipeline disagreement)."""
+    orig_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">konst</subfield>
+    </datafield>
+    """
+    recon_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">taide</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    [row] = diff.fields
+    assert row.status == "changed"
+
+
+def test_marckey_bypass_overrides_language_reconciled() -> None:
+    """When a row would qualify as both ``marckey-bypass`` AND
+    ``language-reconciled``, the bypass wins — verification failure
+    is the more serious diagnostic."""
+    orig_body = """
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">konst</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
+    </datafield>
+    """
+    recon_body = f"""
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">taide</subfield>
+      <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
+      <subfield code="9">marckey-bypass</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    [row] = diff.fields
+    assert row.status == "marckey-bypass"
+
+
 def test_path_import_is_used_in_some_assertions() -> None:
     """No-op sanity test — pytest discovers test_ functions and this
     test pulls Path into the module's namespace so future fixture

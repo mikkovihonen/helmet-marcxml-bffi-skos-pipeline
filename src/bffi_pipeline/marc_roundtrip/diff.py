@@ -62,6 +62,16 @@ _NOISE_SUBFIELD_VALUES: Final[frozenset[str]] = frozenset({ROUNDTRIP_MARKER})
 #: BFFI graph as an opaque text blob. Overrides ``identical``/``changed``
 #: so the audit shows where BFFI's structured side is insufficient. See
 #: ``docs/plans/proposed/p-49-bffi-structured-fields-vs-marckey.md``.
+#:
+#: ``language-reconciled``: original and reconstructed point at the same
+#: authority URI (``$0``) but the cataloguer-typed ``$a`` differs from
+#: the authority's prefLabel. Typically a M9 reconciliation: source
+#: ``$a "konst" $0 yso/p1234`` (Swedish term + YSO URI) reconstructs as
+#: ``$a "taide" $0 yso/p1234`` (Finnish prefLabel from YSO). Byte-
+#: differs but semantically equivalent — the cataloguer's term and the
+#: authority's prefLabel are translations of the same concept. Surfaces
+#: in cataloguer-review as a separate band so reviewers see "expected
+#: language drift" distinctly from real ``changed`` rows.
 DiffStatus = Literal[
     "identical",
     "lost",
@@ -70,6 +80,7 @@ DiffStatus = Literal[
     "lost-converter-gap",
     "tag-changed",
     "marckey-bypass",
+    "language-reconciled",
 ]
 
 
@@ -233,14 +244,29 @@ def diff_records(
             status = "identical"
         else:
             status = "changed"
-        # P-49 Phase A: marcKey-bypass overrides ``identical``/``changed``.
-        # The recon row may match byte-for-byte, but verification failed:
+        # ``language-reconciled`` upgrade: when a ``changed`` row's only
+        # substantive difference is the ``$a`` literal AND both sides
+        # carry the same ``$0`` authority URI, the difference is the
+        # M9 reconciliation swapping the cataloguer-typed term for the
+        # authority's prefLabel (typically a Swedish ``$a`` → YSO
+        # Finnish prefLabel). Semantically equivalent; surfaced in its
+        # own band so cataloguer-review distinguishes "expected
+        # language drift" from real content change.
+        if status == "changed" and _is_language_reconciled(orig, recon):
+            status = "language-reconciled"
+            notes.append(
+                "$a differs but $0 authority URI matches — M9-bound "
+                "language drift, semantically equivalent."
+            )
+        # P-49 Phase A: marcKey-bypass overrides ``identical``/``changed``/
+        # ``language-reconciled``. The recon row may match byte-for-byte
+        # (or differ only by reconciliation), but verification failed:
         # the subfields came from parsing the cataloguer's MARC string
         # smuggled through ``bflc:marcKey``, not from BFFI structured
         # properties. Surfaces the audit so the cataloguer-review HTML
         # can render the row in its own colour band. Does NOT override
         # ``tag-changed`` (a misroute is a worse problem than a bypass).
-        if status in ("identical", "changed") and recon.marckey_bypass:
+        if status in ("identical", "changed", "language-reconciled") and recon.marckey_bypass:
             status = "marckey-bypass"
             notes.append(
                 "Subfields reconstructed from bflc:marcKey, not BFFI "
@@ -500,6 +526,55 @@ def _subfields_equal(a: FieldRecord, b: FieldRecord) -> bool:
     return [sf.to_json() for sf in a.subfields] == [sf.to_json() for sf in b.subfields]
 
 
+def _is_language_reconciled(orig: FieldRecord, recon: FieldRecord) -> bool:
+    """Return True when ``orig`` and ``recon`` differ only in their
+    ``$a`` literal but share the same ``$0`` authority URI.
+
+    Detection rules:
+
+    - Both sides must be datafields (not controlfields).
+    - Both sides must carry at least one ``$0`` and the FIRST ``$0``
+      on each side must match exactly. The authority URI is the
+      identity signal; if it matches, both sides agree on which
+      concept this row is about.
+    - The ``$a`` literals must differ. Otherwise the row would be
+      ``identical``, not ``changed``.
+    - All non-``$a`` subfields must match exactly between the two
+      sides (same codes, same values, same order). A ``$2`` or
+      ``$c`` divergence is a real content change, not a
+      reconciliation.
+
+    Conservative on purpose: any extra difference (multiple ``$0``
+    values, indicator mismatch, missing ``$0`` on one side) → return
+    False and let the row stay ``changed``. The M9 reconciliation
+    case we're catching is narrow: cataloguer typed a label in one
+    language, the authority's prefLabel is in another, everything
+    else identical.
+    """
+    if orig.is_control or recon.is_control:
+        return False
+    orig_zero = _first_subfield(orig, "0")
+    recon_zero = _first_subfield(recon, "0")
+    if orig_zero is None or recon_zero is None or orig_zero != recon_zero:
+        return False
+    orig_a = _first_subfield(orig, "a")
+    recon_a = _first_subfield(recon, "a")
+    if orig_a is None or recon_a is None or orig_a == recon_a:
+        return False
+    # All non-``$a`` subfields (in order) must match.
+    orig_rest = [sf.to_json() for sf in orig.subfields if sf.code != "a"]
+    recon_rest = [sf.to_json() for sf in recon.subfields if sf.code != "a"]
+    return orig_rest == recon_rest
+
+
+def _first_subfield(field: FieldRecord, code: str) -> str | None:
+    """First subfield value with the given code; ``None`` if absent."""
+    for sf in field.subfields:
+        if sf.code == code:
+            return sf.value
+    return None
+
+
 def _indicator_notes(orig: FieldRecord, recon: FieldRecord) -> Iterable[str]:
     """Yield human-readable notes for indicator-level differences that
     don't drive the field's `changed` status but cataloguers might
@@ -521,6 +596,7 @@ def _summarise(diffs: Iterable[FieldDiff]) -> dict[str, int]:
         "lost-converter-gap": 0,
         "tag-changed": 0,
         "marckey-bypass": 0,
+        "language-reconciled": 0,
     }
     for d in diffs:
         summary[d.status] = summary.get(d.status, 0) + 1
