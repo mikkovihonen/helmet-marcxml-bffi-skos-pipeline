@@ -153,6 +153,37 @@ def test_build_aggregation_report_emits_one_row_per_aggregating_expression(
     assert statuses == {"unresolved"}
 
 
+def test_build_aggregation_report_falls_back_to_marckey_a_for_title(tmp_path: Path) -> None:
+    """When a component carries no ``skos:prefLabel`` (the common case
+    for Hubs minted by marc2bibframe2 from 730 ``$a`` source), the
+    sidecar parses ``$a`` out of ``bflc:marcKey`` instead. Trailing
+    ISBD punctuation (e.g. ``/`` separating ``$a`` from ``$g``) is
+    stripped."""
+    g = _build_canonical_fixture()
+    parent_expr = URIRef("urn:expr/b00000002")
+    component = URIRef("urn:expr/comp-no-preflabel")
+    g.add((parent_expr, V.BFFI.aggregates, component))
+    g.add((component, RDF.type, V.BFFI.Expression))
+    # No skos:prefLabel — only marcKey
+    g.add(
+        (
+            component,
+            URIRef("http://id.loc.gov/ontologies/bflc/marcKey"),
+            Literal("7300 $aThere are worse things I could do /$gJacobs & Casey"),
+        )
+    )
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "aggregations.jsonl"
+
+    build_aggregation_report(canonical, output)
+    rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    [row] = rows
+    [comp] = row["components"]
+    assert comp["title"] == "There are worse things I could do"
+
+
 def test_build_aggregation_report_handles_components_without_agents(
     tmp_path: Path,
 ) -> None:

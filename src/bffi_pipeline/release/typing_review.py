@@ -102,6 +102,29 @@ def _first_rdfs_label(graph: Graph, subject: URIRef | None) -> str | None:
     return None
 
 
+def _component_title(graph: Graph, component: URIRef) -> str | None:
+    """Component title resolution: ``skos:prefLabel`` first (emitted
+    by M3 when the source Hub had ``rdfs:label``), falling back to
+    parsing ``$a`` from ``bflc:marcKey``. Many Helmet Hubs carry only
+    marcKey, so the fallback is the common case for 730-derived
+    components."""
+    label = _first_pref_label(graph, component)
+    if label is not None:
+        return label
+    for mk in graph.objects(component, V.BFLC.marcKey):
+        text = str(mk)
+        idx = text.find("$a")
+        if idx < 0:
+            continue
+        after = text[idx + 2 :]
+        next_delim = after.find("$")
+        a_value = after if next_delim < 0 else after[:next_delim]
+        a_value = a_value.strip().rstrip("/.,;:").strip()
+        if a_value:
+            return a_value
+    return None
+
+
 def _bib_id_for_manifestation(graph: Graph, manif: URIRef) -> str | None:
     """Pull the Helmet bib_id from a Manifestation via its
     ``dct:identifier`` literal (M8 sets this from the source 907 /
@@ -227,7 +250,7 @@ def build_aggregation_report(canonical_path: Path, output_path: Path) -> int:
         for comp in graph.objects(parent_expr, V.BFFI.aggregates):
             if not isinstance(comp, URIRef):
                 continue
-            comp_title = _first_pref_label(graph, comp)
+            comp_title = _component_title(graph, comp)
             # First contribution → first agent → first label
             agent_uri: URIRef | None = None
             agent_name: str | None = None

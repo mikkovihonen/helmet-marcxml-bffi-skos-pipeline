@@ -143,6 +143,14 @@ _EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
     V.BFFI.aggregatedBy,
     V.SKOS.prefLabel,
     V.BFLC.marcKey,
+    # P-52 Phase G.bis — component Expressions carry a
+    # ``bffi:contribution → bffi:agent → rdfs:label`` chain
+    # synthesised by M3 from each Hub's marcKey ``$g`` subfield.
+    # Without this, M9 component-agent reconciliation has nothing
+    # to walk and the round-trip 700 ind2=2 emit stays silent.
+    # The contribution + agent are reachable blank nodes that
+    # ``_is_propagatable_subject`` follows via ``_copy_subgraph``.
+    V.BFFI.contribution,
 )
 
 

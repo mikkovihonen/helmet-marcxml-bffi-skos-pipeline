@@ -2354,6 +2354,34 @@ def test_propagate_work_typing_routes_bffi_subclasses_to_canonical() -> None:
     assert (canonical, RDF.type, V.BFFI.Work) not in g
 
 
+def test_propagate_expression_passthrough_carries_component_contribution_chain() -> None:
+    """P-52 Phase G.bis end-to-end — M3 emits ``component →
+    bffi:contribution → bf:Agent → rdfs:label`` chains on aggregation
+    components. M8's expression passthrough must include
+    ``bffi:contribution`` in the allowlist so the chain survives the
+    M3 → canonical boundary; the contribution + agent are reachable
+    blank nodes and ride through via ``_copy_subgraph``."""
+    raw_graph = Graph()
+    component = URIRef("http://urn.fi/URN:NBN:fi:bib:expression:c1")
+    contrib = BNode()
+    agent = BNode()
+    raw_graph.add((component, RDF.type, V.BFFI.Expression))
+    raw_graph.add((component, V.BFFI.contribution, contrib))
+    raw_graph.add((contrib, RDF.type, V.BFFI.Contribution))
+    raw_graph.add((contrib, V.BFFI.agent, agent))
+    raw_graph.add((agent, RDF.type, V.BF.Agent))
+    raw_graph.add((agent, V.RDFS.label, Literal("Gore, Michael")))
+
+    g = Graph()
+    _propagate_expression_passthrough(g, raw_graph)
+
+    # The contribution chain survives — converter / M9 can walk it.
+    assert (component, V.BFFI.contribution, contrib) in g
+    assert (contrib, RDF.type, V.BFFI.Contribution) in g
+    assert (contrib, V.BFFI.agent, agent) in g
+    assert (agent, V.RDFS.label, Literal("Gore, Michael")) in g
+
+
 def test_propagate_expression_passthrough_carries_subclass_typing_and_aggregates() -> None:
     """P-52 Phases A-F — Expression-axis subclass typing
     (bffi:Text / bffi:MonographExpression / bffi:AggregatingExpression
