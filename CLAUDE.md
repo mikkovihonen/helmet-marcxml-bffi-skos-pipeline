@@ -44,9 +44,7 @@ BFFI pipeline: MARCXML → BFFI authority Works/Expressions → Skosmos. Pro bon
     2. **Use the `bffi-prov:` namespace** (`http://urn.fi/URN:NBN:fi:schema:bffi-prov#`) for *pipeline-internal* metadata — Activity classes, decision audit predicates, synthetic-sentinel flags. This namespace is ours; extending it is fine.
     3. **Propose adding the term to BFFI through NLF.** Open a proposal in `docs/plans/proposed/` (precedent: P-49 Layer 3). Until ratified, do not emit it under `bffi:`.
 
-  Test `tests/unit/test_bffi_namespace_discipline.py` enforces this: scans `src/bffi_pipeline/provenance/vocab.py` and `sparql/*.rq` for every `bffi:<name>` reference and asserts each one appears as `rdf:about="http://urn.fi/URN:NBN:fi:schema:bffi:<name>"` in `docs/lkd.rdf`. CI breaks on any local mint.
-
-  An ``_GRANDFATHERED`` allowlist in that test carries a handful of pre-existing local mints (AdminMetadata dates, series/title linking predicates) inherited from earlier work — each annotated with its target replacement. **Don't add to it.** New code goes through the three legitimate paths above.
+  Test `tests/unit/test_bffi_namespace_discipline.py` enforces this: scans `src/bffi_pipeline/provenance/vocab.py` and `sparql/*.rq` for every `bffi:<name>` reference and asserts each one appears as `rdf:about="http://urn.fi/URN:NBN:fi:schema:bffi:<name>"` in `docs/lkd.rdf`. No allowlists; no exceptions. CI breaks on any local mint.
 - **Prompts:** All in `prompts/` as versioned files. Hashed at runtime; hash logged to provenance. Never inline in Python code.
 - **SPARQL:** All in `sparql/` as versioned files. Read at startup; parametrize with Jinja2 if needed (autoescape off).
 - **Idempotency:** Every stage has deterministic outputs and writes atomically (`.tmp` then rename). Re-runs skip when output is newer than input unless `--force`.

@@ -487,17 +487,21 @@ class _Reconstructor:
     _YEAR_LEN: Final[int] = 4
 
     def _transaction_date_yymmdd(self) -> str:
-        """Format the source ``bffi:transactionDate`` into the 6-char
-        008 pos 00-05 representation. Returns blank when no source
-        date is available."""
-        for d in self.graph.objects(self.manifestation, V.BFFI.transactionDate):
-            if not isinstance(d, Literal):
-                continue
-            s = str(d)
-            # Accept either "YYYY-MM-DDThh:mm:ss" or "YYYY-MM-DD"
-            if len(s) < self._ISO_DATE_MIN_LEN or s[4] != "-" or s[7] != "-":
-                continue
-            return f"{s[2:4]}{s[5:7]}{s[8:10]}"
+        """Format the source description's last-change date into the
+        6-char MARC 008 pos 00-05 representation. The date lives on
+        the AdminMetadata block as ``bffi:changeDate`` (lkd.rdf
+        canonical name), routed from the source MARC 005 transaction
+        date at M3. Returns blank when no source date is available.
+        """
+        for admin in self.graph.objects(self.manifestation, V.BFFI.adminMetadata):
+            for d in self.graph.objects(admin, V.BFFI.changeDate):
+                if not isinstance(d, Literal):
+                    continue
+                s = str(d)
+                # Accept either "YYYY-MM-DDThh:mm:ss" or "YYYY-MM-DD"
+                if len(s) < self._ISO_DATE_MIN_LEN or s[4] != "-" or s[7] != "-":
+                    continue
+                return f"{s[2:4]}{s[5:7]}{s[8:10]}"
         return "      "
 
     def _publication_date1(self) -> str:
@@ -722,7 +726,7 @@ class _Reconstructor:
         # the Manifestation to a ``bffi:Series`` node carrying
         # ``rdfs:label``. ind1 = 0 ("series not traced") is the
         # MARC default; ind2 has no meaning here.
-        for series in self.graph.objects(self.manifestation, V.BFFI.hasSeries):
+        for series in self.graph.objects(self.manifestation, V.BF.hasSeries):
             label = self._first_label(series)
             if label:
                 self._emit_datafield(record, "490", ("a", label), ind1="0")
@@ -960,7 +964,13 @@ class _Reconstructor:
         expr = self.expression
         if expr is None:
             return
-        for hub in self.graph.objects(expr, V.BFFI.uniformTitleHub):
+        # Walk ``bffi:title`` on the Expression, filtering for Hub-typed
+        # targets — the BIBFRAME / BFFI shape for uniform-title hubs
+        # (regular main titles target ``bffi:Title``; variant titles
+        # ``bf:VariantTitle``; uniform-title hubs ``bf:Hub``).
+        for hub in self.graph.objects(expr, V.BFFI.title):
+            if (hub, V.RDF.type, V.BF.Hub) not in self.graph:
+                continue
             structured = self._hub_title_part_subs(hub)
             mk_lit = self._first_marc_key(hub)
             if mk_lit is None:
@@ -1028,15 +1038,19 @@ class _Reconstructor:
         return None
 
     def _emit_variant_title(self, record: Element) -> None:
-        """MARC 246 — varying form of title. Routed through
-        ``bffi:variantTitle`` → ``bf:VariantTitle`` blank node →
-        ``bf:mainTitle``. Single ``$a`` per row. ind1=3
-        (no note, added entry) is Helmet's dominant choice; ind2
-        blank (type of title unspecified)."""
+        """MARC 246 — varying form of title. Routed via the BIBFRAME
+        pattern: the Expression has ``bffi:title`` triples pointing
+        at typed Title nodes; we filter for ``bf:VariantTitle``
+        (regular main titles target ``bffi:Title`` / ``bf:Title``).
+        Single ``$a`` per row. ind1=3 (no note, added entry) is
+        Helmet's dominant choice; ind2 blank (type of title
+        unspecified)."""
         expr = self.expression
         if expr is None:
             return
-        for variant in self.graph.objects(expr, V.BFFI.variantTitle):
+        for variant in self.graph.objects(expr, V.BFFI.title):
+            if (variant, V.RDF.type, V.BF.VariantTitle) not in self.graph:
+                continue
             for title in self.graph.objects(variant, V.BF.mainTitle):
                 if isinstance(title, Literal):
                     self._emit_datafield(record, "246", ("a", str(title)), ind1="3")

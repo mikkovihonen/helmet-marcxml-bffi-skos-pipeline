@@ -190,11 +190,15 @@ def test_008_carries_primary_language_at_pos_35_37(minimal_record: ET.Element) -
 
 
 def test_008_carries_transaction_date_at_pos_00_05() -> None:
-    """``bffi:transactionDate`` (mirrored from source 005 by M3) lands
-    at MARC 008 positions 00-05 in YYMMDD form. ISO datetime is
-    parsed character-by-character — no timezone gymnastics."""
+    """Source MARC 005 transaction date (mirrored by M3 onto the
+    AdminMetadata block as ``bffi:changeDate``, the canonical lkd.rdf
+    name) lands at MARC 008 positions 00-05 in YYMMDD form. ISO
+    datetime is parsed character-by-character — no timezone
+    gymnastics."""
     g = _build_minimal_graph()
-    g.add((MANIF, V.BFFI.transactionDate, Literal("2026-05-12T12:25:26")))
+    admin = BNode()
+    g.add((MANIF, V.BFFI.adminMetadata, admin))
+    g.add((admin, V.BFFI.changeDate, Literal("2026-05-12T12:25:26")))
     rec = reconstruct_marc(g, MANIF)
     cf = rec.element.find("m:controlfield[@tag='008']", NS)
     assert cf is not None and cf.text is not None
@@ -797,7 +801,7 @@ def test_240_emits_uniform_title_with_a_n_p_l_from_hub_marcKey() -> None:
     The b26164413 Russian-translation case."""
     g = _build_minimal_graph()
     hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b26164413#Hub240-14")
-    g.add((EXPR, V.BFFI.uniformTitleHub, hub))
+    g.add((EXPR, V.BFFI.title, hub))
     g.add((hub, RDF.type, V.BF.Hub))
     g.add(
         (
@@ -828,7 +832,7 @@ def test_240_prefers_structured_part_number_and_part_name() -> None:
     but the structured side is honoured for the part subfields."""
     g = _build_minimal_graph()
     hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b26164413#Hub240-14")
-    g.add((EXPR, V.BFFI.uniformTitleHub, hub))
+    g.add((EXPR, V.BFFI.title, hub))
     g.add((hub, RDF.type, V.BF.Hub))
     g.add(
         (
@@ -873,7 +877,7 @@ def test_246_emits_variant_title_from_bf_VariantTitle() -> None:
     ind1=3 (no note, added entry)."""
     g = _build_minimal_graph()
     variant = BNode()
-    g.add((EXPR, V.BFFI.variantTitle, variant))
+    g.add((EXPR, V.BFFI.title, variant))
     g.add((variant, RDF.type, V.BF.VariantTitle))
     g.add(
         (
@@ -1199,8 +1203,8 @@ def test_490_emits_series_statement_from_manifestation_node() -> None:
     ``rdfs:label``. Converter emits 490 $a with ind1=0."""
     g = _build_minimal_graph()
     series = BNode()
-    g.add((MANIF, V.BFFI.hasSeries, series))
-    g.add((series, RDF.type, V.BFFI.Series))
+    g.add((MANIF, V.BF.hasSeries, series))
+    g.add((series, RDF.type, V.BF.Series))
     g.add((series, V.RDFS.label, Literal("Usborne lots of things to know")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='490']", NS)

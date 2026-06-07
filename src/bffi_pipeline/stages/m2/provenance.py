@@ -139,8 +139,11 @@ def _add_admin_metadata_block(
     g.add((target, V.adminMetadata, am))
     g.add((am, RDF.type, V.AdminMetadata))
     g.add((am, V.adminMetadataFor, target))
+    # Both ``descriptionCreationDate`` and ``dateGenerated`` now bind
+    # to ``bffi:generationDate`` (lkd.rdf canonical name); a single
+    # add is enough — rdflib's set-semantics would dedup duplicates
+    # anyway, but emitting once is honest about there being one fact.
     g.add((am, V.descriptionCreationDate, timestamp))
-    g.add((am, V.dateGenerated, timestamp))
     g.add((am, V.descriptionModifier, V.AGENT_MARC2BIBFRAME2))
     g.add((am, V.generationProcess, pipeline_version_uri))
     g.add((am, V.descriptionConventions, V.DESC_CONV_BFFI_1_0_0))

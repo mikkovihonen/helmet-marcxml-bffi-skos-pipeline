@@ -48,12 +48,11 @@ CONSTRUCT {
             bffi:dimensions            ?dimensions ;
             bffi:tableOfContents       ?bfToc ;
             bffi:editionStatement      ?editionStatement ;
-            bffi:hasSeries             ?seriesNode ;
+            bf:hasSeries               ?seriesNode ;
             bffi:note                  ?instanceNote ;
             bffi:relation              ?hubRel ;
             bffi:relation              ?relWorkRel ;
             bffi:adminMetadata         ?adminMeta ;
-            bffi:transactionDate       ?transactionDate ;
             bffi:title                 ?manifTitleNode ;
             skos:prefLabel             ?manifLabel .
   ?manifTitleNode a              bffi:Title ;
@@ -64,7 +63,8 @@ CONSTRUCT {
   ?adminMeta  a bffi:AdminMetadata ;
               bf:agent ?adminAgent ;
               bffi:descriptionLanguage    ?descLangURI ;
-              bffi:descriptionConventions ?descConvURI .
+              bffi:descriptionConventions ?descConvURI ;
+              bffi:changeDate             ?transactionDate .
   ?adminAgent a bf:Agent ;
               bf:code ?adminAgencyCode .
   ?bfToc   a               bffi:TableOfContents ;
@@ -115,7 +115,7 @@ CONSTRUCT {
                 bf:code    ?sysCtrlAgentCode .
   ?audIssue a              bf:AudioIssueNumber ;
             rdf:value      ?audIssueValue .
-  ?seriesNode a            bffi:Series ;
+  ?seriesNode a            bf:Series ;
               rdfs:label   ?seriesLabel .
 }
 WHERE {
@@ -377,7 +377,7 @@ WHERE {
   # ``rdfs:label`` on it; rdflib graph semantics dedupe identical
   # triples so the cross-product blow-up from multiple OPTIONALs
   # doesn't matter (no BNODE() mint needed). BFFI doesn't have a
-  # dedicated Series class — bffi:Series is modelled by analogy to
+  # dedicated Series class — bf:Series is modelled by analogy to
   # bf:Series.
   OPTIONAL {
     ?bfWork bf:relation ?seriesRel .
@@ -420,7 +420,7 @@ WHERE {
   #
   # Filter on the Hub type so this OPTIONAL doesn't match the
   # ``bf:Series`` chain routed separately above (490 series; Series
-  # uses a flatter ``bffi:hasSeries`` model).
+  # uses a flatter ``bf:hasSeries`` model).
   OPTIONAL {
     ?bfWork bf:relation ?hubRel .
     ?hubRel bf:associatedResource ?bfHub .

@@ -125,8 +125,6 @@ _EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
     V.BFFI.summary,
     V.BFFI.classification,
     V.BFFI.marcKey,
-    V.BFFI.uniformTitleHub,
-    V.BFFI.variantTitle,
 )
 
 

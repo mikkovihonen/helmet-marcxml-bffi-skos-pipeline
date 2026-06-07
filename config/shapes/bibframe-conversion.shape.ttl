@@ -142,12 +142,7 @@ bffi:AdminMetadataM2Shape
         sh:message "AdminMetadata missing back-link bffi:adminMetadataFor." ;
     ] ;
     sh:property [
-        sh:path bffi:descriptionCreationDate ;
-        sh:minCount 1 ;
-        sh:datatype xsd:dateTime ;
-    ] ;
-    sh:property [
-        sh:path bffi:dateGenerated ;
+        sh:path bffi:generationDate ;
         sh:minCount 1 ;
         sh:datatype xsd:dateTime ;
     ] ;

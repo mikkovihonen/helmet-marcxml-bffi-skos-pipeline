@@ -23,8 +23,8 @@ PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 CONSTRUCT {
   ?exprURI a bffi:Expression ;
            bffi:expressionOf ?workURI ;
-           bffi:uniformTitleHub ?uniformTitleHub ;
-           bffi:variantTitle ?variantTitle ;
+           bffi:title        ?uniformTitleHub ;
+           bffi:title        ?variantTitle ;
            bffi:language     ?language ;
            bffi:content      ?contentType ;
            bffi:title        ?title ;

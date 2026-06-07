@@ -60,41 +60,6 @@ _SPARQL_BFFI_REF_RE: Final[re.Pattern[str]] = re.compile(r"\bbffi:([A-Za-z][A-Za
 #: appears in vocab.py without being a real namespaced term.
 _PYTHON_BFFI_REF_EXCLUSIONS: Final[frozenset[str]] = frozenset()
 
-#: Grandfathered ``bffi:<name>`` references that pre-date the BFFI
-#: namespace discipline rule (P-50 vocab cleanup, commit 3970699).
-#: Each entry is a known discipline violation tracked for follow-up
-#: fix. New code MUST NOT add to this set — open a P-49-Layer-3-style
-#: NLF proposal instead, or pick a standard term per the
-#: ``CLAUDE.md`` decision tree.
-#:
-#: Why allowlisted instead of fixed-now: each fix touches M3 CONSTRUCT
-#: + M8 propagation + round-trip converter + tests, and several have
-#: no obvious 1:1 standard-term replacement (``transactionDate``,
-#: ``uniformTitleHub``). Tracking as explicit debt keeps the rule
-#: enforced for new code while keeping the cleanup itemised.
-_GRANDFATHERED: Final[frozenset[str]] = frozenset(
-    {
-        # AdminMetadata dates — should move to ``dct:created`` /
-        # ``dct:modified`` / ``prov:generatedAtTime``.
-        "dateGenerated",
-        "descriptionChangeDate",
-        "descriptionCreationDate",
-        # Title/Hub linking — likely replaceable with BIBFRAME
-        # ``bf:title`` + ``bf:VariantTitle`` for 246 and
-        # ``bf:expressionOf`` + ``bf:Hub`` for 240.
-        "uniformTitleHub",
-        "variantTitle",
-        # Series linking — should swap to BIBFRAME ``bf:hasSeries``
-        # + ``bf:Series``. Both exist in BIBFRAME.
-        "hasSeries",
-        "Series",
-        # MARC 005 transaction date on AdminMetadata. Closest
-        # standard: ``dct:modified``. Needs validation that the
-        # round-trip + Skosmos consumers still work after the swap.
-        "transactionDate",
-    }
-)
-
 
 def _declared_bffi_terms() -> set[str]:
     """Parse ``docs/lkd.rdf`` and return the set of ``bffi:<name>``
@@ -172,11 +137,11 @@ def test_python_vocab_bffi_terms_all_declared_in_lkd_rdf() -> None:
     """
     declared = _declared_bffi_terms()
     referenced = _python_bffi_references()
-    undeclared = referenced - declared - _GRANDFATHERED
+    undeclared = referenced - declared
     assert not undeclared, (
-        f"Locally-minted bffi: terms in vocab.py (not in docs/lkd.rdf "
-        f"and not grandfathered): {sorted(undeclared)}. See CLAUDE.md "
-        f"§ Conventions § BFFI namespace discipline."
+        f"Locally-minted bffi: terms in vocab.py (not in docs/lkd.rdf): "
+        f"{sorted(undeclared)}. See CLAUDE.md § Conventions § BFFI "
+        f"namespace discipline."
     )
 
 
@@ -191,29 +156,13 @@ def test_sparql_construct_bffi_terms_all_declared_in_lkd_rdf() -> None:
     sparql_refs = _sparql_bffi_references()
     violations: dict[str, set[str]] = {}
     for filename, names in sparql_refs.items():
-        undeclared = names - declared - _GRANDFATHERED
+        undeclared = names - declared
         if undeclared:
             violations[filename] = undeclared
     assert not violations, (
         f"Locally-minted bffi: terms in SPARQL files (not in "
-        f"docs/lkd.rdf and not grandfathered): {violations}. See "
-        f"CLAUDE.md § Conventions § BFFI namespace discipline."
-    )
-
-
-def test_grandfathered_violations_still_present() -> None:
-    """If a grandfathered term has been fully fixed in code, it should
-    be removed from the allowlist. This test fails when the allowlist
-    contains entries that no longer appear anywhere — forcing the
-    inventory to track reality.
-    """
-    referenced = _python_bffi_references()
-    for filename_names in _sparql_bffi_references().values():
-        referenced |= filename_names
-    stale = _GRANDFATHERED - referenced
-    assert not stale, (
-        f"Grandfathered violations no longer in code — remove from "
-        f"_GRANDFATHERED in this file: {sorted(stale)}"
+        f"docs/lkd.rdf): {violations}. See CLAUDE.md § Conventions § "
+        f"BFFI namespace discipline."
     )
 
 

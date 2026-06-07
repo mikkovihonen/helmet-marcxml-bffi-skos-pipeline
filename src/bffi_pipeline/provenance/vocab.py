@@ -12,7 +12,7 @@ so it stays cheap to import from any stage.
 from __future__ import annotations
 
 from rdflib import Graph, Literal, Namespace, URIRef
-from rdflib.namespace import RDF, RDFS, XSD
+from rdflib.namespace import DCTERMS, RDF, RDFS, XSD
 
 # --- Namespaces -----------------------------------------------------------
 
@@ -247,9 +247,21 @@ HELMET_SOURCE_URI: URIRef = URIRef("http://urn.fi/URN:NBN:fi:bib:source:helmet")
 
 adminMetadata: URIRef = BFFI.adminMetadata
 adminMetadataFor: URIRef = BFFI.adminMetadataFor
-descriptionCreationDate: URIRef = BFFI.descriptionCreationDate
-descriptionChangeDate: URIRef = BFFI.descriptionChangeDate
-dateGenerated: URIRef = BFFI.dateGenerated
+#: AdminMetadata creation/change dates rebound to the canonical
+#: ``lkd.rdf`` terms. ``descriptionCreationDate`` and ``dateGenerated``
+#: both meant "when M2 generated this admin block" — collapsed onto
+#: ``bffi:generationDate`` (lkd.rdf, domain AdminMetadata). The
+#: Python attribute names are retained so call sites don't churn,
+#: per the ``sourceMetadata`` precedent.
+descriptionCreationDate: URIRef = BFFI.generationDate
+dateGenerated: URIRef = BFFI.generationDate
+
+#: "When our pipeline last updated this AdminMetadata block." Distinct
+#: from ``bffi:changeDate`` which now carries the SOURCE description's
+#: change date (MARC 005). ``dct:modified`` is the standard term for
+#: "the resource was changed at this time" without binding it to a
+#: specific actor — fits the M8/M9 update semantic exactly.
+descriptionChangeDate: URIRef = DCTERMS.modified
 descriptionModifier: URIRef = BFFI.descriptionModifier
 descriptionConventions: URIRef = BFFI.descriptionConventions
 descriptionLevel: URIRef = BFFI.descriptionLevel
