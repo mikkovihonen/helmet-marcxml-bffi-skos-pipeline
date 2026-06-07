@@ -75,6 +75,48 @@ def _primary_record_language(source: Graph) -> str | None:
     return None
 
 
+def _tag_manifestation_pref_labels_with_primary_language(bffi_graph: Graph, source: Graph) -> None:
+    """Pre-tag ``bffi:Manifestation``-side ``skos:prefLabel`` literals
+    with the record's primary language so the LLM title-language
+    cascade doesn't fire on them.
+
+    M3's manifestation CONSTRUCT synthesises the Manifestation
+    prefLabel by concatenating the source title with the publication
+    statement (e.g. ``"AADA WILDE (Helsinki : Otava, 1912)"``). This
+    is pipeline-generated, NOT cataloguer-typed, and:
+
+    1. The same conceptual title already lives on the bf:Work /
+       bffi:Expression with a clean (no-parenthetical) form — language
+       detection on THAT literal is the authoritative answer.
+    2. The synthetic concatenation can confuse the detector when the
+       publication statement is in a different language than the
+       title (e.g. Finnish title + Swedish-language imprint).
+    3. Sending it through the LLM cascade burns cycles for no value;
+       the language detector audit log fills with synthetic-looking
+       rows that aren't actionable.
+
+    Pre-tagging here marks each synthetic Manifestation prefLabel as
+    already-tagged with the record's primary language. ``_retag_pref_labels``
+    then skips the literal (its ``o.language`` is now truthy).
+
+    Returns silently when no primary language is detected — the
+    LLM cascade falls back to its existing per-text detection.
+    """
+    primary_lang = _primary_record_language(source)
+    if primary_lang is None:
+        return
+    to_swap: list[tuple[URIRef, Literal]] = []
+    for manif in bffi_graph.subjects(RDF.type, V.BFFI.Manifestation):
+        if not isinstance(manif, URIRef):
+            continue
+        for o in bffi_graph.objects(manif, V.SKOS.prefLabel):
+            if isinstance(o, Literal) and o.language is None:
+                to_swap.append((manif, o))
+    for manif, o in to_swap:
+        bffi_graph.remove((manif, V.SKOS.prefLabel, o))
+        bffi_graph.add((manif, V.SKOS.prefLabel, Literal(str(o), lang=primary_lang)))
+
+
 def _tag_loc_vocab_labels_with_primary_language(bffi_graph: Graph, source: Graph) -> None:
     """Tag every untagged ``rdfs:label`` literal on a LoC vocabulary
     URI with the source record's primary language BCP-47 code.
@@ -130,6 +172,15 @@ def post_process(
     cataloguer-review bundle build to avoid re-running the LLM
     against BIBFRAME / canonical graphs.
     """
+    # Pre-tag Manifestation prefLabels with the record's primary
+    # language. These are pipeline-synthesised (title + publication
+    # statement concatenation) rather than cataloguer-typed, so they
+    # shouldn't burn LLM cascade cycles — the underlying title's
+    # language is already detected on the bf:Work / bffi:Expression
+    # side, and the synthetic concatenation can confuse the detector
+    # when the imprint is in a different language than the title.
+    # Pre-tagging marks them as already-tagged so the cascade skips.
+    _tag_manifestation_pref_labels_with_primary_language(bffi_graph, source)
     candidates = _candidate_languages(source)
     if candidates:
         _retag_pref_labels(

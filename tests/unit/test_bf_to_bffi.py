@@ -634,6 +634,53 @@ def test_post_process_tags_pref_labels_with_language() -> None:
     assert str(work_label) == "Sota ja rauha"
 
 
+def test_post_process_pre_tags_manifestation_pref_labels_with_primary_language() -> None:
+    """M3 synthesises ``bffi:Manifestation skos:prefLabel`` by
+    concatenating title + publication statement (e.g. ``"Sota ja
+    rauha (Helsinki : Otava, 1923)"``). It's pipeline-generated, not
+    cataloguer-typed — pre-tag with the record's primary language so
+    the title-language LLM cascade doesn't fire on it."""
+    source = _build_source()
+    bffi = construct_bffi(source)
+    post_process(bffi, source)
+    manif_labels = [
+        o for o in bffi.objects(EXPECTED_MANIF, V.SKOS.prefLabel) if isinstance(o, Literal)
+    ]
+    assert len(manif_labels) >= 1
+    # Every Manifestation prefLabel carries the record's primary
+    # language tag (here Finnish from the source bf:Work bf:language).
+    # Pre-tagging ran before any other re-tag pass.
+    for label in manif_labels:
+        assert label.language == "fi", f"untagged Manifestation prefLabel survived: {label!r}"
+
+
+def test_post_process_leaves_already_tagged_manifestation_pref_labels_alone() -> None:
+    """Idempotent: if a Manifestation prefLabel already carries a
+    language tag (e.g. from a re-run or upstream stage), don't
+    re-tag it. The pre-tag pass only operates on untagged literals."""
+    source = _build_source()
+    bffi = construct_bffi(source)
+    # Strip whatever the CONSTRUCT emitted and inject one Swedish-
+    # tagged literal so we can verify it survives untouched.
+    for existing in list(bffi.objects(EXPECTED_MANIF, V.SKOS.prefLabel)):
+        bffi.remove((EXPECTED_MANIF, V.SKOS.prefLabel, existing))
+    bffi.add(
+        (
+            EXPECTED_MANIF,
+            V.SKOS.prefLabel,
+            Literal("Sota ja rauha (Helsinki : Otava, 1912)", lang="sv"),
+        )
+    )
+    post_process(bffi, source)
+    manif_labels = [
+        o for o in bffi.objects(EXPECTED_MANIF, V.SKOS.prefLabel) if isinstance(o, Literal)
+    ]
+    # Only the Swedish-tagged literal survives (the source's primary
+    # language is Finnish but the existing tag must not be overwritten).
+    assert len(manif_labels) == 1
+    assert manif_labels[0].language == "sv"
+
+
 def test_pref_label_tagged_via_single_declared_language_fast_path() -> None:
     """When MARC 041 declares a single language outside the Lingua-
     detectable set (here ``fre``→``fr``) and the title has no RDA
