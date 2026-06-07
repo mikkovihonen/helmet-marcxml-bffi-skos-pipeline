@@ -531,6 +531,22 @@ def _provision_264_value(field: SourceMarcField) -> str:
 
 _TYPE_WORK: Final[URIRef] = URIRef(_BF + "Work")
 _BF_SUBJECT: Final[URIRef] = URIRef(_BF + "subject")
+_BF_GENRE_FORM: Final[URIRef] = URIRef(_BF + "genreForm")
+
+#: marc2bibframe2 routes MARC 655 (Index Term - Genre/Form) to
+#: ``bf:genreForm`` rather than ``bf:subject``; every other 6XX tag
+#: in :data:`_SUBJECT_TAGS` goes through ``bf:subject``. The matcher
+#: walks both predicates and the per-tag table picks the right one.
+_PREDICATE_BY_TAG: Final[dict[str, URIRef]] = {
+    "600": _BF_SUBJECT,
+    "610": _BF_SUBJECT,
+    "611": _BF_SUBJECT,
+    "630": _BF_SUBJECT,
+    "648": _BF_SUBJECT,
+    "650": _BF_SUBJECT,
+    "651": _BF_SUBJECT,
+    "655": _BF_GENRE_FORM,
+}
 
 #: Source MARC tags whose subjects need link-node reification. Covers
 #: the standard 6XX subject family + 655 (genre / form). 800 / 810 /
@@ -658,20 +674,26 @@ def _find_subject_target(
     field: SourceMarcField,
     targets_used: set[Node],
 ) -> Node | None:
-    """Match a source MARC 6XX / 655 field to the bf:subject target
+    """Match a source MARC 6XX / 655 field to the BIBFRAME target
     that marc2bibframe2 emitted from it.
+
+    The carrier predicate depends on the tag: 655 (Genre/Form) lands
+    on ``bf:genreForm``; every other 6XX tag lands on ``bf:subject``.
+    The matcher uses :data:`_PREDICATE_BY_TAG` to pick the right one
+    (defaulting to ``bf:subject`` for unmapped tags).
 
     Three tiers:
 
     1. **``$0`` URI match** — exact URI equality between source ``$0``
-       and a bf:subject target.
-    2. **``$a`` label match** — bf:subject target with rdfs:label
+       and a candidate target.
+    2. **``$a`` label match** — candidate target with rdfs:label
        equal to source ``$a`` (whitespace normalised).
-    3. **Raw URI fragment match** — bf:subject target URI whose
+    3. **Raw URI fragment match** — candidate target URI whose
        fragment contains the source tag + ordinal (matches
-       marc2bibframe2's ``#Topic650-N`` raw URIs even when M3's
-       counter isn't 1-indexed-within-tag).
+       marc2bibframe2's ``#Topic650-N`` / ``#GenreForm655-N`` raw
+       URIs even when M3's counter isn't 1-indexed-within-tag).
     """
+    predicate = _PREDICATE_BY_TAG.get(field.tag, _BF_SUBJECT)
     source_a = field.subfield_value("a") or ""
     source_a_norm = _norm(source_a)
     source_zero = field.subfield_value("0") or ""
@@ -679,21 +701,21 @@ def _find_subject_target(
     # Tier 1 — $0 URI exact match
     if source_zero:
         candidate = URIRef(source_zero.strip())
-        for _, _, o in graph.triples((work, _BF_SUBJECT, candidate)):
+        for _, _, o in graph.triples((work, predicate, candidate)):
             if o not in targets_used:
                 return o
 
     # Tier 2 — $a label exact match
-    for o in graph.objects(work, _BF_SUBJECT):
+    for o in graph.objects(work, predicate):
         if o in targets_used:
             continue
         for label in graph.objects(o, RDFS.label):
             if isinstance(label, Literal) and _norm(str(label)) == source_a_norm:
                 return o
 
-    # Tier 3 — raw URI fragment match (#Topic<tag>-N)
+    # Tier 3 — raw URI fragment match (#Topic<tag>-N, #GenreForm655-N)
     fragment_marker = f"{field.tag}-"
-    for o in graph.objects(work, _BF_SUBJECT):
+    for o in graph.objects(work, predicate):
         if o in targets_used:
             continue
         if isinstance(o, URIRef) and fragment_marker in str(o):

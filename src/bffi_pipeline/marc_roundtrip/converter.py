@@ -1940,6 +1940,28 @@ class _Reconstructor:
                     out[auth] = str(raw)
         return out
 
+    def _find_subject_statement_for_target(self, work: URIRef, target: Node) -> Node | None:
+        """Locate the M2-post-minted ``rdf:Statement`` reification that
+        links this ``work`` to ``target`` as a subject occurrence.
+        Returns the statement URI (so the caller can read its
+        ``bffi-prov:fromMarcField`` token) or ``None`` when no such
+        statement exists (e.g. records processed before P-50 Phase C
+        shipped or M2-post couldn't correlate the source field).
+
+        Used by ``_emit_genre_forms`` so 655 emits can share the same
+        Statement-anchored lineage path that ``_emit_subjects`` uses
+        for 600/610/611/648/650/651 — both are subject-shape
+        reifications under the same ``rdf:predicate bffi:subject``
+        contract.
+        """
+        for stmt in self.graph.subjects(RDF.subject, work):
+            if (stmt, RDF.type, RDF.Statement) not in self.graph:
+                continue
+            if (stmt, RDF.object, target) not in self.graph:
+                continue
+            return stmt
+        return None
+
     def _emit_genre_forms(self, record: Element) -> None:
         work = self.work
         if work is None:
@@ -1951,7 +1973,19 @@ class _Reconstructor:
             if row_result is None:
                 continue
             row, used_marckey = row_result
-            lineage = self._lineage_for_subject(genre, raw_origin_hints)
+            # Prefer Statement-anchored lineage: M2-post emits one
+            # rdf:Statement reification per source 655 field with the
+            # genre target as ``rdf:object`` and the source-MARC-field
+            # token as ``bffi-prov:fromMarcField``. The reified
+            # statement's token is per-occurrence; the target URI may
+            # be shared (LCGFT / SLM / KAUNO). Fall back to the
+            # legacy direct-or-back-walk lineage when no Statement is
+            # found (records processed before P-50 Phase C shipped,
+            # or shapes M2-post's matcher doesn't cover).
+            stmt = self._find_subject_statement_for_target(work, genre)
+            lineage = (
+                self._lineage_token(stmt) if stmt is not None else None
+            ) or self._lineage_for_subject(genre, raw_origin_hints)
             self._emit_datafield(
                 record,
                 "655",
