@@ -184,6 +184,66 @@ def _propagate_subject_typing(g: Graph, raw_graph: Graph) -> int:
     return count
 
 
+def _propagate_from_marc_field(g: Graph, raw_graph: Graph) -> int:
+    """Copy every ``?entity bffi-prov:fromMarcField "<token>"`` triple
+    from the raw graph to canonical (P-50 Phase A).
+
+    The triples were attached at M2-post on raw-bib URIs (the entities
+    marc2bibframe2 minted from each source MARC field, e.g.
+    ``#Topic650-27``, ``#Agent700-31``). The other M8 propagation passes
+    (subject_typing, raw_agent_identifiers, manifestations,
+    expression_passthrough) carry the raw URIs forward into canonical
+    but each only copies a specific predicate set. The provenance
+    predicate is orthogonal to those passes' semantics, so a single
+    catch-all pass keeps the wiring clean: walk every fromMarcField
+    triple, copy it verbatim.
+
+    Idempotent — rdflib's ``add`` is set-semantics.
+
+    Returns triples copied.
+    """
+    count = 0
+    for s, _p, o in raw_graph.triples((None, V.fromMarcField, None)):
+        g.add((s, V.fromMarcField, o))
+        count += 1
+    return count
+
+
+def _propagate_subject_links(g: Graph, raw_graph: Graph) -> int:
+    """Copy the P-50 Phase C SubjectLink reification triples from the
+    raw graph to canonical.
+
+    For every M3-emitted ``?bfWork bffi:hasSubjectLink ?link`` (which
+    M3 routed from the M2-post-emitted link nodes on the raw bib
+    graph), copy:
+
+    - ``?canonicalWork bffi:hasSubjectLink ?link``
+    - ``?link rdf:type bffi:SubjectLink``
+    - ``?link bffi:subjectTarget ?target``
+
+    The ``fromMarcField`` triple on each link is already carried by
+    :func:`_propagate_from_marc_field`.
+
+    Note: this pass copies from the *raw-bib BFFI* (M3 output) into
+    canonical. M3's CONSTRUCT keeps the link URI verbatim — it's a
+    per-record bib-namespace URI, never minted as canonical because
+    SubjectLinks are inherently per-record.
+
+    Idempotent. Returns triples copied.
+    """
+    count = 0
+    for s, _p, o in raw_graph.triples((None, V.hasSubjectLink, None)):
+        g.add((s, V.hasSubjectLink, o))
+        count += 1
+    for link in raw_graph.subjects(RDF.type, V.SubjectLink):
+        g.add((link, RDF.type, V.SubjectLink))
+        count += 1
+        for target in raw_graph.objects(link, V.subjectTarget):
+            g.add((link, V.subjectTarget, target))
+            count += 1
+    return count
+
+
 def _propagate_loc_vocab_labels(g: Graph, raw_graph: Graph) -> int:
     """Copy ``rdfs:label`` triples on LoC vocabulary URIs from the M3
     per-record graph into the canonical graph.

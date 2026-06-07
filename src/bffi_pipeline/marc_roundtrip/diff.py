@@ -353,51 +353,91 @@ def _pair_data_fields(
 ) -> list[tuple[FieldRecord | None, FieldRecord | None]]:
     """Pair data fields between the two records.
 
-    P-48 Phase A pass: when a reconstructed field carries a
-    ``$9 src=<tag>-<ord>`` lineage token, look up the original field
-    by (tag, 1-indexed position within the tag bucket) and pair them
-    explicitly — even if their tags differ on the two sides (the
-    misroute case). Whatever's left unpaired falls through to the
-    legacy tag-bucket heuristic.
+    Three pairing tiers, applied in order:
+
+    1. **P-50 source-MARC-field token** — recon's ``$9 src=<bib>:<tag>:
+       <ord>`` matches a source field at the same ``(tag, ordinal)``
+       slot, computed from source MARCXML document order. Stable
+       against marc2bibframe2 routing decisions and M9 reconciliation.
+    2. **P-48 rank-bucket token** — legacy ``$9 src=<tag>-<rank>``
+       fallback for entities M2-post couldn't tokenise (records
+       processed before P-50 Phase A shipped, or shapes Phase A's
+       correlator doesn't cover yet — flat literals, URI-keyed
+       subjects). Source side ranks 1-indexed-within-tag-bucket;
+       recon side derives rank from raw-URI fragment.
+    3. **Tag-bucket heuristic** — final fallback for the residue
+       (``$a`` + position pairing). See
+       :func:`_pair_residue_via_heuristic`.
+
+    Tier 1 takes precedence: a recon row carrying both token forms
+    pairs by the P-50 token. Tiers don't conflict by construction
+    (they look up against disjoint maps).
     """
     orig_data = [f for f in original if not f.is_control]
     recon_data = [f for f in reconstructed if not f.is_control]
 
-    # Build the lineage lookup over the original side. Position
-    # within the source's tag bucket IS the second half of the
-    # lineage token. M3's positional counter for ``#Topic650-N`` /
-    # ``#Place651-N`` is 1-indexed-within-record (not 1-indexed-
-    # within-tag-bucket), so we walk the original record once and
-    # number each tag's instances in encounter order. That matches
-    # marc2bibframe2's own per-record counter.
+    # Tier 1: P-50 token — source-side index by (tag, ordinal-in-tag-
+    # bucket). Walk the original record once and rank within each tag's
+    # bucket. The ordinal is the second half of the recon's
+    # ``<bib>:<tag>:<ord>`` token (bib_id is implicit — the diff is
+    # per-bib so the bib_id matches by construction).
+    orig_by_source_token_suffix: dict[str, FieldRecord] = {}
+    # Tier 2: P-48 fallback — same data, but keyed by ``<tag>-<rank>``
+    # since the legacy lineage scheme also ranks 1-indexed-within-tag.
+    # Identical lookup table, different key shape.
     orig_by_lineage: dict[str, FieldRecord] = {}
     tag_counters: dict[str, int] = {}
     for f in orig_data:
         tag_counters[f.tag] = tag_counters.get(f.tag, 0) + 1
-        orig_by_lineage[f"{f.tag}-{tag_counters[f.tag]}"] = f
+        rank = tag_counters[f.tag]
+        orig_by_source_token_suffix[f"{f.tag}:{rank}"] = f
+        orig_by_lineage[f"{f.tag}-{rank}"] = f
 
     pairs: list[tuple[FieldRecord | None, FieldRecord | None]] = []
     matched_orig_ids: set[int] = set()
     residue_recon: list[FieldRecord] = []
     for recon in recon_data:
-        if recon.lineage is None:
-            residue_recon.append(recon)
-            continue
-        orig_match = orig_by_lineage.get(recon.lineage)
+        orig_match = _lookup_orig_by_token(
+            recon.lineage,
+            orig_by_source_token_suffix,
+            orig_by_lineage,
+        )
         if orig_match is not None and id(orig_match) not in matched_orig_ids:
             matched_orig_ids.add(id(orig_match))
             pairs.append((orig_match, recon))
         else:
-            # Lineage points at an original we already matched (the
-            # converter emitted two rows from one source field — rare
-            # but possible) OR at a token absent from the original
-            # (the converter mis-stamped). Fall back to heuristic for
-            # this row.
+            # Lineage absent / mis-stamped / pointing at an already-
+            # matched original. Fall back to heuristic for this row.
             residue_recon.append(recon)
 
     residue_orig = [f for f in orig_data if id(f) not in matched_orig_ids]
     pairs.extend(_pair_residue_via_heuristic(residue_orig, residue_recon))
     return pairs
+
+
+def _lookup_orig_by_token(
+    lineage: str | None,
+    by_source_token_suffix: dict[str, FieldRecord],
+    by_legacy_lineage: dict[str, FieldRecord],
+) -> FieldRecord | None:
+    """Decode the recon-side lineage string and return the source field
+    it points at, or ``None`` when neither token form parses.
+
+    P-50 format: ``"<bib_id>:<tag>:<within-tag-ordinal>"`` (three
+    colon-separated tokens; bib_id may itself contain colons in
+    URN-style identifiers, so split from the right). The bib_id half
+    is dropped because the diff is per-bib — the suffix ``"<tag>:<ord>"``
+    is enough.
+
+    P-48 legacy format: ``"<tag>-<rank>"`` (one hyphen, no colons).
+    """
+    if not lineage:
+        return None
+    if ":" in lineage:
+        # P-50 token. Take the last two colon-separated components.
+        suffix = ":".join(lineage.rsplit(":", 2)[-2:])
+        return by_source_token_suffix.get(suffix)
+    return by_legacy_lineage.get(lineage)
 
 
 def _pair_residue_via_heuristic(

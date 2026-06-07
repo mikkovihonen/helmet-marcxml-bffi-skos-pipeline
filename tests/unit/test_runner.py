@@ -206,7 +206,7 @@ def test_from_stage_skips_earlier_stages_with_resume_reason(
     skipped = {e["stage"]: e for e in events if e["event"] == "skipped"}
 
     # Stages strictly before m6 were skipped with resume-from-stage.
-    assert set(skipped.keys()) == {"m2", "m3", "m5"}
+    assert set(skipped.keys()) == {"m2", "m2-post", "m3", "m5"}
     for ev in skipped.values():
         assert ev["extra"]["reason"] == "resume-from-stage"
 
@@ -261,6 +261,7 @@ def test_failed_stage_records_failure_and_reraises(
         "_DISPATCHERS",
         {
             "m2": ok,
+            "m2-post": ok,
             "m3": ok,
             "m5": boom,
             "m6": ok,
@@ -274,8 +275,10 @@ def test_failed_stage_records_failure_and_reraises(
     with pytest.raises(RuntimeError, match="kaboom"):
         run_pipeline(input_dir=tmp_path)
 
-    # Three ok calls (m2, m3) before m5 blew up — m5 itself raised so didn't append.
-    assert len(calls) == 2
+    # Three ok calls (m2, m2-post, m3) before m5 blew up — m5 itself raised
+    # so didn't append. m2-post is part of the canonical chain since P-50
+    # Phase A (commit graduating the source-MARC-field provenance redesign).
+    assert len(calls) == 3
 
 
 def test_failed_stage_emits_failed_event_with_error_type_and_message(

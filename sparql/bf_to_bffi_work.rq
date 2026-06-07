@@ -11,21 +11,23 @@
 # (not `bflc:PrimaryContribution` as the spec example uses). We match the
 # converter's actual output here.
 
-PREFIX bf:      <http://id.loc.gov/ontologies/bibframe/>
-PREFIX bflc:    <http://id.loc.gov/ontologies/bflc/>
-PREFIX bffi:    <http://urn.fi/URN:NBN:fi:schema:bffi:>
-PREFIX dct:     <http://purl.org/dc/terms/>
-PREFIX madsrdf: <http://www.loc.gov/mads/rdf/v1#>
-PREFIX rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX skos:    <http://www.w3.org/2004/02/skos/core#>
-PREFIX arq:     <http://jena.apache.org/ARQ/function#>
+PREFIX bf:        <http://id.loc.gov/ontologies/bibframe/>
+PREFIX bflc:      <http://id.loc.gov/ontologies/bflc/>
+PREFIX bffi:      <http://urn.fi/URN:NBN:fi:schema:bffi:>
+PREFIX bffi-prov: <http://urn.fi/URN:NBN:fi:schema:bffi-prov#>
+PREFIX dct:       <http://purl.org/dc/terms/>
+PREFIX madsrdf:   <http://www.loc.gov/mads/rdf/v1#>
+PREFIX rdf:       <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs:      <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos:      <http://www.w3.org/2004/02/skos/core#>
+PREFIX arq:       <http://jena.apache.org/ARQ/function#>
 
 CONSTRUCT {
   ?workURI a bffi:Work ;
            bffi:hasExpression       ?exprURI ;
            bffi:contribution        ?contrib ;
            bffi:subject             ?subject ;
+           bffi:hasSubjectLink      ?subjectLink ;
            bffi:classification      ?class ;
            bffi:originDate          ?originDate ;
            bffi:genreForm           ?workGenre ;
@@ -35,6 +37,15 @@ CONSTRUCT {
            bffi:originPlace         ?originPlaceURI ;
            bffi:marcKey             ?marcKey ;
            skos:prefLabel           ?workLabel .
+  # P-50 Phase C — per-record SubjectLink reification. The link node
+  # carries the ``bffi-prov:fromMarcField`` token M2-post attached, so
+  # each occurrence has its own provenance anchor independent of the
+  # (possibly shared) target URI. Flat ``bffi:subject ?subject`` above
+  # is retained as a derived shortcut for Skosmos and other consumers
+  # that walk the bare predicate.
+  ?subjectLink a               bffi:SubjectLink ;
+               bffi:subjectTarget ?subjectLinkTarget ;
+               bffi-prov:fromMarcField ?subjectLinkToken .
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent ;
            bf:role         ?primaryRole .
@@ -203,6 +214,17 @@ WHERE {
     # ?primaryAgent rdfs:label pattern at d040a90, so the rdflib
     # nested-OPTIONAL bug doesn't bite.
     OPTIONAL { ?bfSubject rdfs:label ?subjectLabel }
+  }
+
+  # P-50 Phase C — pass M2-post's per-record SubjectLink chain through
+  # to the canonical Work. Each link node binds one source 6XX / 655
+  # field to its subject target via ``bffi:subjectTarget`` and carries
+  # the ``bffi-prov:fromMarcField`` token. The flat ``bffi:subject``
+  # triple above is retained as a derived shortcut.
+  OPTIONAL {
+    ?bfWork bffi:hasSubjectLink ?subjectLink .
+    ?subjectLink bffi:subjectTarget       ?subjectLinkTarget ;
+                 bffi-prov:fromMarcField  ?subjectLinkToken .
   }
   OPTIONAL { ?bfWork bf:classification ?class }
   OPTIONAL { ?bfWork bf:originDate     ?originDate }

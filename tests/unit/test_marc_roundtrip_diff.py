@@ -481,6 +481,81 @@ def test_marckey_bypass_does_not_override_tag_changed() -> None:
     assert row.status == "tag-changed"
 
 
+def test_diff_pairs_by_p50_source_token_when_present() -> None:
+    """P-50 Phase A: when recon carries a ``$9 src=<bib>:<tag>:<ord>``
+    token, the diff pairs against the source field at that
+    ``(tag, ordinal)`` slot — even when content matches multiple
+    source rows. The b10642122 case: 11 source 650s, 2 raw recon
+    rows with P-50 tokens pointing at slots 5 and 9. Tokens win over
+    position-based pairing."""
+    orig_body = "".join(
+        f"""
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">subject-{i}</subfield>
+    </datafield>
+        """
+        for i in range(1, 12)  # 11 source 650s, $a = subject-1 .. subject-11
+    )
+    recon_body = f"""
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">subject-5</subfield>
+      <subfield code="9">src=b1:650:5</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">subject-9</subfield>
+      <subfield code="9">src=b1:650:9</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    paired = {
+        (row.original.primary_a() if row.original else None): row
+        for row in diff.fields
+        if row.status in ("identical", "changed")
+    }
+    # The two recon rows pair to source slots 5 and 9 by token, not
+    # by position (slot 1 / 2) which is the legacy bug shape.
+    assert "subject-5" in paired
+    assert "subject-9" in paired
+    assert paired["subject-5"].status == "identical"
+    assert paired["subject-9"].status == "identical"
+
+
+def test_diff_falls_back_to_legacy_rank_when_p50_token_absent() -> None:
+    """Backwards compat: recon rows that still carry the P-48-style
+    ``$9 src=<tag>-<rank>`` token (no colon) pair against the source
+    by 1-indexed-within-tag rank — the original P-48 Phase A path."""
+    orig_body = """
+    <datafield tag="700" ind1="1" ind2=" ">
+      <subfield code="a">First</subfield>
+    </datafield>
+    <datafield tag="700" ind1="1" ind2=" ">
+      <subfield code="a">Second</subfield>
+    </datafield>
+    """
+    recon_body = f"""
+    <datafield tag="700" ind1="1" ind2=" ">
+      <subfield code="a">Second</subfield>
+      <subfield code="9">src=700-2</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    paired = [r for r in diff.fields if r.status == "identical"]
+    assert len(paired) == 1
+    assert paired[0].original is not None
+    assert paired[0].original.primary_a() == "Second"
+
+
 def test_path_import_is_used_in_some_assertions() -> None:
     """No-op sanity test — pytest discovers test_ functions and this
     test pulls Path into the module's namespace so future fixture

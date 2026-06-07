@@ -81,6 +81,7 @@ from bffi_pipeline.observability.events import (
 #: is reporting-only and not part of this chain.
 CANONICAL_STAGES: Final[tuple[str, ...]] = (
     "m2",
+    "m2-post",
     "m3",
     "m5",
     "m6",
@@ -106,6 +107,7 @@ CANONICAL_STAGES: Final[tuple[str, ...]] = (
 #: on ``start`` events without a phase.
 STAGE_PHASES: Final[dict[str, tuple[str, ...]]] = {
     "m2": ("_",),
+    "m2-post": ("_",),
     "m3": ("_",),
     "m5": ("_",),
     "m6": ("_",),
@@ -154,6 +156,13 @@ def _dispatch_m2(*, input_dir: Path, force: bool, llm_salvage_cascade: bool = Fa
         force=force,
         llm_salvage_cascade=llm_salvage_cascade,
     )
+
+
+def _dispatch_m2_post(*, input_dir: Path, force: bool) -> None:
+    """Run the P-50 Phase A source-MARC-field provenance enrichment."""
+    from bffi_pipeline.stages.m2_post import run as m2_post_run  # noqa: PLC0415
+
+    m2_post_run(input_dir=input_dir, force=force)
 
 
 def _dispatch_m3(*, force: bool, llm_contrib_cascade: bool = False) -> None:
@@ -327,6 +336,7 @@ def _dispatch_cataloguer_bundle(*, input_dir: Path | None = None) -> None:
 #: invocation without monkeypatching the entire CLI module.
 _DISPATCHERS: Final[dict[str, Callable[..., None]]] = {
     "m2": _dispatch_m2,
+    "m2-post": _dispatch_m2_post,
     "m3": _dispatch_m3,
     "m5": _dispatch_m5,
     "m6": _dispatch_m6,
@@ -361,6 +371,10 @@ def _call_dispatcher(
         if input_dir is None:
             raise ValueError("m2 dispatch requires input_dir (MARCXML source directory).")
         dispatcher(input_dir=input_dir, force=force, llm_salvage_cascade=llm_salvage_cascade)
+    elif stage == "m2-post":
+        if input_dir is None:
+            raise ValueError("m2-post dispatch requires input_dir (MARCXML source directory).")
+        dispatcher(input_dir=input_dir, force=force)
     elif stage == "m3":
         dispatcher(force=force, llm_contrib_cascade=llm_contrib_cascade)
     elif stage in {"m5", "m6", "skosify"}:

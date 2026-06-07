@@ -31,9 +31,11 @@ from bffi_pipeline.stages.m8.mint import (
     _bind_prefixes,
     _emit_canonical_work,
     _propagate_expression_passthrough,
+    _propagate_from_marc_field,
     _propagate_loc_vocab_labels,
     _propagate_manifestations,
     _propagate_raw_agent_identifiers,
+    _propagate_subject_links,
     _propagate_subject_typing,
     _select_description_modifier,
 )
@@ -250,6 +252,20 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
         # subject URI's namespace doesn't carry a hint (the
         # cataloguer-typed plain ``yso/`` URI case).
         _propagate_subject_typing(g, raw_corpus_graph)
+        # P-50 Phase A — source-MARC-field provenance tokens M2-post
+        # attached to raw-bib URIs (the entities marc2bibframe2 minted
+        # per source field). Copying these into canonical lets the
+        # round-trip converter and any provenance SPARQL query see
+        # "this triple came from MARC field <bib>:<tag>:<ord>" without
+        # walking back to per-record M3 output.
+        _propagate_from_marc_field(g, raw_corpus_graph)
+        # P-50 Phase C — SubjectLink reification triples (Work →
+        # hasSubjectLink → SubjectLink → subjectTarget). Link nodes
+        # are per-record so they pass through canonical verbatim
+        # (no merging). The ``fromMarcField`` triple on each link
+        # rode through above; this copies the structural triples that
+        # make the link queryable.
+        _propagate_subject_links(g, raw_corpus_graph)
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label

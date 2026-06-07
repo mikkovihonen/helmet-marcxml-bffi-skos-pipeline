@@ -45,6 +45,52 @@ Synthesis: URIRef = BFFI_PROV.Synthesis
 helmetBibId: URIRef = BFFI_PROV.helmetBibId
 converterVersion: URIRef = BFFI_PROV.converterVersion
 
+#: P-50 Phase A — source-MARC-field provenance token. Attached to
+#: every BFFI / BIBFRAME entity derived from a specific source MARC
+#: datafield or controlfield instance. Computed at M2-post from source
+#: MARCXML and carried through every downstream transformation
+#: (M3 CONSTRUCT, M8 canonical mint, M9 authority binding) unchanged.
+#:
+#: Value format: ``"<bib_id>:<tag>:<within-tag-ordinal>"``. The ordinal
+#: is 1-indexed position of this field instance within the same-tag
+#: bucket in source MARCXML document order. Controlfields use ordinal 1.
+#:
+#: Cardinality: 0..n per entity. Zero on pipeline-synthesised entities
+#: (Activity URIs, canonical mint anchors). One on the common case
+#: (one source field → one entity). Many on canonical entities merged
+#: across editions (one token per contributing record).
+fromMarcField: URIRef = BFFI_PROV.fromMarcField
+
+# --- BFFI predicates added by P-50 Phase C (SubjectLink reification) -----
+
+#: P-50 Phase C — link-node class for per-record per-occurrence
+#: subject reification. A ``bffi:SubjectLink`` mediates between a
+#: ``bffi:Work`` and a subject target, carrying the per-record
+#: provenance triple ``bffi-prov:fromMarcField`` that cannot live on
+#: the (shared) target URI itself.
+#:
+#: Use case: when source MARC has ``$0 <yso-uri>`` on a 6XX, the
+#: target ``<yso-uri>`` is shared across every record using that YSO
+#: concept. Without an indirection, multiple records' provenance
+#: tokens would all collide on the same target URI. The link node
+#: gives each occurrence its own anchor.
+#:
+#: Coexists with the flat ``bffi:subject`` triple — the latter is
+#: kept as a derived shortcut so Skosmos and other consumers
+#: continue to see the flat shape.
+SubjectLink: URIRef = BFFI.SubjectLink
+
+#: P-50 Phase C — Work → SubjectLink edge. One per source 6XX / 655
+#: instance the cataloguer typed.
+hasSubjectLink: URIRef = BFFI.hasSubjectLink
+
+#: P-50 Phase C — SubjectLink → target URI edge. The target is the
+#: shared authority URI (YSO / finaf / etc.) or the raw bib URI for
+#: unresolved subjects. M9 reconciliation rewrites this predicate on
+#: each link node when it binds the raw URI to an authority URI;
+#: ``fromMarcField`` survives because it's on the link, not the target.
+subjectTarget: URIRef = BFFI.subjectTarget
+
 # --- bffi-prov predicates emitted by M6 (WorkMergeDecision) ---------------
 
 stage: URIRef = BFFI_PROV.stage
@@ -241,6 +287,7 @@ __all__ = [
     "HumanReview",
     "MarcConversion",
     "Reconciliation",
+    "SubjectLink",
     "Synthesis",
     "WorkMergeDecision",
     "adminMetadata",
@@ -261,7 +308,9 @@ __all__ = [
     "divergingField",
     "embeddingSimilarity",
     "encodingLevel",
+    "fromMarcField",
     "generationProcess",
+    "hasSubjectLink",
     "helmetBibId",
     "inputLiteral",
     "is_synthetic_sentinel",
@@ -283,6 +332,7 @@ __all__ = [
     "sourceMetadata",
     "sourceVocabulary",
     "stage",
+    "subjectTarget",
     "syntheticConfidence",
     "syntheticField",
     "syntheticMarcSource",
