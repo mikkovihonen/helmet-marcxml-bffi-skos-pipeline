@@ -318,7 +318,7 @@ WHERE {
   # dedicated Series class — bffi:Series is modelled by analogy to
   # bf:Series.
   OPTIONAL {
-    ?bfInstance bf:relation ?seriesRel .
+    ?bfWork bf:relation ?seriesRel .
     ?seriesRel bf:associatedResource ?seriesNode .
     ?seriesNode a bf:Series ;
                 bf:title ?bfSeriesTitle .
@@ -360,7 +360,7 @@ WHERE {
   # ``bf:Series`` chain routed separately above (490 series; Series
   # uses a flatter ``bffi:hasSeries`` model).
   OPTIONAL {
-    ?bfInstance bf:relation ?hubRel .
+    ?bfWork bf:relation ?hubRel .
     ?hubRel bf:associatedResource ?bfHub .
     ?bfHub a bf:Hub .
     OPTIONAL { ?hubRel bf:relationship ?hubRelationship }
@@ -383,7 +383,7 @@ WHERE {
   # raw URI exists in the source graph but has no canonical Work
   # role — perfect for the same pass-through routing as Hubs.
   OPTIONAL {
-    ?bfInstance bf:relation ?relWorkRel .
+    ?bfWork bf:relation ?relWorkRel .
     ?relWorkRel bf:associatedResource ?relWork .
     ?relWork a bf:Work .
     OPTIONAL { ?relWorkRel bf:relationship ?relWorkRelationship }
