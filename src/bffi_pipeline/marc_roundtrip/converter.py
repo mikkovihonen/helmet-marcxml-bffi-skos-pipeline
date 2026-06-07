@@ -853,7 +853,7 @@ class _Reconstructor:
                 for qual in self.graph.objects(ident, V.BF.qualifier):
                     if isinstance(qual, Literal):
                         subs.append(("q", str(qual)))
-                self._emit_datafield(record, "020", *subs)
+                self._emit_datafield(record, "020", *subs, lineage=self._lineage_token(ident))
 
     def _emit_publisher_numbers(self, record: Element) -> None:
         # MARC 028 publisher number / catalog number (music + video).
@@ -868,7 +868,13 @@ class _Reconstructor:
             if V.BF.AudioIssueNumber in types:
                 for value in self.graph.objects(ident, RDF.value):
                     if isinstance(value, Literal):
-                        self._emit_datafield(record, "028", ("a", str(value)), ind1="0")
+                        self._emit_datafield(
+                            record,
+                            "028",
+                            ("a", str(value)),
+                            ind1="0",
+                            lineage=self._lineage_token(ident),
+                        )
 
     def _assigner_marc_code(self, assigner: Node) -> str | None:
         """Resolve a ``bf:assigner`` to the cataloguer-typed
@@ -914,7 +920,9 @@ class _Reconstructor:
             if value is None:
                 continue
             formatted = f"({code}){value}" if code else value
-            self._emit_datafield(record, "035", ("a", formatted))
+            self._emit_datafield(
+                record, "035", ("a", formatted), lineage=self._lineage_token(ident)
+            )
 
     def _emit_edition_statement(self, record: Element) -> None:
         # MARC 250 edition statement. marc2bibframe2 emits a flat
@@ -937,7 +945,19 @@ class _Reconstructor:
         for series in self.graph.objects(self.manifestation, V.BF.hasSeries):
             label = self._first_label(series)
             if label:
-                self._emit_datafield(record, "490", ("a", label), ind1="0")
+                # ``series`` is a bnode emitted by M3 from the
+                # marc2bibframe2 ``bf:Hub/bf:Series`` chain. Phase A's
+                # subject-statement matcher tags the source Hub; if
+                # M3's CONSTRUCT routed the Hub URI directly the token
+                # rides through. Fallback ``None`` is fine — series
+                # is rare (~206 rows / 500-record sample).
+                self._emit_datafield(
+                    record,
+                    "490",
+                    ("a", label),
+                    ind1="0",
+                    lineage=self._lineage_token(series),
+                )
 
     _LANGUAGES_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
     _DESCRIPTION_CONVENTIONS_URI_PREFIX: Final[str] = (
@@ -1185,7 +1205,14 @@ class _Reconstructor:
                 # No marcKey at all — emit whatever structured parts
                 # exist (rare; defensive).
                 if structured:
-                    self._emit_datafield(record, "240", *structured, ind1="1", ind2="0")
+                    self._emit_datafield(
+                        record,
+                        "240",
+                        *structured,
+                        ind1="1",
+                        ind2="0",
+                        lineage=self._lineage_token(hub),
+                    )
                     return
                 continue
             # Parse marcKey to recover $a (from $t) and $l. Use
@@ -1212,6 +1239,7 @@ class _Reconstructor:
                     *subs,
                     ind1="1",
                     ind2="0",
+                    lineage=self._lineage_token(hub),
                     marckey_bypass=used_marckey,
                 )
                 return
@@ -1261,7 +1289,13 @@ class _Reconstructor:
                 continue
             for title in self.graph.objects(variant, V.BF.mainTitle):
                 if isinstance(title, Literal):
-                    self._emit_datafield(record, "246", ("a", str(title)), ind1="3")
+                    self._emit_datafield(
+                        record,
+                        "246",
+                        ("a", str(title)),
+                        ind1="3",
+                        lineage=self._lineage_token(variant),
+                    )
                     break
 
     def _emit_title(self, record: Element) -> None:
@@ -1273,7 +1307,7 @@ class _Reconstructor:
         # = "$a : $b") on bf:Work. Reading from the Manifestation
         # preserves the source subfield boundary; falling back to the
         # Work's prefLabel yields the concatenated form (no $b).
-        main_title, subtitle = self._manifestation_title_parts()
+        main_title, subtitle, title_node = self._manifestation_title_parts()
         if main_title is None:
             work = self.work
             main_title = self._first_label(work) if work is not None else None
@@ -1290,11 +1324,24 @@ class _Reconstructor:
             if isinstance(stmt, Literal):
                 subs.append(("c", str(stmt)))
                 break
-        self._emit_datafield(record, "245", *subs, ind1="1", ind2="0")
+        # Lineage from the Title node M2-post tagged (Phase B
+        # flat-literal-title matcher). M9 doesn't rebind Title nodes
+        # so the token on the source bnode rides through verbatim.
+        self._emit_datafield(
+            record,
+            "245",
+            *subs,
+            ind1="1",
+            ind2="0",
+            lineage=self._lineage_token(title_node) if title_node is not None else None,
+        )
 
-    def _manifestation_title_parts(self) -> tuple[str | None, str | None]:
+    def _manifestation_title_parts(self) -> tuple[str | None, str | None, Node | None]:
         """Read the Manifestation's structured title — returns
-        ``(main_title, subtitle)`` with either / both possibly ``None``.
+        ``(main_title, subtitle, title_node)`` with any of the first
+        two possibly ``None``. ``title_node`` is the source ``bffi:Title``
+        bnode the parts came off (caller uses it for lineage lookup);
+        ``None`` when no Title node was found.
 
         The M3 manifestation CONSTRUCT routes bf:Instance's bf:Title
         bnode to a sha1-minted ``bffi:Title`` node under
@@ -1304,6 +1351,7 @@ class _Reconstructor:
         """
         main_title: str | None = None
         subtitle: str | None = None
+        picked_node: Node | None = None
         for title_node in self.graph.objects(self.manifestation, V.BFFI.title):
             for mt in self.graph.objects(title_node, V.BFFI.mainTitle):
                 if isinstance(mt, Literal):
@@ -1314,8 +1362,9 @@ class _Reconstructor:
                     subtitle = str(st)
                     break
             if main_title is not None:
+                picked_node = title_node
                 break
-        return main_title, subtitle
+        return main_title, subtitle, picked_node
 
     def _emit_publication_statement(self, record: Element) -> None:
         """MARC 264 publication / production / distribution / manufacture.
@@ -1343,7 +1392,7 @@ class _Reconstructor:
             if not subs:
                 continue
             ind2 = self._provision_activity_ind2(prov)
-            self._emit_datafield(record, "264", *subs, ind2=ind2)
+            self._emit_datafield(record, "264", *subs, ind2=ind2, lineage=self._lineage_token(prov))
             emitted_structured = True
         if emitted_structured:
             return
@@ -1422,21 +1471,36 @@ class _Reconstructor:
         #                            (a mnotetype/accmat) rdfs:label``
         # Skip entirely when all four are absent.
         subs: list[tuple[str, str]] = []
-        subs.extend(self._extent_subs())
+        extent_subs, extent_node = self._extent_subs()
+        subs.extend(extent_subs)
         subs.extend(self._dimensions_subs())
         subs.extend(self._accmat_subs())
         if subs:
-            self._emit_datafield(record, "300", *subs)
+            # 300's source-MARC-field token rides on the ``bf:Extent``
+            # bnode (Phase B's flat-literal-extent matcher anchors
+            # there). Other 300 subfields ($c dimensions, $e accmat)
+            # come from the same source row by convention.
+            self._emit_datafield(
+                record,
+                "300",
+                *subs,
+                lineage=self._lineage_token(extent_node) if extent_node is not None else None,
+            )
 
-    def _extent_subs(self) -> list[tuple[str, str]]:
+    def _extent_subs(self) -> tuple[list[tuple[str, str]], Node | None]:
         """``$a`` + nested ``$b`` from the Manifestation's first
         ``bffi:extent``. Literal extents emit only ``$a``; bf:Extent
-        bnodes walk into ``bf:note`` for ``$b`` other-physical."""
+        bnodes walk into ``bf:note`` for ``$b`` other-physical.
+
+        Returns ``(subfields, extent_node)`` — ``extent_node`` is the
+        ``bf:Extent`` bnode the subfields came off so the caller can
+        look up M2-post's lineage token on it. ``None`` when the
+        extent was a flat literal (no entity to tag)."""
         out: list[tuple[str, str]] = []
         for ext in self.graph.objects(self.manifestation, V.BFFI.extent):
             if isinstance(ext, Literal):
                 out.append(("a", str(ext)))
-                return out
+                return out, None
             lbl = self._first_label(ext)
             if lbl:
                 out.append(("a", lbl))
@@ -1445,9 +1509,9 @@ class _Reconstructor:
                     nlbl = self._first_label(note)
                     if nlbl:
                         out.append(("b", nlbl))
-                        return out
-            return out
-        return out
+                        return out, ext
+            return out, ext
+        return out, None
 
     def _dimensions_subs(self) -> list[tuple[str, str]]:
         """``$c`` from the first ``bffi:dimensions``."""
@@ -1542,7 +1606,13 @@ class _Reconstructor:
                                 break
                 if text and text not in seen:
                     seen.add(text)
-                    self._emit_datafield(record, "500", ("a", text))
+                    # Lineage from the bf:Note bnode (Phase B
+                    # flat-literal-note matcher). Flat-literal note
+                    # text has no anchor node → no lineage available.
+                    note_lineage = (
+                        self._lineage_token(note) if not isinstance(note, Literal) else None
+                    )
+                    self._emit_datafield(record, "500", ("a", text), lineage=note_lineage)
 
     def _emit_table_of_contents(self, record: Element) -> None:
         # MARC 505 formatted contents note. M3 hoists
@@ -1561,7 +1631,11 @@ class _Reconstructor:
         for toc in self.graph.objects(manif, V.BFFI.tableOfContents):
             text = self._first_label(toc) if not isinstance(toc, Literal) else str(toc)
             if text:
-                self._emit_datafield(record, "505", ("a", text), ind1="0")
+                # bffi:TableOfContents is a bnode; M2-post's
+                # flat-literal-note matcher tags some of these
+                # (505 routes through bf:Note in raw BIBFRAME).
+                toc_lineage = self._lineage_token(toc) if not isinstance(toc, Literal) else None
+                self._emit_datafield(record, "505", ("a", text), ind1="0", lineage=toc_lineage)
 
     def _emit_media_type(self, record: Element) -> None:
         for media in self.graph.objects(self.manifestation, V.BFFI.media):
