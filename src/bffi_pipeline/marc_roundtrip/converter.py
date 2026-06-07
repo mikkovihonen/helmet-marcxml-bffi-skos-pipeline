@@ -425,16 +425,98 @@ class _Reconstructor:
         return "00000nam  2200000   4500"
 
     def _make_008(self) -> str:
-        # 40 chars. Positions we can fill: 35-37 (primary language).
-        # Others stay as blanks; the diff will surface them.
-        lang_code = self._primary_language_code() or "   "
+        """MARC 008 — 40-char fixed-length data elements. Positions we
+        reconstruct:
+
+          00-05 Date entered on file (YYMMDD) — from
+                ``bffi:transactionDate`` (the source 005 timestamp
+                that marc2bibframe2 mirrors onto bf:adminMetadata's
+                ``bf:date`` on the ``status=n`` block).
+          06    Type of date — default ``s`` (single date). BFFI
+                doesn't carry a 1:1 mapping; ``s`` matches the
+                dominant Helmet case.
+          07-10 Date1 (publication year, 4-char) — from the first
+                ``bffi:provisionActivity`` bnode's ``bf:date`` typed
+                value (clean 4-char) with fallback to digits scraped
+                from ``bflc:simpleDate`` (``"c1997"`` → ``"1997"``).
+          15-17 Place of publication (3-char MARC country code) —
+                URI tail of the first ``bf:place`` on a
+                ``bffi:provisionActivity`` bnode (``…/countries/xxk``
+                → ``"xxk"``). Pad to 3 chars when shorter.
+          35-37 Primary language (3-char) — already lifted from
+                ``bffi:language`` URI tail.
+
+        Other positions (audience, form, content type, literary
+        form, biography, modified, source) require BIBFRAME → MARC
+        mappings that aren't 1:1; left blank, the diff surfaces
+        each gap so cataloguers see what BFFI represents elsewhere.
+        """
         s = list(" " * 40)
-        # Synthesise minimal date type: 's' (single date) is the safest
-        # default — see leader for caveat.
+        entered = self._transaction_date_yymmdd()
+        for i, c in enumerate(entered):
+            s[i] = c
         s[6] = "s"
+        date1 = self._publication_date1()
+        for i, c in enumerate(date1[:4]):
+            s[7 + i] = c
+        country = self._publication_country_code()
+        for i, c in enumerate(country[:3]):
+            s[15 + i] = c
+        lang_code = self._primary_language_code() or "   "
         for i, c in enumerate(lang_code[:3]):
             s[35 + i] = c
         return "".join(s)
+
+    #: Minimum literal length for an ISO date that carries YYYY-MM-DD
+    #: at positions 0-9. Used to validate transactionDate input.
+    _ISO_DATE_MIN_LEN: Final[int] = 10
+    #: Year is 4 chars in MARC 008 Date1 (pos 07-10).
+    _YEAR_LEN: Final[int] = 4
+
+    def _transaction_date_yymmdd(self) -> str:
+        """Format the source ``bffi:transactionDate`` into the 6-char
+        008 pos 00-05 representation. Returns blank when no source
+        date is available."""
+        for d in self.graph.objects(self.manifestation, V.BFFI.transactionDate):
+            if not isinstance(d, Literal):
+                continue
+            s = str(d)
+            # Accept either "YYYY-MM-DDThh:mm:ss" or "YYYY-MM-DD"
+            if len(s) < self._ISO_DATE_MIN_LEN or s[4] != "-" or s[7] != "-":
+                continue
+            return f"{s[2:4]}{s[5:7]}{s[8:10]}"
+        return "      "
+
+    def _publication_date1(self) -> str:
+        """Date1 (4-char publication year) for 008 pos 07-10. Prefer
+        the typed ``bf:date`` on a ``bffi:provisionActivity`` bnode;
+        fall back to extracting 4 consecutive digits from
+        ``bflc:simpleDate`` ("c1997" → "1997")."""
+        for prov in self.graph.objects(self.manifestation, V.BFFI.provisionActivity):
+            for d in self.graph.objects(prov, V.BF.date):
+                if isinstance(d, Literal):
+                    val = str(d).strip()
+                    if len(val) >= self._YEAR_LEN and val[: self._YEAR_LEN].isdigit():
+                        return val[: self._YEAR_LEN]
+        for prov in self.graph.objects(self.manifestation, V.BFFI.provisionActivity):
+            for d in self.graph.objects(prov, V.BFLC.simpleDate):
+                if isinstance(d, Literal):
+                    digits = "".join(c for c in str(d) if c.isdigit())
+                    if len(digits) >= self._YEAR_LEN:
+                        return digits[: self._YEAR_LEN]
+        return "    "
+
+    _COUNTRIES_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/countries/"
+
+    def _publication_country_code(self) -> str:
+        """Country code for 008 pos 15-17 — URI tail of a
+        ``bffi:provisionActivity → bf:place`` LoC countries URI."""
+        for prov in self.graph.objects(self.manifestation, V.BFFI.provisionActivity):
+            for p in self.graph.objects(prov, V.BF.place):
+                if isinstance(p, URIRef) and str(p).startswith(self._COUNTRIES_URI_PREFIX):
+                    tail = str(p)[len(self._COUNTRIES_URI_PREFIX) :]
+                    return f"{tail:<3}"[:3]
+        return "   "
 
     def _primary_language_code(self) -> str | None:
         expr = self.expression

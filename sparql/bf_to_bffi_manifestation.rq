@@ -53,6 +53,7 @@ CONSTRUCT {
             bffi:relation              ?hubRel ;
             bffi:relation              ?relWorkRel ;
             bffi:adminMetadata         ?adminMeta ;
+            bffi:transactionDate       ?transactionDate ;
             skos:prefLabel             ?manifLabel .
   ?mediaURI   rdfs:label ?mediaLabel .
   ?carrierURI rdfs:label ?carrierLabel .
@@ -87,7 +88,9 @@ CONSTRUCT {
                      bflc:simplePlace ?provisionPlace ;
                      bflc:simpleAgent ?provisionAgent ;
                      bflc:simpleDate  ?provisionDate ;
-                     bflc:marcKey     ?provisionMarcKey .
+                     bflc:marcKey     ?provisionMarcKey ;
+                     bf:date          ?provisionTypedDate ;
+                     bf:place         ?provisionTypedPlace .
   ?instanceNote a        bf:Note ;
                 rdf:type ?instanceNoteType ;
                 rdfs:label ?instanceNoteLabel .
@@ -214,6 +217,29 @@ WHERE {
     OPTIONAL { ?provisionActivity bflc:simpleAgent ?provisionAgent }
     OPTIONAL { ?provisionActivity bflc:simpleDate  ?provisionDate }
     OPTIONAL { ?provisionActivity bflc:marcKey     ?provisionMarcKey }
+    # Typed-value siblings used by the round-trip converter to
+    # reconstruct MARC 008 positions:
+    #   bf:date  → Date1 (008 pos 07-10, 4-char publication year)
+    #   bf:place → country code (008 pos 15-17, URI tail of
+    #              ``…/vocabulary/countries/<code>``)
+    OPTIONAL { ?provisionActivity bf:date  ?provisionTypedDate }
+    OPTIONAL {
+      ?provisionActivity bf:place ?provisionTypedPlace .
+      FILTER(isIRI(?provisionTypedPlace))
+    }
+  }
+
+  # MARC 008 pos 00-05 (date entered on file, YYMMDD). marc2bibframe2
+  # emits the source 005 transaction timestamp as
+  # ``bf:adminMetadata → bf:AdminMetadata (bf:status mstatus/n) →
+  # bf:date "YYYY-MM-DDThh:mm:ss"``. Filter on status=n to pick the
+  # SOURCE record's date rather than marc2bibframe2's own conversion
+  # date (which lives on a sibling AdminMetadata block with
+  # ``bf:status mstatus/c``).
+  OPTIONAL {
+    ?bfWork bf:adminMetadata ?txAdmin .
+    ?txAdmin bf:status <http://id.loc.gov/vocabulary/mstatus/n> ;
+             bf:date  ?transactionDate .
   }
   OPTIONAL { ?bfInstance bf:publicationStatement   ?publicationStatement }
   OPTIONAL { ?bfInstance bf:responsibilityStatement ?responsibilityStatement }
@@ -306,16 +332,16 @@ WHERE {
   BIND(IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:adminmeta/",
                   arq:sha1(STR(?bfInstance)))) AS ?adminMeta)
   OPTIONAL {
-    ?bfInstance bf:adminMetadata ?srcAdminBlock1 .
+    ?bfWork bf:adminMetadata ?srcAdminBlock1 .
     ?srcAdminBlock1 bf:agent ?adminAgent .
     ?adminAgent bf:code ?adminAgencyCode .
   }
   OPTIONAL {
-    ?bfInstance bf:adminMetadata ?srcAdminBlock2 .
+    ?bfWork bf:adminMetadata ?srcAdminBlock2 .
     ?srcAdminBlock2 bf:descriptionLanguage ?descLangURI .
   }
   OPTIONAL {
-    ?bfInstance bf:adminMetadata ?srcAdminBlock3 .
+    ?bfWork bf:adminMetadata ?srcAdminBlock3 .
     ?srcAdminBlock3 bf:descriptionConventions ?descConvURI .
   }
 

@@ -189,6 +189,65 @@ def test_008_carries_primary_language_at_pos_35_37(minimal_record: ET.Element) -
     assert cf008.text[35:38] == "fin"
 
 
+def test_008_carries_transaction_date_at_pos_00_05() -> None:
+    """``bffi:transactionDate`` (mirrored from source 005 by M3) lands
+    at MARC 008 positions 00-05 in YYMMDD form. ISO datetime is
+    parsed character-by-character — no timezone gymnastics."""
+    g = _build_minimal_graph()
+    g.add((MANIF, V.BFFI.transactionDate, Literal("2026-05-12T12:25:26")))
+    rec = reconstruct_marc(g, MANIF)
+    cf = rec.element.find("m:controlfield[@tag='008']", NS)
+    assert cf is not None and cf.text is not None
+    assert cf.text[0:6] == "260512"
+
+
+def test_008_carries_publication_year_at_pos_07_10() -> None:
+    """Date1 (008 pos 07-10) reads from
+    ``bffi:provisionActivity → bf:date`` (typed) preferentially,
+    fallback to digits in ``bflc:simpleDate`` (\"c1997\" → \"1997\")."""
+    g = _build_minimal_graph()
+    prov = BNode()
+    g.add((MANIF, V.BFFI.provisionActivity, prov))
+    g.add((prov, V.BFLC.simpleDate, Literal("c1997")))
+    rec = reconstruct_marc(g, MANIF)
+    cf = rec.element.find("m:controlfield[@tag='008']", NS)
+    assert cf is not None and cf.text is not None
+    assert cf.text[7:11] == "1997"
+
+
+def test_008_carries_country_code_at_pos_15_17() -> None:
+    """008 pos 15-17 = 3-char MARC country code, derived from the
+    ``bffi:provisionActivity → bf:place`` URI tail
+    (``…/countries/xxk`` → ``"xxk"``). Shorter codes are
+    space-padded right (``"fi"`` → ``"fi "``)."""
+    g = _build_minimal_graph()
+    prov = BNode()
+    g.add((MANIF, V.BFFI.provisionActivity, prov))
+    g.add(
+        (
+            prov,
+            V.BF.place,
+            URIRef("http://id.loc.gov/vocabulary/countries/xxk"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    cf = rec.element.find("m:controlfield[@tag='008']", NS)
+    assert cf is not None and cf.text is not None
+    assert cf.text[15:18] == "xxk"
+
+
+def test_008_pads_short_country_code_with_spaces() -> None:
+    """``…/countries/fi`` → ``"fi "`` (right-pad to 3 chars)."""
+    g = _build_minimal_graph()
+    prov = BNode()
+    g.add((MANIF, V.BFFI.provisionActivity, prov))
+    g.add((prov, V.BF.place, URIRef("http://id.loc.gov/vocabulary/countries/fi")))
+    rec = reconstruct_marc(g, MANIF)
+    cf = rec.element.find("m:controlfield[@tag='008']", NS)
+    assert cf is not None and cf.text is not None
+    assert cf.text[15:18] == "fi "
+
+
 def test_020_emits_isbn(minimal_record: ET.Element) -> None:
     df = _datafield(minimal_record, "020")
     assert df is not None
