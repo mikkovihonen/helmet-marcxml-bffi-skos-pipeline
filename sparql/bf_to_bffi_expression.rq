@@ -22,6 +22,7 @@ PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 
 CONSTRUCT {
   ?exprURI a bffi:Expression ;
+           a                 ?exprSubclass ;
            bffi:expressionOf ?workURI ;
            bffi:title        ?uniformTitleHub ;
            bffi:title        ?variantTitle ;
@@ -80,6 +81,33 @@ WHERE {
             arq:sha1(STR(?bfWork)))) AS ?exprURI )
 
   OPTIONAL { ?bfWork bf:language        ?language }
+
+  # P-52 Phase A — Expression-axis BFFI subclass typing. marc2bibframe2
+  # emits content-shape secondary types on ``bf:Work`` (BIBFRAME has no
+  # Expression class; everything piggybacks on Work). BFFI's split puts
+  # content / realisation-form classes on the Expression axis, so we
+  # mirror each ``bf:Text`` / ``bf:NotatedMusic`` / etc. triple onto
+  # ``?exprURI`` with its ``owl:equivalentClass`` BFFI counterpart.
+  # The 9 BFFI subclasses below are all declared
+  # ``owl:equivalentClass`` of their BIBFRAME source class in
+  # ``docs/lkd.rdf``; the typing is purely a mirror — no semantic
+  # transformation. The existing BIBFRAME-class triple on the bffi:Work
+  # is retained for tools expecting it (the work CONSTRUCT carries it).
+  OPTIONAL {
+    ?bfWork a ?bfExprClass .
+    VALUES (?bfExprClass ?exprSubclass) {
+      (bf:Text             bffi:Text)
+      (bf:NotatedMusic     bffi:NotatedMusic)
+      (bf:NotatedMovement  bffi:NotatedMovement)
+      (bf:StillImage       bffi:StillImage)
+      (bf:Dataset          bffi:Dataset)
+      (bf:Object           bffi:Object)
+      (bf:MixedMaterial    bffi:MixedMaterial)
+      (bf:Multimedia       bffi:Multimedia)
+      (bf:Arrangement      bffi:Arrangement)
+    }
+  }
+
   OPTIONAL {
     ?bfWork bf:content ?contentType .
     # Pass the Finnish source-MARC $a label attached to the URI by

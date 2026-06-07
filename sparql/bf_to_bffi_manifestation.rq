@@ -30,6 +30,7 @@ PREFIX arq:   <http://jena.apache.org/ARQ/function#>
 
 CONSTRUCT {
   ?manifURI a bffi:Manifestation ;
+            a                          ?manifSubclass ;
             bffi:expressionManifested  ?exprURI ;
             bf:identifiedBy            ?ident ;
             bf:identifiedBy            ?isbn ;
@@ -132,6 +133,33 @@ WHERE {
             arq:sha1(STR(?bfInstance)))) AS ?manifURI )
   BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:expression:",
             arq:sha1(STR(?bfWork)))) AS ?exprURI )
+
+  # P-52 Phase A — Manifestation-axis BFFI subclass typing. Five
+  # carrier-form classes BFFI declares ``owl:equivalentClass`` of
+  # their BIBFRAME counterparts:
+  #   - bf:Print      → bffi:Print       (regular printed book)
+  #   - bf:Electronic → bffi:Electronic  (online / digital file)
+  #   - bf:Microform  → bffi:Microform   (microfilm / microfiche)
+  #   - bf:Tactile    → bffi:Tactile     (Braille / embossed)
+  #   - bf:Archival   → bffi:Archival    (archival-controlled)
+  # marc2bibframe2 may attach the BIBFRAME class to either
+  # ``?bfInstance`` (the natural BIBFRAME home for carrier form)
+  # or ``?bfWork`` (older Helmet records that pre-date the routing
+  # convention). UNION over both so we don't miss either shape.
+  OPTIONAL {
+    {
+      ?bfInstance a ?bfManifClass .
+    } UNION {
+      ?bfWork a ?bfManifClass .
+    }
+    VALUES (?bfManifClass ?manifSubclass) {
+      (bf:Print      bffi:Print)
+      (bf:Electronic bffi:Electronic)
+      (bf:Microform  bffi:Microform)
+      (bf:Tactile    bffi:Tactile)
+      (bf:Archival   bffi:Archival)
+    }
+  }
 
   # Helmet identifier — moved from Work + Expression to Manifestation
   # for BFFI 1.0.0 ontology fidelity. The bib_id identifies the

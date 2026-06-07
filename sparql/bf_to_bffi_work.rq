@@ -25,6 +25,7 @@ PREFIX arq:       <http://jena.apache.org/ARQ/function#>
 CONSTRUCT {
   ?workURI a bffi:Work ;
            a                        ?workTypeURI ;
+           a                        ?workSubclass ;
            bffi:hasExpression       ?exprURI ;
            bffi:contribution        ?contrib ;
            bffi:subject             ?subject ;
@@ -140,6 +141,21 @@ WHERE {
       bf:Multimedia, bf:Object, bf:Dataset, bf:MixedMaterial,
       bf:Manuscript, bf:Tactile
     ))
+  }
+
+  # P-52 Phase A — Work-axis BFFI subclass typing. Mirrors the
+  # BIBFRAME class onto the ``bffi:Work`` URI with the ``owl:equivalentClass``
+  # BFFI counterpart. Two classes carried on the Work axis:
+  #   - bf:Manuscript  → bffi:Manuscript  (RDA: handwritten / typescript content)
+  #   - bf:Integrating → bffi:Integrating (RDA: updating resource, e.g. loose-leaf)
+  # Both are declared ``owl:equivalentClass`` in ``docs/lkd.rdf``.
+  # See the longer comment in bf_to_bffi_expression.rq's VALUES block.
+  OPTIONAL {
+    ?bfWork a ?bfWorkClass .
+    VALUES (?bfWorkClass ?workSubclass) {
+      (bf:Manuscript  bffi:Manuscript)
+      (bf:Integrating bffi:Integrating)
+    }
   }
 
   # Primary creator only (translators, editors -> Expression, see Pass 2).

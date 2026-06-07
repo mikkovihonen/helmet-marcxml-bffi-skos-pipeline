@@ -142,6 +142,117 @@ def test_construct_passes_through_bnode_keyed_from_marc_field_tokens() -> None:
     assert (bnode_subject, V.fromMarcField, Literal("10000001:020:1")) in bffi
 
 
+def test_construct_mirrors_expression_axis_bibframe_classes_as_bffi_subclasses() -> None:
+    """P-52 Phase A — Expression-axis OWL-equivalent typing mirror.
+
+    Each of the 9 BIBFRAME content / realisation-form classes that BFFI
+    declares ``owl:equivalentClass`` on the Expression side gets a
+    parallel ``a bffi:<Class>`` triple emitted on the bffi:Expression
+    URI. Existing ``a bffi:Expression`` typing stays (additive).
+    """
+    expr_pairs = [
+        ("Text", V.BFFI.Text),
+        ("NotatedMusic", V.BFFI.NotatedMusic),
+        ("NotatedMovement", V.BFFI.NotatedMovement),
+        ("StillImage", V.BFFI.StillImage),
+        ("Dataset", V.BFFI.Dataset),
+        ("Object", V.BFFI.Object),
+        ("MixedMaterial", V.BFFI.MixedMaterial),
+        ("Multimedia", V.BFFI.Multimedia),
+        ("Arrangement", V.BFFI.Arrangement),
+    ]
+    for bf_local_name, bffi_class in expr_pairs:
+        source = _build_source()
+        source.add((URIRef(BF_WORK), RDF.type, V.BF[bf_local_name]))
+        bffi = construct_bffi(source)
+        assert (EXPECTED_EXPR, RDF.type, bffi_class) in bffi, (
+            f"bf:{bf_local_name} not mirrored to {bffi_class!r} on Expression"
+        )
+        # The default bffi:Expression typing is still present.
+        assert (EXPECTED_EXPR, RDF.type, V.BFFI.Expression) in bffi
+
+
+def test_construct_mirrors_work_axis_bibframe_classes_as_bffi_subclasses() -> None:
+    """P-52 Phase A — Work-axis mirror (Manuscript + Integrating)."""
+    work_pairs = [
+        ("Manuscript", V.BFFI.Manuscript),
+        ("Integrating", V.BFFI.Integrating),
+    ]
+    for bf_local_name, bffi_class in work_pairs:
+        source = _build_source()
+        source.add((URIRef(BF_WORK), RDF.type, V.BF[bf_local_name]))
+        bffi = construct_bffi(source)
+        assert (EXPECTED_WORK, RDF.type, bffi_class) in bffi, (
+            f"bf:{bf_local_name} not mirrored to {bffi_class!r} on Work"
+        )
+        assert (EXPECTED_WORK, RDF.type, V.BFFI.Work) in bffi
+
+
+def test_construct_mirrors_manifestation_axis_bibframe_classes_from_instance() -> None:
+    """P-52 Phase A — Manifestation-axis mirror for the bf:Instance
+    side (the natural BIBFRAME home for carrier-form classes)."""
+    manif_pairs = [
+        ("Print", V.BFFI.Print),
+        ("Electronic", V.BFFI.Electronic),
+        ("Microform", V.BFFI.Microform),
+        ("Tactile", V.BFFI.Tactile),
+        ("Archival", V.BFFI.Archival),
+    ]
+    for bf_local_name, bffi_class in manif_pairs:
+        source = _build_source()
+        source.add((URIRef(BF_INSTANCE), RDF.type, V.BF[bf_local_name]))
+        bffi = construct_bffi(source)
+        assert (EXPECTED_MANIF, RDF.type, bffi_class) in bffi, (
+            f"bf:{bf_local_name} not mirrored to {bffi_class!r} on Manifestation (Instance-side)"
+        )
+        assert (EXPECTED_MANIF, RDF.type, V.BFFI.Manifestation) in bffi
+
+
+def test_construct_mirrors_manifestation_axis_bibframe_classes_from_work() -> None:
+    """P-52 Phase A — Manifestation-axis mirror when the BIBFRAME
+    class lands on ``bf:Work`` (older Helmet records pre-dating the
+    bf:Instance routing convention). The CONSTRUCT UNION's both sides
+    so cataloguer-typing-style drift is absorbed without per-record
+    pre-flight."""
+    source = _build_source()
+    source.add((URIRef(BF_WORK), RDF.type, V.BF.Print))
+    bffi = construct_bffi(source)
+    assert (EXPECTED_MANIF, RDF.type, V.BFFI.Print) in bffi
+
+
+def test_construct_emits_zero_subclass_typing_when_no_bibframe_signal() -> None:
+    """No matching BIBFRAME class on source → no BFFI subclass
+    typing on the BFFI entity. The base bffi:Work / Expression /
+    Manifestation typing is unaffected (still emitted)."""
+    bffi = construct_bffi(_build_source())
+    bffi_subclasses = {
+        V.BFFI.Text,
+        V.BFFI.NotatedMusic,
+        V.BFFI.NotatedMovement,
+        V.BFFI.StillImage,
+        V.BFFI.Dataset,
+        V.BFFI.Object,
+        V.BFFI.MixedMaterial,
+        V.BFFI.Multimedia,
+        V.BFFI.Arrangement,
+        V.BFFI.Manuscript,
+        V.BFFI.Integrating,
+        V.BFFI.Print,
+        V.BFFI.Electronic,
+        V.BFFI.Microform,
+        V.BFFI.Tactile,
+        V.BFFI.Archival,
+    }
+    emitted_types = (
+        set(bffi.objects(EXPECTED_WORK, RDF.type))
+        | set(bffi.objects(EXPECTED_EXPR, RDF.type))
+        | set(bffi.objects(EXPECTED_MANIF, RDF.type))
+    )
+    assert not (emitted_types & bffi_subclasses), (
+        f"Unexpected BFFI subclass typing in baseline fixture: {emitted_types & bffi_subclasses!r}"
+    )
+
+
 def test_expression_links_back_to_work() -> None:
     bffi = construct_bffi(_build_source())
     assert (EXPECTED_EXPR, V.BFFI.expressionOf, EXPECTED_WORK) in bffi
