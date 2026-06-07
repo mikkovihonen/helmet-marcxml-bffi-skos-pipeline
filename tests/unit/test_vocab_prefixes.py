@@ -96,32 +96,53 @@ def test_canonical_helper_is_idempotent() -> None:
     assert bindings_before == bindings_after
 
 
-def test_no_private_prefix_bind_lists_in_pipeline_stages() -> None:
-    """Static-source check: every ``graph.bind("...", V....)`` call in
-    pipeline stages should go through :func:`bind_canonical_prefixes`,
-    not maintain a private list. Catches drift between stages where
-    one file binds 7 of 13 namespaces and another binds 4 different
-    ones.
-
-    Allowlist: ``vocab.py`` itself (defines the helper) and ``m10/
-    load_finto.py`` (loads external Finto vocabs into Fuseki — those
-    are different namespaces with their own conventions, not the
-    pipeline's emit set).
-    """
-    allowlist = {
+#: Files exempt from the project-wide rule that all Turtle prefix
+#: bindings must go through
+#: :func:`bffi_pipeline.provenance.vocab.bind_canonical_prefixes`.
+#: Each entry MUST come with a stated reason — adding to this set
+#: weakens the corpus-concat-collision guard (see CLAUDE.md
+#: "Turtle prefix bindings" rule). Prefer extending
+#: ``CANONICAL_TURTLE_PREFIXES`` over allowlisting.
+#:
+#: - ``provenance/vocab.py`` — defines the helper.
+#: - ``stages/m10/load_finto.py`` — uploads external Finto vocab
+#:   dumps (YSO / KAUNO / KANTO / Allärs / MUSO etc.) to Fuseki.
+#:   These vocabs bring their own ``@prefix`` declarations that
+#:   differ per-vocab (e.g. ``yso:``, ``allars:``); they are NOT
+#:   part of the pipeline's *emit* surface (which canonical.ttl,
+#:   provenance.ttl etc. are). Letting this loader bind
+#:   vocab-specific prefixes keeps the canonical helper focused
+#:   on the pipeline's output namespaces.
+_PRIVATE_BIND_ALLOWLIST: frozenset[Path] = frozenset(
+    {
         _SRC / "provenance" / "vocab.py",
         _SRC / "stages" / "m10" / "load_finto.py",
     }
+)
+
+
+def test_no_private_prefix_bind_lists_in_pipeline_stages() -> None:
+    """Static-source check: every ``graph.bind("...", V....)`` call in
+    pipeline stages routes through
+    :func:`bffi_pipeline.provenance.vocab.bind_canonical_prefixes`,
+    not a private list. Catches drift between stages where one file
+    binds 7 of 13 namespaces and another binds 4 different ones.
+
+    Allowlisted files are documented in :data:`_PRIVATE_BIND_ALLOWLIST`
+    above — extending the allowlist requires stating why the file is
+    exempt from the project-wide rule.
+    """
     pattern = re.compile(r"\.bind\(\s*['\"]")
     offenders: list[tuple[Path, int, str]] = []
     for py in _SRC.rglob("*.py"):
-        if py in allowlist:
+        if py in _PRIVATE_BIND_ALLOWLIST:
             continue
         for lineno, line in enumerate(py.read_text(encoding="utf-8").splitlines(), start=1):
             if pattern.search(line):
                 offenders.append((py.relative_to(_PROJECT_ROOT), lineno, line.strip()))
     assert not offenders, (
         "Found private prefix-bind calls outside the canonical helper. "
-        "Replace with bffi_pipeline.provenance.vocab.bind_canonical_prefixes(graph):\n"
+        "Replace with bffi_pipeline.provenance.vocab.bind_canonical_prefixes(graph) "
+        "— see CLAUDE.md 'Turtle prefix bindings' rule for rationale.\n"
         + "\n".join(f"  {p}:{ln}  {src}" for p, ln, src in offenders)
     )
