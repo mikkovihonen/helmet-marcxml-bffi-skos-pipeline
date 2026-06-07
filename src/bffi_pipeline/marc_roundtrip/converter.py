@@ -182,6 +182,19 @@ LINEAGE_SUBFIELD: Final[str] = "9"
 #: pass-through both key on this prefix.
 LINEAGE_VALUE_PREFIX: Final[str] = "src="
 
+#: P-49 Phase A — round-trip-only sentinel marking that this
+#: reconstructed field's subfields were built by parsing
+#: ``bflc:marcKey`` rather than from BFFI structured properties.
+#: Such rows are flagged ``marckey_bypass`` in the diff regardless
+#: of byte-equality with the original — they "pass" only because
+#: the cataloguer's original MARC string is smuggled through the
+#: BFFI graph and reparsed, not because BFFI faithfully models the
+#: bibliographic data. Emitted as a sentinel ``$9`` value alongside
+#: the lineage ``$9 src=…`` subfield; both are stripped by the diff
+#: parser. Cataloguer-supplied ``$9`` with other content passes
+#: through unchanged.
+MARCKEY_BYPASS_VALUE: Final[str] = "marckey-bypass"
+
 #: M3's raw-URI positional fragment grammar. Three named groups:
 #:   - ``kind``: the M3 routing prefix (Topic / Place / Agent / Hub / ...)
 #:   - ``tag``:  the source MARC datafield tag (650 / 651 / 700 / ...)
@@ -544,6 +557,7 @@ class _Reconstructor:
         ind2: str = _INDICATOR_BLANK,
         add_marker: bool = True,
         lineage: str | None = None,
+        marckey_bypass: bool = False,
     ) -> None:
         df = SubElement(
             record,
@@ -566,6 +580,17 @@ class _Reconstructor:
                 attrib={"code": LINEAGE_SUBFIELD},
             )
             sf.text = f"{LINEAGE_VALUE_PREFIX}{lineage}"
+        # P-49 Phase A: marcKey-bypass sentinel — only emitted when the
+        # converter built this row's subfields from bflc:marcKey rather
+        # than from BFFI structured properties. The diff flags such
+        # rows as ``marckey_bypass`` so the audit is visible.
+        if marckey_bypass:
+            sf = SubElement(
+                df,
+                f"{{{MARC_NAMESPACE}}}subfield",
+                attrib={"code": LINEAGE_SUBFIELD},
+            )
+            sf.text = MARCKEY_BYPASS_VALUE
         if add_marker:
             sf = SubElement(df, f"{{{MARC_NAMESPACE}}}subfield", attrib={"code": "5"})
             sf.text = ROUNDTRIP_MARKER
@@ -784,6 +809,7 @@ class _Reconstructor:
                 continue
             for agent in self.graph.objects(contrib, V.BFFI.agent):
                 name_subs = self._name_subfields_from_marc_key(agent)
+                used_marckey = name_subs is not None
                 if name_subs is None:
                     label = self._first_label(agent)
                     if not label:
@@ -801,6 +827,7 @@ class _Reconstructor:
                     *role_subs,
                     *id_subs,
                     ind1="1",
+                    marckey_bypass=used_marckey,
                 )
                 return  # only one primary
 
@@ -912,35 +939,93 @@ class _Reconstructor:
         return None
 
     def _emit_uniform_title(self, record: Element) -> None:
-        """MARC 240 — uniform title for the work. Source data lives
-        on a per-record ``bf:Hub`` (``#Hub240-N``) attached to the
-        Expression via ``bffi:uniformTitleHub``; the Hub carries a
-        ``bflc:marcKey`` with the combined 1XX + 240 subfield
-        structure (e.g. ``1001 $aAuthor$tTitle$n2,$pPart$lLang``).
-        We parse marcKey for ``$t``/``$n``/``$p``/``$l`` and map
-        to MARC 240 ``$a``/``$n``/``$p``/``$l``. ind1=1 (title
-        traced), ind2=0 (no nonfiling characters).
+        """MARC 240 — uniform title for the work.
+
+        Source data lives on a per-record ``bf:Hub`` (``#Hub240-N``)
+        attached to the Expression via ``bffi:uniformTitleHub``. Two
+        title shapes per Hub:
+
+        - **Structured** (P-49 Layer 1): ``bf:title → bf:Title`` with
+          ``bf:partNumber`` / ``bf:partName`` for 240 ``$n`` / ``$p``.
+          Round-trip uses these directly when present.
+
+        - **bflc:marcKey** (legacy / fallback): the combined 1XX + 240
+          source subfield string. Used for $a (title proper),
+          $g, and $l (language) — none of which has a dedicated
+          structured BFFI predicate yet (P-49 Layer 3 gap). When this
+          path runs the row is flagged ``marckey_bypass``.
+
+        ind1=1 (title traced), ind2=0 (no nonfiling characters).
         """
         expr = self.expression
         if expr is None:
             return
         for hub in self.graph.objects(expr, V.BFFI.uniformTitleHub):
-            for mk in self.graph.objects(hub, V.BFLC.marcKey):
-                if not isinstance(mk, Literal):
-                    continue
-                # marcKey carries 100+240 combined; we want $t/$n/$p/$l
-                # (the 240 subfields, NOT the 100 subfields $a/$e
-                # which route via _emit_primary_contribution).
-                parsed = _parse_marc_key_subfields(str(mk))
-                subs: list[tuple[str, str]] = []
-                for code, value in parsed:
-                    if code == "t":
-                        subs.append(("a", value))
-                    elif code in ("n", "p", "l"):
-                        subs.append((code, value))
-                if subs:
-                    self._emit_datafield(record, "240", *subs, ind1="1", ind2="0")
+            structured = self._hub_title_part_subs(hub)
+            mk_lit = self._first_marc_key(hub)
+            if mk_lit is None:
+                # No marcKey at all — emit whatever structured parts
+                # exist (rare; defensive).
+                if structured:
+                    self._emit_datafield(record, "240", *structured, ind1="1", ind2="0")
+                    return
+                continue
+            # Parse marcKey to recover $a (from $t) and $l. Use
+            # structured for $n / $p when present.
+            structured_codes = {code for code, _ in structured}
+            parsed = _parse_marc_key_subfields(str(mk_lit))
+            base: list[tuple[str, str]] = []
+            used_marckey = False
+            for code, value in parsed:
+                if code == "t":
+                    base.append(("a", value))
+                    used_marckey = True
+                elif code == "l":
+                    base.append(("l", value))
+                    used_marckey = True
+                elif code in ("n", "p") and code not in structured_codes:
+                    base.append((code, value))
+                    used_marckey = True
+            subs = _merge_structured_parts(base, structured)
+            if subs:
+                self._emit_datafield(
+                    record,
+                    "240",
+                    *subs,
+                    ind1="1",
+                    ind2="0",
+                    marckey_bypass=used_marckey,
+                )
+                return
+
+    def _hub_title_part_subs(self, hub: Node) -> list[tuple[str, str]]:
+        """Read the Hub's structured ``bf:Title`` for ``bf:partNumber``
+        / ``bf:partName`` and return them as ``[(n, ...), (p, ...)]``.
+
+        Returns ``[]`` when neither structured predicate is present —
+        callers fall back to ``bflc:marcKey``. Used by both 240
+        (uniform title) and 730/740 (related uniform titles) since
+        both attach a ``bf:Title`` to a ``bf:Hub`` / ``bf:Work``.
+        """
+        out: list[tuple[str, str]] = []
+        for title in self.graph.objects(hub, V.BF.title):
+            for pn in self.graph.objects(title, V.BF.partNumber):
+                if isinstance(pn, Literal):
+                    out.append(("n", str(pn)))
                     break
+            for pname in self.graph.objects(title, V.BF.partName):
+                if isinstance(pname, Literal):
+                    out.append(("p", str(pname)))
+                    break
+            if out:
+                return out
+        return out
+
+    def _first_marc_key(self, node: Node) -> Literal | None:
+        for mk in self.graph.objects(node, V.BFLC.marcKey):
+            if isinstance(mk, Literal):
+                return mk
+        return None
 
     def _emit_variant_title(self, record: Element) -> None:
         """MARC 246 — varying form of title. Routed through
@@ -958,22 +1043,57 @@ class _Reconstructor:
                     break
 
     def _emit_title(self, record: Element) -> None:
-        work = self.work
-        if work is None:
-            return
-        label = self._first_label(work)
-        if not label:
+        # 245 $a / $b — prefer the Manifestation's structured
+        # ``bffi:title → bffi:Title → bffi:mainTitle / bffi:subtitle``
+        # routed from bf:Instance's transcribed bf:Title. marc2bibframe2
+        # emits the split form (separate mainTitle + subtitle = 245 $a
+        # + $b) on bf:Instance and a concatenated form (one mainTitle
+        # = "$a : $b") on bf:Work. Reading from the Manifestation
+        # preserves the source subfield boundary; falling back to the
+        # Work's prefLabel yields the concatenated form (no $b).
+        main_title, subtitle = self._manifestation_title_parts()
+        if main_title is None:
+            work = self.work
+            main_title = self._first_label(work) if work is not None else None
+        if not main_title:
             return
         # 245 ind1=1 ("title added entry") ind2=0 (no non-filing chars
         # to skip). Both are best-effort defaults.
+        subs: list[tuple[str, str]] = [("a", main_title)]
+        if subtitle:
+            subs.append(("b", subtitle))
         # 245 $c — statement of responsibility (lifted by M3 onto the
         # Manifestation as ``bffi:responsibilityStatement``, P-47).
-        subs: list[tuple[str, str]] = [("a", label)]
         for stmt in self.graph.objects(self.manifestation, V.BFFI.responsibilityStatement):
             if isinstance(stmt, Literal):
                 subs.append(("c", str(stmt)))
                 break
         self._emit_datafield(record, "245", *subs, ind1="1", ind2="0")
+
+    def _manifestation_title_parts(self) -> tuple[str | None, str | None]:
+        """Read the Manifestation's structured title — returns
+        ``(main_title, subtitle)`` with either / both possibly ``None``.
+
+        The M3 manifestation CONSTRUCT routes bf:Instance's bf:Title
+        bnode to a sha1-minted ``bffi:Title`` node under
+        ``bffi:title``, copying its ``bf:mainTitle``/``bf:subtitle``
+        as ``bffi:mainTitle``/``bffi:subtitle``. We pick the first of
+        each (Helmet records have one transcribed title per 245).
+        """
+        main_title: str | None = None
+        subtitle: str | None = None
+        for title_node in self.graph.objects(self.manifestation, V.BFFI.title):
+            for mt in self.graph.objects(title_node, V.BFFI.mainTitle):
+                if isinstance(mt, Literal):
+                    main_title = str(mt)
+                    break
+            for st in self.graph.objects(title_node, V.BFFI.subtitle):
+                if isinstance(st, Literal):
+                    subtitle = str(st)
+                    break
+            if main_title is not None:
+                break
+        return main_title, subtitle
 
     def _emit_publication_statement(self, record: Element) -> None:
         """MARC 264 publication / production / distribution / manufacture.
@@ -1305,12 +1425,20 @@ class _Reconstructor:
         seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.subject)
         raw_origin_hints = self._build_raw_origin_hints(work, V.BFFI.subject)
         for subject in self.graph.objects(work, V.BFFI.subject):
-            row = self._subject_row(subject, seen_authorities)
-            if row is None:
+            row_result = self._subject_row(subject, seen_authorities)
+            if row_result is None:
                 continue
+            row, used_marckey = row_result
             tag = self._subject_marc_tag(subject, raw_origin_hints)
             lineage = self._lineage_for_subject(subject, raw_origin_hints)
-            self._emit_datafield(record, tag, *row, ind2="7", lineage=lineage)
+            self._emit_datafield(
+                record,
+                tag,
+                *row,
+                ind2="7",
+                lineage=lineage,
+                marckey_bypass=used_marckey,
+            )
 
     def _lineage_for_subject(
         self,
@@ -1461,11 +1589,19 @@ class _Reconstructor:
         seen_authorities: set[URIRef] = self._authority_targets(work, V.BFFI.genreForm)
         raw_origin_hints = self._build_raw_origin_hints(work, V.BFFI.genreForm)
         for genre in self.graph.objects(work, V.BFFI.genreForm):
-            row = self._subject_row(genre, seen_authorities)
-            if row is None:
+            row_result = self._subject_row(genre, seen_authorities)
+            if row_result is None:
                 continue
+            row, used_marckey = row_result
             lineage = self._lineage_for_subject(genre, raw_origin_hints)
-            self._emit_datafield(record, "655", *row, ind2="7", lineage=lineage)
+            self._emit_datafield(
+                record,
+                "655",
+                *row,
+                ind2="7",
+                lineage=lineage,
+                marckey_bypass=used_marckey,
+            )
 
     def _authority_targets(self, work: URIRef, predicate: URIRef) -> set[URIRef]:
         """Return the set of authority-URI targets of ``<work> predicate``
@@ -1481,10 +1617,13 @@ class _Reconstructor:
 
     def _subject_row(
         self, target: Node, authorities_on_work: set[URIRef]
-    ) -> tuple[tuple[str, str], ...] | None:
+    ) -> tuple[tuple[tuple[str, str], ...], bool] | None:
         """Build the subfield tuple for one 650/655 row, applying the
         raw-vs-authority dedup + skos:exactMatch redirect logic.
 
+        Returns ``(subfields, used_marckey)`` or ``None``. ``used_marckey``
+        is True when any subfield was sourced from ``bflc:marcKey`` —
+        the row gets flagged as ``marckey_bypass`` in the diff.
         Returns ``None`` when the row should be suppressed entirely
         (raw URI shadowed by a sibling authority binding on the same
         Work; the authority will emit its own row independently)."""
@@ -1494,13 +1633,14 @@ class _Reconstructor:
 
     def _raw_subject_row(
         self, target: URIRef, authorities_on_work: set[URIRef]
-    ) -> tuple[tuple[str, str], ...] | None:
+    ) -> tuple[tuple[tuple[str, str], ...], bool] | None:
         """Subject-row builder for raw-bib URI targets.
 
         Follows ``skos:exactMatch`` to suppress when an authority
         twin emits its own row, prefers parsed ``bflc:marcKey`` over
         ``rdfs:label`` for $a / $c / $d subfield structure, falls back
-        to single $a from the label."""
+        to single $a from the label. Returns ``(subfields, used_marckey)``
+        — see :meth:`_subject_row`."""
         redirected = self._first_authority_redirect(target)
         if redirected is not None:
             return None
@@ -1510,6 +1650,7 @@ class _Reconstructor:
         ):
             return None
         name_subs = self._name_subfields_from_marc_key(target)
+        used_marckey = name_subs is not None
         source = self._first_source(target)
         subs: list[tuple[str, str]] = []
         if name_subs:
@@ -1518,19 +1659,23 @@ class _Reconstructor:
             subs.append(("a", label))
         if source:
             subs.append(("2", source))
-        return tuple(subs) if subs else None
+        return (tuple(subs), used_marckey) if subs else None
 
-    def _authority_subject_row(self, target: Node) -> tuple[tuple[str, str], ...] | None:
+    def _authority_subject_row(
+        self, target: Node
+    ) -> tuple[tuple[tuple[str, str], ...], bool] | None:
         """Subject-row builder for authority-URI / blank-node targets.
 
         Tries marcKey on the target first; falls back to walking
         inverse ``skos:exactMatch`` to find a raw-bib origin with
         marcKey (so $a/$c survive M9-bound subjects). Otherwise emits
         a single $a from the authority's prefLabel (or, last-resort,
-        the raw URI's label)."""
+        the raw URI's label). Returns ``(subfields, used_marckey)`` —
+        see :meth:`_subject_row`."""
         name_subs = self._name_subfields_from_marc_key(target)
         if name_subs is None and isinstance(target, URIRef):
             name_subs = self._name_subfields_from_raw_origin(target)
+        used_marckey = name_subs is not None
         label = self._authority_label(target)
         if label is None and isinstance(target, URIRef):
             label = self._raw_origin_label(target)
@@ -1544,7 +1689,7 @@ class _Reconstructor:
             subs.append(("2", source))
         if isinstance(target, URIRef):
             subs.append(("0", str(target)))
-        return tuple(subs) if subs else None
+        return (tuple(subs), used_marckey) if subs else None
 
     def _name_subfields_from_raw_origin(self, authority: URIRef) -> list[tuple[str, str]] | None:
         """Walk inverse ``skos:exactMatch`` from an authority URI to a
@@ -1644,6 +1789,7 @@ class _Reconstructor:
                 continue  # already emitted as 100
             for agent in self.graph.objects(contrib, V.BFFI.agent):
                 name_subs = self._name_subfields_from_marc_key(agent)
+                used_marckey = name_subs is not None
                 if name_subs is None:
                     label = self._first_label(agent)
                     if not label:
@@ -1661,6 +1807,7 @@ class _Reconstructor:
                     *id_subs,
                     ind1="1",
                     lineage=lineage,
+                    marckey_bypass=used_marckey,
                 )
 
     def _added_entry_tag(self, agent: Node) -> str:
@@ -1715,31 +1862,64 @@ class _Reconstructor:
                     tag = "740"
                 else:
                     continue
-                subs = self._related_title_subfields(resource)
+                subs, used_marckey = self._related_title_subfields(resource)
                 if not subs:
                     continue
                 lineage = self._lineage_token(resource)
-                self._emit_datafield(record, tag, *subs, ind1="0", lineage=lineage)
+                self._emit_datafield(
+                    record,
+                    tag,
+                    *subs,
+                    ind1="0",
+                    lineage=lineage,
+                    marckey_bypass=used_marckey,
+                )
 
-    def _related_title_subfields(self, hub: Node) -> tuple[tuple[str, str], ...]:
-        """Build the ``$a`` / ``$g`` subfield tuple for one 730 row.
+    def _related_title_subfields(self, hub: Node) -> tuple[tuple[tuple[str, str], ...], bool]:
+        """Build the 730 / 740 subfield tuple for one related title.
 
-        Prefers parsing the source ``bflc:marcKey`` (faithful to the
-        original MARC subfields) and falls back to splitting
-        ``bf:mainTitle`` on `` / `` (last-resort heuristic — covers
-        the music-collection case where the cataloguer wrote
-        ``"Title / Author"``)."""
+        Returns ``(subfields, used_marckey)``. Combines:
+
+        - **Structured** (P-49 Layer 1): ``bf:partNumber`` / ``bf:partName``
+          from the Hub's ``bf:Title`` for ``$n`` / ``$p`` when present.
+          No bypass flag because the source is a structured BFFI
+          predicate.
+
+        - **bflc:marcKey** (legacy): parses ``$a`` (title proper) +
+          ``$g`` (responsibility / misc). When this path supplies any
+          subfield the row is flagged ``marckey_bypass`` — both $a and
+          $g are P-49 Layer 3 gaps (no dedicated BFFI predicate).
+
+        - **bf:mainTitle split** (last-resort fallback): splits the
+          concatenated main title on `` / `` for ``$a`` / ``$g``. The
+          music-collection idiom where marc2bibframe2 produced a Hub
+          but no marcKey survived M3 propagation.
+        """
+        structured = self._hub_title_part_subs(hub)
+        structured_codes = {code for code, _ in structured}
         for mk in self.graph.objects(hub, V.BFLC.marcKey):
-            if isinstance(mk, Literal):
-                parsed = _parse_marc_key_subfields(str(mk), ("a", "g"))
-                if parsed:
-                    return parsed
-        # Fall back to bf:mainTitle split
+            if not isinstance(mk, Literal):
+                continue
+            parsed = _parse_marc_key_subfields(str(mk), ("a", "n", "p", "g"))
+            if not parsed:
+                continue
+            base: list[tuple[str, str]] = []
+            used_marckey = False
+            for code, value in parsed:
+                if code in ("n", "p") and code in structured_codes:
+                    continue
+                base.append((code, value))
+                used_marckey = True
+            return _merge_structured_parts(base, structured), used_marckey
+        # Fall back to bf:mainTitle split. Structured $n / $p still
+        # apply (rare combo, defensible).
         for title in self.graph.objects(hub, V.BF.title):
             for mt in self.graph.objects(title, V.BF.mainTitle):
                 if isinstance(mt, Literal):
-                    return _split_title_responsibility(str(mt))
-        return ()
+                    return _merge_structured_parts(
+                        list(_split_title_responsibility(str(mt))), structured
+                    ), False
+        return tuple(structured), False
 
     def _emit_bib_id_local(self, record: Element, bib_id: str | None) -> None:
         if not bib_id:
@@ -1795,6 +1975,32 @@ def _split_title_responsibility(text: str) -> tuple[tuple[str, str], ...]:
         head, _, tail = text.partition(sep)
         return (("a", f"{head} /"), ("g", tail))
     return (("a", text),)
+
+
+def _merge_structured_parts(
+    base: list[tuple[str, str]], structured: list[tuple[str, str]]
+) -> tuple[tuple[str, str], ...]:
+    """Insert structured ``$n`` / ``$p`` subfields into ``base`` in
+    MARC subfield order — after ``$a``, before ``$g`` / ``$l``.
+
+    P-49 Layer 1 helper for 240 / 730 / 740 where ``$a`` comes from a
+    marcKey-or-mainTitle parse and ``$n`` / ``$p`` come from structured
+    ``bf:partNumber`` / ``bf:partName``. Inserts at the first ``$g`` or
+    ``$l`` position so the output reads ``$a $n $p $g`` / ``$a $n $p $l``.
+    Appends to the tail when neither ``$g`` nor ``$l`` is present.
+    """
+    if not structured:
+        return tuple(base)
+    merged: list[tuple[str, str]] = []
+    inserted = False
+    for code, value in base:
+        if code in ("g", "l") and not inserted:
+            merged.extend(structured)
+            inserted = True
+        merged.append((code, value))
+    if not inserted:
+        merged.extend(structured)
+    return tuple(merged)
 
 
 def _indent(elem: Element, level: int = 0) -> None:

@@ -32,6 +32,7 @@ from bffi_pipeline.marc_roundtrip.converter import (
     LINEAGE_SUBFIELD,
     LINEAGE_VALUE_PREFIX,
     MARC_NAMESPACE,
+    MARCKEY_BYPASS_VALUE,
     ROUNDTRIP_MARKER,
 )
 
@@ -53,7 +54,23 @@ _NOISE_SUBFIELD_VALUES: Final[frozenset[str]] = frozenset({ROUNDTRIP_MARKER})
 #: paired with a recon 650 — the b10303327 Greece bug shape). Surfaces in
 #: the HTML viewer as its own colour band so cataloguers see misroutes
 #: directly.
-DiffStatus = Literal["identical", "lost", "added", "changed", "lost-converter-gap", "tag-changed"]
+#:
+#: ``marckey-bypass`` (P-49 Phase A): the reconstructed field's subfields
+#: were built by parsing ``bflc:marcKey`` rather than from BFFI structured
+#: properties. The row may match byte-for-byte but the verification
+#: failed: the cataloguer's original MARC string is smuggled through the
+#: BFFI graph as an opaque text blob. Overrides ``identical``/``changed``
+#: so the audit shows where BFFI's structured side is insufficient. See
+#: ``docs/plans/proposed/p-49-bffi-structured-fields-vs-marckey.md``.
+DiffStatus = Literal[
+    "identical",
+    "lost",
+    "added",
+    "changed",
+    "lost-converter-gap",
+    "tag-changed",
+    "marckey-bypass",
+]
 
 
 @dataclass(frozen=True)
@@ -82,6 +99,11 @@ class FieldRecord:
     #: lineage-absent reconstructed fields (the flat Instance-side
     #: predicates pending P-48 Phase B).
     lineage: str | None = None
+    #: P-49 Phase A — True when this reconstructed field carried the
+    #: ``$9 marckey-bypass`` sentinel, i.e. its subfields were built
+    #: from ``bflc:marcKey`` rather than from BFFI structured properties.
+    #: Always False on the original side.
+    marckey_bypass: bool = False
 
     def primary_a(self) -> str | None:
         """The first ``$a`` subfield value — the natural pair key for
@@ -211,6 +233,19 @@ def diff_records(
             status = "identical"
         else:
             status = "changed"
+        # P-49 Phase A: marcKey-bypass overrides ``identical``/``changed``.
+        # The recon row may match byte-for-byte, but verification failed:
+        # the subfields came from parsing the cataloguer's MARC string
+        # smuggled through ``bflc:marcKey``, not from BFFI structured
+        # properties. Surfaces the audit so the cataloguer-review HTML
+        # can render the row in its own colour band. Does NOT override
+        # ``tag-changed`` (a misroute is a worse problem than a bypass).
+        if status in ("identical", "changed") and recon.marckey_bypass:
+            status = "marckey-bypass"
+            notes.append(
+                "Subfields reconstructed from bflc:marcKey, not BFFI "
+                "structured properties — see P-49 audit."
+            )
         diffs.append(
             FieldDiff(
                 # Original's tag — the cataloguer's authoritative
@@ -250,6 +285,7 @@ def _parse_record(record: ET.Element, *, strip_marker: bool = False) -> list[Fie
         ind2 = df.attrib.get("ind2", " ")
         subfields: list[SubfieldRecord] = []
         lineage: str | None = None
+        marckey_bypass = False
         for sf in df.findall("m:subfield", _NS):
             code = sf.attrib.get("code", "")
             value = sf.text or ""
@@ -263,6 +299,13 @@ def _parse_record(record: ET.Element, *, strip_marker: bool = False) -> list[Fie
             if strip_marker and code == LINEAGE_SUBFIELD and value.startswith(LINEAGE_VALUE_PREFIX):
                 lineage = value[len(LINEAGE_VALUE_PREFIX) :]
                 continue
+            # P-49 Phase A: parse + strip the marcKey-bypass sentinel
+            # ``$9 marckey-bypass`` on the reconstructed side. Multiple
+            # ``$9`` values per datafield are legal in MARC, so this
+            # coexists with the lineage subfield above.
+            if strip_marker and code == LINEAGE_SUBFIELD and value == MARCKEY_BYPASS_VALUE:
+                marckey_bypass = True
+                continue
             subfields.append(SubfieldRecord(code=code, value=value))
         out.append(
             FieldRecord(
@@ -272,6 +315,7 @@ def _parse_record(record: ET.Element, *, strip_marker: bool = False) -> list[Fie
                 ind2=ind2,
                 subfields=tuple(subfields),
                 lineage=lineage,
+                marckey_bypass=marckey_bypass,
             )
         )
     return out
@@ -436,6 +480,7 @@ def _summarise(diffs: Iterable[FieldDiff]) -> dict[str, int]:
         "changed": 0,
         "lost-converter-gap": 0,
         "tag-changed": 0,
+        "marckey-bypass": 0,
     }
     for d in diffs:
         summary[d.status] = summary.get(d.status, 0) + 1

@@ -47,7 +47,12 @@ CONSTRUCT {
              rdfs:label ?otherRoleLabel .
   ?contentType rdfs:label ?contentTypeLabel .
   ?uniformTitleHub a bf:Hub ;
-                   bflc:marcKey ?uniformTitleMarcKey .
+                   bflc:marcKey ?uniformTitleMarcKey ;
+                   bf:title     ?uniformTitleNode .
+  ?uniformTitleNode a bf:Title ;
+                    bf:mainTitle  ?uniformMainTitle ;
+                    bf:partNumber ?uniformPartNumber ;
+                    bf:partName   ?uniformPartName .
   ?variantTitle a bf:VariantTitle ;
                 bf:mainTitle ?variantMainTitle .
 }
@@ -138,15 +143,29 @@ WHERE {
 
   # MARC 240 (uniform title) lands in BIBFRAME as
   # ``bf:Work → bf:expressionOf → bf:Hub (#Hub240-N)``. The Hub
-  # carries a ``bflc:marcKey`` with the combined source MARC 1XX +
-  # 240 subfield string (e.g.
-  # ``1001 $aMorosinotto, Davide$tGrandissimi.$n2,$pLeonardo da Vincei…$lVenäjä``).
-  # Round-trip converter parses ``$t``/``$n``/``$p``/``$l`` from
-  # marcKey to emit MARC 240 ``$a``/``$n``/``$p``/``$l``.
+  # carries:
+  #
+  #   - ``bflc:marcKey`` with the combined source MARC 1XX + 240
+  #     subfield string (e.g.
+  #     ``1001 $aMorosinotto, Davide$tGrandissimi.$n2,$pLeonardo…$lVenäjä``).
+  #     Last-resort source for $l (title language) — P-49 Layer 3 gap.
+  #
+  #   - structured ``bf:title → bf:Title`` with ``bf:mainTitle``
+  #     (concatenated form, including part info), ``bf:partNumber``,
+  #     and ``bf:partName``. P-49 Layer 1: prefer these for $n and $p
+  #     so the round-trip converter no longer needs to parse marcKey
+  #     for those subfields.
   OPTIONAL {
     ?bfWork bf:expressionOf ?uniformTitleHub .
     ?uniformTitleHub a bf:Hub .
     OPTIONAL { ?uniformTitleHub bflc:marcKey ?uniformTitleMarcKey }
+    OPTIONAL {
+      ?uniformTitleHub bf:title ?uniformTitleNode .
+      ?uniformTitleNode a bf:Title ;
+                        bf:mainTitle ?uniformMainTitle .
+      OPTIONAL { ?uniformTitleNode bf:partNumber ?uniformPartNumber }
+      OPTIONAL { ?uniformTitleNode bf:partName   ?uniformPartName }
+    }
   }
 
   # MARC 246 (varying form of title) lands as

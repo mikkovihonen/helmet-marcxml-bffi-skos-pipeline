@@ -419,6 +419,68 @@ def test_cataloguer_supplied_dollar9_survives_diff_strip() -> None:
     assert rows[0].status == "changed"
 
 
+def test_marckey_bypass_overrides_identical_when_recon_carries_sentinel() -> None:
+    """P-49 Phase A: a recon row whose subfields were built by parsing
+    ``bflc:marcKey`` carries a ``$9 marckey-bypass`` sentinel. The
+    diff classifies the row as ``marckey-bypass`` regardless of
+    byte-equality with the original — the verification failed because
+    the path was through the raw MARC string, not BFFI structured
+    properties. Cataloguer-supplied ``$9`` content (other values)
+    is unaffected."""
+    orig_body = """
+    <datafield tag="700" ind1="1" ind2=" ">
+      <subfield code="a">Andersson, Benny,</subfield>
+      <subfield code="e">säveltäjä</subfield>
+    </datafield>
+    """
+    recon_body = f"""
+    <datafield tag="700" ind1="1" ind2=" ">
+      <subfield code="a">Andersson, Benny,</subfield>
+      <subfield code="e">säveltäjä</subfield>
+      <subfield code="9">marckey-bypass</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    [row] = diff.fields
+    assert row.status == "marckey-bypass"
+    assert any("bflc:marcKey" in n for n in row.notes)
+    # Summary counter increments.
+    assert diff.summary.get("marckey-bypass") == 1
+    assert diff.summary.get("identical", 0) == 0
+
+
+def test_marckey_bypass_does_not_override_tag_changed() -> None:
+    """A misroute (source tag X → recon tag Y) is a more serious
+    diagnostic than a bypass. ``tag-changed`` wins."""
+    orig_body = """
+    <datafield tag="651" ind1=" " ind2="7">
+      <subfield code="a">Kreikka</subfield>
+      <subfield code="2">yso</subfield>
+    </datafield>
+    """
+    recon_body = f"""
+    <datafield tag="650" ind1=" " ind2="7">
+      <subfield code="a">Kreikka</subfield>
+      <subfield code="2">yso</subfield>
+      <subfield code="9">src=651-1</subfield>
+      <subfield code="9">marckey-bypass</subfield>
+      <subfield code="5">{ROUNDTRIP_MARKER}</subfield>
+    </datafield>
+    """
+    diff = diff_records(
+        bib_id="b1",
+        original=_record(orig_body),
+        reconstructed=_record(recon_body),
+    )
+    [row] = diff.fields
+    assert row.status == "tag-changed"
+
+
 def test_path_import_is_used_in_some_assertions() -> None:
     """No-op sanity test — pytest discovers test_ functions and this
     test pulls Path into the module's namespace so future fixture

@@ -54,7 +54,11 @@ CONSTRUCT {
             bffi:relation              ?relWorkRel ;
             bffi:adminMetadata         ?adminMeta ;
             bffi:transactionDate       ?transactionDate ;
+            bffi:title                 ?manifTitleNode ;
             skos:prefLabel             ?manifLabel .
+  ?manifTitleNode a              bffi:Title ;
+                  bffi:mainTitle ?manifMainTitle ;
+                  bffi:subtitle  ?manifSubtitle .
   ?mediaURI   rdfs:label ?mediaLabel .
   ?carrierURI rdfs:label ?carrierLabel .
   ?adminMeta  a bffi:AdminMetadata ;
@@ -71,14 +75,18 @@ CONSTRUCT {
   ?bfHub   a               bf:Hub ;
            bf:title        ?bfHubTitle ;
            bflc:marcKey    ?hubMarcKey .
-  ?bfHubTitle bf:mainTitle ?hubMainTitle .
+  ?bfHubTitle bf:mainTitle  ?hubMainTitle ;
+              bf:partNumber ?hubPartNumber ;
+              bf:partName   ?hubPartName .
   ?relWorkRel a                    bffi:Relation ;
               bffi:relationship    ?relWorkRelationship ;
               bffi:associatedResource ?relWork .
   ?relWork    a               bf:Work ;
               bf:title        ?relWorkTitle ;
               bflc:marcKey    ?relWorkMarcKey .
-  ?relWorkTitle bf:mainTitle  ?relWorkMainTitle .
+  ?relWorkTitle bf:mainTitle  ?relWorkMainTitle ;
+                bf:partNumber ?relWorkPartNumber ;
+                bf:partName   ?relWorkPartName .
   ?extent  rdfs:label    ?extentLabel ;
            bf:note       ?extentNote .
   ?extentNote a          bf:Note ;
@@ -418,9 +426,14 @@ WHERE {
     ?hubRel bf:associatedResource ?bfHub .
     ?bfHub a bf:Hub .
     OPTIONAL { ?hubRel bf:relationship ?hubRelationship }
+    # P-49 Layer 1: pass structured bf:partNumber / bf:partName through
+    # so the round-trip converter emits 730 $n / $p from BFFI predicates
+    # rather than parsing them out of bflc:marcKey.
     OPTIONAL {
       ?bfHub bf:title ?bfHubTitle .
       ?bfHubTitle bf:mainTitle ?hubMainTitle .
+      OPTIONAL { ?bfHubTitle bf:partNumber ?hubPartNumber }
+      OPTIONAL { ?bfHubTitle bf:partName   ?hubPartName }
     }
     OPTIONAL { ?bfHub bflc:marcKey ?hubMarcKey }
   }
@@ -441,9 +454,13 @@ WHERE {
     ?relWorkRel bf:associatedResource ?relWork .
     ?relWork a bf:Work .
     OPTIONAL { ?relWorkRel bf:relationship ?relWorkRelationship }
+    # P-49 Layer 1: pass structured bf:partNumber / bf:partName for
+    # 740 $n / $p (parallel to 730 above).
     OPTIONAL {
       ?relWork bf:title ?relWorkTitle .
       ?relWorkTitle bf:mainTitle ?relWorkMainTitle .
+      OPTIONAL { ?relWorkTitle bf:partNumber ?relWorkPartNumber }
+      OPTIONAL { ?relWorkTitle bf:partName   ?relWorkPartName }
     }
     OPTIONAL { ?relWork bflc:marcKey ?relWorkMarcKey }
   }
@@ -460,6 +477,29 @@ WHERE {
   OPTIONAL {
     ?bfInstance bf:title ?titleNode .
     ?titleNode bf:mainTitle ?titleLit .
+  }
+
+  # Manifestation-side structured title — round-trip 245 $a / $b.
+  #
+  # marc2bibframe2 emits two parallel titles per record:
+  #
+  #   bf:Instance  bf:title  bf:Title  bf:mainTitle "Foo"
+  #                                     bf:subtitle "Bar baz"     ← transcribed (245 $a / $b)
+  #   bf:Work      bf:title  bf:Title  bf:mainTitle "Foo : Bar baz"  ← concatenated (canonical)
+  #
+  # The transcribed form on bf:Instance is what carries the original
+  # subfield boundary; the converter needs it to emit 245 with
+  # separate $a and $b. We mint a Manifestation-scoped Title bnode-IRI
+  # (sha1 of the source bf:Title node) so the canonical graph can
+  # ``DESCRIBE`` the manifestation without dragging in cross-record
+  # bnode shapes.
+  OPTIONAL {
+    ?bfInstance bf:title ?bfInstanceTitle .
+    ?bfInstanceTitle a bf:Title ;
+                     bf:mainTitle ?manifMainTitle .
+    OPTIONAL { ?bfInstanceTitle bf:subtitle ?manifSubtitle }
+    BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:manifestation:",
+              arq:sha1(STR(?bfInstance)), "#title")) AS ?manifTitleNode )
   }
   OPTIONAL { ?bfInstance bf:publicationStatement ?pubStmt }
   BIND(

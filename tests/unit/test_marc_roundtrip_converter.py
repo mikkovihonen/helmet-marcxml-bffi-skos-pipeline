@@ -267,6 +267,50 @@ def test_100_emits_primary_creator_label(minimal_record: ET.Element) -> None:
     assert _subfield(df, "a") == "KRAG, THOMAS PETER"
 
 
+def _all_subfield_values(df: ET.Element, code: str) -> list[str]:
+    return [sf.text or "" for sf in df.findall("m:subfield", NS) if sf.attrib.get("code") == code]
+
+
+def test_100_does_not_carry_marckey_bypass_sentinel_for_label_only_emission() -> None:
+    """P-49 Phase A: when the converter builds 100 $a from
+    ``rdfs:label`` (no ``bflc:marcKey`` present on the agent), the
+    recon row should NOT carry the ``$9 marckey-bypass`` sentinel —
+    the row is honestly built from structured BFFI data."""
+    df = _datafield(_minimal_record_re_render(), "100")
+    assert df is not None
+    assert "marckey-bypass" not in _all_subfield_values(df, "9")
+
+
+def test_100_emits_marckey_bypass_sentinel_when_built_from_marc_key() -> None:
+    """P-49 Phase A: when the agent carries ``bflc:marcKey`` (so the
+    converter pulls $a / $c / $d from it instead of from
+    ``rdfs:label``), the recon row gets the ``$9 marckey-bypass``
+    sentinel. The cataloguer-review diff classifies the row as
+    ``marckey-bypass`` regardless of byte-match."""
+    g = _build_minimal_graph()
+    g.add(
+        (
+            AGENT,
+            V.BFLC.marcKey,
+            Literal("1001 $aKRAG, THOMAS PETER,$d1868-1913,$ekirjoittaja"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='100']", NS)
+    assert df is not None
+    # The marcKey carried $d 1868-1913 — recon should now emit $d
+    # (with the ISBD trailing comma preserved verbatim from marcKey).
+    assert _subfield(df, "d") == "1868-1913,"
+    # Sentinel present.
+    assert "marckey-bypass" in _all_subfield_values(df, "9")
+
+
+def _minimal_record_re_render() -> ET.Element:
+    """Per-test minimal record (rebuilt to avoid fixture sharing)."""
+    g = _build_minimal_graph()
+    return reconstruct_marc(g, MANIF).element
+
+
 def test_245_emits_work_pref_label_as_title(minimal_record: ET.Element) -> None:
     df = _datafield(minimal_record, "245")
     assert df is not None
@@ -688,6 +732,63 @@ def test_245_emits_responsibility_statement_in_c_subfield() -> None:
     assert _subfield(df, "c") == "THOMAS PETER KRAG"
 
 
+def test_245_splits_a_and_b_from_manifestation_structured_title() -> None:
+    """marc2bibframe2 emits two parallel titles per record: a
+    transcribed structured form (``bf:mainTitle`` + ``bf:subtitle``)
+    on bf:Instance, and a flat concatenated form on bf:Work.
+    M3 routes the Instance side onto the Manifestation as
+    ``bffi:title → bffi:Title → bffi:mainTitle`` / ``bffi:subtitle``.
+    The converter must emit 245 $a from ``bffi:mainTitle`` and 245 $b
+    from ``bffi:subtitle`` — without this, the Work's flat label gets
+    concatenated into a single $a (the b1095840x regression)."""
+    g = _build_minimal_graph()
+    title_node = URIRef("http://urn.fi/URN:NBN:fi:bib:manifestation:abc#title")
+    g.add((MANIF, V.BFFI.title, title_node))
+    g.add((title_node, RDF.type, V.BFFI.Title))
+    g.add((title_node, V.BFFI.mainTitle, Literal("Svenskt konstnärslexikon")))
+    g.add(
+        (
+            title_node,
+            V.BFFI.subtitle,
+            Literal("tiotusen svenska konstnärers liv och verk. IV : Lundgren-Sallberg"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='245']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Svenskt konstnärslexikon"
+    assert _subfield(df, "b") == "tiotusen svenska konstnärers liv och verk. IV : Lundgren-Sallberg"
+
+
+def test_245_omits_b_when_manifestation_title_has_no_subtitle() -> None:
+    """Manifestation-side structured title with only ``bffi:mainTitle``
+    (no ``bffi:subtitle``) emits 245 $a alone; no synthesised $b."""
+    g = _build_minimal_graph()
+    title_node = URIRef("http://urn.fi/URN:NBN:fi:bib:manifestation:def#title")
+    g.add((MANIF, V.BFFI.title, title_node))
+    g.add((title_node, RDF.type, V.BFFI.Title))
+    g.add((title_node, V.BFFI.mainTitle, Literal("AADA WILDE")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='245']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "AADA WILDE"
+    assert _subfield(df, "b") is None
+
+
+def test_245_falls_back_to_work_pref_label_when_no_manifestation_title() -> None:
+    """Backwards compat: when M3 did not route a Manifestation-side
+    ``bffi:title`` (older canonical graphs), the converter falls back
+    to the Work's prefLabel for 245 $a — preserving the previous
+    behaviour rather than emitting an empty 245."""
+    g = _build_minimal_graph()
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='245']", NS)
+    assert df is not None
+    # _build_minimal_graph sets the Work prefLabel to "AADA WILDE";
+    # see the canonical fixture in this file.
+    assert _subfield(df, "a") == "AADA WILDE"
+
+
 def test_240_emits_uniform_title_with_a_n_p_l_from_hub_marcKey() -> None:
     """MARC 240 uniform title: bf:Hub on the Expression via
     ``bffi:uniformTitleHub`` carries a ``bflc:marcKey`` with the
@@ -716,6 +817,45 @@ def test_240_emits_uniform_title_with_a_n_p_l_from_hub_marcKey() -> None:
     assert _subfield(df, "a") == "Grandissimi."
     assert _subfield(df, "n") == "2,"
     assert _subfield(df, "p") == "Leonardo da Vincei, genio senza tempo."
+    assert _subfield(df, "l") == "Venäjä"
+
+
+def test_240_prefers_structured_part_number_and_part_name() -> None:
+    """P-49 Layer 1: when the Hub's bf:Title carries structured
+    ``bf:partNumber`` / ``bf:partName``, the converter sources $n
+    and $p from them — NOT from marcKey. Only $a (from $t) and $l
+    still come from marcKey, so the row remains ``marckey_bypass``
+    but the structured side is honoured for the part subfields."""
+    g = _build_minimal_graph()
+    hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b26164413#Hub240-14")
+    g.add((EXPR, V.BFFI.uniformTitleHub, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal(
+                "1001 $aMorosinotto, Davide,$ekirjoittaja."
+                "$tGrandissimi.$nDISCARDED,$pDISCARDED.$lVenäjä"
+            ),
+        )
+    )
+    # Structured: bf:Title with explicit bf:partNumber + bf:partName
+    # (the marc2bibframe2 path that emits these alongside marcKey).
+    title_node = BNode()
+    g.add((hub, V.BF.title, title_node))
+    g.add((title_node, RDF.type, V.BF.Title))
+    g.add((title_node, V.BF.mainTitle, Literal("Grandissimi. 2, Leonardo da Vincei")))
+    g.add((title_node, V.BF.partNumber, Literal("2,")))
+    g.add((title_node, V.BF.partName, Literal("Leonardo da Vincei, genio senza tempo.")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='240']", NS)
+    assert df is not None
+    # $n / $p sourced from structured BFFI predicates, NOT marcKey.
+    assert _subfield(df, "n") == "2,"
+    assert _subfield(df, "p") == "Leonardo da Vincei, genio senza tempo."
+    # $a / $l still from marcKey (Layer 3 gap).
+    assert _subfield(df, "a") == "Grandissimi."
     assert _subfield(df, "l") == "Venäjä"
 
 
@@ -1386,6 +1526,46 @@ def test_730_falls_back_to_mainTitle_split_when_no_marcKey() -> None:
     assert df is not None
     assert _subfield(df, "a") == "Fame /"
     assert _subfield(df, "g") == "Gore, Michael"
+
+
+def test_730_prefers_structured_part_number_and_part_name() -> None:
+    """P-49 Layer 1: when the Hub's bf:Title carries structured
+    ``bf:partNumber`` / ``bf:partName`` (the Beethoven Op. 18 case),
+    the converter sources $n and $p from them. $a and $g still
+    come from marcKey (P-49 Layer 3 gaps), so the row is still
+    flagged ``marckey_bypass`` — but the part subfields are
+    structured-sourced. The structured values override any $n/$p
+    that marcKey happens to also carry."""
+    g = _build_minimal_graph()
+    hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b11567594#Hub730-33")
+    rel = BNode()
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal(
+                "7300 $aKvartetot, jouset, op18.$nDISCARDED-N,"
+                "$pDISCARDED-P /$gBeethoven, Ludwig van"
+            ),
+        )
+    )
+    title = BNode()
+    g.add((hub, V.BF.title, title))
+    g.add((title, RDF.type, V.BF.Title))
+    g.add((title, V.BF.partNumber, Literal("Nro 3")))
+    g.add((title, V.BF.partName, Literal("D-duuri")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='730']", NS)
+    assert df is not None
+    # $n / $p sourced from structured bf:partNumber/bf:partName.
+    assert _subfield(df, "n") == "Nro 3"
+    assert _subfield(df, "p") == "D-duuri"
+    # $a / $g still from marcKey (Layer 3 gap).
+    assert _subfield(df, "a") == "Kvartetot, jouset, op18."
+    assert _subfield(df, "g") == "Beethoven, Ludwig van"
 
 
 def test_730_emits_a_only_when_mainTitle_has_no_responsibility() -> None:
