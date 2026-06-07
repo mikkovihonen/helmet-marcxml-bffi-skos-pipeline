@@ -20,14 +20,87 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Final
 
-from rdflib import Graph
+from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
 
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.stages.m3.contributions import _emit_extracted_contributions
-from bffi_pipeline.stages.m3.language_detect import _candidate_languages, _retag_pref_labels
+from bffi_pipeline.stages.m3.language_detect import (
+    _LANG_3_TO_2,
+    _candidate_languages,
+    _retag_pref_labels,
+)
 from bffi_pipeline.stages.m3.relator_term_enrichment import enrich_role_uris
+
+#: LoC vocab URIs that carry per-record cataloguer-typed
+#: ``rdfs:label`` text (e.g. MARC 33X ``$a``). Without per-record
+#: language tagging, M8's :func:`_propagate_loc_vocab_labels` merges
+#: Finnish- and Swedish-source records' labels onto the same shared
+#: URI, and Skosify's ``default_language = fi`` config force-tags
+#: every untagged literal as ``@fi`` — including the Swedish ones,
+#: confusing the round-trip converter's label lookup.
+_LOC_VOCAB_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/"
+_LANGUAGES_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
+
+
+def _primary_record_language(source: Graph) -> str | None:
+    """Pick the source record's primary language as a BCP-47 code.
+
+    Reads ``bf:Work bf:language`` URIs (skipping contained / related
+    works the M3 SPARQL filters out) and returns the first one whose
+    MARC 3-letter tail maps to a BCP-47 code in
+    :data:`_LANG_3_TO_2`. Returns ``None`` when no Work has a routable
+    language — in which case the caller skips re-tagging and rdfs:label
+    triples stay untagged for Skosify to default-language them.
+    """
+    contained = {
+        o
+        for _, _, o in source.triples((None, V.BF.associatedResource, None))
+        if isinstance(o, URIRef)
+    }
+    for work in source.subjects(RDF.type, V.BF.Work):
+        if not isinstance(work, URIRef) or work in contained:
+            continue
+        for lang in source.objects(work, V.BF.language):
+            if not isinstance(lang, URIRef):
+                continue
+            s = str(lang)
+            if not s.startswith(_LANGUAGES_URI_PREFIX):
+                continue
+            code = _LANG_3_TO_2.get(s[len(_LANGUAGES_URI_PREFIX) :])
+            if code is not None:
+                return code
+    return None
+
+
+def _tag_loc_vocab_labels_with_primary_language(bffi_graph: Graph, source: Graph) -> None:
+    """Tag every untagged ``rdfs:label`` literal on a LoC vocabulary
+    URI with the source record's primary language BCP-47 code.
+
+    The round-trip converter's ``_loc_label`` lookup uses
+    ``lang_pref=("fi", "en")`` so the language tag is the only way it
+    can pick the right per-record label when M8 merges multiple
+    records' cataloguer-typed labels onto the same shared LoC URI in
+    canonical. Without this, Skosify's ``default_language = fi``
+    force-tags every untagged literal as @fi — including Swedish
+    text from Swedish-source records — and the lookup randomly
+    surfaces "ingen medietyp" on a Finnish-source record's 337 $a.
+    """
+    primary_lang = _primary_record_language(source)
+    if primary_lang is None:
+        return
+    to_swap: list[tuple[URIRef, Literal]] = []
+    for s, _p, o in bffi_graph.triples((None, RDFS.label, None)):
+        if not (isinstance(s, URIRef) and str(s).startswith(_LOC_VOCAB_URI_PREFIX)):
+            continue
+        if not (isinstance(o, Literal) and o.language is None):
+            continue
+        to_swap.append((s, o))
+    for s, o in to_swap:
+        bffi_graph.remove((s, RDFS.label, o))
+        bffi_graph.add((s, RDFS.label, Literal(str(o), lang=primary_lang)))
 
 
 def post_process(
@@ -79,6 +152,11 @@ def post_process(
     # blank-node-with-rdfs:label so round-trip MARC keeps the
     # cataloguer's original ``$e`` and gains a ``$4`` code.
     enrich_role_uris(bffi_graph)
+    # Language-tag untagged rdfs:label values on LoC vocab URIs with
+    # the record's primary language so M8's cross-record propagation
+    # (and Skosify's default_language=fi) don't merge a Finnish $a
+    # and a Swedish $a into one ambiguous bucket. See helper docstring.
+    _tag_loc_vocab_labels_with_primary_language(bffi_graph, source)
     bffi_graph.bind("bf", V.BF)
     bffi_graph.bind("bffi", V.BFFI)
     bffi_graph.bind("bib", V.BIB)
