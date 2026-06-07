@@ -272,6 +272,65 @@ def test_leader_pos07_defaults_to_m_when_no_issuance() -> None:
     assert leader.text[7] == "m"
 
 
+def test_leader_pos08_is_blank_for_non_archival_default() -> None:
+    """Non-archival records (Helmet's default — 100% of the 5000-
+    record corpus survey) leave LDR/08 blank. No
+    ``bffi:descriptionConventions`` pointing at DACS → blank."""
+    g = _build_minimal_graph()
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[8] == " "
+
+
+def test_leader_pos08_is_a_when_admin_metadata_says_dacs() -> None:
+    """LDR/08 = 'a' (archival) when any of the AdminMetadata's
+    ``bffi:descriptionConventions`` URIs points at the LoC DACS
+    vocabulary entry. The source signal is cataloguer-typed
+    ``040 $e dacs`` which marc2bibframe2 routes verbatim."""
+    g = _build_minimal_graph()
+    admin = BNode()
+    g.add((MANIF, V.BFFI.adminMetadata, admin))
+    g.add(
+        (
+            admin,
+            V.BFFI.descriptionConventions,
+            URIRef("http://id.loc.gov/vocabulary/descriptionConventions/dacs"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[8] == "a"
+
+
+def test_leader_pos08_picks_a_even_when_multiple_conventions_present() -> None:
+    """A record can declare multiple cataloguing standards (RDA + DACS
+    is the common archival case — RDA rules for non-archival fields,
+    DACS for archival ones). Any DACS triple flags LDR/08 = 'a'."""
+    g = _build_minimal_graph()
+    admin = BNode()
+    g.add((MANIF, V.BFFI.adminMetadata, admin))
+    g.add(
+        (
+            admin,
+            V.BFFI.descriptionConventions,
+            URIRef("http://id.loc.gov/vocabulary/descriptionConventions/rda"),
+        )
+    )
+    g.add(
+        (
+            admin,
+            V.BFFI.descriptionConventions,
+            URIRef("http://id.loc.gov/vocabulary/descriptionConventions/dacs"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    leader = rec.element.find("m:leader", NS)
+    assert leader is not None and leader.text is not None
+    assert leader.text[8] == "a"
+
+
 def test_leader_pos09_is_utf8_char_encoding_marker() -> None:
     """LDR/09 = 'a' always — this pipeline emits MARCXML in UTF-8,
     so the encoding flag must say so (legacy MARC-8 was blank)."""

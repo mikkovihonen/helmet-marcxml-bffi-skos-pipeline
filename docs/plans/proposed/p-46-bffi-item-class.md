@@ -29,6 +29,19 @@ This proposal is parked rather than rejected. It activates when **any** of these
 - A holdings-federation initiative at the Helmet consortium level (cross-branch coverage analytics, OPAC alternative, etc.).
 - An external partner (academic library, archive) asking for Items as RDF.
 - A circulation-side use case that wants Item URIs as join keys against the operational Sierra database.
+- The MARC round-trip diff surfaces enough LDR/19 (multipart resource record level) discrepancies to matter — see "MARC round-trip dependency" below.
+
+### MARC round-trip dependency: LDR/19
+
+The MARC leader's position 19 carries the cataloguer's choice of granularity for multipart resources: ``'a'`` = set as a whole, ``'b'`` = part with independent title, ``'c'`` = part with dependent title, blank = single-volume or N/A. Helmet's corpus is ≥99.98 % blank (5000-record random sample showed 1× non-blank, and that value was non-standard noise), so the round-trip converter (commits ``f6cc6d2``, ``2979434``) leaves LDR/19 unwired — the next non-blank-LDR/19 record will surface as a ``changed`` diff row.
+
+The principled fix is to derive LDR/19 from the multipart structure that P-46's Item class introduces:
+
+- ``bf:hasPart`` triples on the Instance (one Item per physical volume) → ``'a'`` (set).
+- ``bf:partOf`` on a per-part Instance → ``'b'`` / ``'c'`` (with title shape disambiguating).
+- No multipart structure → blank.
+
+marc2bibframe2 silently drops LDR/19, and our current per-record CONSTRUCTs can't reconstruct multipart-ness from a single bib record. The Item class is the natural home for this — once Items are minted, the hasPart/partOf chain becomes queryable and LDR/19 derives from it. **When P-46 ships, add an LDR/19 derivation phase that walks the Item structure and exercises it via synthetic multipart fixtures.**
 
 Until then, the cost-benefit doesn't pencil out: Item adds ~5-15 triples × average 3 copies/bib (~15-45 per bib) over an 800k corpus = ~12-36 million extra triples in Fuseki, plus a Sierra-export schema change, plus a branch-vocab to maintain, plus per-shape SHACL validation cost — without a consumer that visibly benefits.
 

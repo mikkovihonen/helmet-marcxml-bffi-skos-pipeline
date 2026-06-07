@@ -454,6 +454,9 @@ class _Reconstructor:
           07  bibliographic level — derived from the Manifestation's
               ``bf:issuance`` URI tail (``mono`` → 'm', ``serial``
               → 's', etc.). Defaults to ``'m'`` (monograph).
+          08  type of control — ``'a'`` (archival) when any of the
+              AdminMetadata's ``bffi:descriptionConventions`` URIs is
+              the LoC DACS vocabulary entry; else blank.
           09  character coding scheme — fixed at ``'a'`` (UTF-8).
               MARCXML is always UTF-8 in this pipeline; the legacy
               MARC-8 form (blank) doesn't apply.
@@ -466,10 +469,13 @@ class _Reconstructor:
 
         Positions left blank (no reliable BIBFRAME signal):
 
-          08  type of control (archival flag — rare in Helmet)
           18  descriptive cataloguing form (marc2bibframe2 emits
               only the pipeline's own conventions, not the source's)
-          19  multipart resource record level (rare; defaults blank)
+          19  multipart resource record level — would require a
+              multipart-structure model (bf:Item + bf:hasPart). The
+              BFFI Item class is intentionally deferred under P-46;
+              LDR/19 round-trip ships with it. See
+              ``docs/plans/proposed/p-46-bffi-item-class.md``.
 
         Length placeholder positions 0-4 + base-address 12-16 stay
         zero-padded; serialisers usually rewrite these.
@@ -477,20 +483,53 @@ class _Reconstructor:
         status_char = self._record_status_code()
         type_char = self._record_type_code()
         bib_level_char = self._bibliographic_level_code()
+        control_char = self._type_of_control_code()
         enc_char = self._encoding_level_code()
         # MARC bib leader layout (24 chars total):
         # 00-04 record length placeholder ``00000``
         # 05    record status (this method computes)
         # 06    type of record (this method computes)
         # 07    bibliographic level (this method computes)
-        # 08    type of control (blank — no BIBFRAME signal)
+        # 08    type of control (this method computes)
         # 09    character coding scheme (``a`` = UTF-8, fixed)
         # 10-11 ``22`` (indicator + subfield-code counts)
         # 12-16 base-address placeholder ``00000``
         # 17    encoding level (this method computes)
         # 18-19 spaces (descriptive cataloging form + multipart)
         # 20-23 ``4500`` (MARC structural fixed suffix)
-        return f"00000{status_char}{type_char}{bib_level_char} a2200000{enc_char}  4500"
+        return (
+            f"00000{status_char}{type_char}{bib_level_char}{control_char}a2200000{enc_char}  4500"
+        )
+
+    #: URI for the DACS (Describing Archives: A Content Standard)
+    #: descriptionConventions vocabulary entry. Presence in any of the
+    #: AdminMetadata's ``bffi:descriptionConventions`` triples is the
+    #: cataloguer's signal that this record describes archival
+    #: material — translates to MARC LDR/08 = 'a'.
+    _DACS_URI: Final[str] = "http://id.loc.gov/vocabulary/descriptionConventions/dacs"
+
+    def _type_of_control_code(self) -> str:
+        """Return the MARC LDR/08 character (type of control).
+
+        ``'a'`` (archival) when any of the Manifestation's
+        AdminMetadata blocks carries
+        ``bffi:descriptionConventions <…/descriptionConventions/dacs>``.
+        Defaults to blank — the dominant Helmet case (and per MARC
+        spec, "no specified type" means non-archival).
+
+        The DACS URI is the cataloguer's authoritative signal for
+        archival cataloguing — typed as MARC 040 $e ``dacs`` which
+        marc2bibframe2 routes into ``bf:descriptionConventions``.
+        Records can carry multiple convention URIs (e.g. RDA + DACS
+        when the cataloguer says both apply); we look for DACS in
+        any of them.
+        """
+        dacs = URIRef(self._DACS_URI)
+        for admin in self.graph.objects(self.manifestation, V.BFFI.adminMetadata):
+            for conv in self.graph.objects(admin, V.BFFI.descriptionConventions):
+                if conv == dacs:
+                    return "a"
+        return " "
 
     def _record_status_code(self) -> str:
         """Return the MARC LDR/05 character (record status).
