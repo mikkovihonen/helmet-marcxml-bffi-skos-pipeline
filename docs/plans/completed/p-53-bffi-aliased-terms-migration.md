@@ -1,6 +1,7 @@
 # P-53 — Migrate remaining `bf:` terms with a `bffi:` alias to `bffi:`
 
-**Status**: in progress (Phase 0 audit shipped 2026-06-08; Families 1-5 sequenced).
+**Status**: completed (2026-06-08; all five families verified on the
+500-sample with zero semantic content changes on targeted MARC tags).
 
 **Source proposal**: `docs/plans/proposed/p-53-bffi-aliased-terms-migration.md`
 at the time the role-redesign PR was being written (the proposal file's
@@ -10,14 +11,38 @@ own creation commit is the lineage anchor).
 of the role-redesign work, after Phase D verification on
 `runs/20260608-0810-f8d8eb`.
 
-**Phase commits**:
+**Phase commits**: all five families shipped together as a single
+direct-to-main commit per the project's solo-developer workflow
+(see `~/.claude/projects/.../memory/feedback_direct_to_main_workflow.md`).
+The plan's five-PR split was a verification cadence, not a merge
+boundary — each family ran an independent M3 → M9 → Skosify →
+round-trip rerun on the 500-sample before the next family started,
+and the per-family pre-rename recon snapshots
+(`/tmp/recon-before-family-{1..5}`) bracketed each diff check.
 
-- Phase 0 (audit): _to be filled in_
-- Family 1 (subject classes): _to be filled in_
-- Family 2 (agent/role/note/title/identifier classes): _to be filled in_
-- Family 3 (identifier predicates): _to be filled in_
-- Family 4 (title predicates): _to be filled in_
-- Family 5 (miscellaneous predicates): _to be filled in_
+- Phase 0 (audit): **`03b54e5`** (alias-mapping derived from
+  `docs/lkd.rdf` at the Plan-base commit; tables pinned below).
+- Family 1 (subject classes): **`03b54e5`** —
+  `bf:Topic/Place/Person/Organization/Meeting/Temporal` →
+  `bffi:*`. 0/502 6XX content diffs.
+- Family 2 (agent/role/note/title/identifier classes):
+  **`03b54e5`** — `bf:Agent/Role/Note/Title/Identifier/Source/Local`
+  → `bffi:*`. 0/502 6XX content diffs (129 row-order from M9
+  non-determinism).
+- Family 3 (identifier predicates): **`03b54e5`** —
+  `bf:identifiedBy/code/assigner` → `bffi:*`. 0/502 diffs on
+  identifier-bearing tags (020/022/024/028/035/040).
+- Family 4 (title predicates): **`03b54e5`** —
+  `bf:title/mainTitle/partName/partNumber` → `bffi:*`. Resolved
+  the duplicate-emission risk the proposal flagged
+  (`V.BFFI.title` was already used in M8/M10/round-trip while
+  M3 emitted `bf:title` for Expressions). 0/502 title-content
+  diffs (11 row-order only).
+- Family 5 (miscellaneous predicates): **`03b54e5`** —
+  `bf:status/qualifier` migrated (most of Family 5's targets —
+  `bf:summary/relation/relationship/associatedResource` — were
+  already partially migrated in earlier work). 0/502 020 / leader-
+  status content diffs (3 row-order only).
 
 ## Goal
 
