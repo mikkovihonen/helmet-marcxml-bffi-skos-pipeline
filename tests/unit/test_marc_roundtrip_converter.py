@@ -2050,6 +2050,63 @@ def test_020_emits_q_qualifier_when_isbn_carries_one() -> None:
     assert _subfield(df, "q") == "pehmeäkantinen"
 
 
+def test_084_emits_from_ykl_classification() -> None:
+    """``bffi:Work → bffi:classification → bffi:Classification`` with
+    ``bffi:classificationPortion "78"`` and ``bf:source → bffi:Source
+    → bffi:code "ykl"`` round-trips as MARC 084 $a 78 $2 ykl
+    (98.49 % corpus coverage — Finnish library classification)."""
+    g = _build_minimal_graph()
+    classification = URIRef("urn:class/ykl-78")
+    source = URIRef("urn:src/ykl")
+    g.add((WORK, V.BFFI.classification, classification))
+    g.add((classification, RDF.type, V.BFFI.Classification))
+    g.add((classification, V.BFFI.classificationPortion, Literal("78")))
+    g.add((classification, V.BF.source, source))
+    g.add((source, RDF.type, V.BFFI.Source))
+    g.add((source, V.BFFI.code, Literal("ykl")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='084']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "78"
+    assert _subfield(df, "2") == "ykl"
+
+
+def test_080_emits_from_udc_classification() -> None:
+    """UDC classification (``bffi:code "udc"``) routes to MARC 080."""
+    g = _build_minimal_graph()
+    classification = URIRef("urn:class/udc-621")
+    source = URIRef("urn:src/udc")
+    g.add((WORK, V.BFFI.classification, classification))
+    g.add((classification, RDF.type, V.BFFI.Classification))
+    g.add((classification, V.BFFI.classificationPortion, Literal("621.3")))
+    g.add((classification, V.BF.source, source))
+    g.add((source, V.BFFI.code, Literal("udc")))
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='080']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "621.3"
+    assert _subfield(df, "2") == "udc"
+
+
+def test_classifications_skipped_when_source_code_unknown() -> None:
+    """A classification with no source-code or an unknown one (no
+    entry in ``_CLASSIFICATION_SOURCE_CODE_TO_MARC_TAG``) is dropped
+    on emit rather than guessed. Helmet-local 09X codes will land
+    here until the M2-post synthesis pass ships."""
+    g = _build_minimal_graph()
+    classification = URIRef("urn:class/unknown")
+    source = URIRef("urn:src/unknown")
+    g.add((WORK, V.BFFI.classification, classification))
+    g.add((classification, V.BFFI.classificationPortion, Literal("X.Y.Z")))
+    g.add((classification, V.BF.source, source))
+    g.add((source, V.BFFI.code, Literal("not-a-known-vocab")))
+    rec = reconstruct_marc(g, MANIF)
+    # No 050/080/082/084 rows emitted for this unknown code.
+    for tag in ("050", "080", "082", "084"):
+        rows = rec.element.findall(f"m:datafield[@tag='{tag}']", NS)
+        assert all(_subfield(df, "a") != "X.Y.Z" for df in rows), f"unknown-source emitted in {tag}"
+
+
 def test_336_337_338_emit_a_from_rdfs_label_on_loc_uri() -> None:
     """marc2bibframe2 attaches the Finnish source-MARC ``$a`` label
     directly to the LoC URI as ``rdfs:label`` (e.g.

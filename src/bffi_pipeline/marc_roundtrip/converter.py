@@ -123,6 +123,8 @@ _MNOTETYPE_TO_MARC_5XX: Final[dict[str, str]] = {
     "provenance": "561",  # provenance / immediate source
     "awards": "586",  # awards
     "accessRestrict": "506",  # restrictions on access
+    "orig": "534",  # original version note (P-54 Phase 3)
+    "descsource": "588",  # source of description note (P-54 Phase 3)
 }
 
 
@@ -188,6 +190,56 @@ _SUBJECT_TYPE_TO_MARC_6XX_TAG: Final[dict[URIRef, str]] = {
 
 #: BIBFRAME bf:ProvisionActivity subclass tail → MARC 264 ind2.
 #: ind2=1 (Publication) is the dominant fallback.
+#: Unicode block ranges → MARC 880 ``$6 …/<code>`` script subtag.
+#: Used by ``_detect_marc_script_code`` to reconstruct the ``$6``
+#: script-code suffix when emitting 880 rows for vernacular
+#: literals. The MARC code conventions follow LC's documentation:
+#: ``(B`` = Latin, ``(N`` = Cyrillic, ``(3`` = Arabic,
+#: ``(2`` = Hebrew, ``(S`` = Greek, ``$1`` = CJK Unified
+#: Ideographs. P-54 Phase 7.
+_UNICODE_SCRIPT_RANGES_TO_MARC_CODE: Final[tuple[tuple[int, int, str], ...]] = (
+    (0x0400, 0x04FF, "(N"),  # Cyrillic
+    (0x0500, 0x052F, "(N"),  # Cyrillic supplement
+    (0x0590, 0x05FF, "(2"),  # Hebrew
+    (0x0600, 0x06FF, "(3"),  # Arabic
+    (0x0750, 0x077F, "(3"),  # Arabic supplement
+    (0x0370, 0x03FF, "(S"),  # Greek and Coptic
+    (0x4E00, 0x9FFF, "$1"),  # CJK Unified Ideographs
+    (0x3040, 0x309F, "$1"),  # Hiragana
+    (0x30A0, 0x30FF, "$1"),  # Katakana
+    (0xAC00, 0xD7AF, "$1"),  # Hangul Syllables
+)
+
+
+def _detect_marc_script_code(text: str) -> str:
+    """Return the MARC ``$6 …/<code>`` script subtag for ``text``.
+
+    Scans the literal for the first character in a known non-Latin
+    Unicode block and returns the corresponding MARC code; falls
+    back to ``(B`` (Latin) when no non-Latin character is found.
+    Used to reconstruct the ``$6`` script-code suffix on 880 rows
+    emitted from language-tagged vernacular literals (P-54 Phase 7).
+    """
+    for ch in text:
+        cp = ord(ch)
+        for low, high, code in _UNICODE_SCRIPT_RANGES_TO_MARC_CODE:
+            if low <= cp <= high:
+                return code
+    return "(B"
+
+
+#: Source-vocab code → MARC classification tag. Driven by what
+#: marc2bibframe2 emits as ``bf:code`` on ``bf:Source`` in the
+#: classification chain (P-54 Phase 1A). Helmet-local 09X codes will
+#: be added when the M2-post synthesis pass ships (sub-phase 1B).
+_CLASSIFICATION_SOURCE_CODE_TO_MARC_TAG: Final[dict[str, str]] = {
+    "ykl": "084",
+    "udc": "080",
+    "dewey": "082",
+    "ddc": "082",
+    "lcc": "050",
+}
+
 _PROVISION_TYPE_TO_IND2: Final[dict[str, str]] = {
     "Production": "0",
     "Publication": "1",
@@ -400,6 +452,9 @@ class _Reconstructor:
             self._emit_controlfield(record, "008", cf008)
 
         self._emit_isbns(record)
+        self._emit_issns(record)  # 022
+        self._emit_other_std_identifiers(record)  # 024
+        self._emit_classifications(record)  # 080 / 082 / 084 (+ later 091..097)
         self._emit_publisher_numbers(record)  # 028
         self._emit_system_control_numbers(record)  # 035
         self._emit_helmet_source_marker(record)  # 040 synth marker
@@ -425,6 +480,7 @@ class _Reconstructor:
         self._emit_added_entries(record)  # 700/710 etc.
         self._emit_aggregated_component_analytical_entries(record)  # 700 ind2=2
         self._emit_related_uniform_titles(record)  # 730
+        self._emit_vernacular_880(record)  # 880 — P-54 Phase 7
         self._emit_bib_id_local(record, bib_id)  # 907 Helmet display form
 
         # Holdings (852) explicitly skipped — BFFI doesn't model Items
@@ -881,6 +937,102 @@ class _Reconstructor:
                         subs.append(("q", str(qual)))
                 self._emit_datafield(record, "020", *subs, lineage=self._lineage_token(ident))
 
+    def _emit_classifications(self, record: Element) -> None:
+        """MARC 080 / 082 / 084 — classification numbers, plus
+        (later) Helmet-local 091 / 092 / 093 / 094 / 095 / 097.
+
+        ``bf:Work → bffi:classification → bffi:Classification`` with
+        ``bffi:classificationPortion <number>`` and ``bf:source →
+        bffi:Source → bffi:code <vocab>``. The source-code value
+        decides the MARC tag:
+
+          - ``ykl`` → 084 (Finnish library classification, 98.49 %
+            of corpus)
+          - ``udc`` → 080 (Universal Decimal Classification)
+          - ``dewey`` → 082 (Dewey Decimal Classification)
+          - ``lcc`` → 050 (Library of Congress Classification)
+          - Helmet-local source URIs (091/092/093/094/095/097) →
+            the corresponding 09X tag
+
+        Notes on coverage gap: marc2bibframe2's
+        ``ConvSpec-050-088.xsl`` only handles 084 with `$2`; the
+        Helmet-local 09X classifications without ``$2`` are dropped
+        at the BIBFRAME boundary. A M2-post pass that mints
+        ``bf:Classification`` nodes from the source MARC will fill
+        the 09X gap; until that lands, this emitter handles only
+        the codes marc2bibframe2 captures.
+        """
+        work = self.work
+        if work is None:
+            return
+        for class_node in self.graph.objects(work, V.BFFI.classification):
+            portion = next(
+                (
+                    str(p)
+                    for p in self.graph.objects(class_node, V.BFFI.classificationPortion)
+                    if isinstance(p, Literal)
+                ),
+                None,
+            )
+            if portion is None:
+                continue
+            source_code: str | None = None
+            for source_node in self.graph.objects(class_node, V.BF.source):
+                for c in self.graph.objects(source_node, V.BFFI.code):
+                    if isinstance(c, Literal):
+                        source_code = str(c).strip().lower()
+                        break
+                if source_code:
+                    break
+            tag = _CLASSIFICATION_SOURCE_CODE_TO_MARC_TAG.get(source_code or "")
+            if tag is None:
+                continue
+            subs: list[tuple[str, str]] = [("a", portion)]
+            if source_code:
+                subs.append(("2", source_code))
+            self._emit_datafield(record, tag, *subs, lineage=self._lineage_token(class_node))
+
+    def _emit_issns(self, record: Element) -> None:
+        """MARC 022 — ISSN (serials). ``bf:identifiedBy → bf:Issn →
+        rdf:value`` on the Manifestation. P-54 Phase 2.
+        """
+        for ident in self.graph.objects(self.manifestation, V.BFFI.identifiedBy):
+            types = set(self.graph.objects(ident, RDF.type))
+            if V.BF.Issn not in types:
+                continue
+            for value in self.graph.objects(ident, RDF.value):
+                if not isinstance(value, Literal):
+                    continue
+                self._emit_datafield(
+                    record, "022", ("a", str(value)), lineage=self._lineage_token(ident)
+                )
+
+    def _emit_other_std_identifiers(self, record: Element) -> None:
+        """MARC 024 — Other Standard Identifier (EANs on commercial
+        physical media + various other standard ids). marc2bibframe2
+        types these as ``bf:Ean`` (ind1=3) or ``bf:OtherIdentifier``
+        (other ind1 values); the round-trip emits both as MARC 024
+        with ind1 derived from the typing. P-54 Phase 2.
+        """
+        for ident in self.graph.objects(self.manifestation, V.BFFI.identifiedBy):
+            types = set(self.graph.objects(ident, RDF.type))
+            if V.BF.Ean in types:
+                ind1 = "3"
+            elif V.BF.OtherIdentifier in types:
+                ind1 = "8"  # default to "Unspecified type" when ind1 wasn't preserved
+            else:
+                continue
+            for value in self.graph.objects(ident, RDF.value):
+                if not isinstance(value, Literal):
+                    continue
+                self._emit_datafield(
+                    record,
+                    "024",
+                    ("a", str(value)),
+                    ind1=ind1,
+                    lineage=self._lineage_token(ident),
+                )
+
     def _emit_publisher_numbers(self, record: Element) -> None:
         # MARC 028 publisher number / catalog number (music + video).
         # marc2bibframe2 emits ``bf:identifiedBy [a bf:AudioIssueNumber;
@@ -961,29 +1113,42 @@ class _Reconstructor:
                 self._emit_datafield(record, "250", ("a", str(stmt)))
 
     def _emit_series_statement(self, record: Element) -> None:
-        # MARC 490 series statement. M3 routes the marc2bibframe2 chain
-        # ``bf:Instance → bf:relation → bf:Relation →
-        # bf:associatedResource → bf:Series → bf:title → bf:Title →
-        # bf:mainTitle`` down to a flat ``bffi:hasSeries`` link from
-        # the Manifestation to a ``bffi:Series`` node carrying
-        # ``rdfs:label``. ind1 = 0 ("series not traced") is the
-        # MARC default; ind2 has no meaning here.
+        """MARC 490 (series statement, untraced) OR MARC 830 (series
+        added entry, uniform title). The series-node URI segment
+        decides: ``#Hub830-N`` → MARC 830 (ind1=0 ind2=blank);
+        anything else (typically a bnode emitted from a 490 source
+        row) → MARC 490 (ind1=0 ind2=blank).
+
+        M3 routes the marc2bibframe2 chain
+        ``bf:Instance → bf:relation → bf:Relation →
+        bf:associatedResource → bf:Series → bf:title → bf:Title →
+        bf:mainTitle`` down to a flat ``bf:hasSeries`` link from
+        the Manifestation to a ``bf:Series`` node carrying
+        ``rdfs:label``. P-54 Phase 6 added the Hub830 routing.
+        ``bf:seriesEnumeration`` (MARC 830 ``$v`` volume number)
+        is captured by marc2bibframe2 on the Relation node but not
+        yet on the Manifestation-side Series; ``$v`` emit is
+        deferred.
+        """
         for series in self.graph.objects(self.manifestation, V.BF.hasSeries):
             label = self._first_label(series)
-            if label:
-                # ``series`` is a bnode emitted by M3 from the
-                # marc2bibframe2 ``bf:Hub/bf:Series`` chain. Phase A's
-                # subject-statement matcher tags the source Hub; if
-                # M3's CONSTRUCT routed the Hub URI directly the token
-                # rides through. Fallback ``None`` is fine — series
-                # is rare (~206 rows / 500-record sample).
-                self._emit_datafield(
-                    record,
-                    "490",
-                    ("a", label),
-                    ind1="0",
-                    lineage=self._lineage_token(series),
-                )
+            if not label:
+                continue
+            # P-54 Phase 6 — 490 vs 830 routing by source-Hub URI.
+            # marc2bibframe2 mints ``#Hub830-N`` for source-830
+            # rows; 490 rows lack the Hub URI and arrive as
+            # bnodes. Default to 490 for the bnode case.
+            if isinstance(series, URIRef) and "#Hub830-" in str(series):
+                tag, ind1 = "830", "0"
+            else:
+                tag, ind1 = "490", "0"
+            self._emit_datafield(
+                record,
+                tag,
+                ("a", label),
+                ind1=ind1,
+                lineage=self._lineage_token(series),
+            )
 
     _LANGUAGES_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/languages/"
     _DESCRIPTION_CONVENTIONS_URI_PREFIX: Final[str] = (
@@ -1231,10 +1396,14 @@ class _Reconstructor:
         return None
 
     def _emit_uniform_title(self, record: Element) -> None:  # noqa: PLR0912 — three-tier shape (BFFI-native mainTitle+language → marcKey-parse → structured-only) on top of the existing Hub-walk; splitting fragments shared state.
-        """MARC 240 — uniform title for the work.
+        """MARC 240 — uniform title for the work, OR MARC 130 — main
+        entry uniform title (no-author works: anthologies, scriptures,
+        classics). The Hub URI's tag-segment (``#Hub240-N`` vs
+        ``#Hub130-N``) decides which MARC tag the row routes to.
 
-        Source data lives on a per-record ``bf:Hub`` (``#Hub240-N``)
-        attached to the Expression via ``bffi:uniformTitleHub``. Two
+        Source data lives on a per-record ``bf:Hub`` (``#Hub240-N``
+        or ``#Hub130-N``) attached to the Expression via
+        ``bffi:title``. P-54 Phase 5 added the 130 routing. Two
         title shapes per Hub:
 
         - **Structured** (P-49 Layer 1): ``bf:title → bf:Title`` with
@@ -1259,6 +1428,18 @@ class _Reconstructor:
         for hub in self.graph.objects(expr, V.BFFI.title):
             if (hub, V.RDF.type, V.BF.Hub) not in self.graph:
                 continue
+            # P-54 Phase 5 — route 130 vs 240 by Hub URI segment.
+            # marc2bibframe2 mints ``#Hub130-N`` vs ``#Hub240-N``
+            # URIs; the path-segment tag tells which source field
+            # the cataloguer wrote. 130 (main-entry uniform title)
+            # uses ind1=0 ind2=blank by convention; 240 (uniform
+            # title traced) uses ind1=1 ind2=0. When the URI is not
+            # a recognised Hub-tag we default to 240 (the more
+            # common case, ~152k vs ~19k records).
+            if isinstance(hub, URIRef) and "#Hub130-" in str(hub):
+                tag, ind1, ind2 = "130", "0", _INDICATOR_BLANK
+            else:
+                tag, ind1, ind2 = "240", "1", "0"
             structured = self._hub_title_part_subs(hub)
             # P-168 — BFFI-native first when the Hub has no
             # structured ``$n``/``$p``: mainTitle IS the clean ``$a``
@@ -1278,10 +1459,10 @@ class _Reconstructor:
                 if bffi_subs:
                     self._emit_datafield(
                         record,
-                        "240",
+                        tag,
                         *bffi_subs,
-                        ind1="1",
-                        ind2="0",
+                        ind1=ind1,
+                        ind2=ind2,
                         lineage=self._lineage_token(hub),
                     )
                     return
@@ -1312,10 +1493,10 @@ class _Reconstructor:
             if subs:
                 self._emit_datafield(
                     record,
-                    "240",
+                    tag,
                     *subs,
-                    ind1="1",
-                    ind2="0",
+                    ind1=ind1,
+                    ind2=ind2,
                     lineage=self._lineage_token(hub),
                     marckey_bypass=used_marckey,
                 )
@@ -2617,6 +2798,135 @@ class _Reconstructor:
         if not bib_id:
             return
         self._emit_datafield(record, "907", ("a", f".{bib_id}"))
+
+    def _emit_vernacular_880(self, record: Element) -> None:
+        """MARC 880 — Alternate Graphic Representation (vernacular
+        forms paired with Latin transliterations).
+
+        marc2bibframe2 already pairs 880s natively when it processes
+        source MARC: when both a primary tag (e.g. 245, 100, 700,
+        260) and its `$6`-linked 880 exist, marc2bibframe2 emits
+        BOTH literals on the SAME BIBFRAME entity, with ``xml:lang``
+        on the vernacular form (typically the language code derived
+        from the source `$6 …/(script-code)` convention). M3 SPARQL
+        preserves both literals through to canonical.
+
+        So the data is already in the canonical graph — this
+        emitter just walks for language-tagged literal companions
+        on the key predicates and re-emits each as a separate MARC
+        880 row with a reconstructed ``$6 <primary-tag>-NN/<script>``
+        link. The script code in ``$6`` is recovered via Unicode-
+        block detection on the literal text (Cyrillic block →
+        ``(N``, Arabic → ``(3``, etc.). The ``$<primary-tag>-NN``
+        position counter uses ``01`` by default — the Helmet
+        corpus has at most one vernacular pair per field in 99 %+
+        of records (per the L-09 entry in
+        ``docs/bffi_limitations.md``).
+
+        Coverage scope: targets the highest-volume vernacular
+        carriers found in the corpus:
+
+          - ``bf:mainTitle@<lang>`` on the Manifestation's
+            ``bffi:title`` → 880 paired with 245
+          - ``bffi:responsibilityStatement@<lang>`` on Manifestation
+            → 880 paired with 245 (statement of responsibility lives
+            with the title)
+          - ``bflc:simplePlace`` / ``bflc:simpleAgent`` /
+            ``bflc:simpleDate`` ``@<lang>`` on ProvisionActivity →
+            880 paired with 264 (one row per non-default-language
+            literal, combining the place/agent/date if all three
+            exist in the vernacular)
+          - ``bffi:publicationStatement@<lang>`` on Manifestation →
+            880 paired with 264 (single flat string form of place +
+            agent + date)
+          - ``rdfs:label@<lang>`` on the primary contribution agent
+            (Work-side PrimaryContribution) → 880 paired with 100
+          - ``rdfs:label@<lang>`` on each non-primary contribution
+            agent → 880 paired with 700
+
+        Out of scope (deferred): 130 / 240 / 246 / 600 / 610 / 611 /
+        630 / 650 / 651 / 655 / 730 / 740 / 800 / 810 / 830 — these
+        have lower vernacular volume in the corpus and follow the
+        same pattern as the included set; extension is mechanical
+        when needed.
+        """
+        seq = 0
+        # 245 / 245-statement-of-responsibility
+        for ent in [self.manifestation]:
+            for title_node in self.graph.objects(ent, V.BFFI.title):
+                seq = self._emit_vernacular_for_predicate(
+                    record, "245", title_node, V.BFFI.mainTitle, seq
+                )
+            seq = self._emit_vernacular_for_predicate(
+                record, "245", ent, V.BFFI.responsibilityStatement, seq
+            )
+        # 264 / publication statement — both the flat string and the
+        # simple* triple chain.
+        seq = self._emit_vernacular_for_predicate(
+            record, "264", self.manifestation, V.BFFI.publicationStatement, seq
+        )
+        for pa in self.graph.objects(self.manifestation, V.BFFI.provisionActivity):
+            for pred in (V.BFLC.simplePlace, V.BFLC.simpleAgent, V.BFLC.simpleDate):
+                seq = self._emit_vernacular_for_predicate(record, "264", pa, pred, seq)
+        # 100 — primary contribution agent rdfs:label vernacular.
+        work = self.work
+        if work is not None:
+            for contrib in self.graph.objects(work, V.BFFI.contribution):
+                if V.BFFI.PrimaryContribution not in set(self.graph.objects(contrib, RDF.type)):
+                    continue
+                for agent in self.graph.objects(contrib, V.BFFI.agent):
+                    seq = self._emit_vernacular_for_predicate(
+                        record, "100", agent, V.RDFS.label, seq
+                    )
+        # 700 — non-primary contribution agent rdfs:label vernacular.
+        expr = self.expression
+        if expr is not None:
+            for contrib in self.graph.objects(expr, V.BFFI.contribution):
+                if V.BFFI.PrimaryContribution in set(self.graph.objects(contrib, RDF.type)):
+                    continue
+                for agent in self.graph.objects(contrib, V.BFFI.agent):
+                    seq = self._emit_vernacular_for_predicate(
+                        record, "700", agent, V.RDFS.label, seq
+                    )
+
+    def _emit_vernacular_for_predicate(
+        self,
+        record: Element,
+        primary_tag: str,
+        subject: Node,
+        predicate: URIRef,
+        seq: int,
+    ) -> int:
+        """For ``subject ?predicate ?literal`` where the literal
+        carries a language tag (and a companion untagged literal
+        exists under the same predicate), emit an 880 row paired to
+        ``primary_tag``. Returns the next ``seq`` counter.
+
+        Pairing logic: the untagged literal is the primary form
+        already emitted in ``primary_tag``; the language-tagged
+        literal is the vernacular companion. If no untagged
+        companion exists, skip — the language tag may be carried
+        for genuine language-marker reasons (a Russian title on a
+        Russian original) rather than vernacular pairing.
+        """
+        literals = list(self.graph.objects(subject, predicate))
+        untagged_count = sum(1 for lit in literals if isinstance(lit, Literal) and not lit.language)
+        if untagged_count == 0:
+            return seq
+        for lit in literals:
+            if not isinstance(lit, Literal) or not lit.language:
+                continue
+            seq += 1
+            occurrence = f"{seq:02d}"
+            script_code = _detect_marc_script_code(str(lit))
+            self._emit_datafield(
+                record,
+                "880",
+                ("6", f"{primary_tag}-{occurrence}/{script_code}"),
+                ("a", str(lit)),
+                lineage=self._lineage_token(subject),
+            )
+        return seq
 
 
 def _parse_marc_key_subfields(

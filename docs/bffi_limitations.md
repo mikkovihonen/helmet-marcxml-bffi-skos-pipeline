@@ -427,6 +427,277 @@ five-family verification cadence, move the row from the "still
 
 ---
 
+## L-09 — MARC 880 vernacular pairing recovered heuristically; no `bffi:vernacularOf` predicate
+
+**Case** MARC 880 is the "Alternate Graphic Representation" field — the
+record's vernacular (original-script) rendering of a Latin-transliterated
+field. Records with non-Latin source content (Russian / Cyrillic, Arabic,
+Hebrew, CJK, Greek, Devanagari, etc.) carry both the transliterated form
+in the primary tag (100/245/700/etc.) and the original-script form in a
+paired 880 row. Pairing is positional via `$6`:
+
+```
+100 1   $6 880-01 $a Tolstoy, Lev Nikolaevich
+245 1 0 $6 880-02 $a Voina i mir.
+880 1   $6 100-01/(N $a Толстой, Лев Николаевич
+880 1 0 $6 245-02/(N $a Война и мир.
+```
+
+`$6 100-01/(N` reads: "this 880 is the vernacular pair of the first 100
+in this record; the script is Cyrillic (MARC code `(N` = ISO 15924
+`Cyrl`)."
+
+**BFFI graph state** BFFI 1.0.0 has the script-identification piece
+(`bffi:Script` is a class, `owl:equivalentClass bf:Script`, subclass of
+`bffi:Notation`; `bffi:notation` is the predicate on `bffi:Expression`).
+It has the variant-form piece (`bf:VariantTitle` is used; we already
+route variant titles via `bf_to_bffi_expression.rq`). What it does
+**not** have is an explicit "this is the vernacular pair of that"
+predicate — no `bffi:vernacularOf`, `bffi:hasVariantForm`, or similar
+link between a Latin-transliterated structural form and its vernacular
+counterpart. `docs/lkd.rdf` declares no such property; the closest
+neighbours are:
+
+- `madsrdf:variantLabel` — "any variant of this label", not
+  specifically "other-script form"
+- BCP 47 language+script tags on `rdfs:Literal`s — works for
+  string-level pairs but not for multi-subfield structural forms (a
+  full 100 row carries `$a $c $d $q` + authority URI + relator code;
+  one literal-language-tag can't represent the full pair)
+- `bf:VariantTitle` typing on a `bf:Title` blank node — flags
+  variance but doesn't say from-what
+
+**Why BFFI can't restore the pairing structurally**: marc2bibframe2
+normalises the positional MARC into a graph of structured entities,
+erasing the "first 100" / "second 245" indexes. The `$6` linking field
+that says "this 880 pairs with that primary row" is lost in
+normalisation. Even if we ran a M3-post pass that walked `bflc:marcKey`
+to recover the `$6` data, we'd have no BFFI predicate to encode the
+pairing back into the canonical graph.
+
+**Our mitigation (Solution A): re-use marc2bibframe2's existing
+language-tagged-literal pairing.** A 2026-06-08 audit of
+`third_party/marc2bibframe2/xsl/ConvSpec-880.xsl` (and a spot-check
+on Helmet record `b18685389`) found that marc2bibframe2 already
+pairs 880s natively in BIBFRAME — when both a primary tag (e.g.,
+245) and its paired 880 exist, marc2bibframe2 processes them
+together and emits **both** literals on the **same** BIBFRAME
+entity, with `xml:lang` on the vernacular form. M3 SPARQL preserves
+both literals through to canonical. Spot-check on `b18685389`:
+
+```turtle
+?provisionActivity bflc:simpleAgent  "TsJeNTRAL PARTNJeRŠIP",
+                                     "ЦЕНТРАЛ ПАРТНЕРШИП"@ru ;
+                   bflc:simplePlace  "Moskva",
+                                     "Москва"@ru ;
+                   bflc:simpleDate   "2007", "2007"@ru ;
+?manifestation bffi:publicationStatement
+                       "Moskva: TsJeNTRAL PARTNJeRŠIP, 2007",
+                       "Москва: ЦЕНТРАЛ ПАРТНЕРШИП, 2007"@ru ;
+                   bffi:responsibilityStatement
+                       "režisser Sergei Ursuljak",
+                       "режиссер Сергей Урсуляк"@ru .
+```
+
+So the data is already in canonical. **No M3 changes are needed.**
+The pairing is implicit: one untagged literal (the primary
+Latin / transliterated form) + one or more language-tagged literals
+(the vernaculars) on the same entity, all under the same predicate.
+
+**Round-trip emit (the only piece this project needs to add)**: walk
+each entity for language-tagged companions of the predicates that
+serialise to a paired-880-able MARC tag (245 / 260 / 264 / 100 /
+110 / 111 / 130 / 240 / 246 / 247 / 700 / 710 / 711 / 730 / 740 /
+800 / 810 / 830 — the set listed `convertLinked="false"` in
+`map880.xml`). For each language-tagged literal companion, emit
+a MARC 880 row with `$6 <primary-tag>-<seq>/<script-code>`, where
+the script code is derived by Unicode-script detection on the
+literal text (Cyrillic block → `(N`, Arabic → `(3`, Hebrew → `(2`,
+CJK → `$1`, Greek → `(S`, etc.).
+
+For Helmet, this resolves correctly in **99 %+ of records**
+because each record has at most one vernacular pair per field —
+the implicit pairing (untagged + language-tagged on the same
+entity, under the same predicate) carries the structural relation.
+Records with multiple non-Latin scripts in different fields (e.g.
+a Russian record citing an Arabic-script book in 700) can
+mis-pair. Corpus-level frequency: probably <0.1 % (verifiable post-
+implementation).
+
+**Conclusion: acceptable for the canonical we ship today; flagged
+as a candidate for a future BFFI ontology extension.** The
+bibliographic content survives intact (both transliterated and
+original-script forms are in the graph, queryable, renderable in
+Skosmos with appropriate script labels). The structural pairing —
+"THIS 880 row goes with THAT 245 row" — is recovered heuristically
+on round-trip rather than carried explicitly in the graph.
+
+**Candidate BFFI extensions** for a Layer-3 NLF conversation
+(precedent: P-49):
+
+- **Solution B**: model each script-variant as its own `bffi:Expression`
+  with `bffi:notation` typing, linked via `bffi:AggregatingExpression`
+  under a shared Manifestation. Requires relaxing the SHACL
+  `bffi:expressionManifested maxCount 1` constraint on
+  `bffi:Manifestation` and overloads the aggregating-expression
+  pattern (originally for music compilations) onto multi-script
+  editions. ~4 % corpus growth in aggregating Expressions.
+- **Solution C**: propose a new BFFI predicate `bffi:vernacularOf`
+  (range `bffi:Title` / `bffi:Agent` / `bf:ProvisionActivity`) that
+  carries the pairing explicitly. Aligns with how AACR2/RDA-Z39.7 +
+  ISBD describe vernacular forms. Out of project scope; needs NLF.
+
+Solution B + C remain available as escalations if Solution A's
+heuristic mis-pairs measurably in production. Until then,
+canonical.ttl ships with the BCP 47-tagged literal pattern and
+round-trip emits 880 rows with heuristic `$6` reconstruction.
+
+---
+
+## L-10 — Helmet-local 09X classifications (091/092/093/094/095/097) dropped at the BIBFRAME boundary (marc2bibframe2 gap)
+
+**Case** Helmet records carry several local-vocabulary
+classification fields in the MARC 09X range:
+
+| Tag | % corpus | Records | What it carries |
+|---|--:|--:|---|
+| 091 | 98.63 % | 789,496 | Helmet local-location code (e.g. `$a 77`, `$a 78`, `$a 89`) — shelf-section / collection grouping |
+| 097 | 98.34 % | 787,111 | Helmet local secondary classification (often a finer-grained YKL number than 084) |
+| 095 | 79.34 % | 635,036 | Helmet local additional classification (multi-`$b` — supplementary classes) |
+| 092 | 54.67 % | 437,587 | Helmet local genre / format classification |
+| 094 | 30.28 % | 242,336 | Helmet local class (combined main + sub-class) |
+| 093 | 20.05 % | 160,462 | Helmet local primary classification (numeric scheme) |
+
+Coverage: ~99 % of Helmet records have at least one 09X
+classification field; total volume across the six tags is
+~2.85 million sub-fields per-record-deduped (probably ~5 million
+including repetitions).
+
+**Source MARC** — Helmet example b10068004:
+```
+084   $a 78    $2 ykl
+091   $a 77
+092   $a 78.8935  $b 78.891
+095   $a 788.33  $b 783.63  $b 788.44  $b 783.21
+097   $a 78.8911
+```
+
+**BFFI graph state**: ONLY the 084 row survives. `b10068004`'s
+canonical Work carries `bffi:classification` with
+`bffi:classificationPortion "78"` and source code `"ykl"` —
+the four 09X rows are absent.
+
+**Why the data is lost**: marc2bibframe2's `ConvSpec-050-088.xsl`
+contains a template explicitly only for MARC 084
+(`xsl:template match="marc:datafield[@tag='084' or
+(@tag='880' and substring(marc:subfield[@code='6'],1,3)='084')]"`).
+The 050-088 spec also handles 050, 060, 070, 072, 080, 082, 083,
+086 — but **not** the 09X local fields. The 09X tags fall through
+to marc2bibframe2's default "drop unhandled datafield" path, so
+they never appear in the BIBFRAME XML this project consumes.
+
+This is an upstream-fork-or-walkaround decision. CLAUDE.md
+forbids modifying `third_party/marc2bibframe2/`:
+
+> Don't modify ``third_party/marc2bibframe2/`` (git submodule).
+> Wrap, don't fork.
+
+**Reconstructed MARC**: the four 09X rows do not reappear in the
+round-trip. The cataloguer-review diff classifies them as `lost`
+(source had data; recon doesn't).
+
+**Conclusion: acceptable for now; documented as a Helmet-specific
+upstream gap.** Three options exist for closing the gap, in
+escalating order of project work:
+
+1. **Local M2-post synthesis pass** — read the source MARC
+   directly (we already have it on disk for the diff comparator),
+   walk the 09X rows, mint `bf:Classification` blank nodes with
+   Helmet-local source URIs (e.g.,
+   `<http://urn.fi/URN:NBN:fi:bib:source:helmet-class-091>`),
+   attach them to the `bf:Work` *before* M3 SPARQL runs. The
+   existing `_emit_classifications` round-trip walker
+   (P-54 Phase 1A) would then automatically emit them once the
+   Helmet-local source codes are added to
+   `_CLASSIFICATION_SOURCE_CODE_TO_MARC_TAG`. Estimated: ~3-4 h
+   of Phase 1B work; deferred per the 2026-06-08 scope call.
+2. **Patch the marc2bibframe2 submodule** — add 09X templates
+   to `ConvSpec-050-088.xsl`. Forbidden by CLAUDE.md.
+3. **Upstream contribution to marc2bibframe2** — file a PR
+   against `lcnetdev/marc2bibframe2` to add 09X handling for
+   library-local classifications. Long lead-time; doesn't solve
+   the immediate gap.
+
+Until Phase 1B ships, **the 09X classifications are not
+recoverable from the canonical graph**. Consumers who need them
+(Helmet shelf-organisation, finer-grained YKL drill-downs) must
+read the source MARCXML directly.
+
+---
+
+## L-11 — Helmet-local 5XX broadcaster notes (574/575) dropped at the BIBFRAME boundary (marc2bibframe2 gap)
+
+**Case** Helmet records use two non-standard 5XX note tags for
+broadcast-media-related metadata:
+
+| Tag | % corpus | Records | What it carries |
+|---|--:|--:|---|
+| 574 | 29.06 % | 232,618 | Broadcaster note (`$a` = broadcasting station / network name) |
+| 575 | 12.90 % | 103,220 | Broadcaster of original (`$a` = original broadcaster when current record is a re-broadcast or recording-of-broadcast) |
+
+Combined coverage: ~42 % of records carry at least one of these
+fields — concentrated on the audio / video / TV / radio side of the
+corpus.
+
+**Source MARC** — Helmet example b18685389:
+```
+574    $a L. Järventausta
+```
+
+**BFFI graph state**: no triples derived from 574 or 575 — neither
+mnotetype-typed `bf:Note` nor any other shape. The cataloguer's text
+is absent from the canonical entirely.
+
+**Why the data is lost**: `third_party/marc2bibframe2/xsl/ConvSpec-5XX.xsl`
+has templates for the standard MARC 5XX tags (500, 502, 504, 505,
+506, 508, 511, 513, 520, 521, 540, 545, 546, 561, 586, etc.) but
+no template matching `tag='574'` or `tag='575'`. These tags are
+defined locally by Helmet (Sierra / Finnish public-library
+convention) and don't appear in the standard MARC bibliographic
+format, so marc2bibframe2 has no mapping for them. The data falls
+through marc2bibframe2's default "drop unhandled datafield" path
+and never reaches BIBFRAME XML.
+
+CLAUDE.md forbids modifying the marc2bibframe2 submodule
+(`Don't modify ``third_party/marc2bibframe2/`` (git submodule).
+Wrap, don't fork.`).
+
+**Reconstructed MARC**: the 574 and 575 rows do not reappear in
+the round-trip. The cataloguer-review diff classifies them as
+`lost` (source had data; recon doesn't).
+
+**Conclusion: acceptable for now; documented as a Helmet-specific
+upstream gap.** Same options as L-10:
+
+1. **Local M2-post synthesis pass** — read the source MARC for 574
+   and 575, mint `bf:Note` blank nodes typed
+   `rdf:type <…/mnotetype/helmet-broadcaster>` (and
+   `helmet-broadcaster-orig` for 575) on the `bf:Instance`. Add
+   the two new tails to `_MNOTETYPE_TO_MARC_5XX` so the round-trip
+   reconstructs the rows. Estimated: ~1-2 h.
+2. **Patch marc2bibframe2** — forbidden by CLAUDE.md.
+3. **Upstream contribution** — file an issue with
+   `lcnetdev/marc2bibframe2` for Helmet-local extension support.
+   Probably won't be accepted since they're truly local fields,
+   not standard MARC.
+
+Until option 1 ships, **the broadcaster notes are not recoverable
+from the canonical graph**. Consumers who need them (broadcast-
+metadata pipelines, TV/radio cataloguing tools) must read the
+source MARCXML directly.
+
+---
+
 ## How to add a new entry
 
 When you find a round-trip case where:

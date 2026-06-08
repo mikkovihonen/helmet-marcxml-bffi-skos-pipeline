@@ -37,6 +37,7 @@ from bffi_pipeline.stages.m8.mint import (
     _propagate_raw_agent_identifiers,
     _propagate_subject_links,
     _propagate_subject_typing,
+    _propagate_work_classifications,
     _propagate_work_typing,
     _select_description_modifier,
 )
@@ -278,6 +279,12 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
         # ``bffi:aggregates`` / ``bffi:aggregatedBy`` allowlist
         # entries).
         _propagate_work_typing(g, raw_corpus_graph, canonical_entries)
+        # P-54 Phase 1A — copy bffi:classification + inner subgraph
+        # (Classification typing, classificationPortion, source/code)
+        # from raw Work URIs onto the canonical Work URI they merged
+        # into. Without this, classifications die at the M8 boundary
+        # the same way work-axis subclass typings would.
+        _propagate_work_classifications(g, raw_corpus_graph, canonical_entries)
 
     # F2: bind variant labels from the M3 cascade's sidecar onto the
     # canonical agents that match (canonical_label → existing rdfs:label

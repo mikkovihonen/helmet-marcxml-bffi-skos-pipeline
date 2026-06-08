@@ -38,6 +38,8 @@ CONSTRUCT {
             bffi:identifiedBy          ?isbn ;
             bffi:identifiedBy          ?audIssue ;
             bffi:identifiedBy          ?sysCtrl ;
+            bffi:identifiedBy          ?issn ;
+            bffi:identifiedBy          ?otherStd ;
             dct:identifier             ?helmetBibIdLiteral ;
             bf:issuance                ?issuance ;
             bffi:media                 ?mediaURI ;
@@ -121,6 +123,10 @@ CONSTRUCT {
                 bffi:code  ?sysCtrlAgentCode .
   ?audIssue a              bf:AudioIssueNumber ;
             rdf:value      ?audIssueValue .
+  ?issn    a               bf:Issn ;
+           rdf:value       ?issnValue .
+  ?otherStd a              ?otherStdType ;
+            rdf:value      ?otherStdValue .
   ?seriesNode a            bf:Series ;
               rdfs:label   ?seriesLabel .
 }
@@ -462,6 +468,30 @@ WHERE {
     ?bfInstance bf:identifiedBy ?audIssue .
     ?audIssue a bf:AudioIssueNumber ;
               rdf:value ?audIssueValue .
+  }
+
+  # MARC 022 (ISSN — serials). marc2bibframe2 emits
+  # ``bf:identifiedBy → bf:Issn`` (or ``bf:IssnL`` for ind1=0).
+  # Per L-08 (BFFI namespace closed set), ``bf:Issn`` has no
+  # ``bffi:*`` alias in ``docs/lkd.rdf`` so we re-emit it under
+  # ``bf:Issn``. P-54 Phase 2.
+  OPTIONAL {
+    ?bfInstance bf:identifiedBy ?issn .
+    ?issn a bf:Issn ;
+          rdf:value ?issnValue .
+  }
+
+  # MARC 024 (Other Standard Identifier). marc2bibframe2 emits a
+  # type-by-indicator subclass: ind1=3 → ``bf:Ean``, ind1=0/1/2/8 →
+  # ``bf:Identifier`` (or a more specific subclass when the source
+  # vocabulary is known). We carry through the typing as-is so the
+  # round-trip can route to the appropriate $2-discriminator if
+  # present. P-54 Phase 2.
+  OPTIONAL {
+    ?bfInstance bf:identifiedBy ?otherStd .
+    ?otherStd a ?otherStdType ;
+              rdf:value ?otherStdValue .
+    FILTER(?otherStdType IN (bf:Ean, bf:OtherIdentifier))
   }
 
   # MARC 250 (edition statement). marc2bibframe2 puts this as a flat

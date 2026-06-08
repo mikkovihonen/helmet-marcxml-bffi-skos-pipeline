@@ -398,6 +398,45 @@ def _propagate_work_typing(
     return count
 
 
+def _propagate_work_classifications(
+    g: Graph,
+    raw_graph: Graph,
+    canonical_entries: list[CanonicalEntry],
+) -> int:
+    """P-54 Phase 1A — copy ``bffi:classification`` blocks from the
+    M3-raw Work URIs onto the M8-canonical Work URIs they merged into.
+
+    M3's ``bf_to_bffi_work.rq`` CONSTRUCT emits
+
+      ``?rawWork bffi:classification ?class .``
+      ``?class a bffi:Classification ;``
+      ``       bffi:classificationPortion <number> ;``
+      ``       bf:source [a bffi:Source; bffi:code <vocab>] .``
+
+    on the raw Work URI. M8 mints a different canonical URI for the
+    Work, so the classification doesn't survive without explicit
+    forwarding. Same pattern as :func:`_propagate_work_typing`.
+
+    For each canonical entry, walks every raw Work it absorbed,
+    copies the ``bffi:classification`` triple, and re-emits the
+    blank-node subgraph (typing + portion + source/code) under the
+    canonical Work URI. Returns triples copied.
+    """
+    count = 0
+    visited_bnodes: set[BNode] = set()
+    visited_uris: set[URIRef] = set()
+    for entry in canonical_entries:
+        canonical_uri = URIRef(entry.canonical_work_uri)
+        for raw_uri_str in entry.raw_work_uris:
+            raw_uri = URIRef(raw_uri_str)
+            for class_node in raw_graph.objects(raw_uri, V.BFFI.classification):
+                g.add((canonical_uri, V.BFFI.classification, class_node))
+                count += 1
+                if _is_propagatable_subject(class_node):
+                    count += _copy_subgraph(g, raw_graph, class_node, visited_bnodes, visited_uris)
+    return count
+
+
 def _propagate_expression_passthrough(g: Graph, raw_graph: Graph) -> int:
     """Copy a curated list of Expression-side predicates from the M3
     per-record output into the canonical M8 graph, including reachable

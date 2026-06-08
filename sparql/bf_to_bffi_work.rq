@@ -40,6 +40,17 @@ CONSTRUCT {
            bffi:originPlace         ?originPlaceURI ;
            bffi:marcKey             ?marcKey ;
            skos:prefLabel           ?workLabel .
+  # P-54 Phase 1A — classification inner triples. ``bf:Work
+  # → bf:classification → bf:Classification`` carries the
+  # classification number (``bf:classificationPortion``) and a
+  # source-vocab discriminator (``bf:source → bf:Source → bf:code``)
+  # — e.g. "ykl" for MARC 084, "udc" for 080. The round-trip
+  # ``_emit_classifications`` walker maps the code to the MARC tag.
+  ?class a                          bffi:Classification ;
+         bffi:classificationPortion ?classPortion ;
+         bf:source                  ?classSource .
+  ?classSource a                    bffi:Source ;
+               bffi:code            ?classSourceCode .
   # P-50 Phase C — per-record subject reification via W3C-standard
   # ``rdf:Statement``. Each reified statement URI is per-occurrence
   # (one per source 6XX / 655 field), so it carries its own
@@ -344,7 +355,26 @@ WHERE {
                  rdf:object     ?subjectStmtTarget ;
                  bffi-prov:fromMarcField ?subjectStmtToken .
   }
-  OPTIONAL { ?bfWork bf:classification ?class }
+  # P-54 Phase 1A — classification chain. marc2bibframe2 emits
+  # ``bf:Work → bf:classification → bf:Classification`` with
+  # ``bf:classificationPortion <number>`` and ``bf:source → bf:Source
+  # → bf:code <vocab>`` (e.g., "ykl" for MARC 084 + $2 ykl, "udc"
+  # for 080, "dewey" for 082). Pre-P-54 the CONSTRUCT bound only
+  # ``?class`` so the canonical carried an empty bnode under
+  # ``bffi:classification``; now we also walk the inner triples so
+  # the round-trip ``_emit_classifications`` walker can reconstruct
+  # the MARC tag from ``?classSourceCode``. Helmet-local 09X
+  # (091/092/093/094/095/097) bypasses marc2bibframe2 entirely
+  # because those tags have no ``$2`` — they're handled by a
+  # separate M2-post synthesis pass.
+  OPTIONAL {
+    ?bfWork bf:classification ?class .
+    OPTIONAL { ?class bf:classificationPortion ?classPortion }
+    OPTIONAL {
+      ?class bf:source ?classSource .
+      OPTIONAL { ?classSource bf:code ?classSourceCode }
+    }
+  }
   OPTIONAL { ?bfWork bf:originDate     ?originDate }
   OPTIONAL {
     ?bfWork bf:genreForm ?workGenre .
