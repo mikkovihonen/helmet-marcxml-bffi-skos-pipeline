@@ -48,11 +48,29 @@ def _manifestation_query() -> str:
     return (_SPARQL_DIR / "bf_to_bffi_manifestation.rq").read_text(encoding="utf-8")
 
 
+@lru_cache(maxsize=1)
+def _aggregation_query() -> str:
+    return (_SPARQL_DIR / "bf_to_bffi_aggregation.rq").read_text(encoding="utf-8")
+
+
 def construct_bffi(source: Graph) -> Graph:
-    """Run all three CONSTRUCT passes against ``source`` and merge into one graph."""
+    """Run all four CONSTRUCT passes against ``source`` and merge into one graph.
+
+    The fourth pass (``bf_to_bffi_aggregation.rq``) is split off from
+    the Expression CONSTRUCT to keep its multi-Hub walk from
+    cross-producting with the parent Expression's non-primary
+    contribution / variant-title OPTIONALs. See the rq file's
+    header for the verification numbers behind the split.
+    """
     register_sparql_functions()
     out = Graph()
-    for query in (_work_query(), _expression_query(), _manifestation_query()):
+    queries = (
+        _work_query(),
+        _expression_query(),
+        _manifestation_query(),
+        _aggregation_query(),
+    )
+    for query in queries:
         result = source.query(query)
         for triple in cast("Iterable[tuple[Node, Node, Node]]", result):
             out.add(triple)

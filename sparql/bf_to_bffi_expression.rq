@@ -25,7 +25,6 @@ CONSTRUCT {
            a                 ?exprSubclass ;
            a                 ?issuanceExprSubclass ;
            a                 ?aggregatingExprSubclass ;
-           bffi:aggregates   ?componentExprURI ;
            bffi:expressionOf ?workURI ;
            bffi:title        ?uniformTitleHub ;
            bffi:title        ?variantTitle ;
@@ -36,10 +35,6 @@ CONSTRUCT {
            bffi:summary      ?summary ;
            bffi:note         ?note ;
            skos:prefLabel    ?exprLabel .
-  ?componentExprURI a bffi:Expression ;
-                    bffi:aggregatedBy ?exprURI ;
-                    skos:prefLabel    ?componentLabel ;
-                    bflc:marcKey      ?componentMarcKey .
   ?otherContrib a bffi:Contribution ;
                 bffi:agent ?otherAgent ;
                 bf:role    ?otherRole .
@@ -164,34 +159,11 @@ WHERE {
     BIND(bffi:AggregatingExpression AS ?aggregatingExprSubclass)
   }
 
-  # P-52 Phase F — component-Expression minting + ``bffi:aggregates``
-  # edges. For each ``bf:Hub`` reachable via the parent's ``bf:relation
-  # → bf:associatedResource`` chain, mint a derivative
-  # ``bffi:Expression`` URI from the Hub URI's SHA-1 and link via
-  # ``bffi:aggregates`` (forward, on the parent) +
-  # ``bffi:aggregatedBy`` (reverse, on the component). The ``bffi:aggregates``
-  # predicate has ``rdfs:domain bffi:AggregatingExpression`` so we
-  # gate the entire branch on the same multi-Hub detection rule
-  # Phase E uses for typing. Hub label survives via ``skos:prefLabel``;
-  # marcKey rides through for round-trip ``$a`` / ``$g`` recovery.
-  OPTIONAL {
-    FILTER EXISTS {
-      ?bfWork bf:relation ?_compDetectRel1 .
-      ?_compDetectRel1 bf:associatedResource ?_compDetectHub1 .
-      ?_compDetectHub1 a bf:Hub .
-      ?bfWork bf:relation ?_compDetectRel2 .
-      ?_compDetectRel2 bf:associatedResource ?_compDetectHub2 .
-      ?_compDetectHub2 a bf:Hub .
-      FILTER(?_compDetectHub1 != ?_compDetectHub2)
-    }
-    ?bfWork bf:relation ?compRel .
-    ?compRel bf:associatedResource ?compHub .
-    ?compHub a bf:Hub .
-    OPTIONAL { ?compHub rdfs:label ?componentLabel }
-    OPTIONAL { ?compHub bflc:marcKey ?componentMarcKey }
-    BIND( IRI(CONCAT("http://urn.fi/URN:NBN:fi:bib:expression:",
-              arq:sha1(STR(?compHub)))) AS ?componentExprURI )
-  }
+  # P-52 Phase F — component-Expression minting was extracted into a
+  # separate CONSTRUCT (``bf_to_bffi_aggregation.rq``) so its
+  # multi-Hub walk doesn't cross-product with the non-primary
+  # contribution / variant-title / other OPTIONALs in this query and
+  # blow up per-record bnode-emission counts.
 
   OPTIONAL {
     ?bfWork bf:content ?contentType .
