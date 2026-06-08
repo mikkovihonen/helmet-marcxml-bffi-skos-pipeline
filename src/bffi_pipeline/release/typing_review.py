@@ -205,7 +205,7 @@ def _reconciliation_status_for_agent(graph: Graph, agent: URIRef | None) -> tupl
         return ("no-agent", None)
     # M9 attaches the matched authority via several possible
     # predicates depending on era; check the common ones.
-    for predicate in (V.BFFI.authorityMatch, V.BFFI.reconciledTo, V.BF.identifiedBy):
+    for predicate in (V.BFFI.authorityMatch, V.BFFI.reconciledTo, V.BFFI.identifiedBy):
         for target in graph.objects(agent, predicate):
             if isinstance(target, URIRef):
                 s = str(target)

@@ -70,7 +70,7 @@ WHERE {
       }
       OPTIONAL { ?workA bffi:expressionLanguage ?languageA }
       OPTIONAL {
-        ?workA bf:identifiedBy ?identA .
+        ?workA bffi:identifiedBy ?identA .
         ?identA bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ;
                 rdf:value ?bibIdA .
       }

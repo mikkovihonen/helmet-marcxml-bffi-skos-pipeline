@@ -110,7 +110,7 @@ def test_manifestation_chain_round_trips_end_to_end(
     assert (expected_manif, RDF.type, V.BFFI.Manifestation) in g
     assert (expected_manif, V.BFFI.expressionManifested, expected_expr) in g
     # bib_id (Sierra display form) lives on the Manifestation.
-    idents = list(g.objects(expected_manif, V.BF.identifiedBy))
+    idents = list(g.objects(expected_manif, V.BFFI.identifiedBy))
     assert len(idents) == 1
     # And the Sierra-flat dct:identifier denormalisation follows it.
     assert list(g.objects(expected_manif, DCTERMS.identifier)) == [Literal("10000001")]
@@ -124,8 +124,8 @@ def test_manifestation_chain_round_trips_end_to_end(
     # Work and Expression must NOT carry bf:identifiedBy after the
     # P-45 commit 2 migration.
     expected_work = URIRef(mint_raw_work_uri(bf_work))
-    assert not list(g.objects(expected_work, V.BF.identifiedBy))
-    assert not list(g.objects(expected_expr, V.BF.identifiedBy))
+    assert not list(g.objects(expected_work, V.BFFI.identifiedBy))
+    assert not list(g.objects(expected_expr, V.BFFI.identifiedBy))
 
 
 def test_idempotent_rerun(converted: tuple[Path, BffiSummary]) -> None:

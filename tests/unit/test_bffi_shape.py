@@ -41,9 +41,9 @@ VALID_TTL = (
 
     <urn:manif/A> a bffi:Manifestation ;
         bffi:expressionManifested <urn:expr/A> ;
-        bf:identifiedBy <urn:manif/A/id> .
+        bffi:identifiedBy <urn:manif/A/id> .
 
-    <urn:manif/A/id> a bf:Local ;
+    <urn:manif/A/id> a bffi:Local ;
         rdf:value "12345" ;
         bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> .
     """
@@ -139,9 +139,9 @@ def test_work_with_bf_identifiedby_fails() -> None:
             + """
             <urn:work/E2> a bffi:Work ;
                 bffi:hasExpression <urn:expr/E2> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "x" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] ;
+                bffi:identifiedBy [ a bffi:Local ;
+                                    rdf:value "x" ;
+                                    bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] ;
                 skos:prefLabel "x"@fi .
 
             <urn:expr/E2> a bffi:Expression ;
@@ -149,9 +149,9 @@ def test_work_with_bf_identifiedby_fails() -> None:
 
             <urn:manif/E2> a bffi:Manifestation ;
                 bffi:expressionManifested <urn:expr/E2> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "x" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
+                bffi:identifiedBy [ a bffi:Local ;
+                                    rdf:value "x" ;
+                                    bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
             """
         )
     )
@@ -174,9 +174,9 @@ def test_work_with_expression_only_property_fails() -> None:
 
             <urn:manif/F> a bffi:Manifestation ;
                 bffi:expressionManifested <urn:expr/F> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "x" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
+                bffi:identifiedBy [ a bffi:Local ;
+                                    rdf:value "x" ;
+                                    bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
             """
         )
     )
@@ -199,9 +199,9 @@ def test_expression_with_work_only_property_fails() -> None:
 
             <urn:manif/G> a bffi:Manifestation ;
                 bffi:expressionManifested <urn:expr/G> ;
-                bf:identifiedBy [ a bf:Local ;
-                                  rdf:value "x" ;
-                                  bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
+                bffi:identifiedBy [ a bffi:Local ;
+                                    rdf:value "x" ;
+                                    bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet> ] .
             """
         )
     )

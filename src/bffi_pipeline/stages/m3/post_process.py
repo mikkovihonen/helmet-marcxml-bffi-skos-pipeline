@@ -32,7 +32,6 @@ from bffi_pipeline.stages.m3.language_detect import (
     _candidate_languages,
     _retag_pref_labels,
 )
-from bffi_pipeline.stages.m3.relator_term_enrichment import enrich_role_uris
 
 #: LoC vocab URIs that carry per-record cataloguer-typed
 #: ``rdfs:label`` text (e.g. MARC 33X ``$a``). Without per-record
@@ -143,7 +142,7 @@ def _enrich_aggregation_components_with_agents(bffi_graph: Graph) -> None:
         bffi_graph.add((component, V.BFFI.contribution, contrib))
         bffi_graph.add((contrib, RDF.type, V.BFFI.Contribution))
         bffi_graph.add((contrib, V.BFFI.agent, agent))
-        bffi_graph.add((agent, RDF.type, V.BF.Agent))
+        bffi_graph.add((agent, RDF.type, V.BFFI.Agent))
         bffi_graph.add((agent, RDFS.label, Literal(agent_label)))
 
 
@@ -274,12 +273,19 @@ def post_process(
     # subfield. Drives the round-trip 700 ind2=2 analytical-entry emit
     # path and feeds M9 component-agent reconciliation.
     _enrich_aggregation_components_with_agents(bffi_graph)
-    # Resolve Finnish / Swedish ``$e`` role terms on every bf:role
-    # blank node to a LoC relator URI when the curated mapping
-    # matches. Sibling URI lives next to the original
-    # blank-node-with-rdfs:label so round-trip MARC keeps the
-    # cataloguer's original ``$e`` and gains a ``$4`` code.
-    enrich_role_uris(bffi_graph)
+    # NOTE: a M3 post-pass that lifted Finnish / Swedish ``$e`` role
+    # terms onto a LoC relator URI used to live here
+    # (``relator_term_enrichment.enrich_role_uris``). It was removed
+    # in the role-redesign because BFFI 1.0.0 designates MTS — not
+    # LoC relators — as the value vocabulary for ``bffi:Role`` (see
+    # ``bffi-meta:relatedValueVocabulary`` on ``docs/lkd.rdf``'s
+    # ``bffi:Role`` class, pointing at MTS collections m34 / m153 /
+    # m491 / m1157). Role-URI enrichment now happens at M10 / Skosify
+    # time against MTS; ``canonical.ttl`` carries the cataloguer's
+    # bnode-with-``rdfs:label`` form only (source-faithful).
+    # ``$4`` round-trip emission was also removed — source MARC
+    # essentially never has ``$4`` (10/473 k records per the corpus
+    # inventory). See ``docs/bffi_limitations.md``.
     # Language-tag untagged rdfs:label values on LoC vocab URIs with
     # the record's primary language so M8's cross-record propagation
     # (and Skosify's default_language=fi) don't merge a Finnish $a

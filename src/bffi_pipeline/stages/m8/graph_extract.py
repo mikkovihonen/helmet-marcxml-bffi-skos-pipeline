@@ -92,7 +92,7 @@ def _primary_agent_uri(graph: Graph, work: URIRef) -> str | None:
 
 def _is_translator_role(graph: Graph, contrib: URIRef | BNode) -> bool:
     """True if ``contrib`` carries a translator role (URI or label form)."""
-    for role in graph.objects(contrib, V.BF.role):
+    for role in graph.objects(contrib, V.BFFI.role):
         if isinstance(role, URIRef) and str(role) in _TRANSLATOR_ROLE_URIS:
             return True
         for label in graph.objects(role, V.RDFS.label):
@@ -256,7 +256,7 @@ def _primary_contribution_targets(  # noqa: PLR0912 — walks two-axis role shap
                 continue
             role_uri: str | None = None
             role_label: str | None = None
-            for role in graph.objects(contrib, V.BF.role):
+            for role in graph.objects(contrib, V.BFFI.role):
                 if isinstance(role, URIRef):
                     if role_uri is None:
                         role_uri = str(role)
@@ -299,7 +299,7 @@ def _helmet_identifiers(graph: Graph, work: URIRef) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for expr in graph.objects(work, V.BFFI.hasExpression):
         for manif in graph.subjects(V.BFFI.expressionManifested, expr):
-            for ident in graph.objects(manif, V.BF.identifiedBy):
+            for ident in graph.objects(manif, V.BFFI.identifiedBy):
                 sources = set(graph.objects(ident, V.BF.source))
                 if V.HELMET_SOURCE_URI not in sources:
                     continue
@@ -406,18 +406,51 @@ def _expression_labels(graph: Graph, work: URIRef) -> list[tuple[str, str, str |
 def _read_role(graph: Graph, contrib: Node) -> tuple[str | None, str | None]:
     """Return ``(role_uri, role_label)`` from a contribution's ``bf:role``.
 
-    Two shapes coexist: a controlled-vocabulary URI (M3 cascade emits
-    these as ``<relators/cnd>`` etc.); a blank node typed ``bf:Role``
-    with an ``rdfs:label`` (marc2bibframe2's lift of MARC $e free-text).
-    URI form takes precedence; the first one wins.
+    Two shapes coexist on the same Contribution after M3's post-pass
+    enrichment:
+
+    - a controlled-vocabulary URI from
+      :mod:`bffi_pipeline.stages.m3.relator_term_enrichment` lifting
+      the cataloguer's ``$e`` term (Finnish ``"säveltäjä"`` /
+      ``"kirjoittaja"``) into a LoC relator URI
+      (``<relators/cmp>`` / ``<relators/aut>``);
+    - a blank node typed ``bf:Role`` with the original
+      ``rdfs:label "<säveltäjä>"`` (marc2bibframe2's lift of the
+      MARC ``$e`` free-text — survives untouched alongside the URI
+      so the round-trip can emit both ``$4 <code>`` and ``$e
+      <term>`` on one MARC row).
+
+    Returns both when both are present on the same contribution. A
+    contribution with only the URI form (rare; cataloguers almost
+    never type ``$4`` directly) returns ``(uri, None)``; with only
+    the label form (post-M3 enrichment had no mapping for the
+    ``$e`` term, e.g. ``"johtaja"`` which is intentionally
+    unmapped) returns ``(None, label)``.
+
+    Mirrors the inline scan in
+    :func:`_primary_contribution_targets` so both contribution paths
+    populate the same two-form contract — the bug fix that pairs
+    with :func:`mint._propagate_expressions`' parallel-emit pattern.
+    Before this scan-and-collect form, the function short-circuited
+    on the first ``bf:role`` object iteration produced, which (with
+    arbitrary rdflib iteration order) typically returned the
+    label-bearing bnode and silently dropped the LoC relator URI
+    that the M3 enrichment had added — and so MARC ``$4`` round-trip
+    silently broke on the 99 % of records where ``$e`` had a curated
+    mapping.
     """
-    for role in graph.objects(contrib, V.BF.role):
+    role_uri: str | None = None
+    role_label: str | None = None
+    for role in graph.objects(contrib, V.BFFI.role):
         if isinstance(role, URIRef):
-            return str(role), None
-        for lab in graph.objects(role, V.RDFS.label):
-            if isinstance(lab, RdfLiteral):
-                return None, str(lab)
-    return None, None
+            if role_uri is None:
+                role_uri = str(role)
+        else:
+            for lab in graph.objects(role, V.RDFS.label):
+                if isinstance(lab, RdfLiteral) and role_label is None:
+                    role_label = str(lab)
+                    break
+    return role_uri, role_label
 
 
 def _read_agent(graph: Graph, contrib: Node) -> tuple[str | None, str | None]:

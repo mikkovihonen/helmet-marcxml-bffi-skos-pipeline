@@ -119,13 +119,15 @@ bffi:genreForm rdfs:label "Genre/form"@en, "Genre/muoto"@fi, "Genre/form"@sv .
 dct:creator     rdfs:label "Creator"@en, "Tekijä"@fi, "Upphovsperson"@sv .
 dct:contributor rdfs:label "Contributor"@en, "Muu tekijä"@fi, "Medverkande"@sv .
 
-# bf:role labels the relator URI on each Contribution block (set by the
-# M3 contributor-extraction cascade — bf:role <relators/trl> for
-# translator, etc.). Without this rdfs:label Skosmos drops the
-# predicate from the rendered concept page even though the LoC
-# relators vocab is loaded under <http://id.loc.gov/vocabulary/relators/>
-# and would otherwise resolve the URIs to labels.
-bf:role rdfs:label "Role"@en, "Rooli"@fi, "Roll"@sv .
+# bffi:role labels the role URI on each Contribution block (the
+# BFFI-equivalent of bf:role, owl:equivalentProperty in lkd.rdf;
+# the project uses bffi:role throughout the canonical graph since
+# bffi:Role's range-of-values comes from MTS — see the
+# bffi-meta:relatedValueVocabulary pointers on lkd.rdf's bffi:Role
+# class to the four MTS axis-collections m34/m153/m491/m1157).
+# Without this rdfs:label Skosmos drops the predicate from the
+# rendered concept page.
+bffi:role rdfs:label "Role"@en, "Rooli"@fi, "Roll"@sv .
 
 # ---------------------------------------------------------------------------
 # Helmet source URI — declared as a real entity so bf:identifiedBy
@@ -161,3 +163,191 @@ bf:role rdfs:label "Role"@en, "Rooli"@fi, "Roll"@sv .
 dct:identifier rdfs:label "Helmet bib ID"@en,
                           "Helmet-tunniste"@fi,
                           "Helmet-bib-id"@sv .
+
+# ---------------------------------------------------------------------------
+# P-52 BFFI subclass typing (Phase A–F): every subclass we emit needs an
+# rdfs:label so the Skosmos type sidebar surfaces it with a human-readable
+# name instead of the bare URI. Source labels come from ``docs/lkd.rdf``;
+# we re-state them here so the overlay stays self-contained.
+# ---------------------------------------------------------------------------
+
+# Work-axis subclasses
+bffi:MonographWork         rdfs:label "Monograph work"@en,
+                                      "Monografiateos"@fi,
+                                      "Monografiverk"@sv .
+bffi:SerialWork            rdfs:label "Serial work"@en,
+                                      "Sarjajulkaisuteos"@fi,
+                                      "Periodiskt verk"@sv .
+bffi:CollectionWork        rdfs:label "Collection work"@en,
+                                      "Kokoelmateos"@fi,
+                                      "Samlingsverk"@sv .
+bffi:Integrating           rdfs:label "Integrating work"@en,
+                                      "Päivittyvä teos"@fi,
+                                      "Integrerande verk"@sv .
+bffi:Manuscript            rdfs:label "Manuscript"@en,
+                                      "Käsikirjoitus"@fi,
+                                      "Manuskript"@sv .
+bffi:CartographyWork       rdfs:label "Cartographic work"@en,
+                                      "Kartografinen teos"@fi,
+                                      "Kartografiskt verk"@sv .
+bffi:MovingImageWork       rdfs:label "Moving image work"@en,
+                                      "Liikkuvan kuvan teos"@fi,
+                                      "Rörlig bild-verk"@sv .
+bffi:MusicWork             rdfs:label "Music work"@en,
+                                      "Musiikkiteos"@fi,
+                                      "Musikverk"@sv .
+bffi:NonMusicAudioWork     rdfs:label "Non-music audio work"@en,
+                                      "Ei-musikaalinen ääniteos"@fi,
+                                      "Ej-musikaliskt ljudverk"@sv .
+bffi:SeriesWork            rdfs:label "Series work"@en,
+                                      "Sarjateos"@fi,
+                                      "Serieverk"@sv .
+bffi:AggregatingWork       rdfs:label "Aggregating work"@en,
+                                      "Aggregoiva teos"@fi,
+                                      "Aggregerande verk"@sv .
+
+# Expression-axis subclasses
+bffi:Text                  rdfs:label "Text"@en, "Teksti"@fi, "Text"@sv .
+bffi:NotatedMusic          rdfs:label "Notated music"@en,
+                                      "Notatoitu musiikki"@fi,
+                                      "Noterad musik"@sv .
+bffi:NotatedMovement       rdfs:label "Notated movement"@en,
+                                      "Notatoitu liikenotaatio"@fi,
+                                      "Noterad rörelse"@sv .
+bffi:StillImage            rdfs:label "Still image"@en,
+                                      "Pysäytetty kuva"@fi,
+                                      "Stillbild"@sv .
+bffi:Dataset               rdfs:label "Dataset"@en, "Aineisto"@fi, "Datamängd"@sv .
+bffi:Object                rdfs:label "Three-dimensional form"@en,
+                                      "Kolmiulotteinen muoto"@fi,
+                                      "Tredimensionell form"@sv .
+bffi:MixedMaterial         rdfs:label "Mixed material"@en,
+                                      "Sekamateriaali"@fi,
+                                      "Blandat material"@sv .
+bffi:Multimedia            rdfs:label "Software"@en,
+                                      "Ohjelmisto"@fi,
+                                      "Programvara"@sv .
+bffi:Arrangement           rdfs:label "Arrangement"@en,
+                                      "Sovitus"@fi,
+                                      "Arrangemang"@sv .
+bffi:CartographyExpression rdfs:label "Cartographic expression"@en,
+                                      "Kartografinen ekspressio"@fi,
+                                      "Kartografiskt uttryck"@sv .
+bffi:MovingImageExpression rdfs:label "Moving image expression"@en,
+                                      "Liikkuvan kuvan ekspressio"@fi,
+                                      "Rörlig bild-uttryck"@sv .
+bffi:MusicAudioExpression  rdfs:label "Music audio expression"@en,
+                                      "Musiikkitallenne-ekspressio"@fi,
+                                      "Musikljud-uttryck"@sv .
+bffi:NonMusicAudioExpression rdfs:label "Non-music audio expression"@en,
+                                        "Ei-musikaalinen ääni-ekspressio"@fi,
+                                        "Ej-musikaliskt ljud-uttryck"@sv .
+bffi:MonographExpression   rdfs:label "Monograph expression"@en,
+                                      "Monografia-ekspressio"@fi,
+                                      "Monografi-uttryck"@sv .
+bffi:SerialExpression      rdfs:label "Serial expression"@en,
+                                      "Sarjajulkaisu-ekspressio"@fi,
+                                      "Periodiskt uttryck"@sv .
+bffi:CollectionExpression  rdfs:label "Collection expression"@en,
+                                      "Kokoelma-ekspressio"@fi,
+                                      "Samlings-uttryck"@sv .
+bffi:SeriesExpression      rdfs:label "Series expression"@en,
+                                      "Sarja-ekspressio"@fi,
+                                      "Serie-uttryck"@sv .
+bffi:AggregatingExpression rdfs:label "Aggregating expression"@en,
+                                      "Aggregoiva ekspressio"@fi,
+                                      "Aggregerande uttryck"@sv .
+
+# Manifestation-axis subclasses
+bffi:Print                 rdfs:label "Printed"@en, "Painettu"@fi, "Tryckt"@sv .
+bffi:Electronic            rdfs:label "Electronic"@en, "Elektroninen"@fi, "Elektronisk"@sv .
+bffi:Microform             rdfs:label "Microform"@en, "Mikromuoto"@fi, "Mikroform"@sv .
+bffi:Tactile               rdfs:label "Tactile material"@en,
+                                      "Tuntoaistiin perustuva aineisto"@fi,
+                                      "Taktilt material"@sv .
+bffi:Archival              rdfs:label "Archival controlled"@en,
+                                      "Arkistokäytänne"@fi,
+                                      "Arkivkontrollerad"@sv .
+bffi:CollectionManifestation rdfs:label "Collection instance"@en,
+                                        "Kokoelmainstanssi"@fi,
+                                        "Samlingsinstans"@sv .
+
+# ---------------------------------------------------------------------------
+# Predicates emitted on Works / Expressions / Manifestations in canonical.ttl
+# but previously unlabeled — Skosmos drops any predicate without an rdfs:label
+# from rendered concept pages. These labels make the data visible.
+# ---------------------------------------------------------------------------
+
+# Work / Expression / Manifestation structural chains (rendered as outgoing
+# links; Skosmos walks one hop only — the per-blank-node sub-content is
+# surfaced by the Skosify-stage flatteners that emit flat companion
+# predicates listed further below).
+bffi:contribution      rdfs:label "Contribution"@en,
+                                  "Tekijyys"@fi,
+                                  "Medverkan"@sv .
+bffi:title             rdfs:label "Title"@en, "Nimeke"@fi, "Titel"@sv .
+bffi:language          rdfs:label "Language"@en, "Kieli"@fi, "Språk"@sv .
+bffi:content           rdfs:label "Content type"@en,
+                                  "Sisältötyyppi"@fi,
+                                  "Innehållstyp"@sv .
+bffi:note              rdfs:label "Note"@en, "Huomautus"@fi, "Anmärkning"@sv .
+bffi:summary           rdfs:label "Summary"@en, "Tiivistelmä"@fi, "Sammandrag"@sv .
+bffi:adminMetadata     rdfs:label "Administrative metadata"@en,
+                                  "Hallinnolliset metatiedot"@fi,
+                                  "Administrativ metadata"@sv .
+bffi:provisionActivity rdfs:label "Provision activity"@en,
+                                  "Saatavuustieto"@fi,
+                                  "Tillgänglighetsuppgift"@sv .
+bffi:publicationStatement rdfs:label "Publication statement"@en,
+                                     "Julkaisutiedot"@fi,
+                                     "Publiceringsuppgift"@sv .
+bffi:relation          rdfs:label "Related resource"@en,
+                                  "Liittyvä resurssi"@fi,
+                                  "Relaterad resurs"@sv .
+bffi:responsibilityStatement rdfs:label "Statement of responsibility"@en,
+                                        "Vastuullisuustiedot"@fi,
+                                        "Ansvarsuppgift"@sv .
+bffi:extent            rdfs:label "Extent"@en, "Laajuus"@fi, "Omfång"@sv .
+bffi:dimensions        rdfs:label "Dimensions"@en, "Mitat"@fi, "Dimensioner"@sv .
+bf:hasSeries           rdfs:label "Is part of series"@en,
+                                  "Osa sarjaa"@fi,
+                                  "Del av serie"@sv .
+bffi:tableOfContents   rdfs:label "Table of contents"@en,
+                                  "Sisällysluettelo"@fi,
+                                  "Innehållsförteckning"@sv .
+bffi:editionStatement  rdfs:label "Edition"@en, "Painos"@fi, "Upplaga"@sv .
+bf:issuance            rdfs:label "Issuance"@en, "Ilmestyminen"@fi, "Utgivning"@sv .
+bf:identifiedBy        rdfs:label "Identifier"@en,
+                                  "Tunniste"@fi,
+                                  "Identifierare"@sv .
+bffi:aggregates        rdfs:label "Aggregates"@en,
+                                  "Sisältää osan"@fi,
+                                  "Innehåller del"@sv .
+bffi:aggregatedBy      rdfs:label "Part of"@en,
+                                  "Sisältyy kokoelmaan"@fi,
+                                  "Del av samling"@sv .
+
+# ---------------------------------------------------------------------------
+# Display-only flat predicates synthesised by the Skosify stage's
+# _synthesise_display_predicates family (m10/skosify_run.py). These live
+# ONLY in canonical-skosified.ttl — the canonical.ttl that NLF could
+# ingest carries only the structural BFFI chains above.
+# ---------------------------------------------------------------------------
+
+dct:publisher   rdfs:label "Publisher"@en, "Julkaisija"@fi, "Förlag"@sv .
+dct:date        rdfs:label "Date"@en, "Vuosi"@fi, "År"@sv .
+dct:spatial     rdfs:label "Place"@en, "Paikka"@fi, "Plats"@sv .
+dct:isPartOf    rdfs:label "Series"@en, "Sarja"@fi, "Serie"@sv .
+dct:modified    rdfs:label "Last modified"@en,
+                           "Viimeksi muokattu"@fi,
+                           "Senast ändrad"@sv .
+dct:conformsTo  rdfs:label "Cataloguing convention"@en,
+                           "Luettelointikäytäntö"@fi,
+                           "Katalogiseringspraxis"@sv .
+bf:isbn         rdfs:label "ISBN"@en, "ISBN"@fi, "ISBN"@sv .
+bf:audioIssueNumber rdfs:label "Audio issue number"@en,
+                               "Äänitalon numero"@fi,
+                               "Ljudutgåvanummer"@sv .
+bf:systemNumber rdfs:label "System control number"@en,
+                           "Järjestelmän kontrollinumero"@fi,
+                           "Systemkontrollnummer"@sv .

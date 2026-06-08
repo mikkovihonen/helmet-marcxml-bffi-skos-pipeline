@@ -411,8 +411,8 @@ def _build_anonymous_main_entry_graph(
         g.add((contrib, V.BFFI.agent, agent_uri))
         g.add((agent_uri, V.RDFS.label, Literal(label)))
         role = BNode()
-        g.add((contrib, V.BF.role, role))
-        g.add((role, RDF.type, V.BF.Role))
+        g.add((contrib, V.BFFI.role, role))
+        g.add((role, RDF.type, V.BFFI.Role))
         if translator_only:
             g.add((role, V.RDFS.label, Literal("kääntäjä")))
         else:
@@ -667,7 +667,7 @@ def test_canonical_work_does_not_carry_bf_identified_by_post_p45(tmp_path: Path)
     g = Graph()
     g.parse(str(canonical_path), format="turtle")
     for canonical in g.subjects(V.RDF.type, V.BFFI.Work):
-        assert list(g.objects(canonical, V.BF.identifiedBy)) == []
+        assert list(g.objects(canonical, V.BFFI.identifiedBy)) == []
     # The bib_id rollup still lives in the canonical-map.jsonl audit log
     # — that's the cataloguer-facing surface for "which raws absorbed".
     rows = [json.loads(line) for line in map_path.read_text().splitlines() if line.strip()]
@@ -1316,7 +1316,7 @@ def test_canonical_expression_carries_blank_node_contribution_from_cascade(
     contribs = list(g.objects(URIRef(EXPR_A), V.BFFI.contribution))
     assert len(contribs) == 1
     contrib = contribs[0]
-    roles = list(g.objects(contrib, V.BF.role))
+    roles = list(g.objects(contrib, V.BFFI.role))
     assert roles == [URIRef("http://id.loc.gov/vocabulary/relators/cnd")]
     [agent] = list(g.objects(contrib, V.BFFI.agent))
     labels = list(g.objects(agent, V.RDFS.label))
@@ -1463,12 +1463,12 @@ def test_walker_filters_primary_contributions_from_expression_propagation() -> N
             # Primary — MUST be filtered out by the walker.
             <#contrib1> a bffi:Contribution, bffi:PrimaryContribution ;
                 bffi:agent <#agent-primary> ;
-                bf:role <http://id.loc.gov/vocabulary/relators/aut> .
+                bffi:role <http://id.loc.gov/vocabulary/relators/aut> .
 
             # Non-primary — MUST be picked up.
             <#contrib2> a bffi:Contribution ;
                 bffi:agent <#agent-translator> ;
-                bf:role <http://id.loc.gov/vocabulary/relators/trl> .
+                bffi:role <http://id.loc.gov/vocabulary/relators/trl> .
 
             <#agent-primary>    rdfs:label "Tolstoy, Lev" .
             <#agent-translator> rdfs:label "Adrian, Esa" .
@@ -1504,7 +1504,7 @@ def test_walker_captures_blank_node_role_label_from_marc2bibframe2() -> None:
                 bffi:contribution [
                     a bffi:Contribution ;
                     bffi:agent [ rdfs:label "Hogwood, Christopher" ] ;
-                    bf:role [ a bf:Role ; rdfs:label "johtaja" ]
+                    bffi:role [ a bf:Role ; rdfs:label "johtaja" ]
                 ] .
             """
         ).strip(),
@@ -1513,6 +1513,92 @@ def test_walker_captures_blank_node_role_label_from_marc2bibframe2() -> None:
     [ec] = _expression_contributions(g, URIRef(WORK_A))
     assert ec.role_uri is None
     assert ec.role_label == "johtaja"
+
+
+def test_walker_captures_both_role_forms_when_both_present() -> None:
+    """After M3's relator-term enrichment, a contribution carries TWO
+    ``bf:role`` triples on the same node — the LoC relator URI added
+    by the enrichment plus the original marc2bibframe2 bnode-with-
+    label. The walker must capture both forms (one into ``role_uri``,
+    one into ``role_label``) so the canonical Contribution can re-emit
+    both, and the round-trip MARC can render ``$4 <code> $e <term>``
+    on one row instead of either dropping ``$4`` or emitting two rows
+    for the same logical contribution."""
+    g = Graph()
+    g.parse(
+        data=dedent(
+            f"""
+            @prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+            @prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+            <{WORK_A}> a bffi:Work ;
+                bffi:hasExpression <{EXPR_A}> .
+
+            <{EXPR_A}> a bffi:Expression ;
+                bffi:contribution [
+                    a bffi:Contribution ;
+                    bffi:agent [ rdfs:label "Andersson, Benny" ] ;
+                    bffi:role <http://id.loc.gov/vocabulary/relators/cmp> ,
+                              [ a bf:Role ; rdfs:label "säveltäjä" ]
+                ] .
+            """
+        ).strip(),
+        format="turtle",
+    )
+    [ec] = _expression_contributions(g, URIRef(WORK_A))
+    assert ec.role_uri == "http://id.loc.gov/vocabulary/relators/cmp"
+    assert ec.role_label == "säveltäjä"
+
+
+def test_canonical_expression_emits_both_role_forms_when_both_present(tmp_path: Path) -> None:
+    """When an ExpressionContribution carries BOTH ``role_uri`` and
+    ``role_label`` (the post-M3-enrichment shape — see also
+    :func:`test_walker_captures_both_role_forms_when_both_present`),
+    the propagator must emit both:
+
+      - ``contrib bf:role <relator-uri>`` (drives ``$4`` in
+        round-trip MARC)
+      - ``contrib bf:role [a bf:Role; rdfs:label "..."]``
+        (drives ``$e``)
+
+    on the SAME canonical Contribution so the MARC reconstruction
+    gets one ``700`` row per agent with both subfields, not two rows
+    (one with ``$4`` only, one with ``$e`` only)."""
+    records = _records()
+    records[WORK_A] = CanonicalWorkInputs(
+        work_uri=WORK_A,
+        creator_uri=AGENT_TOLSTOY,
+        pref_label="Sota ja rauha",
+        expression_uris=[EXPR_A],
+        helmet_identifiers=[("http://example.org/ident/a1", "111")],
+        expression_contributions=[
+            ExpressionContribution(
+                expression_uri=EXPR_A,
+                role_uri="http://id.loc.gov/vocabulary/relators/cmp",
+                role_label="säveltäjä",
+                agent_uri="http://urn.fi/URN:NBN:fi:bib:raw/aaa#Agent700-26",
+                agent_label="Andersson, Benny",
+            ),
+        ],
+    )
+    canonical_path, _, _ = _run(
+        tmp_path,
+        [_decision_row(WORK_A, WORK_B, decision="different_work")],
+        work_records=records,
+    )
+    g = Graph()
+    g.parse(str(canonical_path), format="turtle")
+    [contrib] = list(g.objects(URIRef(EXPR_A), V.BFFI.contribution))
+    roles = list(g.objects(contrib, V.BFFI.role))
+    # Both forms on the SAME contribution.
+    uri_roles = [r for r in roles if isinstance(r, URIRef)]
+    bnode_roles = [r for r in roles if not isinstance(r, URIRef)]
+    assert uri_roles == [URIRef("http://id.loc.gov/vocabulary/relators/cmp")]
+    assert len(bnode_roles) == 1
+    [bnode_role] = bnode_roles
+    assert (bnode_role, V.RDF.type, V.BFFI.Role) in g
+    assert (bnode_role, V.RDFS.label, Literal("säveltäjä")) in g
 
 
 def test_canonical_expression_emits_blank_node_role_with_label(tmp_path: Path) -> None:
@@ -1543,9 +1629,9 @@ def test_canonical_expression_emits_blank_node_role_with_label(tmp_path: Path) -
     g = Graph()
     g.parse(str(canonical_path), format="turtle")
     [contrib] = list(g.objects(URIRef(EXPR_A), V.BFFI.contribution))
-    [role] = list(g.objects(contrib, V.BF.role))
+    [role] = list(g.objects(contrib, V.BFFI.role))
     # Role is a blank node typed bf:Role with rdfs:label
-    assert (role, V.RDF.type, V.BF.Role) in g
+    assert (role, V.RDF.type, V.BFFI.Role) in g
     assert (role, V.RDFS.label, Literal("cembalo")) in g
 
 
@@ -2068,9 +2154,9 @@ def test_p45_manifestation_subgraphs_propagate_into_canonical_ttl(tmp_path: Path
             <urn:manif/A> a bffi:Manifestation ;
                           bffi:expressionManifested <urn:expr/A> ;
                           dct:identifier "b10000001" ;
-                          bf:identifiedBy [ a bf:Local ;
-                                            rdf:value "b10000001" ;
-                                            bf:source <{HELMET}> ] .
+                          bffi:identifiedBy [ a bffi:Local ;
+                                              rdf:value "b10000001" ;
+                                              bf:source <{HELMET}> ] .
             """
         ),
         encoding="utf-8",
@@ -2120,7 +2206,7 @@ def test_p45_manifestation_subgraphs_propagate_into_canonical_ttl(tmp_path: Path
     assert (manif_uri, DCTERMS.identifier, Literal("b10000001")) in out
     # Reachable blank node: the bf:identifiedBy block must be copied with
     # rdf:value + bf:source intact.
-    idents = list(out.objects(manif_uri, V.BF.identifiedBy))
+    idents = list(out.objects(manif_uri, V.BFFI.identifiedBy))
     assert len(idents) == 1
     assert (idents[0], V.BF.source, URIRef(HELMET)) in out
     assert (idents[0], RDF.value, Literal("b10000001")) in out
@@ -2163,16 +2249,16 @@ def test_agent_asteri_identifier_subgraph_propagates_to_canonical(
             <urn:manif/A> a bffi:Manifestation ;
                           bffi:expressionManifested <urn:expr/A> ;
                           dct:identifier "b10000001" ;
-                          bf:identifiedBy [ a bf:Local ;
-                                            rdf:value "b10000001" ;
-                                            bf:source <{HELMET}> ] .
+                          bffi:identifiedBy [ a bffi:Local ;
+                                              rdf:value "b10000001" ;
+                                              bf:source <{HELMET}> ] .
 
             <http://urn.fi/URN:NBN:fi:bib:raw/b10000001#Agent710-1>
                           rdfs:label "Otava, kustannusosakeyhtiö" ;
-                          bf:identifiedBy [
-                              a bf:Identifier ;
+                          bffi:identifiedBy [
+                              a bffi:Identifier ;
                               rdf:value "000039084" ;
-                              bf:source [ a bf:Source ;
+                              bf:source [ a bffi:Source ;
                                           bf:code "FI-ASTERI-N" ] ] .
             """
         ),
@@ -2211,7 +2297,7 @@ def test_agent_asteri_identifier_subgraph_propagates_to_canonical(
     # must reach canonical (without the new
     # _propagate_raw_agent_identifiers pass, no triples about the
     # agent URI survive M8).
-    idents = list(out.objects(agent_uri, V.BF.identifiedBy))
+    idents = list(out.objects(agent_uri, V.BFFI.identifiedBy))
     assert len(idents) == 1, f"expected 1 identifier, found {len(idents)}"
     ident = idents[0]
     assert (ident, RDF.value, Literal("000039084")) in out
@@ -2256,9 +2342,9 @@ def test_p48_730_hub_subgraph_propagates_via_raw_bib_uri_passthrough(
             <urn:manif/A> a bffi:Manifestation ;
                           bffi:expressionManifested <urn:expr/A> ;
                           dct:identifier "b10000001" ;
-                          bf:identifiedBy [ a bf:Local ;
-                                            rdf:value "b10000001" ;
-                                            bf:source <{HELMET}> ] ;
+                          bffi:identifiedBy [ a bffi:Local ;
+                                              rdf:value "b10000001" ;
+                                              bf:source <{HELMET}> ] ;
                           bffi:relation [
                             a bffi:Relation ;
                             bffi:associatedResource
@@ -2372,7 +2458,7 @@ def test_propagate_expression_passthrough_carries_component_contribution_chain()
     raw_graph.add((component, V.BFFI.contribution, contrib))
     raw_graph.add((contrib, RDF.type, V.BFFI.Contribution))
     raw_graph.add((contrib, V.BFFI.agent, agent))
-    raw_graph.add((agent, RDF.type, V.BF.Agent))
+    raw_graph.add((agent, RDF.type, V.BFFI.Agent))
     raw_graph.add((agent, V.RDFS.label, Literal("Gore, Michael")))
 
     g = Graph()

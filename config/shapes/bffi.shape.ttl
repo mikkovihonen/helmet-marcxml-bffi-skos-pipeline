@@ -36,14 +36,14 @@ bffi:WorkShape
     ] ;
 
     # P-45 commit 2: Helmet identifier moved from Work to Manifestation.
-    # The Work no longer asserts ``bf:identifiedBy``; the bib_id lives on
-    # Manifestation (see :bffi:ManifestationShape below). Cataloguer
+    # The Work no longer asserts ``bffi:identifiedBy``; the bib_id lives
+    # on Manifestation (see :bffi:ManifestationShape below). Cataloguer
     # tooling discovers the bib_id from a Work via:
     #   Work → bffi:hasExpression → Expression
     #        ← bffi:expressionManifested ← Manifestation
-    #        → bf:identifiedBy
-    sh:property [ sh:path bf:identifiedBy ; sh:maxCount 0 ;
-                  sh:message "bf:identifiedBy is Manifestation-only post-P-45." ] ;
+    #        → bffi:identifiedBy
+    sh:property [ sh:path bffi:identifiedBy ; sh:maxCount 0 ;
+                  sh:message "bffi:identifiedBy is Manifestation-only post-P-45." ] ;
 
     # prefLabel must exist in at least one of fi/sv/en.
     sh:property [
@@ -87,10 +87,10 @@ bffi:ExpressionShape
         sh:message "bffi:Expression must point at exactly one bffi:Work via bffi:expressionOf."
     ] ;
 
-    # P-45 commit 2: bf:identifiedBy moved to Manifestation (see
+    # P-45 commit 2: bffi:identifiedBy moved to Manifestation (see
     # :bffi:ManifestationShape).
-    sh:property [ sh:path bf:identifiedBy ; sh:maxCount 0 ;
-                  sh:message "bf:identifiedBy is Manifestation-only post-P-45." ] ;
+    sh:property [ sh:path bffi:identifiedBy ; sh:maxCount 0 ;
+                  sh:message "bffi:identifiedBy is Manifestation-only post-P-45." ] ;
 
     # Properties that belong only to bffi:Work MUST NOT appear here.
     sh:property [ sh:path bffi:hasExpression  ; sh:maxCount 0 ;
@@ -126,9 +126,11 @@ bffi:ManifestationShape
 
     # Helmet identifier preserved on Manifestation (P-45 commit 2 — moved
     # here from Work + Expression because the bib_id identifies the
-    # published artefact, not the abstract creative content).
+    # published artefact, not the abstract creative content). The
+    # predicate name became ``bffi:identifiedBy`` in P-53 Family 3
+    # (``owl:equivalentProperty`` of ``bf:identifiedBy`` in lkd.rdf).
     sh:property [
-        sh:path bf:identifiedBy ;
+        sh:path bffi:identifiedBy ;
         sh:minCount 1 ;
         sh:qualifiedValueShape [
             sh:property [
@@ -138,5 +140,5 @@ bffi:ManifestationShape
             sh:property [ sh:path rdf:value ; sh:minCount 1 ; sh:datatype xsd:string ] ;
         ] ;
         sh:qualifiedMinCount 1 ;
-        sh:message "bffi:Manifestation must carry a Helmet bf:identifiedBy."
+        sh:message "bffi:Manifestation must carry a Helmet bffi:identifiedBy."
     ] .

@@ -273,6 +273,160 @@ the closest-tag bucket.
 
 ---
 
+## L-07 — Enrichment-derived MARC `$4` no longer emitted (BFFI role values switch from LoC to MTS)
+
+**Case** Pre-redesign, the round-trip emitted MARC `$4 cmp` /
+`$4 trl` etc. on `100` and `700` rows for **every contribution**,
+because M3's relator-term-enrichment pass lifted every Finnish
+``$e`` term to a LoC relator URI (e.g. ``"säveltäjä" → <relators/cmp>``).
+Source Helmet MARC essentially never has `$4` (10 occurrences in
+473 k records per the 2026-06-07 corpus inventory), so this was
+*enrichment*, not round-trip faithfulness — the recon added a
+subfield the cataloguer never wrote on 99 % of records.
+
+**Source-``$4`` records still round-trip verbatim.** The ~10
+records where the cataloguer DID write ``$4`` in source MARC are
+unaffected: marc2bibframe2 lifts the source ``$4 cmp`` to
+``bf:role <relators/cmp>``, M3 propagates it as
+``bffi:role <relators/cmp>`` on the canonical, and
+``_collect_role_subs`` recognises the LoC-relator URI prefix and
+emits ``$4 cmp`` from the URI's last path segment. The deletion
+removed only the *synthesised* ``$4`` for the 99 % of records.
+
+**Architectural reason for removal** BFFI 1.0.0 does not
+designate LoC relators as the value vocabulary for
+``bffi:Role``. ``docs/lkd.rdf`` records the binding explicitly:
+
+```xml
+<rdf:Description rdf:about="…/schema:bffi:Role">
+  <bffi-meta:relatedValueVocabulary rdf:resource="…/au:mts:m34"/>
+  <bffi-meta:relatedValueVocabulary rdf:resource="…/au:mts:m153"/>
+  <bffi-meta:relatedValueVocabulary rdf:resource="…/au:mts:m491"/>
+  <bffi-meta:relatedValueVocabulary rdf:resource="…/au:mts:m1157"/>
+  <owl:equivalentClass rdf:resource="…/bibframe/Role"/>
+</rdf:Description>
+```
+
+The four MTS collections partition role concepts by FRBR axis
+(Work / Expression / Manifestation / Item). The project's M3
+enrichment pass (`relator_term_enrichment.py` +
+`marc_relator_terms.py`) and the round-trip `$4` emission path
+were both removed during the role-redesign; role values are now
+MTS concept URIs added at M10 / Skosify time (see the
+``_synthesise_role_mts_uri`` flattener in
+``src/bffi_pipeline/stages/m10/skosify_run.py``).
+
+**Source MARC**:
+```
+100 1   $a Tolstoy, Lev, $e kirjoittaja
+700 1   $a Adrian, Esa,  $e kääntäjä
+```
+
+**BFFI graph** — Contribution carries:
+
+  - ``bffi:role [ a bf:Role ; rdfs:label "kirjoittaja" ]`` —
+    the cataloguer's free-text term, preserved verbatim by
+    marc2bibframe2 and passed through M3/M8 untouched.
+  - At ``canonical-skosified.ttl`` only:
+    ``bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m552>``
+    (MTS concept "kirjoittaja" from the Work-axis collection
+    ``mts:m34``). Lives in the Skosify-loaded artefact, not in
+    the canonical NLF would ingest.
+
+**Reconstructed MARC**:
+```
+100 1   $a Tolstoy, Lev, $e kirjoittaja
+700 1   $a Adrian, Esa,  $e kääntäjä
+```
+
+**Conclusion: acceptable.** ``$e`` round-trips verbatim from the
+bnode ``rdfs:label``. ``$4`` is intentionally not synthesised because:
+
+1. **Source fidelity wins**: the cataloguer didn't write a code,
+   so reconstructing the record without one matches the source.
+2. **BFFI compliance**: the role URI added at M10 / Skosify is an
+   MTS concept whose last URI segment (`m552`) is not a MARC
+   relator code — the LoC URI → MARC-code shortcut doesn't apply
+   to MTS URIs.
+3. **Cataloguer review**: the reconstruction shows what was
+   catalogued, not what an enrichment pipeline could infer. That
+   makes diff residue mean "real data movement" rather than
+   "expected enrichment delta".
+
+---
+
+## L-08 — `bf:*` terms still emitted in canonical (no `bffi:*` alias in `lkd.rdf`)
+
+**Case** After P-53 (the BFFI-aliased-terms migration), the canonical
+graph uses `bffi:*` consistently for every term whose
+`owl:equivalentClass` or `owl:equivalentProperty` is declared in
+`docs/lkd.rdf`. ~26 terms migrated across five families
+(`bffi:role`, `bffi:Agent`, `bffi:Title`, `bffi:identifiedBy`,
+`bffi:Topic` / `bffi:Place` / `bffi:Person` / `bffi:Organization` /
+`bffi:Meeting` / `bffi:Temporal`, `bffi:mainTitle` /
+`bffi:partName` / `bffi:partNumber`, `bffi:status`,
+`bffi:qualifier`, etc.).
+
+**The remaining `bf:*` terms in canonical.ttl are NLF's deliberate
+BIBFRAME reuse, not migration oversight.** BFFI 1.0.0 does not
+redefine these terms — `lkd.rdf` carries no `bffi:*` counterpart.
+Per the CLAUDE.md "BFFI namespace discipline" rule ("reuse an
+existing standard term") and "What not to do" rule ("don't mint
+local `bffi:` terms"), we emit them from the BIBFRAME namespace
+directly.
+
+**Predicates we still emit as `bf:*`:**
+
+| `bf:*` predicate | Why no `bffi:*` alias |
+|---|---|
+| `bf:source` | Used as the source-vocab pointer on identifiers and authority targets. BIBFRAME's term is reused directly. |
+| `bf:note` | Used as a typed-note predicate inside Manifestation. |
+| `bf:date`, `bf:place`, `bf:agent` | Slots inside `bf:ProvisionActivity` blank-node chains (date/place/agent on the activity itself). |
+| `bf:hasSeries`, `bf:hasInstance` | FRBR-axis linkages BFFI doesn't redefine (series + instance-of). |
+| `bf:isbn`, `bf:issn`, `bf:ean`, `bf:audioIssueNumber`, `bf:systemNumber` | Skosify-stage flat-identifier display predicates emitted only in `canonical-skosified.ttl` (P-45 commit 12 — see `_synthesise_identifier_predicates` in `m10/skosify_run.py`). |
+
+**Classes we still emit as `bf:*`:**
+
+| `bf:*` class | Why no `bffi:*` alias |
+|---|---|
+| `bf:Hub` | Aggregating-entity class for related works / uniform titles. |
+| `bf:Series` | Series resource (object of `bf:hasSeries`). |
+| `bf:VariantTitle` | Variant-title class on the Expression's `bffi:title` chain. |
+| `bf:Isbn`, `bf:Issn`, `bf:Ean` | Identifier-type classes inside `bf:identifiedBy` chains. |
+| `bf:AudioIssueNumber`, `bf:SystemNumber` | Same — identifier-type classes. |
+
+**Closed set.** Anything NOT in the two tables above must be
+emitted as `bffi:*` if a `bffi:*` alias exists in `lkd.rdf`. The
+`tests/unit/test_bffi_namespace_discipline.py` test enforces that
+every `bffi:*` term in code or SPARQL exists in `lkd.rdf`; a
+companion audit (the script under § "Verification of the alias
+mapping" in `docs/plans/in-progress/p-53-bffi-aliased-terms-migration.md`)
+re-derives the alias mapping from `lkd.rdf` and flags new aliases
+worth migrating. **Adding a new `bf:*` emit to canonical.ttl
+requires either an entry in one of the two tables above (with
+reasoning) or a migration plan to the `bffi:*` counterpart if one
+exists.**
+
+**Boundary discipline.** This list is about what `canonical.ttl`
+carries — the NLF-shippable surface. Stages and boundaries that
+deliberately operate in the BIBFRAME namespace (M2's enrichment of
+the marc2bibframe2-emitted graph; M3 SPARQL WHERE clauses reading
+that graph) continue to use the BIBFRAME predicates and classes
+exactly as marc2bibframe2 produces them. The migration is a
+canonical-output property, not a pipeline-wide ban on `bf:*`
+identifiers.
+
+**Conclusion: acceptable, and design-of-record.** The mix of
+`bffi:*` (for terms BFFI has aliased) and `bf:*` (for terms BFFI
+deliberately doesn't) is the BFFI 1.0.0-aligned shape the project
+ships. When NLF extends BFFI with a new alias (e.g., a future
+`bffi:Series` or `bffi:hasInstance`), the migration playbook from
+P-53 applies: invert the audit, swap the emit sites, run the
+five-family verification cadence, move the row from the "still
+`bf:*`" table to the "migrated" set.
+
+---
+
 ## How to add a new entry
 
 When you find a round-trip case where:

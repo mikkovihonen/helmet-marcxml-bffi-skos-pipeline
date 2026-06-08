@@ -427,7 +427,7 @@ def test_phase_g_bis_extracts_g_subfield_from_component_marckey() -> None:
         for contrib in bffi.objects(comp, V.BFFI.contribution):
             assert (contrib, RDF.type, V.BFFI.Contribution) in bffi
             for agent in bffi.objects(contrib, V.BFFI.agent):
-                assert (agent, RDF.type, V.BF.Agent) in bffi
+                assert (agent, RDF.type, V.BFFI.Agent) in bffi
                 for lbl in bffi.objects(agent, V.RDFS.label):
                     agent_labels.add(str(lbl))
     assert agent_labels == {"Author One", "Author Two"}
@@ -624,16 +624,16 @@ def test_helmet_identifier_lives_on_manifestation_not_work_or_expression() -> No
     bffi = construct_bffi(_build_source())
     helmet = URIRef("http://urn.fi/URN:NBN:fi:bib:source:helmet")
     # Manifestation carries the identifier.
-    idents = list(bffi.objects(EXPECTED_MANIF, V.BF.identifiedBy))
+    idents = list(bffi.objects(EXPECTED_MANIF, V.BFFI.identifiedBy))
     assert len(idents) == 1, f"missing Helmet identifier on Manifestation {EXPECTED_MANIF}"
     ident = idents[0]
     assert (ident, V.BF.source, helmet) in bffi
     assert (ident, RDF.value, Literal("10000001")) in bffi
     # Work + Expression do NOT carry it directly anymore.
-    assert not list(bffi.objects(EXPECTED_WORK, V.BF.identifiedBy)), (
+    assert not list(bffi.objects(EXPECTED_WORK, V.BFFI.identifiedBy)), (
         "Work must not carry bf:identifiedBy post-P-45"
     )
-    assert not list(bffi.objects(EXPECTED_EXPR, V.BF.identifiedBy)), (
+    assert not list(bffi.objects(EXPECTED_EXPR, V.BFFI.identifiedBy)), (
         "Expression must not carry bf:identifiedBy post-P-45"
     )
 
@@ -1539,7 +1539,7 @@ def test_emitter_skips_when_extractor_flags_transliteration_variant() -> None:
     # No new Contribution should appear on the Expression beyond what
     # the M3 CONSTRUCT propagated from the existing 700.
     contributions_on_expr = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
-    role_triples = list(bffi.triples((None, V.BF.role, None)))
+    role_triples = list(bffi.triples((None, V.BFFI.role, None)))
     assert role_triples == []
     # The pre-existing 700 contribution is still routed by the SPARQL
     # CONSTRUCT (one entry); the cascade adds nothing.
@@ -1566,7 +1566,7 @@ def test_emitter_emits_new_contribution_when_extractor_returns_pure_relator() ->
     )
     bffi = construct_bffi(source)
     post_process(bffi, source, contrib_extractor=extractor)
-    role_triples = list(bffi.triples((None, V.BF.role, None)))
+    role_triples = list(bffi.triples((None, V.BFFI.role, None)))
     assert len(role_triples) == 1
     _, _, role_uri = role_triples[0]
     assert str(role_uri) == "http://id.loc.gov/vocabulary/relators/aft"
@@ -1615,7 +1615,7 @@ def test_construct_routes_uri_role_to_bffi_contribution() -> None:
     [contrib] = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
     assert (
         contrib,
-        V.BF.role,
+        V.BFFI.role,
         URIRef("http://id.loc.gov/vocabulary/relators/trl"),
     ) in bffi
 
@@ -1652,9 +1652,9 @@ def test_construct_routes_blank_node_role_label_with_typing() -> None:
     )
     bffi = construct_bffi(source)
     [contrib] = list(bffi.objects(EXPECTED_EXPR, V.BFFI.contribution))
-    [role] = list(bffi.objects(contrib, V.BF.role))
+    [role] = list(bffi.objects(contrib, V.BFFI.role))
     # Role is a blank node typed bf:Role with the cataloguer's label
-    assert (role, RDF.type, V.BF.Role) in bffi
+    assert (role, RDF.type, V.BFFI.Role) in bffi
     assert (role, V.RDFS.label, Literal("cembalo")) in bffi
 
 
@@ -1701,7 +1701,7 @@ def test_construct_routes_one_role_per_repeated_agent() -> None:
     assert len(contribs) == 3
     role_labels: set[str] = set()
     for c in contribs:
-        for r in bffi.objects(c, V.BF.role):
+        for r in bffi.objects(c, V.BFFI.role):
             for lab in bffi.objects(r, V.RDFS.label):
                 role_labels.add(str(lab))
     assert role_labels == {"johtaja", "cembalo", "urut"}
@@ -1761,7 +1761,7 @@ def test_post_process_writes_variant_to_sidecar(tmp_path: Path) -> None:
     bffi = construct_bffi(source)
     post_process(bffi, source, contrib_extractor=extractor, variants_sidecar_path=sidecar)
     # No new bf:role triples (variant skipped from Contribution emission).
-    assert list(bffi.triples((None, V.BF.role, None))) == []
+    assert list(bffi.triples((None, V.BFFI.role, None))) == []
     # Sidecar carries the variant claim.
     [claim] = load_variant_claims(sidecar)
     assert claim.helmet_bib_id == "1714651"

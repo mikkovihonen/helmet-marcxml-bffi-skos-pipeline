@@ -178,7 +178,7 @@ def _emit_extracted_contributions(
             bffi_graph.add((expr_uri, V.BFFI.contribution, contrib_node))
             bffi_graph.add((contrib_node, RDF.type, V.BFFI.Contribution))
             bffi_graph.add((contrib_node, V.BFFI.agent, agent_node))
-            bffi_graph.add((contrib_node, V.BF.role, role_uri))
+            bffi_graph.add((contrib_node, V.BFFI.role, role_uri))
             bffi_graph.add((agent_node, RDF.type, V.BFFI.Agent))
             bffi_graph.add((agent_node, RDFS.label, Literal(cand.name)))
 

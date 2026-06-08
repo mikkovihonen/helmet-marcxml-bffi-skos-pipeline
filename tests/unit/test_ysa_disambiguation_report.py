@@ -107,21 +107,21 @@ def test_helmet_bib_ids_extracted_from_canonical() -> None:
     g.add(
         (
             work,
-            V.BF.identifiedBy,
+            V.BFFI.identifiedBy,
             URIRef("http://urn.fi/URN:NBN:fi:bib:graph:ident/helmet/2628274"),
         )
     )
     g.add(
         (
             work,
-            V.BF.identifiedBy,
+            V.BFFI.identifiedBy,
             URIRef("http://urn.fi/URN:NBN:fi:bib:graph:ident/helmet/1690010"),
         )
     )
     g.add(
         (
             work,
-            V.BF.identifiedBy,
+            V.BFFI.identifiedBy,
             URIRef("http://example.org/other-identifier"),  # non-Helmet, skipped
         )
     )
@@ -178,7 +178,7 @@ def _build_residue_graph() -> Graph:
         g.add(
             (
                 work,
-                V.BF.identifiedBy,
+                V.BFFI.identifiedBy,
                 URIRef(f"http://urn.fi/URN:NBN:fi:bib:graph:ident/helmet/{bib_id}"),
             )
         )
@@ -226,7 +226,7 @@ def test_walk_classifies_missed_altlabel_when_exactly_one_candidate() -> None:
     g.add(
         (
             work,
-            V.BF.identifiedBy,
+            V.BFFI.identifiedBy,
             URIRef("http://urn.fi/URN:NBN:fi:bib:graph:ident/helmet/2628274"),
         )
     )
@@ -251,7 +251,7 @@ def test_walk_skips_literals_with_no_disambiguation_candidates() -> None:
     g.add(
         (
             work,
-            V.BF.identifiedBy,
+            V.BFFI.identifiedBy,
             URIRef("http://urn.fi/URN:NBN:fi:bib:graph:ident/helmet/2628274"),
         )
     )

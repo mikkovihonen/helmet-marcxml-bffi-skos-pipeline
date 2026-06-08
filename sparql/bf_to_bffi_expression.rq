@@ -37,32 +37,32 @@ CONSTRUCT {
            skos:prefLabel    ?exprLabel .
   ?otherContrib a bffi:Contribution ;
                 bffi:agent ?otherAgent ;
-                bf:role    ?otherRole .
+                bffi:role  ?otherRole .
   ?otherAgent rdfs:label     ?otherAgentLabel ;
-              bf:identifiedBy ?otherAgentIdent ;
+              bffi:identifiedBy ?otherAgentIdent ;
               bflc:marcKey    ?otherAgentMarcKey .
-  ?otherAgentIdent a         bf:Identifier ;
+  ?otherAgentIdent a         bffi:Identifier ;
                    rdf:value ?otherAgentIdentValue ;
                    bf:source ?otherAgentIdentSource .
-  ?otherAgentIdentSource a   bf:Source ;
-                         bf:code ?otherAgentIdentSourceCode .
-  ?otherRole a         bf:Role ;
+  ?otherAgentIdentSource a   bffi:Source ;
+                         bffi:code ?otherAgentIdentSourceCode .
+  ?otherRole a         bffi:Role ;
              rdfs:label ?otherRoleLabel .
   ?contentType rdfs:label ?contentTypeLabel .
   ?uniformTitleHub a bf:Hub ;
                    bflc:marcKey ?uniformTitleMarcKey ;
-                   bf:title     ?uniformTitleNode ;
+                   bffi:title   ?uniformTitleNode ;
                    bf:language  ?uniformTitleLanguage .
   ?uniformTitleLanguage a       bf:Language ;
                         rdfs:label ?uniformTitleLanguageLabel .
-  ?uniformTitleNode a bf:Title ;
-                    bf:mainTitle  ?uniformMainTitle ;
-                    bf:partNumber ?uniformPartNumber ;
-                    bf:partName   ?uniformPartName .
+  ?uniformTitleNode a bffi:Title ;
+                    bffi:mainTitle  ?uniformMainTitle ;
+                    bffi:partNumber ?uniformPartNumber ;
+                    bffi:partName   ?uniformPartName .
   ?variantTitle a bf:VariantTitle ;
-                bf:mainTitle ?variantMainTitle .
+                bffi:mainTitle ?variantMainTitle .
 }
-# P-36 Phase A: bf:role propagation (URI form for cataloguer $4 +
+# P-36 Phase A: bffi:role propagation (URI form for cataloguer $4 +
 # blank-node-with-rdfs:label form for $e free-text) routes via the
 # inner OPTIONAL inside the non-primary contribution block below.
 # The d040a90 precedent (?primaryAgent rdfs:label inside the

@@ -169,17 +169,27 @@ _COMPONENT_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (V.BFFI.contribution,)
 _LOC_VOCAB_URI_PREFIX: str = "http://id.loc.gov/vocabulary/"
 
 
-#: BIBFRAME subject classes that the round-trip converter routes
-#: on (``rdf:type`` on the subject URI = MARC 6XX tag selector):
-#: ``bf:Place`` → 651, ``bf:Temporal`` → 648, ``bf:Person`` → 600,
-#: ``bf:Organization`` → 610, ``bf:Meeting`` → 611, ``bf:Topic`` → 650.
+#: BFFI subject classes that the round-trip converter routes on
+#: (``rdf:type`` on the subject URI = MARC 6XX tag selector):
+#: ``bffi:Place`` → 651, ``bffi:Temporal`` → 648, ``bffi:Person`` →
+#: 600, ``bffi:Organization`` → 610, ``bffi:Meeting`` → 611,
+#: ``bffi:Topic`` → 650.
+#:
+#: The classes were ``bf:Topic`` / ``bf:Place`` / etc. before P-53
+#: Family 1 (the BFFI-aliased-terms migration). ``docs/lkd.rdf``
+#: declares each as ``owl:equivalentClass`` of its BIBFRAME
+#: counterpart, so the rename is semantics-preserving; the project
+#: prefers ``bffi:*`` consistently because ``bffi:Role``'s
+#: ``bffi-meta:relatedValueVocabulary`` MTS pointers (the precedent
+#: established by the role redesign) require typing role bnodes
+#: under ``bffi:*`` for the contract to be literal in the graph.
 _SUBJECT_TYPING_PREDICATES: tuple[URIRef, ...] = (
-    V.BF.Topic,
-    V.BF.Place,
-    V.BF.Temporal,
-    V.BF.Person,
-    V.BF.Organization,
-    V.BF.Meeting,
+    V.BFFI.Topic,
+    V.BFFI.Place,
+    V.BFFI.Temporal,
+    V.BFFI.Person,
+    V.BFFI.Organization,
+    V.BFFI.Meeting,
 )
 
 
@@ -326,11 +336,11 @@ def _propagate_raw_agent_identifiers(g: Graph, raw_graph: Graph) -> int:
     """
     count = 0
     visited_bnodes: set[BNode] = set()
-    for agent in raw_graph.subjects(V.BF.identifiedBy, None):
+    for agent in raw_graph.subjects(V.BFFI.identifiedBy, None):
         if not (isinstance(agent, URIRef) and str(agent).startswith(_RAW_BIB_URI_PREFIX)):
             continue
-        for ident in raw_graph.objects(agent, V.BF.identifiedBy):
-            g.add((agent, V.BF.identifiedBy, ident))
+        for ident in raw_graph.objects(agent, V.BFFI.identifiedBy):
+            g.add((agent, V.BFFI.identifiedBy, ident))
             count += 1
             # Walk the Identifier blank-node subgraph (rdf:value,
             # bf:source → bf:Source → bf:code) verbatim. Re-uses the
@@ -608,18 +618,19 @@ def _propagate_expressions(
             expr = URIRef(ec.expression_uri)
             g.add((expr, V.BFFI.contribution, contrib_node))
             g.add((contrib_node, RDF.type, V.BFFI.Contribution))
+            # Both role forms can coexist on one Contribution — the
+            # LoC relator URI (from M3's $e → relator enrichment) AND
+            # the free-text bnode-with-label (the cataloguer's original
+            # ``$e`` term, kept alongside the URI so the round-trip can
+            # render both ``$4 <code>`` and ``$e <term>`` on one MARC
+            # row). Parallel ``if`` blocks (not ``if/elif``) — matches
+            # :func:`_propagate_primary_contributions`.
             if ec.role_uri is not None:
-                g.add((contrib_node, V.BF.role, URIRef(ec.role_uri)))
-            elif ec.role_label is not None:
-                # Free-text role from the cataloguer's $e ("johtaja" /
-                # "cembalo" / etc.) — re-emit the marc2bibframe2 shape
-                # `bf:role [a bf:Role; rdfs:label "..."]` so Skosmos
-                # surfaces the cataloguer-supplied role text alongside
-                # any controlled-vocabulary URIs other contributions
-                # carry.
+                g.add((contrib_node, V.BFFI.role, URIRef(ec.role_uri)))
+            if ec.role_label is not None:
                 role_node = BNode(f"erol{digest}")
-                g.add((contrib_node, V.BF.role, role_node))
-                g.add((role_node, RDF.type, V.BF.Role))
+                g.add((contrib_node, V.BFFI.role, role_node))
+                g.add((role_node, RDF.type, V.BFFI.Role))
                 g.add((role_node, V.RDFS.label, Literal(ec.role_label)))
             agent_node: URIRef | BNode
             if ec.agent_uri is not None:
@@ -676,11 +687,11 @@ def _propagate_primary_contributions(
         # ``_collect_role_subs`` finds them on the canonical
         # PrimaryContribution.
         if target.role_uri is not None:
-            g.add((contrib, V.BF.role, URIRef(target.role_uri)))
+            g.add((contrib, V.BFFI.role, URIRef(target.role_uri)))
         if target.role_label is not None:
             role_node = BNode(f"role{digest}")
-            g.add((contrib, V.BF.role, role_node))
-            g.add((role_node, RDF.type, V.BF.Role))
+            g.add((contrib, V.BFFI.role, role_node))
+            g.add((role_node, RDF.type, V.BFFI.Role))
             g.add((role_node, V.RDFS.label, Literal(target.role_label)))
 
 

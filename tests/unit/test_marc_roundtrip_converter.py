@@ -55,7 +55,7 @@ def _build_minimal_graph() -> Graph:
     translator = URIRef("urn:agent/translator")
     g.add((EXPR, V.BFFI.contribution, contrib_trl))
     g.add((contrib_trl, V.BFFI.agent, translator))
-    g.add((contrib_trl, V.BF.role, URIRef("http://id.loc.gov/vocabulary/relators/trl")))
+    g.add((contrib_trl, V.BFFI.role, URIRef("http://id.loc.gov/vocabulary/relators/trl")))
     g.add((translator, V.RDFS.label, Literal("Adrian, Esa")))
 
     # Manifestation
@@ -68,7 +68,7 @@ def _build_minimal_graph() -> Graph:
 
     # ISBN
     isbn = URIRef("urn:isbn/n0")
-    g.add((MANIF, V.BF.identifiedBy, isbn))
+    g.add((MANIF, V.BFFI.identifiedBy, isbn))
     g.add((isbn, RDF.type, V.BF.Isbn))
     g.add((isbn, RDF.value, Literal("9789511440932")))
 
@@ -235,7 +235,7 @@ def test_leader_pos05_reflects_record_status_from_admin_metadata() -> None:
     g = _build_minimal_graph()
     admin = BNode()
     g.add((MANIF, V.BFFI.adminMetadata, admin))
-    g.add((admin, V.BF.status, URIRef("http://id.loc.gov/vocabulary/mstatus/c")))
+    g.add((admin, V.BFFI.status, URIRef("http://id.loc.gov/vocabulary/mstatus/c")))
     rec = reconstruct_marc(g, MANIF)
     leader = rec.element.find("m:leader", NS)
     assert leader is not None and leader.text is not None
@@ -811,6 +811,12 @@ def test_700_emits_translator_added_entry(minimal_record: ET.Element) -> None:
     assert df is not None
     assert df.attrib["ind1"] == "1"
     assert _subfield(df, "a") == "Adrian, Esa"
+    # ``minimal_record`` puts a LoC ``<relators/trl>`` URI on the
+    # role — that's the source-``$4`` case (cataloguer wrote
+    # ``$4 trl`` in MARC, marc2bibframe2 lifted it to the URI). The
+    # round-trip still emits ``$4`` from such LoC URIs. Per L-07,
+    # only the M3-enrichment-derived ``$4`` (LoC URI synthesised
+    # from ``$e``) was removed.
     assert _subfield(df, "4") == "trl"
 
 
@@ -859,7 +865,7 @@ def test_700_emits_relator_term_e_from_freetext_role_label(tmp_path) -> None:
     g.add((expr, V.BFFI.contribution, contrib))
     g.add((contrib, V.BFFI.agent, agent))
     g.add((agent, V.RDFS.label, Literal("Adrian, Esa")))
-    g.add((contrib, V.BF.role, role_node))
+    g.add((contrib, V.BFFI.role, role_node))
     g.add((role_node, V.RDFS.label, Literal("kääntäjä", lang="fi")))
 
     rec = reconstruct_marc(g, manif)
@@ -897,27 +903,31 @@ def test_700_dedups_e_when_both_uri_and_bnode_label_present() -> None:
     g.add((expr, V.BFFI.contribution, contrib))
     g.add((contrib, V.BFFI.agent, agent))
     g.add((agent, V.RDFS.label, Literal("Adrian, Esa")))
-    g.add((contrib, V.BF.role, role_bnode))
+    g.add((contrib, V.BFFI.role, role_bnode))
     g.add((role_bnode, V.RDFS.label, Literal("kirjoittaja", lang="fi")))
-    g.add((contrib, V.BF.role, role_uri))
+    g.add((contrib, V.BFFI.role, role_uri))
     # LoC label that the converter would otherwise pick as fallback
     g.add((role_uri, SKOS.prefLabel, Literal("tekijä", lang="fi")))
 
     rec = reconstruct_marc(g, manif)
     df = rec.element.find("m:datafield[@tag='700']", NS)
     assert df is not None
-    # $4 comes from the URI tail.
+    # The LoC URI on the role is the source-``$4`` case (cataloguer
+    # wrote ``$4 aut`` in MARC); the round-trip still emits ``$4``
+    # for that case. ``$e`` is the BNode label (cataloguer's
+    # original word) — NOT the URI's ``@fi`` prefLabel "tekijä".
     assert _subfield(df, "4") == "aut"
-    # $e is the BNode label (cataloguer's original word) — NOT the
-    # LoC vocab's @fi prefLabel "tekijä".
     e_values = [sf.text for sf in df.findall("m:subfield", NS) if sf.attrib.get("code") == "e"]
     assert e_values == ["kirjoittaja"]
 
 
 def test_100_emits_e_and_4_from_primary_contribution_role() -> None:
-    """MARC 100 ``$e`` (primary creator relator term) must be
-    reconstructed on the round-trip when the BFFI graph carries a
-    ``bf:role`` on the primary contribution — same shape as 700."""
+    """MARC 100 ``$e`` (primary creator relator term) and ``$4``
+    code must be reconstructed when the BFFI graph carries the
+    source-MARC LoC URI on ``bffi:role`` for the primary
+    contribution — same shape as 700. Only enrichment-derived
+    ``$4`` was removed in the redesign; source-``$4`` survives
+    via the LoC-namespace branch of ``_collect_role_subs``."""
     g = Graph()
     work = URIRef("urn:work/P")
     expr = URIRef("urn:expr/P")
@@ -938,12 +948,12 @@ def test_100_emits_e_and_4_from_primary_contribution_role() -> None:
     g.add((contrib, RDF.type, V.BFFI.PrimaryContribution))
     g.add((contrib, V.BFFI.agent, agent))
     g.add((agent, V.RDFS.label, Literal("Krohn, Aino")))
-    g.add((contrib, V.BF.role, role_bnode))
+    g.add((contrib, V.BFFI.role, role_bnode))
     g.add((role_bnode, V.RDFS.label, Literal("kirjoittaja", lang="fi")))
     g.add(
         (
             contrib,
-            V.BF.role,
+            V.BFFI.role,
             URIRef("http://id.loc.gov/vocabulary/relators/aut"),
         )
     )
@@ -953,6 +963,8 @@ def test_100_emits_e_and_4_from_primary_contribution_role() -> None:
     assert df is not None
     assert _subfield(df, "a") == "Krohn, Aino"
     assert _subfield(df, "e") == "kirjoittaja"
+    # LoC URI is present (source had ``$4 aut``); round-trip
+    # preserves the code.
     assert _subfield(df, "4") == "aut"
 
 
@@ -1096,11 +1108,11 @@ def test_240_prefers_structured_part_number_and_part_name() -> None:
     # Structured: bf:Title with explicit bf:partNumber + bf:partName
     # (the marc2bibframe2 path that emits these alongside marcKey).
     title_node = BNode()
-    g.add((hub, V.BF.title, title_node))
-    g.add((title_node, RDF.type, V.BF.Title))
-    g.add((title_node, V.BF.mainTitle, Literal("Grandissimi. 2, Leonardo da Vincei")))
-    g.add((title_node, V.BF.partNumber, Literal("2,")))
-    g.add((title_node, V.BF.partName, Literal("Leonardo da Vincei, genio senza tempo.")))
+    g.add((hub, V.BFFI.title, title_node))
+    g.add((title_node, RDF.type, V.BFFI.Title))
+    g.add((title_node, V.BFFI.mainTitle, Literal("Grandissimi. 2, Leonardo da Vincei")))
+    g.add((title_node, V.BFFI.partNumber, Literal("2,")))
+    g.add((title_node, V.BFFI.partName, Literal("Leonardo da Vincei, genio senza tempo.")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='240']", NS)
     assert df is not None
@@ -1131,7 +1143,7 @@ def test_246_emits_variant_title_from_bf_VariantTitle() -> None:
     g.add(
         (
             variant,
-            V.BF.mainTitle,
+            V.BFFI.mainTitle,
             Literal("Leonardo da Vino : genij na vse vremena"),
         )
     )
@@ -1183,15 +1195,16 @@ def test_264_ind2_for_manufacture_provision_activity() -> None:
     assert df.attrib["ind2"] == "3"
 
 
-def test_648_routing_from_bf_temporal_rdf_type_on_subject() -> None:
+def test_648_routing_from_bffi_temporal_rdf_type_on_subject() -> None:
     """A cataloguer-typed ``$0 http://www.yso.fi/onto/yso/p…`` URI
-    on source MARC 648 lands as ``<bf:Temporal rdf:about="…">``
-    in BIBFRAME. M3 routes ``a bf:Temporal`` to canonical; the
-    converter reads the type and emits 648 (not the default 650)."""
+    on source MARC 648 lands as ``<bf:Temporal rdf:about="…">`` in
+    BIBFRAME; M3's CONSTRUCT then maps it to ``a bffi:Temporal``
+    on canonical (P-53 Family 1). The converter reads the BFFI
+    type and emits 648 (not the default 650)."""
     g = _build_minimal_graph()
     temporal = URIRef("http://www.yso.fi/onto/yso/p6140061499")
     g.add((WORK, V.BFFI.subject, temporal))
-    g.add((temporal, RDF.type, V.BF.Temporal))
+    g.add((temporal, RDF.type, V.BFFI.Temporal))
     g.add((temporal, V.RDFS.label, Literal("1400-luku")))
     rec = reconstruct_marc(g, MANIF)
     rows = [
@@ -1202,15 +1215,16 @@ def test_648_routing_from_bf_temporal_rdf_type_on_subject() -> None:
     assert len(rows) == 1
 
 
-def test_651_routing_from_bf_place_rdf_type_on_subject() -> None:
+def test_651_routing_from_bffi_place_rdf_type_on_subject() -> None:
     """The Iso-Britannia / b26164413 case: plain ``yso/p104990``
-    URI on a source 651 lands as ``<bf:Place rdf:about="…">``.
-    The converter routes to 651 via the ``a bf:Place`` typing
-    (not via URI namespace — plain yso/ has no geographic hint)."""
+    URI on a source 651 lands as ``<bf:Place rdf:about="…">``,
+    mapped to ``a bffi:Place`` by M3 (P-53 Family 1). The converter
+    routes to 651 via the ``a bffi:Place`` typing (not via URI
+    namespace — plain yso/ has no geographic hint)."""
     g = _build_minimal_graph()
     place = URIRef("http://www.yso.fi/onto/yso/p104990")
     g.add((WORK, V.BFFI.subject, place))
-    g.add((place, RDF.type, V.BF.Place))
+    g.add((place, RDF.type, V.BFFI.Place))
     g.add((place, V.RDFS.label, Literal("Iso-Britannia")))
     rec = reconstruct_marc(g, MANIF)
     rows = [
@@ -1424,7 +1438,7 @@ def test_028_emits_audio_issue_number() -> None:
     Manifestation pointing to a bf:AudioIssueNumber → 028 $a, ind1=0."""
     g = _build_minimal_graph()
     issue = BNode()
-    g.add((MANIF, V.BF.identifiedBy, issue))
+    g.add((MANIF, V.BFFI.identifiedBy, issue))
     g.add((issue, RDF.type, V.BF.AudioIssueNumber))
     g.add((issue, RDF.value, Literal("AM950224")))
     rec = reconstruct_marc(g, MANIF)
@@ -1772,8 +1786,8 @@ def test_730_falls_back_to_mainTitle_split_when_no_marcKey() -> None:
     g.add((rel, RDF.type, V.BFFI.Relation))
     g.add((rel, V.BFFI.associatedResource, hub))
     g.add((hub, RDF.type, V.BF.Hub))
-    g.add((hub, V.BF.title, title))
-    g.add((title, V.BF.mainTitle, Literal("Fame / Gore, Michael")))
+    g.add((hub, V.BFFI.title, title))
+    g.add((title, V.BFFI.mainTitle, Literal("Fame / Gore, Michael")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='730']", NS)
     assert df is not None
@@ -1806,10 +1820,10 @@ def test_730_prefers_structured_part_number_and_part_name() -> None:
         )
     )
     title = BNode()
-    g.add((hub, V.BF.title, title))
-    g.add((title, RDF.type, V.BF.Title))
-    g.add((title, V.BF.partNumber, Literal("Nro 3")))
-    g.add((title, V.BF.partName, Literal("D-duuri")))
+    g.add((hub, V.BFFI.title, title))
+    g.add((title, RDF.type, V.BFFI.Title))
+    g.add((title, V.BFFI.partNumber, Literal("Nro 3")))
+    g.add((title, V.BFFI.partName, Literal("D-duuri")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='730']", NS)
     assert df is not None
@@ -1830,8 +1844,8 @@ def test_730_emits_a_only_when_mainTitle_has_no_responsibility() -> None:
     g.add((MANIF, V.BFFI.relation, rel))
     g.add((rel, V.BFFI.associatedResource, hub))
     g.add((hub, RDF.type, V.BF.Hub))
-    g.add((hub, V.BF.title, title))
-    g.add((title, V.BF.mainTitle, Literal("Standalone Title")))
+    g.add((hub, V.BFFI.title, title))
+    g.add((title, V.BFFI.mainTitle, Literal("Standalone Title")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='730']", NS)
     assert df is not None
@@ -1875,8 +1889,8 @@ def test_730_emits_multiple_hubs_with_ranked_lineage() -> None:
         g.add((MANIF, V.BFFI.relation, rel))
         g.add((rel, V.BFFI.associatedResource, hub))
         g.add((hub, RDF.type, V.BF.Hub))
-        g.add((hub, V.BF.title, title))
-        g.add((title, V.BF.mainTitle, Literal(song)))
+        g.add((hub, V.BFFI.title, title))
+        g.add((title, V.BFFI.mainTitle, Literal(song)))
     rec = reconstruct_marc(g, MANIF)
     rows = rec.element.findall("m:datafield[@tag='730']", NS)
     assert len(rows) == 3
@@ -1902,8 +1916,8 @@ def test_740_emits_from_bf_work_associatedResource() -> None:
     g.add((MANIF, V.BFFI.relation, rel))
     g.add((rel, V.BFFI.associatedResource, related_work))
     g.add((related_work, RDF.type, V.BF.Work))
-    g.add((related_work, V.BF.title, title))
-    g.add((title, V.BF.mainTitle, Literal("Kartor och gatunamnen")))
+    g.add((related_work, V.BFFI.title, title))
+    g.add((title, V.BFFI.mainTitle, Literal("Kartor och gatunamnen")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='740']", NS)
     assert df is not None
@@ -1926,14 +1940,14 @@ def test_740_and_730_both_emit_from_same_record() -> None:
     g.add((MANIF, V.BFFI.relation, rel_hub))
     g.add((rel_hub, V.BFFI.associatedResource, hub))
     g.add((hub, RDF.type, V.BF.Hub))
-    g.add((hub, V.BF.title, hub_title))
-    g.add((hub_title, V.BF.mainTitle, Literal("Fame / Gore, Michael")))
+    g.add((hub, V.BFFI.title, hub_title))
+    g.add((hub_title, V.BFFI.mainTitle, Literal("Fame / Gore, Michael")))
     rel_work = BNode()
     g.add((MANIF, V.BFFI.relation, rel_work))
     g.add((rel_work, V.BFFI.associatedResource, related_work))
     g.add((related_work, RDF.type, V.BF.Work))
-    g.add((related_work, V.BF.title, work_title))
-    g.add((work_title, V.BF.mainTitle, Literal("Pääkaupunkiseutu")))
+    g.add((related_work, V.BFFI.title, work_title))
+    g.add((work_title, V.BFFI.mainTitle, Literal("Pääkaupunkiseutu")))
     rec = reconstruct_marc(g, MANIF)
     df_730 = rec.element.find("m:datafield[@tag='730']", NS)
     df_740 = rec.element.find("m:datafield[@tag='740']", NS)
@@ -1958,12 +1972,12 @@ def test_710_emits_asteri_id_in_dollar0_with_source_code_prefix() -> None:
     g.add((EXPR, V.BFFI.contribution, contrib))
     g.add((contrib, V.BFFI.agent, agent))
     g.add((agent, V.RDFS.label, Literal("Otava, kustannusosakeyhtiö")))
-    g.add((agent, V.BF.identifiedBy, ident))
-    g.add((ident, RDF.type, V.BF.Identifier))
+    g.add((agent, V.BFFI.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BFFI.Identifier))
     g.add((ident, RDF.value, Literal("000039084 ")))  # trailing space
     g.add((ident, V.BF.source, source))
-    g.add((source, RDF.type, V.BF.Source))
-    g.add((source, V.BF.code, Literal("FI-ASTERI-N")))
+    g.add((source, RDF.type, V.BFFI.Source))
+    g.add((source, V.BFFI.code, Literal("FI-ASTERI-N")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='710']", NS)
     assert df is not None
@@ -1980,11 +1994,11 @@ def test_100_emits_asteri_id_on_primary_contribution() -> None:
     # an ASTERI identifier.
     ident = BNode()
     source = BNode()
-    g.add((AGENT, V.BF.identifiedBy, ident))
-    g.add((ident, RDF.type, V.BF.Identifier))
+    g.add((AGENT, V.BFFI.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BFFI.Identifier))
     g.add((ident, RDF.value, Literal("000123456")))
     g.add((ident, V.BF.source, source))
-    g.add((source, V.BF.code, Literal("FI-ASTERI-N")))
+    g.add((source, V.BFFI.code, Literal("FI-ASTERI-N")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='100']", NS)
     assert df is not None
@@ -2002,7 +2016,7 @@ def test_700_emits_dollar0_value_only_when_source_code_absent() -> None:
     g.add((EXPR, V.BFFI.contribution, contrib))
     g.add((contrib, V.BFFI.agent, agent))
     g.add((agent, V.RDFS.label, Literal("Some Agent")))
-    g.add((agent, V.BF.identifiedBy, ident))
+    g.add((agent, V.BFFI.identifiedBy, ident))
     g.add((ident, RDF.value, Literal("bare-id")))
     rec = reconstruct_marc(g, MANIF)
     df = next(
@@ -2023,10 +2037,10 @@ def test_020_emits_q_qualifier_when_isbn_carries_one() -> None:
     in Helmet's Finnish cataloguing)."""
     g = _build_minimal_graph()
     isbn = URIRef("urn:isbn/withq")
-    g.add((MANIF, V.BF.identifiedBy, isbn))
+    g.add((MANIF, V.BFFI.identifiedBy, isbn))
     g.add((isbn, RDF.type, V.BF.Isbn))
     g.add((isbn, RDF.value, Literal("9510066966")))
-    g.add((isbn, V.BF.qualifier, Literal("pehmeäkantinen")))
+    g.add((isbn, V.BFFI.qualifier, Literal("pehmeäkantinen")))
     rec = reconstruct_marc(g, MANIF)
     df = next(
         df
@@ -2084,7 +2098,7 @@ def test_040_emits_source_a_b_e_from_admin_metadata() -> None:
     g.add((MANIF, V.BFFI.adminMetadata, admin))
     g.add((admin, RDF.type, V.BFFI.AdminMetadata))
     g.add((admin, V.BF.agent, agent))
-    g.add((agent, V.BF.code, Literal("FI-BTJ")))
+    g.add((agent, V.BFFI.code, Literal("FI-BTJ")))
     g.add(
         (
             admin,
@@ -2128,13 +2142,13 @@ def test_035_emits_from_loc_organizations_uri_assigner() -> None:
     Converter reverse-derives ``FI-MELINDA`` via the curated table."""
     g = _build_minimal_graph()
     ident = BNode()
-    g.add((MANIF, V.BF.identifiedBy, ident))
-    g.add((ident, RDF.type, V.BF.Local))
+    g.add((MANIF, V.BFFI.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BFFI.Local))
     g.add((ident, RDF.value, Literal("006644447")))
     g.add(
         (
             ident,
-            V.BF.assigner,
+            V.BFFI.assigner,
             URIRef("http://id.loc.gov/vocabulary/organizations/fimelinda"),
         )
     )
@@ -2150,12 +2164,12 @@ def test_035_emits_from_agent_bnode_assigner_with_bf_code() -> None:
     g = _build_minimal_graph()
     ident = BNode()
     agent = BNode()
-    g.add((MANIF, V.BF.identifiedBy, ident))
-    g.add((ident, RDF.type, V.BF.Local))
+    g.add((MANIF, V.BFFI.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BFFI.Local))
     g.add((ident, RDF.value, Literal("7247969")))
-    g.add((ident, V.BF.assigner, agent))
-    g.add((agent, RDF.type, V.BF.Agent))
-    g.add((agent, V.BF.code, Literal("FI-BTJ")))
+    g.add((ident, V.BFFI.assigner, agent))
+    g.add((agent, RDF.type, V.BFFI.Agent))
+    g.add((agent, V.BFFI.code, Literal("FI-BTJ")))
     rec = reconstruct_marc(g, MANIF)
     df = rec.element.find("m:datafield[@tag='035']", NS)
     assert df is not None
@@ -2168,8 +2182,8 @@ def test_035_does_not_emit_for_helmet_bib_id_local() -> None:
     Must not surface as 035 (that's 001 controlfield territory)."""
     g = _build_minimal_graph()
     ident = BNode()
-    g.add((MANIF, V.BF.identifiedBy, ident))
-    g.add((ident, RDF.type, V.BF.Local))
+    g.add((MANIF, V.BFFI.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BFFI.Local))
     g.add((ident, RDF.value, Literal("b13511105")))
     g.add((ident, V.BF.source, URIRef("http://urn.fi/URN:NBN:fi:bib:source:helmet")))
     rec = reconstruct_marc(g, MANIF)
@@ -2181,13 +2195,13 @@ def test_035_falls_back_to_uppercased_uri_tail_for_unknown_org() -> None:
     the tail rather than dropping the row entirely."""
     g = _build_minimal_graph()
     ident = BNode()
-    g.add((MANIF, V.BF.identifiedBy, ident))
-    g.add((ident, RDF.type, V.BF.Local))
+    g.add((MANIF, V.BFFI.identifiedBy, ident))
+    g.add((ident, RDF.type, V.BFFI.Local))
     g.add((ident, RDF.value, Literal("99999")))
     g.add(
         (
             ident,
-            V.BF.assigner,
+            V.BFFI.assigner,
             URIRef("http://id.loc.gov/vocabulary/organizations/zzunknown"),
         )
     )
@@ -2236,7 +2250,7 @@ def test_700_emits_separate_a_and_d_from_marcKey_on_added_entry() -> None:
     )
     # Add a role separately (via bf:role blank node, like M3 emits).
     role = BNode()
-    g.add((contrib, V.BF.role, role))
+    g.add((contrib, V.BFFI.role, role))
     g.add((role, V.RDFS.label, Literal("kirjoittaja")))
     rec = reconstruct_marc(g, MANIF)
     df = next(

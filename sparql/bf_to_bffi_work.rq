@@ -54,15 +54,15 @@ CONSTRUCT {
                bffi-prov:fromMarcField ?subjectStmtToken .
   ?contrib a               bffi:PrimaryContribution ;
            bffi:agent      ?primaryAgent ;
-           bf:role         ?primaryRole .
+           bffi:role       ?primaryRole .
   ?primaryAgent rdfs:label   ?primaryAgentLabel ;
-                bf:identifiedBy ?primaryAgentIdent .
-  ?primaryAgentIdent a       bf:Identifier ;
+                bffi:identifiedBy ?primaryAgentIdent .
+  ?primaryAgentIdent a       bffi:Identifier ;
                      rdf:value  ?primaryAgentIdentValue ;
                      bf:source  ?primaryAgentIdentSource .
-  ?primaryAgentIdentSource a  bf:Source ;
-                           bf:code ?primaryAgentIdentSourceCode .
-  ?primaryRole  a          bf:Role ;
+  ?primaryAgentIdentSource a  bffi:Source ;
+                           bffi:code ?primaryAgentIdentSourceCode .
+  ?primaryRole  a          bffi:Role ;
                 rdfs:label ?primaryRoleLabel .
   # P-36 Phase C: route ``rdfs:label`` for subjects and genreForms.
   # Labels go on ``?bfSubject`` (the source subject node), NOT on
@@ -75,7 +75,7 @@ CONSTRUCT {
   # here so Skosmos can resolve them from Finto at render time.
   ?bfSubject rdfs:label  ?subjectLabel ;
              bflc:marcKey ?subjectMarcKey .
-  ?subject a ?subjectMarcType .
+  ?subject a ?bffiSubjectMarcType .
   ?primaryAgent bflc:marcKey ?primaryAgentMarcKey .
   ?workGenre rdfs:label ?workGenreLabel .
   # Music medium (MARC 382): one canonical URI per MediumOfPerformance
@@ -265,8 +265,12 @@ WHERE {
     # the post-M3 relator-term enrichment pass
     # (:mod:`bffi_pipeline.stages.m3.relator_term_enrichment`)
     # looks up the label in the curated MARC-FI ⇆ LoC table and
-    # adds a sibling `bf:role <relators/CODE>` URI when matched,
-    # so the round-trip converter emits both 100 $4 + $e.
+    # adds a sibling ``bffi:role <relators/CODE>`` URI when
+    # matched, so the round-trip converter emits both 100 $4 + $e.
+    # marc2bibframe2's input predicate is ``bf:role``; we read it
+    # here and re-emit on the CONSTRUCT side as ``bffi:role`` (the
+    # BFFI-equivalent property; ``bffi:Contribution`` and the role
+    # range ``bffi:Role`` are the matching domain/range pair).
     OPTIONAL {
       ?c bf:role ?primaryRole .
       OPTIONAL { ?primaryRole rdfs:label ?primaryRoleLabel }
@@ -294,18 +298,28 @@ WHERE {
     # concatenation bug.
     OPTIONAL { ?bfSubject bflc:marcKey ?subjectMarcKey }
     # Route the subject's ``rdf:type`` so the round-trip converter
-    # can pick MARC 648 (bf:Temporal), 651 (bf:Place), 600
-    # (bf:Person), 610 (bf:Organization), 611 (bf:Meeting), or 650
-    # (bf:Topic / default) from typed cataloguer ``$0`` URIs that
-    # don't carry namespace hints. Filtered to the BIBFRAME classes
-    # the converter routes on; everything else (madsrdf:Topic,
-    # owl:Thing, …) is uninteresting noise for round-trip.
+    # can pick MARC 648 (bffi:Temporal), 651 (bffi:Place), 600
+    # (bffi:Person), 610 (bffi:Organization), 611 (bffi:Meeting),
+    # or 650 (bffi:Topic / default) from typed cataloguer ``$0``
+    # URIs that don't carry namespace hints. The ``VALUES`` block
+    # also maps each BIBFRAME-side class (as marc2bibframe2 emits
+    # it on the source ?bfSubject) to its BFFI-side counterpart so
+    # the CONSTRUCT ?subject a ?bffiSubjectMarcType emits the
+    # ``bffi:*`` form on the canonical (P-53 Family 1; the BFFI
+    # classes are ``owl:equivalentClass`` of their BIBFRAME
+    # counterparts per ``docs/lkd.rdf``). Everything outside this
+    # mapping (``madsrdf:Topic`` / ``owl:Thing`` / etc.) is
+    # uninteresting noise for the round-trip and stays unbound.
     OPTIONAL {
+      VALUES (?subjectMarcType ?bffiSubjectMarcType) {
+        (bf:Topic        bffi:Topic)
+        (bf:Place        bffi:Place)
+        (bf:Temporal     bffi:Temporal)
+        (bf:Person       bffi:Person)
+        (bf:Organization bffi:Organization)
+        (bf:Meeting      bffi:Meeting)
+      }
       ?bfSubject a ?subjectMarcType .
-      FILTER(?subjectMarcType IN (
-        bf:Topic, bf:Place, bf:Temporal,
-        bf:Person, bf:Organization, bf:Meeting
-      ))
     }
     BIND(COALESCE(?bfSubjectAuth, ?bfSubject) AS ?subject)
     # P-36 Phase C: route the cataloguer-supplied label off ?bfSubject

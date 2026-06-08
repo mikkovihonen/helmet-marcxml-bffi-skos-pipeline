@@ -131,10 +131,10 @@ def test_translator_e_role_round_trips_through_m2_m3(corpus_path: Path) -> None:
     assert contribs, "expected at least one bffi:Contribution for 10000001"
     role_labels: set[str] = set()
     for contrib in contribs:
-        for role in g.objects(contrib, V.BF.role):
+        for role in g.objects(contrib, V.BFFI.role):
             if not isinstance(role, BNode):
                 continue
-            assert (role, RDF.type, V.BF.Role) in g, (
+            assert (role, RDF.type, V.BFFI.Role) in g, (
                 f"role blank node {role} missing a bf:Role typing"
             )
             for lab in g.objects(role, RDFS.label):

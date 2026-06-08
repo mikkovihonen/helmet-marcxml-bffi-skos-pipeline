@@ -89,6 +89,14 @@ def _find_root_resources(g: Graph) -> tuple[URIRef, URIRef]:
 
 def _add_helmet_identifier(g: Graph, target: URIRef, helmet_id: str) -> None:
     ident = BNode()
+    # M2 enriches the BIBFRAME-side graph that marc2bibframe2 produced.
+    # The predicate + identifier-class are the BIBFRAME-namespace forms
+    # (``bf:identifiedBy`` / ``bf:Local`` / ``bf:source``) so M2's
+    # additions stay shape-consistent with the rest of the graph M3
+    # SPARQL CONSTRUCTs read from. M3 maps to the ``bffi:*`` aliases on
+    # emit. See ``docs/plans/in-progress/p-53-bffi-aliased-terms-migration.md``
+    # — the M2 → M3 boundary is the BIBFRAME-to-BFFI transition; M2 stays
+    # on the BIBFRAME side of that boundary.
     g.add((target, V.BF.identifiedBy, ident))
     g.add((ident, RDF.type, V.BF.Local))
     g.add((ident, RDF.value, Literal(helmet_id)))

@@ -34,10 +34,10 @@ CONSTRUCT {
             a                          ?issuanceManifSubclass ;
             a                          ?carrierManifSubclass ;
             bffi:expressionManifested  ?exprURI ;
-            bf:identifiedBy            ?ident ;
-            bf:identifiedBy            ?isbn ;
-            bf:identifiedBy            ?audIssue ;
-            bf:identifiedBy            ?sysCtrl ;
+            bffi:identifiedBy          ?ident ;
+            bffi:identifiedBy          ?isbn ;
+            bffi:identifiedBy          ?audIssue ;
+            bffi:identifiedBy          ?sysCtrl ;
             dct:identifier             ?helmetBibIdLiteral ;
             bf:issuance                ?issuance ;
             bffi:media                 ?mediaURI ;
@@ -70,32 +70,32 @@ CONSTRUCT {
               bffi:descriptionConventions ?descConvURI ;
               bffi:changeDate             ?transactionDate ;
               bffi:encodingLevel          ?sourceEncodingLevel ;
-              bf:status                   ?recordStatus .
-  ?adminAgent a bf:Agent ;
-              bf:code ?adminAgencyCode .
+              bffi:status                 ?recordStatus .
+  ?adminAgent a bffi:Agent ;
+              bffi:code ?adminAgencyCode .
   ?bfToc   a               bffi:TableOfContents ;
            rdfs:label      ?tocLabel .
   ?hubRel  a                       bffi:Relation ;
            bffi:relationship       ?hubRelationship ;
            bffi:associatedResource ?bfHub .
   ?bfHub   a               bf:Hub ;
-           bf:title        ?bfHubTitle ;
+           bffi:title      ?bfHubTitle ;
            bflc:marcKey    ?hubMarcKey .
-  ?bfHubTitle bf:mainTitle  ?hubMainTitle ;
-              bf:partNumber ?hubPartNumber ;
-              bf:partName   ?hubPartName .
+  ?bfHubTitle bffi:mainTitle  ?hubMainTitle ;
+              bffi:partNumber ?hubPartNumber ;
+              bffi:partName   ?hubPartName .
   ?relWorkRel a                    bffi:Relation ;
               bffi:relationship    ?relWorkRelationship ;
               bffi:associatedResource ?relWork .
   ?relWork    a               bf:Work ;
-              bf:title        ?relWorkTitle ;
+              bffi:title      ?relWorkTitle ;
               bflc:marcKey    ?relWorkMarcKey .
-  ?relWorkTitle bf:mainTitle  ?relWorkMainTitle ;
-                bf:partNumber ?relWorkPartNumber ;
-                bf:partName   ?relWorkPartName .
+  ?relWorkTitle bffi:mainTitle  ?relWorkMainTitle ;
+                bffi:partNumber ?relWorkPartNumber ;
+                bffi:partName   ?relWorkPartName .
   ?extent  rdfs:label    ?extentLabel ;
            bf:note       ?extentNote .
-  ?extentNote a          bf:Note ;
+  ?extentNote a          bffi:Note ;
               rdf:type   ?extentNoteType ;
               rdfs:label ?extentNoteLabel .
   ?provisionActivity a   ?provisionActivityType ;
@@ -105,20 +105,20 @@ CONSTRUCT {
                      bflc:marcKey     ?provisionMarcKey ;
                      bf:date          ?provisionTypedDate ;
                      bf:place         ?provisionTypedPlace .
-  ?instanceNote a        bf:Note ;
+  ?instanceNote a        bffi:Note ;
                 rdf:type ?instanceNoteType ;
                 rdfs:label ?instanceNoteLabel .
-  ?ident   a               bf:Local ;
+  ?ident   a               bffi:Local ;
            rdf:value       ?identValue ;
            bf:source       ?identSource .
   ?isbn    a               bf:Isbn ;
            rdf:value       ?isbnValue ;
-           bf:qualifier    ?isbnQualifier .
-  ?sysCtrl a               bf:Local ;
+           bffi:qualifier  ?isbnQualifier .
+  ?sysCtrl a               bffi:Local ;
            rdf:value       ?sysCtrlValue ;
-           bf:assigner     ?sysCtrlAssigner .
-  ?sysCtrlAgent a          bf:Agent ;
-                bf:code    ?sysCtrlAgentCode .
+           bffi:assigner   ?sysCtrlAssigner .
+  ?sysCtrlAgent a          bffi:Agent ;
+                bffi:code  ?sysCtrlAgentCode .
   ?audIssue a              bf:AudioIssueNumber ;
             rdf:value      ?audIssueValue .
   ?seriesNode a            bf:Series ;

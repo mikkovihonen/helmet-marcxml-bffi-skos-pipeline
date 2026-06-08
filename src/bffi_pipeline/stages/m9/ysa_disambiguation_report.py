@@ -182,7 +182,7 @@ def _helmet_bib_ids_for_work(graph: Graph, work: URIRef) -> list[str]:
     be updated.
     """
     ids: list[str] = []
-    for ident in graph.objects(work, V.BF.identifiedBy):
+    for ident in graph.objects(work, V.BFFI.identifiedBy):
         if not isinstance(ident, URIRef):
             continue
         s = str(ident)

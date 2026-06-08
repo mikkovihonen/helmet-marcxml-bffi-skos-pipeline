@@ -168,18 +168,22 @@ _URI_NAMESPACE_TO_MARC_SOURCE: Final[dict[str, str]] = {
 }
 
 
-#: BIBFRAME subject-class ``rdf:type`` → MARC 6XX tag. Used by the
+#: BFFI subject-class ``rdf:type`` → MARC 6XX tag. Used by the
 #: round-trip converter's ``_subject_marc_tag`` to route cataloguer-
 #: typed ``$0`` URIs whose namespace alone doesn't reveal the
-#: subject kind (the plain ``yso/`` URI case — `bf:Place rdf:about`
-#: typing is the discriminator).
+#: subject kind (the plain ``yso/`` URI case — ``bffi:Place
+#: rdf:about`` typing is the discriminator).
+#:
+#: The classes are ``bffi:*`` after P-53 Family 1 (the
+#: BFFI-aliased-terms migration). ``docs/lkd.rdf`` declares each
+#: ``owl:equivalentClass`` of its BIBFRAME counterpart.
 _SUBJECT_TYPE_TO_MARC_6XX_TAG: Final[dict[URIRef, str]] = {
-    V.BF.Person: "600",
-    V.BF.Organization: "610",
-    V.BF.Meeting: "611",
-    V.BF.Temporal: "648",
-    V.BF.Place: "651",
-    V.BF.Topic: "650",
+    V.BFFI.Person: "600",
+    V.BFFI.Organization: "610",
+    V.BFFI.Meeting: "611",
+    V.BFFI.Temporal: "648",
+    V.BFFI.Place: "651",
+    V.BFFI.Topic: "650",
 }
 
 #: BIBFRAME bf:ProvisionActivity subclass tail → MARC 264 ind2.
@@ -567,7 +571,7 @@ class _Reconstructor:
         """
         mstatus_prefix = "http://id.loc.gov/vocabulary/mstatus/"
         for admin in self.graph.objects(self.manifestation, V.BFFI.adminMetadata):
-            for status in self.graph.objects(admin, V.BF.status):
+            for status in self.graph.objects(admin, V.BFFI.status):
                 if not isinstance(status, URIRef):
                     continue
                 s = str(status)
@@ -864,7 +868,7 @@ class _Reconstructor:
         # bf:identifiedBy → bf:Isbn → rdf:value on the Manifestation.
         # Plus ``bf:qualifier`` (MARC 020 $q, "kovakantinen" /
         # "nidottu" / "pehmeäkantinen") when the cataloguer typed one.
-        for ident in self.graph.objects(self.manifestation, V.BF.identifiedBy):
+        for ident in self.graph.objects(self.manifestation, V.BFFI.identifiedBy):
             types = set(self.graph.objects(ident, RDF.type))
             if V.BF.Isbn not in types:
                 continue
@@ -872,7 +876,7 @@ class _Reconstructor:
                 if not isinstance(value, Literal):
                     continue
                 subs: list[tuple[str, str]] = [("a", str(value))]
-                for qual in self.graph.objects(ident, V.BF.qualifier):
+                for qual in self.graph.objects(ident, V.BFFI.qualifier):
                     if isinstance(qual, Literal):
                         subs.append(("q", str(qual)))
                 self._emit_datafield(record, "020", *subs, lineage=self._lineage_token(ident))
@@ -885,7 +889,7 @@ class _Reconstructor:
         # cataloguer choice for audio; ind2=1 ("number, no note") is
         # the common Helmet choice but we drop to blank since we don't
         # carry that flag through.
-        for ident in self.graph.objects(self.manifestation, V.BF.identifiedBy):
+        for ident in self.graph.objects(self.manifestation, V.BFFI.identifiedBy):
             types = set(self.graph.objects(ident, RDF.type))
             if V.BF.AudioIssueNumber in types:
                 for value in self.graph.objects(ident, RDF.value):
@@ -913,7 +917,7 @@ class _Reconstructor:
                 tail = s[len(_ORG_URI_PREFIX) :]
                 return _ORG_URI_TO_MARC_CODE.get(tail, tail.upper())
             return None
-        for code in self.graph.objects(assigner, V.BF.code):
+        for code in self.graph.objects(assigner, V.BFFI.code):
             if isinstance(code, Literal):
                 return str(code)
         return None
@@ -927,11 +931,11 @@ class _Reconstructor:
         excluded by requiring ``bf:assigner`` — Helmet uses
         ``bf:source <…/source:helmet>`` instead, with no assigner.
         """
-        for ident in self.graph.objects(self.manifestation, V.BF.identifiedBy):
+        for ident in self.graph.objects(self.manifestation, V.BFFI.identifiedBy):
             types = set(self.graph.objects(ident, RDF.type))
-            if V.BF.Local not in types:
+            if V.BFFI.Local not in types:
                 continue
-            assigner = next(iter(self.graph.objects(ident, V.BF.assigner)), None)
+            assigner = next(iter(self.graph.objects(ident, V.BFFI.assigner)), None)
             if assigner is None:
                 continue
             code = self._assigner_marc_code(assigner)
@@ -998,7 +1002,7 @@ class _Reconstructor:
         subs: list[tuple[str, str]] = []
         for admin in self.graph.objects(self.manifestation, V.BFFI.adminMetadata):
             for agent in self.graph.objects(admin, V.BF.agent):
-                for code in self.graph.objects(agent, V.BF.code):
+                for code in self.graph.objects(agent, V.BFFI.code):
                     if isinstance(code, Literal):
                         subs.append(("a", str(code)))
                         break
@@ -1106,7 +1110,7 @@ class _Reconstructor:
         code, the ``(CODE)`` prefix is omitted.
         """
         subs: list[tuple[str, str]] = []
-        for ident in self.graph.objects(agent, V.BF.identifiedBy):
+        for ident in self.graph.objects(agent, V.BFFI.identifiedBy):
             value: str | None = None
             for v in self.graph.objects(ident, RDF.value):
                 if isinstance(v, Literal):
@@ -1116,7 +1120,7 @@ class _Reconstructor:
                 continue
             code: str | None = None
             for source in self.graph.objects(ident, V.BF.source):
-                for c in self.graph.objects(source, V.BF.code):
+                for c in self.graph.objects(source, V.BFFI.code):
                     if isinstance(c, Literal):
                         code = str(c)
                         break
@@ -1126,29 +1130,63 @@ class _Reconstructor:
             subs.append(("0", formatted))
         return subs
 
+    #: Prefix that identifies LoC MARC relator URIs whose last path
+    #: segment is the MARC ``$4`` code. The round-trip emits ``$4``
+    #: only when the role URI matches this prefix — never for MTS or
+    #: any other URI namespace, since their identifiers aren't MARC
+    #: relator codes.
+    _LOC_RELATOR_URI_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/relators/"
+
     def _collect_role_subs(self, contrib: Node) -> list[tuple[str, str]]:
-        """Walk all ``bf:role`` triples on ``contrib`` and return the
+        """Walk all ``bffi:role`` triples on ``contrib`` and return the
         ordered ``$4`` / ``$e`` subfield pairs.
 
-        Shapes handled:
-          - URIRef role (a LoC relator URI). Emits ``$4`` from the URI
-            tail (the relator code). Provides a fallback ``$e`` from
-            the URI's prefLabel in the merged graph.
-          - BNode role with ``rdfs:label``. Provides the preferred
-            ``$e`` — the cataloguer's original Finnish / Swedish term.
+        ``$4`` is emitted only for LoC-relator URIs — the rare
+        Helmet records (~10 in 473 k per the 2026-06-07 corpus
+        inventory) where the cataloguer wrote a relator code in
+        source MARC and marc2bibframe2 lifted it to
+        ``bf:role <…/relators/CODE>``. M3 propagates that URI
+        unchanged onto ``bffi:role`` on the canonical Contribution.
 
-        When both shapes coexist on the same contribution (the post-M3
-        relator-term enrichment pass added the URI alongside the
-        original blank node), prefer the BNode label for ``$e`` and
-        suppress the URI's label fallback so we don't emit ``$e``
-        twice. ``$4`` is taken from the URI in either case.
+        The previous behaviour — emitting ``$4`` for every
+        contribution thanks to the M3 LoC-enrichment pass — was
+        removed in the BFFI role-redesign because:
+
+        1. BFFI 1.0.0 designates MTS, not LoC, as the value
+           vocabulary for ``bffi:Role`` (see
+           ``bffi-meta:relatedValueVocabulary`` on ``docs/lkd.rdf``'s
+           ``bffi:Role`` class). After enrichment moved from
+           LoC-at-M3 to MTS-at-Skosify, most ``bffi:role`` URIs
+           in the graph are MTS concepts (``mts:m552`` etc.) whose
+           last path segment is not a MARC relator code.
+        2. The enrichment-derived ``$4`` was data the cataloguer
+           never wrote — emitting it on the round-trip mutated the
+           record shape rather than restoring it.
+
+        See ``docs/bffi_limitations.md`` L-07 for the documented
+        behaviour change.
+
+        Role-value shapes that coexist on the same contribution:
+
+          - URIRef role with the LoC-relator prefix — emits ``$4``
+            from the last path segment AND a fallback ``$e`` from
+            the URI's prefLabel.
+          - URIRef role with any other namespace (MTS, etc.) —
+            provides a fallback ``$e`` from the URI's prefLabel,
+            no ``$4``.
+          - BNode role with ``rdfs:label`` — the cataloguer's
+            original ``$e`` term; wins over the URI fallback when
+            both are present so the round-trip restores exactly
+            what was catalogued.
         """
         code: str | None = None
         uri_label: str | None = None
         bnode_label: str | None = None
-        for role in self.graph.objects(contrib, V.BF.role):
+        for role in self.graph.objects(contrib, V.BFFI.role):
             if isinstance(role, URIRef):
-                code = code or str(role).rsplit("/", 1)[-1]
+                role_str = str(role)
+                if code is None and role_str.startswith(self._LOC_RELATOR_URI_PREFIX):
+                    code = role_str[len(self._LOC_RELATOR_URI_PREFIX) :]
                 if uri_label is None:
                     uri_label = self._loc_label(role, lang_pref=("fi", "sv", "en"))
             elif bnode_label is None:
@@ -1293,12 +1331,12 @@ class _Reconstructor:
         both attach a ``bf:Title`` to a ``bf:Hub`` / ``bf:Work``.
         """
         out: list[tuple[str, str]] = []
-        for title in self.graph.objects(hub, V.BF.title):
-            for pn in self.graph.objects(title, V.BF.partNumber):
+        for title in self.graph.objects(hub, V.BFFI.title):
+            for pn in self.graph.objects(title, V.BFFI.partNumber):
                 if isinstance(pn, Literal):
                     out.append(("n", str(pn)))
                     break
-            for pname in self.graph.objects(title, V.BF.partName):
+            for pname in self.graph.objects(title, V.BFFI.partName):
                 if isinstance(pname, Literal):
                     out.append(("p", str(pname)))
                     break
@@ -1332,8 +1370,8 @@ class _Reconstructor:
         a language label is provided, strip the trailing ``", <lang>"``
         suffix so the returned ``$a`` matches the source verbatim.
         """
-        for title in self.graph.objects(hub, V.BF.title):
-            for mt in self.graph.objects(title, V.BF.mainTitle):
+        for title in self.graph.objects(hub, V.BFFI.title):
+            for mt in self.graph.objects(title, V.BFFI.mainTitle):
                 if not isinstance(mt, Literal):
                     continue
                 text = str(mt)
@@ -1365,7 +1403,7 @@ class _Reconstructor:
         for variant in self.graph.objects(expr, V.BFFI.title):
             if (variant, V.RDF.type, V.BF.VariantTitle) not in self.graph:
                 continue
-            for title in self.graph.objects(variant, V.BF.mainTitle):
+            for title in self.graph.objects(variant, V.BFFI.mainTitle):
                 if isinstance(title, Literal):
                     self._emit_datafield(
                         record,
@@ -2551,8 +2589,8 @@ class _Reconstructor:
         structured = self._hub_title_part_subs(hub)
         structured_codes = {code for code, _ in structured}
         # Tier 1 — BFFI-native bf:mainTitle split
-        for title in self.graph.objects(hub, V.BF.title):
-            for mt in self.graph.objects(title, V.BF.mainTitle):
+        for title in self.graph.objects(hub, V.BFFI.title):
+            for mt in self.graph.objects(title, V.BFFI.mainTitle):
                 if isinstance(mt, Literal):
                     base = list(_split_title_responsibility(str(mt)))
                     if base:
