@@ -1444,28 +1444,6 @@ class _Reconstructor:
                 break
         return main_title, subtitle, picked_node
 
-    def _source_marc_tag_from_lineage(self, node: Node, *, default: str) -> str:
-        """Pick the source MARC tag from the entity's P-50
-        ``bffi-prov:fromMarcField`` token (format
-        ``"<bib_id>:<tag>:<ord>"``). Returns ``default`` when no token
-        is available.
-
-        Used by paths where the BIBFRAME → BFFI shape collapses
-        multiple source-MARC tags onto one entity (260 vs 264 both
-        become ``bf:ProvisionActivity``; 240 vs 730 both become
-        ``bf:Hub``; etc.). The token's tag half is the only
-        round-trip signal that survives the collapse.
-        """
-        # Token shape: "<bib_id>:<tag>:<ordinal>" — split from the right
-        # since bib_id can contain colons (URN-style identifiers).
-        _expected_parts = 3
-        for token in self.graph.objects(node, V.fromMarcField):
-            if isinstance(token, Literal):
-                parts = str(token).rsplit(":", 2)
-                if len(parts) >= _expected_parts - 1 and parts[-2].isdigit():
-                    return parts[-2]
-        return default
-
     def _emit_publication_statement(self, record: Element) -> None:
         """MARC 264 publication / production / distribution / manufacture.
 
@@ -1483,13 +1461,17 @@ class _Reconstructor:
         (264 ind2=1, single $c) when no structured data is present.
         Last-resort: parse the prefLabel suffix for older M3 output.
         """
-        # Structured path: one row per provisionActivity bnode. The
-        # MARC tag (260 vs 264) is recovered from the source-MARC
-        # token: ``bffi-prov:fromMarcField "<bib>:<tag>:<ord>"`` carries
-        # the original tag (P-50 token format). When no token is
-        # available (records pre-dating P-50 Phase B, or
-        # ProvisionActivities M2-post couldn't match), default to 264
-        # — RDA-modern emission matches Helmet's dominant practice.
+        # Structured path: one 264 row per provisionActivity bnode.
+        # ind2 from the ProvisionActivity's bf:Publication /
+        # bf:Distribution / bf:Manufacture / bf:Copyright typing.
+        # Source MARC 260 records round-trip as 264 ind2=1 because
+        # marc2bibframe2 normalises both 260 and 264 to a single
+        # ``bf:ProvisionActivity`` shape with no source-MARC-version
+        # marker — the BFFI graph alone can't distinguish them, and
+        # we deliberately don't consult ``bffi-prov:fromMarcField``
+        # here (the round-trip's job is to verify that bffi:
+        # predicates alone can reconstruct source MARC as closely as
+        # possible; pipeline-internal provenance is out of scope).
         emitted_structured = False
         for prov in self.graph.objects(self.manifestation, V.BFFI.provisionActivity):
             if isinstance(prov, Literal):
@@ -1498,14 +1480,7 @@ class _Reconstructor:
             if not subs:
                 continue
             ind2 = self._provision_activity_ind2(prov)
-            tag = self._source_marc_tag_from_lineage(prov, default="264")
-            # 260 doesn't use ind2; clear it. 264 keeps the
-            # production / publication / distribution / manufacture
-            # discriminator.
-            emit_ind2 = " " if tag == "260" else ind2
-            self._emit_datafield(
-                record, tag, *subs, ind2=emit_ind2, lineage=self._lineage_token(prov)
-            )
+            self._emit_datafield(record, "264", *subs, ind2=ind2, lineage=self._lineage_token(prov))
             emitted_structured = True
         if emitted_structured:
             return
