@@ -143,15 +143,23 @@ _EXPRESSION_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (
     V.BFFI.aggregatedBy,
     V.SKOS.prefLabel,
     V.BFLC.marcKey,
-    # P-52 Phase G.bis — component Expressions carry a
-    # ``bffi:contribution → bffi:agent → rdfs:label`` chain
-    # synthesised by M3 from each Hub's marcKey ``$g`` subfield.
-    # Without this, M9 component-agent reconciliation has nothing
-    # to walk and the round-trip 700 ind2=2 emit stays silent.
-    # The contribution + agent are reachable blank nodes that
-    # ``_is_propagatable_subject`` follows via ``_copy_subgraph``.
-    V.BFFI.contribution,
 )
+
+#: P-52 Phase G.bis — component Expressions carry a
+#: ``bffi:contribution → bffi:agent → rdfs:label`` chain synthesised
+#: by M3 from each Hub's marcKey ``$g`` subfield. Without forwarding
+#: that chain, M9 component-agent reconciliation has nothing to walk
+#: and the round-trip 700 ind2=2 emit stays silent.
+#:
+#: We CAN'T include ``V.BFFI.contribution`` in
+#: :data:`_EXPRESSION_PASSTHROUGH_PREDICATES` directly because
+#: :func:`_propagate_expressions` already re-emits parent Expression
+#: contributions from ``member.expression_contributions`` (via
+#: deterministic SHA-1-keyed bnodes); a parallel passthrough copy
+#: would land a SECOND bnode per agent on the parent Expression,
+#: doubling every recon 700 row. Scope the passthrough to component
+#: Expressions only (those with ``bffi:aggregatedBy ?parent``).
+_COMPONENT_PASSTHROUGH_PREDICATES: tuple[URIRef, ...] = (V.BFFI.contribution,)
 
 
 #: Prefix for LoC vocabulary URIs whose ``rdfs:label`` triples must
@@ -390,6 +398,15 @@ def _propagate_expression_passthrough(g: Graph, raw_graph: Graph) -> int:
     — Expressions are preserved 1:1 across the M3 → M8 boundary by
     URI hash, so the data has a stable destination.
 
+    Component Expressions (P-52 Phase F — those with
+    ``bffi:aggregatedBy ?parent``) additionally pass through their
+    ``bffi:contribution`` chain via
+    :data:`_COMPONENT_PASSTHROUGH_PREDICATES`. Parents don't —
+    :func:`_propagate_expressions` already re-emits their non-primary
+    contributions deterministically; a parallel passthrough would
+    double the per-agent contrib bnode count on the canonical
+    Expression.
+
     Returns triples copied (observability)."""
     count = 0
     visited_bnodes: set[BNode] = set()
@@ -398,7 +415,13 @@ def _propagate_expression_passthrough(g: Graph, raw_graph: Graph) -> int:
     ]
     visited_uris: set[URIRef] = set()
     for expr in expressions:
-        for predicate in _EXPRESSION_PASSTHROUGH_PREDICATES:
+        is_component = (expr, V.BFFI.aggregatedBy, None) in raw_graph
+        predicates = (
+            _EXPRESSION_PASSTHROUGH_PREDICATES + _COMPONENT_PASSTHROUGH_PREDICATES
+            if is_component
+            else _EXPRESSION_PASSTHROUGH_PREDICATES
+        )
+        for predicate in predicates:
             for obj in raw_graph.objects(expr, predicate):
                 g.add((expr, predicate, obj))
                 count += 1

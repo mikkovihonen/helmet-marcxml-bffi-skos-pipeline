@@ -2357,15 +2357,18 @@ def test_propagate_work_typing_routes_bffi_subclasses_to_canonical() -> None:
 def test_propagate_expression_passthrough_carries_component_contribution_chain() -> None:
     """P-52 Phase G.bis end-to-end — M3 emits ``component →
     bffi:contribution → bf:Agent → rdfs:label`` chains on aggregation
-    components. M8's expression passthrough must include
-    ``bffi:contribution`` in the allowlist so the chain survives the
-    M3 → canonical boundary; the contribution + agent are reachable
-    blank nodes and ride through via ``_copy_subgraph``."""
+    components. The passthrough's component-scoped allowlist
+    (``_COMPONENT_PASSTHROUGH_PREDICATES``) carries ``bffi:contribution``
+    only on Expressions typed as components (those with
+    ``bffi:aggregatedBy ?parent``) — parents go through
+    ``_propagate_expressions`` to avoid doubling."""
     raw_graph = Graph()
+    parent = URIRef("http://urn.fi/URN:NBN:fi:bib:expression:parent")
     component = URIRef("http://urn.fi/URN:NBN:fi:bib:expression:c1")
     contrib = BNode()
     agent = BNode()
     raw_graph.add((component, RDF.type, V.BFFI.Expression))
+    raw_graph.add((component, V.BFFI.aggregatedBy, parent))
     raw_graph.add((component, V.BFFI.contribution, contrib))
     raw_graph.add((contrib, RDF.type, V.BFFI.Contribution))
     raw_graph.add((contrib, V.BFFI.agent, agent))
@@ -2380,6 +2383,33 @@ def test_propagate_expression_passthrough_carries_component_contribution_chain()
     assert (contrib, RDF.type, V.BFFI.Contribution) in g
     assert (contrib, V.BFFI.agent, agent) in g
     assert (agent, V.RDFS.label, Literal("Gore, Michael")) in g
+
+
+def test_propagate_expression_passthrough_skips_contribution_on_parent_expression() -> None:
+    """Non-component Expressions (those without ``bffi:aggregatedBy``)
+    are NOT passed through for ``bffi:contribution`` — the parallel
+    ``_propagate_expressions`` pass handles those deterministically.
+    Without this scoping, the same agent lands twice on the canonical
+    Expression (one bnode from each pass), doubling every recon 700
+    row that's anchored on that agent."""
+    raw_graph = Graph()
+    parent = URIRef("http://urn.fi/URN:NBN:fi:bib:expression:parent")
+    contrib = BNode()
+    agent = BNode()
+    raw_graph.add((parent, RDF.type, V.BFFI.Expression))
+    # NOTE: no ``bffi:aggregatedBy`` triple — this is a parent
+    # Expression, not a component.
+    raw_graph.add((parent, V.BFFI.contribution, contrib))
+    raw_graph.add((contrib, RDF.type, V.BFFI.Contribution))
+    raw_graph.add((contrib, V.BFFI.agent, agent))
+    raw_graph.add((agent, V.RDFS.label, Literal("Translator")))
+
+    g = Graph()
+    _propagate_expression_passthrough(g, raw_graph)
+
+    # Contribution chain NOT passed through (parents are handled by
+    # ``_propagate_expressions``).
+    assert (parent, V.BFFI.contribution, contrib) not in g
 
 
 def test_propagate_expression_passthrough_carries_subclass_typing_and_aggregates() -> None:
