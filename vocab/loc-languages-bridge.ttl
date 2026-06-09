@@ -1,0 +1,248 @@
+# LoC MARC language code → YSO bridge with multilingual labels.
+#
+# Parallel to vocab/loc-countries-bridge.ttl (see L-12 in
+# docs/bffi_limitations.md for the rationale). LoC publishes
+# language URIs at <http://id.loc.gov/vocabulary/languages/{code}>
+# but with English labels only; the Helmet cataloguer audience
+# needs fi/sv/en. YSO has the language concepts under main YSO
+# (`yso:p2573` "englannin kieli" etc.) but neither LoC nor YSO
+# publishes a cross-reference between the two URI spaces, so this
+# bridge ships the link locally.
+#
+# Source: MARC 008 positions 35-37 (language of the resource)
+# and MARC 041 $a / $h. marc2bibframe2 mints
+# `bf:language <…/languages/{code}>` on the bf:Work; M3 SPARQL
+# carries it through; the Skosify ``_synthesise_language_labels``
+# pass materialises this bridge's prefLabels onto each LoC
+# language URI so Skosmos shows "englannin kieli" / "engelska" /
+# "English language" instead of the bare URI.
+#
+# Coverage: every LoC MARC language code observed in the Helmet
+# 500-sample as of 2026-06-09 (33 codes) plus a generous "common
+# languages" seed. Extend by adding more rows as missing codes
+# surface; the materialiser is data-driven.
+#
+# Licence: CC0 (project's own bridge; YSO labels are Finto-curated
+# under their own CC0 release).
+
+@prefix loc:  <http://id.loc.gov/vocabulary/languages/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix yso:  <http://www.yso.fi/onto/yso/> .
+
+@prefix bridge: <http://urn.fi/URN:NBN:fi:bib:bridge/loc-languages/> .
+
+bridge: a skos:ConceptScheme ;
+    rdfs:label "Local LoC MARC language code ↔ YSO bridge"@en ;
+    rdfs:comment "Project-owned bridge — see docs/bffi_limitations.md L-12 (sibling of the LoC countries bridge)."@en .
+
+# === Languages observed in the 500-record sample ===
+
+loc:alb  skos:exactMatch yso:p13190 ;
+         skos:prefLabel  "albanian kieli"@fi, "albanska"@sv, "Albanian language"@en ;
+         skos:notation   "alb" .
+
+loc:ara  skos:exactMatch yso:p14417 ;
+         skos:prefLabel  "arabian kieli"@fi, "arabiska"@sv, "Arabic language"@en ;
+         skos:notation   "ara" .
+
+loc:chi  skos:exactMatch yso:p17318 ;
+         skos:prefLabel  "kiinan kieli"@fi, "kinesiska"@sv, "Chinese language"@en ;
+         skos:notation   "chi" .
+
+loc:dan  skos:exactMatch yso:p18391 ;
+         skos:prefLabel  "tanskan kieli"@fi, "danska"@sv, "Danish language"@en ;
+         skos:notation   "dan" .
+
+loc:dut  skos:exactMatch yso:p15311 ;
+         skos:prefLabel  "hollannin kieli"@fi, "nederländska"@sv, "Dutch language"@en ;
+         skos:notation   "dut" .
+
+loc:eng  skos:exactMatch yso:p2573 ;
+         skos:prefLabel  "englannin kieli"@fi, "engelska"@sv, "English language"@en ;
+         skos:notation   "eng" .
+
+loc:est  skos:exactMatch yso:p15445 ;
+         skos:prefLabel  "viron kieli"@fi, "estniska"@sv, "Estonian language"@en ;
+         skos:notation   "est" .
+
+loc:fin  skos:exactMatch yso:p8856 ;
+         skos:prefLabel  "suomen kieli"@fi, "finska"@sv, "Finnish language"@en ;
+         skos:notation   "fin" .
+
+loc:fre  skos:exactMatch yso:p10325 ;
+         skos:prefLabel  "ranskan kieli"@fi, "franska"@sv, "French language"@en ;
+         skos:notation   "fre" .
+
+loc:ger  skos:exactMatch yso:p12148 ;
+         skos:prefLabel  "saksan kieli"@fi, "tyska"@sv, "German language"@en ;
+         skos:notation   "ger" .
+
+loc:gre  skos:exactMatch yso:p684 ;
+         skos:prefLabel  "kreikan kieli"@fi, "grekiska"@sv, "Greek language"@en ;
+         skos:notation   "gre" .
+
+loc:ice  skos:exactMatch yso:p3813 ;
+         skos:prefLabel  "islannin kieli"@fi, "isländska"@sv, "Icelandic language"@en ;
+         skos:notation   "ice" .
+
+loc:ita  skos:exactMatch yso:p9203 ;
+         skos:prefLabel  "italian kieli"@fi, "italienska"@sv, "Italian language"@en ;
+         skos:notation   "ita" .
+
+loc:jpn  skos:exactMatch yso:p19175 ;
+         skos:prefLabel  "japanin kieli"@fi, "japanska"@sv, "Japanese language"@en ;
+         skos:notation   "jpn" .
+
+loc:kor  skos:exactMatch yso:p19675 ;
+         skos:prefLabel  "korean kieli"@fi, "koreanska"@sv, "Korean language"@en ;
+         skos:notation   "kor" .
+
+loc:lat  skos:exactMatch yso:p14780 ;
+         skos:prefLabel  "latinan kieli"@fi, "latin"@sv, "Latin language"@en ;
+         skos:notation   "lat" .
+
+loc:lav  skos:exactMatch yso:p6282 ;
+         skos:prefLabel  "latvian kieli"@fi, "lettiska"@sv, "Latvian language"@en ;
+         skos:notation   "lav" .
+
+loc:nor  skos:exactMatch yso:p3978 ;
+         skos:prefLabel  "norjan kieli"@fi, "norska"@sv, "Norwegian language"@en ;
+         skos:notation   "nor" .
+
+loc:per  skos:exactMatch yso:p15895 ;
+         skos:prefLabel  "persian kieli"@fi, "persiska"@sv, "Persian language"@en ;
+         skos:notation   "per" .
+
+loc:por  skos:exactMatch yso:p19823 ;
+         skos:prefLabel  "portugalin kieli"@fi, "portugisiska"@sv, "Portuguese language"@en ;
+         skos:notation   "por" .
+
+loc:pus  skos:exactMatch yso:p24833 ;
+         skos:prefLabel  "paštun kieli"@fi, "pashto"@sv, "Pushto language"@en ;
+         skos:notation   "pus" .
+
+loc:rus  skos:exactMatch yso:p7643 ;
+         skos:prefLabel  "venäjän kieli"@fi, "ryska"@sv, "Russian language"@en ;
+         skos:notation   "rus" .
+
+loc:san  skos:exactMatch yso:p18486 ;
+         skos:prefLabel  "sanskritin kieli"@fi, "sanskrit"@sv, "Sanskrit language"@en ;
+         skos:notation   "san" .
+
+loc:spa  skos:exactMatch yso:p12398 ;
+         skos:prefLabel  "espanjan kieli"@fi, "spanska"@sv, "Spanish language"@en ;
+         skos:notation   "spa" .
+
+loc:swa  skos:exactMatch yso:p17533 ;
+         skos:prefLabel  "swahilin kieli"@fi, "swahili"@sv, "Swahili language"@en ;
+         skos:notation   "swa" .
+
+loc:swe  skos:exactMatch yso:p12469 ;
+         skos:prefLabel  "ruotsin kieli"@fi, "svenska"@sv, "Swedish language"@en ;
+         skos:notation   "swe" .
+
+loc:tha  skos:exactMatch yso:p13871 ;
+         skos:prefLabel  "thain kieli"@fi, "thai"@sv, "Thai language"@en ;
+         skos:notation   "tha" .
+
+loc:ukr  skos:exactMatch yso:p20600 ;
+         skos:prefLabel  "ukrainan kieli"@fi, "ukrainska"@sv, "Ukrainian language"@en ;
+         skos:notation   "ukr" .
+
+# === Codes without a YSO concept (project-supplied labels) ===
+#
+# `cos` (Corsican) — YSO has "Korsika" (the island, p108087) but no
+# Corsican-language concept; project supplies the label.
+# `pan` (Panjabi) — YSO has "punjabit" (the people, p38213) but no
+# distinct Panjabi-language concept.
+# `mul` / `und` / `zxx` — MARC sentinels for "multiple languages",
+# "undetermined", "no linguistic content" respectively. Skosmos
+# needs prefLabels so cataloguers can read them.
+
+loc:cos  skos:prefLabel  "korsikan kieli"@fi,
+                         "korsikanska"@sv,
+                         "Corsican language"@en ;
+         skos:notation   "cos" .
+
+loc:pan  skos:prefLabel  "panjabin kieli"@fi,
+                         "panjabi"@sv,
+                         "Panjabi language"@en ;
+         skos:notation   "pan" .
+
+loc:mul  skos:prefLabel  "useita kieliä"@fi,
+                         "flera språk"@sv,
+                         "Multiple languages"@en ;
+         skos:notation   "mul" .
+
+loc:und  skos:prefLabel  "kielimäärittelemätön"@fi,
+                         "obestämt språk"@sv,
+                         "Undetermined language"@en ;
+         skos:notation   "und" .
+
+loc:zxx  skos:prefLabel  "ei kielellistä sisältöä"@fi,
+                         "inget språkligt innehåll"@sv,
+                         "No linguistic content"@en ;
+         skos:notation   "zxx" .
+
+# === Common languages not in the 500-sample (seed set, alphabetical) ===
+
+loc:bel  skos:prefLabel  "valkovenäjän kieli"@fi,
+                         "vitryska"@sv,
+                         "Belarusian language"@en ;
+         skos:notation   "bel" .
+
+loc:bul  skos:prefLabel  "bulgarian kieli"@fi,
+                         "bulgariska"@sv,
+                         "Bulgarian language"@en ;
+         skos:notation   "bul" .
+
+loc:cze  skos:prefLabel  "tšekin kieli"@fi,
+                         "tjeckiska"@sv,
+                         "Czech language"@en ;
+         skos:notation   "cze" .
+
+loc:heb  skos:prefLabel  "heprean kieli"@fi,
+                         "hebreiska"@sv,
+                         "Hebrew language"@en ;
+         skos:notation   "heb" .
+
+loc:hin  skos:prefLabel  "hindin kieli"@fi,
+                         "hindi"@sv,
+                         "Hindi language"@en ;
+         skos:notation   "hin" .
+
+loc:hun  skos:prefLabel  "unkarin kieli"@fi,
+                         "ungerska"@sv,
+                         "Hungarian language"@en ;
+         skos:notation   "hun" .
+
+loc:lit  skos:prefLabel  "liettuan kieli"@fi,
+                         "litauiska"@sv,
+                         "Lithuanian language"@en ;
+         skos:notation   "lit" .
+
+loc:pol  skos:prefLabel  "puolan kieli"@fi,
+                         "polska"@sv,
+                         "Polish language"@en ;
+         skos:notation   "pol" .
+
+loc:rum  skos:prefLabel  "romanian kieli"@fi,
+                         "rumänska"@sv,
+                         "Romanian language"@en ;
+         skos:notation   "rum" .
+
+loc:slo  skos:prefLabel  "slovakian kieli"@fi,
+                         "slovakiska"@sv,
+                         "Slovak language"@en ;
+         skos:notation   "slo" .
+
+loc:tur  skos:prefLabel  "turkin kieli"@fi,
+                         "turkiska"@sv,
+                         "Turkish language"@en ;
+         skos:notation   "tur" .
+
+loc:vie  skos:prefLabel  "vietnamin kieli"@fi,
+                         "vietnam"@sv,
+                         "Vietnamese language"@en ;
+         skos:notation   "vie" .

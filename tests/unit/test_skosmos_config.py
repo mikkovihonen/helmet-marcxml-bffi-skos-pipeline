@@ -155,10 +155,32 @@ def test_bffi_works_vocab_lists_works_only(graph: Graph) -> None:
     assert classes == {BFFI.Work}
 
 
-def test_vocabulary_uses_isothes_concept_group(graph: Graph) -> None:
+def test_vocabulary_sidebar_views_alphabetical_only(graph: Graph) -> None:
+    """Bibliographic concepts (Works / Expressions / Manifestations) have
+    no curated authority hierarchy, no concept groups, and the
+    per-record ``dct:modified`` is just the pipeline run timestamp —
+    none of Skosmos's Hierarchy / Groups / Changes ("New") tabs carry
+    useful content for our corpus. ``skosmos:sidebarViews`` is set to
+    the alphabetical browse only; the supporting ``groupClass`` and
+    ``showTopConcepts`` knobs are intentionally absent.
+    """
     vocab = _vocabulary_subject(graph)
-    groups = list(graph.objects(vocab, SKOSMOS.groupClass))
-    assert ISOTHES.ConceptGroup in groups
+    # The RDF Collection on ``sidebarViews`` resolves to a chain of
+    # ``rdf:first`` / ``rdf:rest`` triples; walk the list once and
+    # collect the literal members.
+    sidebar_views_head = next(graph.objects(vocab, SKOSMOS.sidebarViews), None)
+    assert sidebar_views_head is not None, "skosmos:sidebarViews must be declared"
+    views: list[str] = []
+    node = sidebar_views_head
+    while node is not None and str(node) != str(RDF.nil):
+        first = next(graph.objects(node, RDF.first), None)
+        if isinstance(first, Literal):
+            views.append(str(first))
+        node = next(graph.objects(node, RDF.rest), None)
+    assert views == ["alphabetical"], f"expected ['alphabetical'], got {views!r}"
+    # The disabled-tab supporting config should be absent.
+    assert not list(graph.objects(vocab, SKOSMOS.groupClass))
+    assert not list(graph.objects(vocab, SKOSMOS.showTopConcepts))
 
 
 def test_vocabulary_dc_title_carries_finnish_label(graph: Graph) -> None:
@@ -177,9 +199,11 @@ def test_vocabulary_short_name_is_bffi_works(graph: Graph) -> None:
     assert any(isinstance(o, Literal) and str(o) == "bffi-works" for o in names)
 
 
-def test_show_top_concepts_and_full_alphabetical_index_are_enabled(graph: Graph) -> None:
+def test_full_alphabetical_index_is_enabled(graph: Graph) -> None:
+    """``fullAlphabeticalIndex true`` enables the unpaginated A-Z page
+    behind the single ``alphabetical`` sidebar tab. ``showTopConcepts``
+    only fed the disabled Hierarchy tab and is intentionally absent."""
     vocab = _vocabulary_subject(graph)
-    assert (vocab, SKOSMOS.showTopConcepts, Literal(True)) in graph
     assert (vocab, SKOSMOS.fullAlphabeticalIndex, Literal(True)) in graph
 
 

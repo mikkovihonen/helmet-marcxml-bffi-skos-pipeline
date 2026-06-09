@@ -35,6 +35,10 @@ CONSTRUCT {
            bffi:summary      ?summary ;
            bffi:note         ?note ;
            skos:prefLabel    ?exprLabel .
+  ?note    a               bffi:Note ;
+           rdf:type        ?noteType ;
+           rdfs:label      ?noteLabel ;
+           bffi:language   ?noteLanguage .
   ?otherContrib a bffi:Contribution ;
                 bffi:agent ?otherAgent ;
                 bffi:role  ?otherRole .
@@ -50,11 +54,19 @@ CONSTRUCT {
              rdfs:label ?otherRoleLabel .
   ?contentType rdfs:label ?contentTypeLabel .
   ?uniformTitleHub a bf:Hub ;
+                   a ?uniformTitleArrangementType ;
                    bflc:marcKey ?uniformTitleMarcKey ;
                    bffi:title   ?uniformTitleNode ;
-                   bf:language  ?uniformTitleLanguage .
+                   bf:language  ?uniformTitleLanguage ;
+                   bf:musicMedium ?uniformTitleMusicMedium ;
+                   bf:keyMode    ?uniformTitleKeyMode ;
+                   bffi:version  ?uniformTitleVersion .
   ?uniformTitleLanguage a       bf:Language ;
                         rdfs:label ?uniformTitleLanguageLabel .
+  ?uniformTitleMusicMedium a    bf:MusicMedium ;
+                           rdfs:label ?uniformTitleMusicMediumLabel .
+  ?uniformTitleKeyMode a        bf:KeyMode ;
+                       rdfs:label ?uniformTitleKeyModeLabel .
   ?uniformTitleNode a bffi:Title ;
                     bffi:mainTitle  ?uniformMainTitle ;
                     bffi:partNumber ?uniformPartNumber ;
@@ -173,7 +185,29 @@ WHERE {
     OPTIONAL { ?contentType rdfs:label ?contentTypeLabel }
   }
   OPTIONAL { ?bfWork bf:summary         ?summary }
-  OPTIONAL { ?bfWork bf:note            ?note }
+  # Propagate the note bnode along with its rdfs:label and rdf:type
+  # so the Skosify pass + Skosmos rendering can surface the actual
+  # note text (MARC 546 $a etc.) instead of a bare ``_:genidN``. The
+  # bnode's outgoing triples aren't copied by default — the CONSTRUCT
+  # template only emits what it lists.
+  OPTIONAL {
+    ?bfWork bf:note ?note .
+    OPTIONAL { ?note rdfs:label ?noteLabel }
+    OPTIONAL {
+      ?note rdf:type ?noteType .
+      FILTER(?noteType != bf:Note)
+    }
+    # ``bf:language`` on a note bnode carries the meaning when no
+    # ``rdfs:label`` is present (e.g. marc2bibframe2's MARC 041
+    # routing produces ``[ a bf:Note, rc:otx ; bf:language <…fre> ]``
+    # for "language of the original" notes). Canonicalised to
+    # ``bffi:language`` on emit (BFFI closed-namespace discipline —
+    # same routing the Expression-level ``bf:language → bffi:language``
+    # mirror uses above) so the Skosify
+    # ``_synthesise_note_language_labels`` pass can compose a readable
+    # prefLabel from the language URI.
+    OPTIONAL { ?note bf:language ?noteLanguage }
+  }
   # bf:tableOfContents is intentionally NOT routed here: BFFI's
   # bffi:tableOfContents has rdfs:domain bffi:Manifestation (per
   # docs/lkd.rdf line 3995), not Expression. The pipeline currently
@@ -259,6 +293,42 @@ WHERE {
       ?uniformTitleHub bf:language ?uniformTitleLanguage .
       ?uniformTitleLanguage a bf:Language ;
                             rdfs:label ?uniformTitleLanguageLabel .
+    }
+    # MARC 240 ``$m`` — music medium of performance. marc2bibframe2's
+    # ConvSpec-240andX30-UnifTitle.xsl emits
+    # ``bf:musicMedium → bf:MusicMedium → rdfs:label``. BFFI 1.0.0
+    # declares ``bffi:musicMedium owl:equivalentProperty bf:musicMedium``
+    # and ``bffi:MusicMedium owl:equivalentClass bf:MusicMedium``; we
+    # keep the BIBFRAME shape on canonical so the round-trip reader can
+    # mirror marc2bibframe2's emit directly.
+    OPTIONAL {
+      ?uniformTitleHub bf:musicMedium ?uniformTitleMusicMedium .
+      ?uniformTitleMusicMedium a bf:MusicMedium ;
+                               rdfs:label ?uniformTitleMusicMediumLabel .
+    }
+    # MARC 240 ``$r`` — music key. marc2bibframe2 v3.1+ emits the
+    # structured ``bf:keyMode → bf:KeyMode → rdfs:label`` (NOT the
+    # older flat ``bf:musicKey`` literal). lkd.rdf has ``bffi:musicKey``
+    # (alias of ``bf:musicKey``, literal range) but NO ``bffi:keyMode``,
+    # so we emit ``bf:keyMode`` directly per the project's BFFI namespace
+    # discipline (BIBFRAME term reuse when no BFFI alias exists).
+    OPTIONAL {
+      ?uniformTitleHub bf:keyMode ?uniformTitleKeyMode .
+      ?uniformTitleKeyMode a bf:KeyMode ;
+                           rdfs:label ?uniformTitleKeyModeLabel .
+    }
+    # MARC 240 ``$s`` — version statement. marc2bibframe2 emits as a
+    # plain literal on the Hub; BFFI alias ``bffi:version``.
+    OPTIONAL { ?uniformTitleHub bf:version ?uniformTitleVersion }
+    # MARC 240 ``$o`` — arrangement. marc2bibframe2 emits the
+    # existence marker as ``rdf:type bf:Arrangement`` on the Hub (the
+    # literal ``$o`` text is lost at the BIBFRAME boundary — see
+    # docs/bffi_limitations.md L-13). Pass the type marker through so
+    # downstream consumers can detect arrangements without parsing
+    # marcKey; the round-trip still uses marcKey for the literal text.
+    OPTIONAL {
+      ?uniformTitleHub a ?uniformTitleArrangementType .
+      FILTER(?uniformTitleArrangementType = bf:Arrangement)
     }
   }
 

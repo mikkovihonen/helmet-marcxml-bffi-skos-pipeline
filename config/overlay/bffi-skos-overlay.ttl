@@ -32,6 +32,16 @@ bffi:Expression    rdfs:subClassOf skos:Concept ;
 bffi:Manifestation rdfs:subClassOf skos:Concept ;
                    rdfs:label "Manifestation"@en, "Manifestaatio"@fi, "Manifestation"@sv .
 
+# AdminMetadata also dual-types as skos:Concept so each per-record
+# admin block renders as its own Skosmos page — the parent W/E/M's
+# "Hallinnolliset metatiedot" link target. The Skosify pass
+# ``_synthesise_admin_metadata_pref_labels`` composes the page's
+# ``skos:prefLabel`` ("Hallinnolliset metatiedot: <axis> – <parent-label>").
+bffi:AdminMetadata rdfs:subClassOf skos:Concept ;
+                   rdfs:label "Administrative metadata"@en,
+                              "Hallinnolliset metatiedot"@fi,
+                              "Administrativ metadata"@sv .
+
 # ---------------------------------------------------------------------------
 # Hierarchical relations ⊑ SKOS — the Skosmos hierarchy view follows
 # skos:narrower / skos:broader, so M10 needs Works to expose Expressions
@@ -296,8 +306,8 @@ bffi:adminMetadata     rdfs:label "Administrative metadata"@en,
                                   "Hallinnolliset metatiedot"@fi,
                                   "Administrativ metadata"@sv .
 bffi:provisionActivity rdfs:label "Provision activity"@en,
-                                  "Saatavuustieto"@fi,
-                                  "Tillgänglighetsuppgift"@sv .
+                                  "Tuottamistiedot"@fi,
+                                  "Tillhandahållande"@sv .
 bffi:publicationStatement rdfs:label "Publication statement"@en,
                                      "Julkaisutiedot"@fi,
                                      "Publiceringsuppgift"@sv .
@@ -351,3 +361,60 @@ bf:audioIssueNumber rdfs:label "Audio issue number"@en,
 bf:systemNumber rdfs:label "System control number"@en,
                            "Järjestelmän kontrollinumero"@fi,
                            "Systemkontrollnummer"@sv .
+
+# ---------------------------------------------------------------------------
+# AdminMetadata predicate labels. These mirror what's in
+# config/skosmos-config.ttl but live in canonical-skosified.ttl too so
+# the labels reach Fuseki — Skosmos's Concept::getProperties() falls
+# back to a SPARQL queryLabel call against Fuseki for any predicate
+# whose label it can't find on the EasyRdf-loaded concept resource,
+# and skosmos-config.ttl labels aren't visible to that fallback.
+# Without the Fuseki copy below, all but the well-known dct: predicates
+# get filtered out of the concept-page property list ("only display
+# properties for which we have a label" — Concept.php line ~595).
+#
+# Reach: AdminMetadata's own page (Option B) AND the parent W/E/M page
+# (the seven flattened predicates). en/fi/sv mirror skosmos-config.ttl
+# verbatim so the two declarations stay in sync.
+# ---------------------------------------------------------------------------
+
+bffi:descriptionAuthentication rdfs:label "Description authentication"@en,
+                                          "Kuvauksen autentikointi"@fi,
+                                          "Beskrivningsautentisering"@sv .
+bffi:descriptionLevel rdfs:label "Description level"@en,
+                                 "Kuvailun tietomalli"@fi,
+                                 "Beskrivningsnivå"@sv .
+bffi:descriptionModifier rdfs:label "Description modifier"@en,
+                                    "Muokkaava taho"@fi,
+                                    "Modifierande aktör"@sv .
+bffi:descriptionConventions rdfs:label "Description conventions"@en,
+                                       "Kuvailusäännöt"@fi,
+                                       "Beskrivningskonventioner"@sv .
+bffi:encodingLevel rdfs:label "Encoding level"@en,
+                              "Kuvailutaso"@fi,
+                              "Kodningsnivå"@sv .
+bffi:generationDate rdfs:label "Generation date"@en,
+                               "Konversioajankohta"@fi,
+                               "Genereringsdatum"@sv .
+bffi:generationProcess rdfs:label "Generation process"@en,
+                                  "Konversioprosessi"@fi,
+                                  "Genereringsprocess"@sv .
+bffi:metadataLicensor rdfs:label "Metadata licensor"@en,
+                                 "Metatiedon tekijänoikeus"@fi,
+                                 "Metadatalicensgivare"@sv .
+bffi:recordingSource rdfs:label "Recording source"@en,
+                                "Merkintälähde"@fi,
+                                "Källa"@sv .
+bffi:sourceConsulted rdfs:label "Source consulted"@en,
+                                "Käytetty lähde"@fi,
+                                "Konsulterad källa"@sv .
+bffi:adminMetadata rdfs:label "Administrative metadata"@en,
+                              "Hallinnolliset metatiedot"@fi,
+                              "Administrativ metadata"@sv .
+bffi:adminMetadataFor rdfs:label "Administrative metadata for"@en,
+                                 "Hallinnolliset metatiedot kohteelle"@fi,
+                                 "Administrativ metadata för"@sv .
+<http://www.w3.org/ns/prov#hadPrimarySource>
+    rdfs:label "Primary source"@en,
+               "Ensisijainen lähde"@fi,
+               "Primärkälla"@sv .

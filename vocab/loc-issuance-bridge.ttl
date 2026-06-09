@@ -1,0 +1,72 @@
+# LoC MARC issuance code → MTS bridge with multilingual labels.
+#
+# Parallel to vocab/loc-countries-bridge.ttl and
+# vocab/loc-languages-bridge.ttl (see L-12 in
+# docs/bffi_limitations.md). LoC publishes issuance URIs at
+# <http://id.loc.gov/vocabulary/issuance/{code}> for the four
+# RDA Mode of Issuance values (single unit / multipart monograph /
+# serial / integrating resource). MTS has the same five RDA-derived
+# concepts under <http://urn.fi/URN:NBN:fi:au:mts:m4370..m5100>
+# with the Finnish/Swedish/English labels NLF curated, but neither
+# side publishes a cross-reference between the LoC URIs and the
+# MTS URIs — so this bridge ships the link locally.
+#
+# Source: MARC leader byte 7 (bibliographic level) +
+# 008 position 21 (frequency / continuing-resource type).
+# marc2bibframe2 mints ``bf:issuance <…/issuance/{code}>`` on the
+# bf:Instance; M3 SPARQL carries it through; the Skosify
+# ``_synthesise_loc_bridge_labels`` pass materialises this bridge's
+# prefLabels onto each LoC issuance URI so Skosmos shows
+# "sarja-aineisto" / "seriell resurs" / "serial" instead of the
+# bare URI.
+#
+# Coverage: all four LoC RDA Mode of Issuance codes (mono / mas /
+# serl / intg) plus the newer "multiple unit" RDA term carried by
+# MTS m5100 (no LoC URI counterpart in the published vocab — kept
+# in the bridge for documentation; never resolves at runtime).
+#
+# Licence: CC0 (project bridge; MTS labels are NLF / Finto CC0).
+
+@prefix loc:  <http://id.loc.gov/vocabulary/issuance/> .
+@prefix mts:  <http://urn.fi/URN:NBN:fi:au:mts:> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+@prefix bridge: <http://urn.fi/URN:NBN:fi:bib:bridge/loc-issuance/> .
+
+bridge: a skos:ConceptScheme ;
+    rdfs:label "Local LoC MARC issuance code ↔ MTS bridge"@en ;
+    rdfs:comment "Project-owned bridge — see docs/bffi_limitations.md L-12. Sibling of the LoC countries + languages bridges."@en .
+
+# === RDA Mode of Issuance — the four LoC issuance URIs ===
+#
+# LoC issuance is a four-term controlled vocabulary; MTS covers
+# the same RDA roots (rdami:1001 … rdami:1004) plus the newer
+# rdami:1005 "multiple unit". Each LoC URI gets:
+#   - skos:exactMatch → its MTS counterpart
+#   - skos:prefLabel mirroring MTS's fi/sv/en labels
+#   - skos:notation carrying the LoC code
+
+loc:mono  skos:exactMatch mts:m4371 ;
+          skos:prefLabel  "yhtenä yksikkönä ilmestyvä aineisto"@fi,
+                          "resurs utkommen som en enhet"@sv,
+                          "single unit"@en ;
+          skos:notation   "mono" .
+
+loc:mas   skos:exactMatch mts:m4373 ;
+          skos:prefLabel  "moniosainen monografia"@fi,
+                          "monografi i flera delar"@sv,
+                          "multipart monography"@en ;
+          skos:notation   "mas" .
+
+loc:serl  skos:exactMatch mts:m4370 ;
+          skos:prefLabel  "sarja-aineisto"@fi,
+                          "seriell resurs"@sv,
+                          "serial"@en ;
+          skos:notation   "serl" .
+
+loc:intg  skos:exactMatch mts:m4374 ;
+          skos:prefLabel  "päivittyvä aineisto"@fi,
+                          "integrerande resurs"@sv,
+                          "integrating resource"@en ;
+          skos:notation   "intg" .

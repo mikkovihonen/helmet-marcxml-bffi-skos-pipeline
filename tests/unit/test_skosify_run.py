@@ -143,14 +143,14 @@ def test_skosify_run_uses_committed_overlay_and_config_paths(
 # --- Display-predicate synthesis (P-45) ---------------------------------
 
 
-def test_skosify_run_synthesises_dct_creator_for_primary_contribution(tmp_path: Path) -> None:
-    """BFFI 1.0.0 has no flat creator predicate — only the structured
-    ``bffi:contribution → bffi:PrimaryContribution → bffi:agent`` chain.
-    Skosify-time synthesis adds ``dct:creator`` on the Work pointing at
-    the agent, so Skosmos's default template can render the author
-    without traversing the blank-node chain. Canonical.ttl carries
-    only the BFFI shape; the dct:* triple lives only in the
-    Skosify-loaded output."""
+def test_skosify_run_does_not_emit_entity_level_dct_creator(tmp_path: Path) -> None:
+    """The previous ``dct:creator`` / ``dct:contributor`` entity-level
+    mirrors created confusing parallel "Tekijä" + "Rooli" rows on the
+    Skosmos concept page (one row per agent, separately one row per
+    role, with no visual indication of which role belongs to which
+    agent). The mirrors were dropped; the cataloguer sees a single
+    ``bffi:contribution`` row whose label is composed as
+    ``"<agent> (<role>)"`` by ``_synthesise_contribution_labels``."""
     AGENT = URIRef("urn:agent/tolstoy")
     g = Graph()
     work = URIRef(WORK)
@@ -172,12 +172,11 @@ def test_skosify_run_synthesises_dct_creator_for_primary_contribution(tmp_path: 
     output = tmp_path / "skosified.ttl"
     run(canonical, output_path=output)
 
-    # Source canonical: NO dct:creator.
-    assert (work, DCTERMS.creator, AGENT) not in g
-    # Skosify output: dct:creator IS present.
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    assert (work, DCTERMS.creator, AGENT) in skosified
+    # The entity-level mirror is GONE — Skosmos now reads the composed
+    # contribution label via the bnode prefLabel one hop deep.
+    assert (work, DCTERMS.creator, AGENT) not in skosified
     # The structured BFFI chain is preserved alongside (blank-node IDs
     # are rewritten on parse-round-trip, so look up by agent).
     chain_agents = {
@@ -188,13 +187,12 @@ def test_skosify_run_synthesises_dct_creator_for_primary_contribution(tmp_path: 
     assert AGENT in chain_agents
 
 
-def test_skosify_run_synthesises_dct_contributor_for_non_primary_contribution(
+def test_skosify_run_does_not_emit_entity_level_dct_contributor(
     tmp_path: Path,
 ) -> None:
-    """Non-primary contributions (translators / illustrators / performers)
-    on an Expression get a flat ``dct:contributor`` triple at Skosify
-    time. The BFFI source has only a ``bffi:Contribution`` node (no
-    ``bffi:PrimaryContribution`` typing)."""
+    """Same rationale as the dct:creator mirror — non-primary
+    contributions no longer emit ``dct:contributor`` on the entity.
+    Skosmos reads the composed contribution label via the bnode."""
     AGENT = URIRef("urn:agent/adrian-translator")
     g = Graph()
     work = URIRef(WORK)
@@ -206,7 +204,6 @@ def test_skosify_run_synthesises_dct_contributor_for_non_primary_contribution(
     g.add((expr, RDF.type, V.BFFI.Expression))
     g.add((expr, V.BFFI.expressionOf, work))
     g.add((expr, V.BFFI.contribution, contrib))
-    # Note: NOT typed PrimaryContribution — base Contribution only.
     g.add((contrib, RDF.type, V.BFFI.Contribution))
     g.add((contrib, V.BFFI.agent, AGENT))
 
@@ -218,8 +215,7 @@ def test_skosify_run_synthesises_dct_contributor_for_non_primary_contribution(
 
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    # Non-primary → dct:contributor (NOT dct:creator).
-    assert (expr, DCTERMS.contributor, AGENT) in skosified
+    assert (expr, DCTERMS.contributor, AGENT) not in skosified
     assert (expr, DCTERMS.creator, AGENT) not in skosified
 
 
@@ -305,6 +301,41 @@ def test_provision_activity_flattened_to_dct_publisher_date_spatial(tmp_path: Pa
     assert (manifestation, DCTERMS.publisher, Literal("Wise Publications")) in skosified
     assert (manifestation, DCTERMS.date, Literal("c1997")) in skosified
     assert (manifestation, DCTERMS.spatial, Literal("London")) in skosified
+    # The ProvisionActivity bnode itself gets a composed
+    # ``skos:prefLabel`` so Skosmos renders the bnode as
+    # "Place : Agent, Date" instead of an unresolvable genid link.
+    pa_labels = [
+        lbl
+        for pa_bnode in skosified.objects(manifestation, V.BFFI.provisionActivity)
+        if isinstance(pa_bnode, BNode)
+        for lbl in skosified.objects(pa_bnode, V.SKOS.prefLabel)
+    ]
+    assert Literal("London : Wise Publications, c1997", lang="fi") in pa_labels
+
+
+def test_provision_activity_label_skipped_when_all_parts_missing(tmp_path: Path) -> None:
+    """When the ProvisionActivity bnode has no simple* values, no
+    composed label is emitted (would be empty)."""
+    manifestation = URIRef("http://urn.fi/URN:NBN:fi:bib:manifestation:m1")
+    pa = BNode()
+    g = Graph()
+    g.add((manifestation, RDF.type, V.BFFI.Manifestation))
+    g.add((manifestation, V.BFFI.provisionActivity, pa))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    pa_labels = [
+        lbl
+        for pa_bnode in skosified.objects(manifestation, V.BFFI.provisionActivity)
+        if isinstance(pa_bnode, BNode)
+        for lbl in skosified.objects(pa_bnode, V.SKOS.prefLabel)
+    ]
+    assert pa_labels == []
 
 
 def test_title_variants_emitted_as_skos_alt_label(tmp_path: Path) -> None:
@@ -362,15 +393,30 @@ def test_series_membership_emitted_as_dct_is_part_of(tmp_path: Path) -> None:
     assert found, f"dct:isPartOf → labeled Series not found; got {parts!r}"
 
 
-def test_admin_metadata_highlights_emitted_on_parent(tmp_path: Path) -> None:
-    """``dct:modified`` and ``bffi:descriptionConventions`` get lifted
-    from the AdminMetadata block onto the parent Work."""
+def test_admin_metadata_stays_on_admin_node(tmp_path: Path) -> None:
+    """AdminMetadata fields stay on the ``bffi:AdminMetadata`` resource
+    and surface via that resource's own Skosmos concept page — the
+    parent Work / Expression / Manifestation page carries just the
+    ``bffi:adminMetadata`` link to the admin block, not the flattened
+    fields. Cataloguers click through "Hallinnolliset metatiedot" to
+    see the full admin block; the per-axis page stays focused on
+    bibliographic content."""
     work = URIRef(WORK)
     admin = URIRef(ADMIN)
     conv = URIRef("http://urn.fi/URN:NBN:fi:bib:desc-conv/bffi-1.0.0")
+    auth = URIRef("http://urn.fi/URN:NBN:fi:bib:auth/auto-merged")
+    level = URIRef("http://urn.fi/URN:NBN:fi:bib:desc-level/minimum")
+    modifier = URIRef("http://urn.fi/URN:NBN:fi:bib:agent/marc2bibframe2")
+    enc_level = URIRef("http://urn.fi/URN:NBN:fi:bib:enc-level/auto")
+    gen_date = Literal("2026-06-09T06:53:20+00:00")
     g = _build_canonical_graph()  # already has work + admin chain
     g.add((admin, DCTERMS.modified, Literal("2026-06-08T00:00:00+00:00")))
     g.add((admin, V.descriptionConventions, conv))
+    g.add((admin, V.descriptionAuthentication, auth))
+    g.add((admin, V.descriptionLevel, level))
+    g.add((admin, V.descriptionModifier, modifier))
+    g.add((admin, V.encodingLevel, enc_level))
+    g.add((admin, V.BFFI.generationDate, gen_date))
 
     canonical = tmp_path / "canonical.ttl"
     g.serialize(destination=str(canonical), format="turtle")
@@ -379,14 +425,29 @@ def test_admin_metadata_highlights_emitted_on_parent(tmp_path: Path) -> None:
 
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    assert (work, DCTERMS.modified, Literal("2026-06-08T00:00:00+00:00")) in skosified
-    assert (work, DCTERMS.conformsTo, conv) in skosified
+    # Admin fields remain on the AdminMetadata resource, NOT on the
+    # parent Work. The parent keeps only the bffi:adminMetadata link.
+    assert (work, V.BFFI.adminMetadata, admin) in skosified
+    assert (admin, DCTERMS.modified, Literal("2026-06-08T00:00:00+00:00")) in skosified
+    assert (admin, V.descriptionAuthentication, auth) in skosified
+    assert (admin, V.descriptionLevel, level) in skosified
+    assert (admin, V.descriptionModifier, modifier) in skosified
+    assert (admin, V.encodingLevel, enc_level) in skosified
+    assert (admin, V.BFFI.generationDate, gen_date) in skosified
+    # Pre-Option-B flattening is gone — admin fields no longer
+    # mirror onto the parent Work.
+    assert (work, DCTERMS.modified, Literal("2026-06-08T00:00:00+00:00")) not in skosified
+    assert (work, V.descriptionLevel, level) not in skosified
+    assert (work, V.descriptionAuthentication, auth) not in skosified
 
 
-def test_role_predicates_lifted_from_contribution_blank_node(tmp_path: Path) -> None:
-    """``?s bffi:contribution ?c . ?c bf:role ?role`` → emit
-    ``?s bf:role ?role`` so Skosmos's concept page shows the role
-    next to the dct:creator / dct:contributor rows."""
+def test_role_predicates_no_longer_lifted_to_entity_level(tmp_path: Path) -> None:
+    """The role-on-entity mirror was dropped — it created a parallel
+    "Rooli" row on the Skosmos concept page with no visual pairing to
+    the corresponding agent. The role stays on the contribution
+    bnode where ``_synthesise_contribution_labels`` composes
+    ``"<agent> (<role>)"`` as the bnode's ``skos:prefLabel``,
+    surfacing the pair as a single "Tekijyys" row."""
     work = URIRef(WORK)
     contrib = BNode()
     agent = URIRef("urn:agent/translator")
@@ -406,7 +467,15 @@ def test_role_predicates_lifted_from_contribution_blank_node(tmp_path: Path) -> 
 
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    assert (work, V.BFFI.role, role) in skosified
+    assert (work, V.BFFI.role, role) not in skosified
+    # Role stays on the bnode for the round-trip + contribution-label
+    # composition.
+    chain_roles = {
+        r
+        for c in skosified.objects(work, V.BFFI.contribution)
+        for r in skosified.objects(c, V.BFFI.role)
+    }
+    assert role in chain_roles
 
 
 def test_role_mts_uri_enrichment_resolves_via_axis_collection(tmp_path: Path) -> None:
@@ -496,7 +565,9 @@ def test_role_mts_uri_enrichment_silent_when_dump_missing(tmp_path: Path) -> Non
 
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    [emitted_contrib] = list(skosified.objects(work, V.BFFI.contribution))
+    emitted_contrib = next(
+        c for c in skosified.objects(work, V.BFFI.contribution) if isinstance(c, BNode)
+    )
     role_uris = [
         r for r in skosified.objects(emitted_contrib, V.BFFI.role) if isinstance(r, URIRef)
     ]
@@ -535,7 +606,9 @@ def test_contribution_label_composes_agent_and_role(tmp_path: Path) -> None:
 
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    [emitted_contrib] = list(skosified.objects(work, V.BFFI.contribution))
+    emitted_contrib = next(
+        c for c in skosified.objects(work, V.BFFI.contribution) if isinstance(c, BNode)
+    )
     pref_labels = list(skosified.objects(emitted_contrib, V.SKOS.prefLabel))
     assert any(
         str(lab) == "Andersson, Benny (säveltäjä)"
@@ -566,7 +639,9 @@ def test_contribution_label_falls_back_to_agent_only_when_no_role(tmp_path: Path
 
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    [emitted_contrib] = list(skosified.objects(work, V.BFFI.contribution))
+    emitted_contrib = next(
+        c for c in skosified.objects(work, V.BFFI.contribution) if isinstance(c, BNode)
+    )
     label_strings = {str(lab) for lab in skosified.objects(emitted_contrib, V.SKOS.prefLabel)}
     assert "Doe, Jane" in label_strings
     # No "(...)" suffix when role is absent.
@@ -596,7 +671,9 @@ def test_contribution_label_skipped_when_prefLabel_already_present(tmp_path: Pat
 
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    [emitted_contrib] = list(skosified.objects(work, V.BFFI.contribution))
+    emitted_contrib = next(
+        c for c in skosified.objects(work, V.BFFI.contribution) if isinstance(c, BNode)
+    )
     label_strings = {str(lab) for lab in skosified.objects(emitted_contrib, V.SKOS.prefLabel)}
     assert label_strings == {"Pre-existing label"}
 
@@ -633,7 +710,9 @@ def test_contribution_label_prefers_catalogueur_text_over_uri_form_role(
 
     skosified = Graph()
     skosified.parse(str(output), format="turtle")
-    [emitted_contrib] = list(skosified.objects(work, V.BFFI.contribution))
+    emitted_contrib = next(
+        c for c in skosified.objects(work, V.BFFI.contribution) if isinstance(c, BNode)
+    )
     label_strings = {str(lab) for lab in skosified.objects(emitted_contrib, V.SKOS.prefLabel)}
     assert "Andersson, Benny (säveltäjä)" in label_strings
     assert "Andersson, Benny (Composer)" not in label_strings
@@ -782,3 +861,606 @@ def test_skosify_run_raises_when_canonical_missing(tmp_path: Path) -> None:
 
 def test_skosified_filename_constant() -> None:
     assert SKOSIFIED_FILENAME == "canonical-skosified.ttl"
+
+
+# --- LoC countries bridge (L-12) -----------------------------------------
+
+
+def _write_loc_countries_bridge_fixture(path: Path, *, code: str = "fi") -> None:
+    """Mini-bridge fixture with one country, one skos:exactMatch, three
+    prefLabels — enough to exercise the materialiser."""
+    path.write_text(
+        f"""
+@prefix loc:  <http://id.loc.gov/vocabulary/countries/> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix yso:  <http://www.yso.fi/onto/yso/> .
+
+loc:{code}  skos:exactMatch yso:p94426 ;
+            skos:prefLabel  "Suomi"@fi, "Finland"@sv, "Finland"@en ;
+            skos:notation   "{code}" .
+""",
+        encoding="utf-8",
+    )
+
+
+def test_country_labels_materialised_from_bridge_on_referenced_uri(tmp_path: Path) -> None:
+    """A ``bf:place`` reference to a LoC country URI gets multilingual
+    prefLabels (plus exactMatch + notation) materialised on the URI
+    itself from the bridge file."""
+    bridge_path = tmp_path / "bridge.ttl"
+    _write_loc_countries_bridge_fixture(bridge_path)
+
+    manifestation = URIRef("http://urn.fi/URN:NBN:fi:bib:manifestation:m1")
+    country = URIRef("http://id.loc.gov/vocabulary/countries/fi")
+    pa = BNode()
+    g = Graph()
+    g.add((manifestation, RDF.type, V.BFFI.Manifestation))
+    g.add((manifestation, V.BFFI.provisionActivity, pa))
+    g.add((pa, V.BF.place, country))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output, loc_countries_bridge_path=bridge_path)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    pref_labels = set(skosified.objects(country, V.SKOS.prefLabel))
+    assert Literal("Suomi", lang="fi") in pref_labels
+    assert Literal("Finland", lang="sv") in pref_labels
+    assert Literal("Finland", lang="en") in pref_labels
+    assert (
+        country,
+        V.SKOS.exactMatch,
+        URIRef("http://www.yso.fi/onto/yso/p94426"),
+    ) in skosified
+    assert (country, V.SKOS.notation, Literal("fi")) in skosified
+
+
+def test_country_labels_skipped_for_unknown_code(tmp_path: Path) -> None:
+    """A country URI absent from the bridge file is left bare — no
+    pref/exactMatch/notation triples appear on it."""
+    bridge_path = tmp_path / "bridge.ttl"
+    _write_loc_countries_bridge_fixture(bridge_path, code="fi")
+
+    manifestation = URIRef("http://urn.fi/URN:NBN:fi:bib:manifestation:m1")
+    # Reference a country NOT in the bridge fixture.
+    country = URIRef("http://id.loc.gov/vocabulary/countries/zz")
+    pa = BNode()
+    g = Graph()
+    g.add((manifestation, RDF.type, V.BFFI.Manifestation))
+    g.add((manifestation, V.BFFI.provisionActivity, pa))
+    g.add((pa, V.BF.place, country))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output, loc_countries_bridge_path=bridge_path)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert list(skosified.objects(country, V.SKOS.prefLabel)) == []
+
+
+def test_subject_typing_propagated_via_exact_match(tmp_path: Path) -> None:
+    """Per b19845637 1910-luku review: when a raw subject URI carries
+    a routable ``rdf:type`` AND a ``skos:exactMatch`` to a YSO URI,
+    the Skosify pass copies the type onto the YSO URI so the
+    round-trip can route the 6XX tag from the YSO URI alone (M9
+    rebinding strips the raw URI; the YSO URI is what survives onto
+    the canonical Work's ``bffi:subject`` predicate)."""
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:work:abc")
+    raw_temporal = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b19845637#Temporal648-29")
+    yso_uri = URIRef("http://www.yso.fi/onto/yso/p6191061919")
+
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.subject, raw_temporal))
+    g.add((work, V.BFFI.subject, yso_uri))
+    g.add((raw_temporal, RDF.type, V.BFFI.Temporal))
+    g.add((raw_temporal, V.RDFS.label, Literal("1910-luku")))
+    g.add((raw_temporal, V.SKOS.exactMatch, yso_uri))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (yso_uri, RDF.type, V.BFFI.Temporal) in skosified
+
+
+def test_typed_subject_display_temporal_emits_dct_temporal(tmp_path: Path) -> None:
+    """A ``bffi:Temporal``-typed subject target mirrors onto
+    ``dct:temporal`` on the parent, so Skosmos shows it under
+    "Temporal subject" distinct from the generic ``bffi:subject``
+    row."""
+    work = URIRef(WORK)
+    target = URIRef("http://www.yso.fi/onto/yso/p6191061919")
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, RDF.type, V.BFFI.Temporal))
+    g.add((target, V.SKOS.prefLabel, Literal("1910-luku", lang="fi")))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, DCTERMS.temporal, target) in skosified
+    # The original bffi:subject link stays — round-trip and queries
+    # that walk bffi:subject still see the target.
+    assert (work, V.BFFI.subject, target) in skosified
+
+
+def test_typed_subject_display_place_emits_geographic_coverage(tmp_path: Path) -> None:
+    """A ``bffi:Place``-typed subject target mirrors onto
+    ``bffi:geographicCoverage`` on the parent."""
+    work = URIRef(WORK)
+    target = URIRef("http://www.yso.fi/onto/yso/p94426")
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, RDF.type, V.BFFI.Place))
+    g.add((target, V.SKOS.prefLabel, Literal("Suomi", lang="fi")))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, V.BFFI.geographicCoverage, target) in skosified
+    assert (work, V.BFFI.subject, target) in skosified
+
+
+def test_redundant_raw_subject_references_are_pruned(tmp_path: Path) -> None:
+    """When a Work has both ``bffi:subject <raw-bib-URI>`` AND
+    ``bffi:subject <yso-URI>`` AND the raw URI ``skos:exactMatch``-es
+    the YSO URI, the raw flat triple is pruned from Skosify output
+    so Skosmos shows the subject only once via the authority URI."""
+    work = URIRef(WORK)
+    raw = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b00000001#Topic650-21")
+    yso = URIRef("http://www.yso.fi/onto/yso/p2849")
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.subject, raw))
+    g.add((work, V.BFFI.subject, yso))
+    g.add((raw, RDF.type, V.BFFI.Topic))
+    g.add((raw, V.SKOS.exactMatch, yso))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    # Raw triple pruned from the flat bffi:subject list.
+    assert (work, V.BFFI.subject, raw) not in skosified
+    # YSO triple retained.
+    assert (work, V.BFFI.subject, yso) in skosified
+    # exactMatch link survives.
+    assert (raw, V.SKOS.exactMatch, yso) in skosified
+
+
+def test_raw_subject_without_authority_twin_is_retained(tmp_path: Path) -> None:
+    """When a Work has only the raw subject reference (no authority
+    twin reconciled by M9), the raw triple stays — pruning would
+    leave the entity with NO subject of that kind."""
+    work = URIRef(WORK)
+    raw = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b00000001#Topic650-22")
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.subject, raw))
+    g.add((raw, RDF.type, V.BFFI.Topic))
+    g.add((raw, V.RDFS.label, Literal("kissaliivit", lang="fi")))
+    # NO skos:exactMatch; NO YSO URI on the work.
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, V.BFFI.subject, raw) in skosified
+
+
+def test_prune_does_not_drop_raw_when_authority_twin_is_on_other_predicate(
+    tmp_path: Path,
+) -> None:
+    """The prune is per-predicate: a raw subject under ``bffi:subject``
+    is NOT dropped just because the same raw URI's exactMatch
+    appears under ``bffi:genreForm`` on the same Work. The two are
+    semantically distinct rows."""
+    work = URIRef(WORK)
+    raw = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b00000001#Topic650-23")
+    yso = URIRef("http://www.yso.fi/onto/yso/p1234")
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.subject, raw))
+    g.add((work, V.BFFI.genreForm, yso))  # authority twin on DIFFERENT predicate
+    g.add((raw, V.SKOS.exactMatch, yso))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    # Raw triple retained because the authority twin isn't on the same predicate.
+    assert (work, V.BFFI.subject, raw) in skosified
+
+
+def test_typed_subject_display_topic_stays_under_subject_only(tmp_path: Path) -> None:
+    """A ``bffi:Topic``-typed (or untyped) subject target does NOT
+    mirror onto typed predicates — it stays under the catch-all
+    ``bffi:subject``."""
+    work = URIRef(WORK)
+    target = URIRef("http://www.yso.fi/onto/yso/p2849")
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.subject, target))
+    g.add((target, RDF.type, V.BFFI.Topic))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, V.BFFI.subject, target) in skosified
+    assert (work, DCTERMS.temporal, target) not in skosified
+    assert (work, V.BFFI.geographicCoverage, target) not in skosified
+
+
+def test_classification_display_flattens_portion_with_source_code(tmp_path: Path) -> None:
+    """``bffi:classification → bffi:classificationPortion`` + ``bf:source
+    → bffi:code`` chain flattens to a parent-level ``bffi:classificationPortion
+    "<portion> (<source>)"`` literal."""
+    work = URIRef(WORK)
+    cls = BNode()
+    src = BNode()
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.classification, cls))
+    g.add((cls, RDF.type, V.BFFI.Classification))
+    g.add((cls, V.BFFI.classificationPortion, Literal("78")))
+    g.add((cls, V.BF.source, src))
+    g.add((src, V.BFFI.code, Literal("ykl")))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, V.BFFI.classificationPortion, Literal("78 (ykl)")) in skosified
+
+
+def test_classification_display_falls_back_to_portion_only(tmp_path: Path) -> None:
+    """When the Classification bnode has no ``bf:source`` chain, the
+    flattened literal is just the portion (no parenthetical)."""
+    work = URIRef(WORK)
+    cls = BNode()
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.classification, cls))
+    g.add((cls, V.BFFI.classificationPortion, Literal("820-2")))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, V.BFFI.classificationPortion, Literal("820-2")) in skosified
+
+
+def test_note_display_mirrors_label_as_skos_prefLabel_on_bnode(tmp_path: Path) -> None:
+    """``bffi:note → bnode → rdfs:label`` chain mirrors the label
+    onto ``skos:prefLabel`` on the same bnode so Skosmos renders
+    the bnode value with readable text instead of a genid 404
+    link. The original ``rdfs:label`` stays untouched — round-trip
+    readers still see it."""
+    work = URIRef(WORK)
+    note = BNode()
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.note, note))
+    g.add((note, RDF.type, V.BFFI.Note))
+    g.add((note, V.RDFS.label, Literal("Linkki verkkoaineistoon", lang="fi")))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    note_prefLabels = [
+        lbl
+        for note_bnode in skosified.objects(work, V.BFFI.note)
+        if isinstance(note_bnode, BNode)
+        for lbl in skosified.objects(note_bnode, V.SKOS.prefLabel)
+    ]
+    assert Literal("Linkki verkkoaineistoon", lang="fi") in note_prefLabels
+    # The original rdfs:label stays.
+    note_rdfsLabels = [
+        lbl
+        for note_bnode in skosified.objects(work, V.BFFI.note)
+        if isinstance(note_bnode, BNode)
+        for lbl in skosified.objects(note_bnode, V.RDFS.label)
+    ]
+    assert Literal("Linkki verkkoaineistoon", lang="fi") in note_rdfsLabels
+
+
+def test_empty_bnode_values_pruned_from_skosify_output(tmp_path: Path) -> None:
+    """M3 SPARQL CONSTRUCTs with unbound right-hand variables emit
+    empty blank nodes (``bffi:title [ ]``, ``bffi:note [ ]``,
+    ``bffi:role [ ]``). Skosmos renders these as rows with a
+    non-resolvable genid link that 404s. The prune pass removes the
+    parent's reference to the empty bnode so the row disappears
+    from Skosmos."""
+    work = URIRef(WORK)
+    empty_title = BNode()
+    empty_note = BNode()
+    populated_note = BNode()
+    g = _build_canonical_graph()
+    # Empty bnodes — no outgoing triples at all.
+    g.add((work, V.BFFI.title, empty_title))
+    g.add((work, V.BFFI.note, empty_note))
+    # Populated bnode — has rdfs:label, should stay.
+    g.add((work, V.BFFI.note, populated_note))
+    g.add((populated_note, RDF.type, V.BFFI.Note))
+    g.add((populated_note, V.RDFS.label, Literal("Actual note text", lang="fi")))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    # Empty bnode references are gone.
+    empty_titles = [n for n in skosified.objects(work, V.BFFI.title) if isinstance(n, BNode)]
+    empty_notes = [
+        n
+        for n in skosified.objects(work, V.BFFI.note)
+        if isinstance(n, BNode) and not any(skosified.predicate_objects(n))
+    ]
+    assert empty_titles == []
+    assert empty_notes == []
+    # Populated bnode survives (and its label/prefLabel chain is intact).
+    populated_note_labels = [
+        lbl
+        for n in skosified.objects(work, V.BFFI.note)
+        if isinstance(n, BNode)
+        for lbl in skosified.objects(n, V.SKOS.prefLabel)
+    ]
+    assert Literal("Actual note text", lang="fi") in populated_note_labels
+
+
+def test_bnode_prefLabel_mirror_covers_tableOfContents_and_extent(tmp_path: Path) -> None:
+    """``bffi:tableOfContents`` and ``bffi:extent`` both point at
+    bnodes that carry their content as ``rdfs:label``. The
+    Skosmos-mirror pass copies that label onto ``skos:prefLabel``
+    on the bnode so Skosmos shows readable text inline instead of a
+    genid 404 link."""
+    work = URIRef(WORK)
+    toc = BNode()
+    ext = BNode()
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.tableOfContents, toc))
+    g.add((toc, RDF.type, V.BFFI.TableOfContents))
+    g.add((toc, V.RDFS.label, Literal("Sisältö: 1. luku, 2. luku, 3. luku", lang="fi")))
+    g.add((work, V.BFFI.extent, ext))
+    g.add((ext, RDF.type, V.BFFI.Extent))
+    g.add((ext, V.RDFS.label, Literal("1 äänilevy", lang="fi")))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    toc_prefLabels = [
+        lbl
+        for n in skosified.objects(work, V.BFFI.tableOfContents)
+        if isinstance(n, BNode)
+        for lbl in skosified.objects(n, V.SKOS.prefLabel)
+    ]
+    ext_prefLabels = [
+        lbl
+        for n in skosified.objects(work, V.BFFI.extent)
+        if isinstance(n, BNode)
+        for lbl in skosified.objects(n, V.SKOS.prefLabel)
+    ]
+    assert Literal("Sisältö: 1. luku, 2. luku, 3. luku", lang="fi") in toc_prefLabels
+    assert Literal("1 äänilevy", lang="fi") in ext_prefLabels
+
+
+def test_related_resource_display_lifts_associated_resource(tmp_path: Path) -> None:
+    """``bffi:relation → bnode → bffi:associatedResource <target>``
+    emits ``dct:relation <target>`` flat on the parent."""
+    work = URIRef(WORK)
+    rel = BNode()
+    target = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b00000001#Work740-1")
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add(
+        (
+            rel,
+            V.BFFI.relationship,
+            URIRef("http://id.loc.gov/vocabulary/relationship/relatedwork"),
+        )
+    )
+    g.add((rel, V.BFFI.associatedResource, target))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, DCTERMS.relation, target) in skosified
+
+
+def test_title_part_display_lifts_part_number_and_name(tmp_path: Path) -> None:
+    """``bffi:title → bnode → bffi:partNumber/partName`` chain emits
+    parallel flat ``bffi:partNumber`` / ``bffi:partName`` literals on
+    the parent so Skosmos renders the part info directly."""
+    work = URIRef(WORK)
+    title = BNode()
+    g = _build_canonical_graph()
+    g.add((work, V.BFFI.title, title))
+    g.add((title, V.BFFI.mainTitle, Literal("Sota ja rauha")))
+    g.add((title, V.BFFI.partNumber, Literal("2")))
+    g.add((title, V.BFFI.partName, Literal("Andrei")))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert (work, V.BFFI.partNumber, Literal("2")) in skosified
+    assert (work, V.BFFI.partName, Literal("Andrei")) in skosified
+
+
+def test_language_labels_materialised_from_bridge_on_referenced_uri(tmp_path: Path) -> None:
+    """Sibling to the country-bridge test: a ``bf:language`` reference
+    to a LoC language URI gets multilingual prefLabels materialised
+    on the URI itself from the languages bridge."""
+    bridge_path = tmp_path / "languages-bridge.ttl"
+    bridge_path.write_text(
+        """
+@prefix loc:  <http://id.loc.gov/vocabulary/languages/> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix yso:  <http://www.yso.fi/onto/yso/> .
+
+loc:fin  skos:exactMatch yso:p8856 ;
+         skos:prefLabel  "suomen kieli"@fi, "finska"@sv, "Finnish language"@en ;
+         skos:notation   "fin" .
+""",
+        encoding="utf-8",
+    )
+
+    work = URIRef(WORK)
+    lang_uri = URIRef("http://id.loc.gov/vocabulary/languages/fin")
+    g = _build_canonical_graph()
+    g.add((work, V.BF.language, lang_uri))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output, loc_languages_bridge_path=bridge_path)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    pref_labels = set(skosified.objects(lang_uri, V.SKOS.prefLabel))
+    assert Literal("suomen kieli", lang="fi") in pref_labels
+    assert Literal("finska", lang="sv") in pref_labels
+    assert Literal("Finnish language", lang="en") in pref_labels
+    assert (
+        lang_uri,
+        V.SKOS.exactMatch,
+        URIRef("http://www.yso.fi/onto/yso/p8856"),
+    ) in skosified
+
+
+def test_issuance_labels_materialised_from_bridge_on_referenced_uri(tmp_path: Path) -> None:
+    """Sibling to the country / language bridges: a ``bf:issuance``
+    reference to a LoC issuance URI gets multilingual prefLabels +
+    MTS exactMatch materialised on the URI itself."""
+    bridge_path = tmp_path / "issuance-bridge.ttl"
+    bridge_path.write_text(
+        """
+@prefix loc:  <http://id.loc.gov/vocabulary/issuance/> .
+@prefix mts:  <http://urn.fi/URN:NBN:fi:au:mts:> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+loc:mono  skos:exactMatch mts:m4371 ;
+          skos:prefLabel  "yhtenä yksikkönä ilmestyvä aineisto"@fi,
+                          "single unit"@en ;
+          skos:notation   "mono" .
+""",
+        encoding="utf-8",
+    )
+
+    work = URIRef(WORK)
+    iss_uri = URIRef("http://id.loc.gov/vocabulary/issuance/mono")
+    g = _build_canonical_graph()
+    g.add((work, V.BF.issuance, iss_uri))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output, loc_issuance_bridge_path=bridge_path)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    pref_labels = set(skosified.objects(iss_uri, V.SKOS.prefLabel))
+    assert Literal("yhtenä yksikkönä ilmestyvä aineisto", lang="fi") in pref_labels
+    assert Literal("single unit", lang="en") in pref_labels
+    assert (
+        iss_uri,
+        V.SKOS.exactMatch,
+        URIRef("http://urn.fi/URN:NBN:fi:au:mts:m4371"),
+    ) in skosified
+
+
+def test_language_labels_skipped_for_unknown_code(tmp_path: Path) -> None:
+    """A language URI absent from the bridge file is left bare."""
+    bridge_path = tmp_path / "languages-bridge.ttl"
+    bridge_path.write_text(
+        """
+@prefix loc:  <http://id.loc.gov/vocabulary/languages/> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+loc:fin  skos:prefLabel "suomen kieli"@fi .
+""",
+        encoding="utf-8",
+    )
+
+    work = URIRef(WORK)
+    lang_uri = URIRef("http://id.loc.gov/vocabulary/languages/xyz")
+    g = _build_canonical_graph()
+    g.add((work, V.BF.language, lang_uri))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    run(canonical, output_path=output, loc_languages_bridge_path=bridge_path)
+
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert list(skosified.objects(lang_uri, V.SKOS.prefLabel)) == []
+
+
+def test_country_labels_pass_silent_when_bridge_file_missing(tmp_path: Path) -> None:
+    """Bridge file missing → pass is a no-op; Skosify still completes."""
+    manifestation = URIRef("http://urn.fi/URN:NBN:fi:bib:manifestation:m1")
+    country = URIRef("http://id.loc.gov/vocabulary/countries/fi")
+    pa = BNode()
+    g = Graph()
+    g.add((manifestation, RDF.type, V.BFFI.Manifestation))
+    g.add((manifestation, V.BFFI.provisionActivity, pa))
+    g.add((pa, V.BF.place, country))
+
+    canonical = tmp_path / "canonical.ttl"
+    g.serialize(destination=str(canonical), format="turtle")
+    output = tmp_path / "skosified.ttl"
+    result = run(
+        canonical,
+        output_path=output,
+        loc_countries_bridge_path=tmp_path / "missing.ttl",
+    )
+    assert result.skipped_idempotent is False
+    skosified = Graph()
+    skosified.parse(str(output), format="turtle")
+    assert list(skosified.objects(country, V.SKOS.prefLabel)) == []

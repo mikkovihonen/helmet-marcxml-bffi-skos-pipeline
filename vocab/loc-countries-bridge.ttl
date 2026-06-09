@@ -1,0 +1,261 @@
+# LoC MARC country code → YSO bridge with multilingual labels.
+#
+# Per docs/bffi_limitations.md L-12, neither LoC's countries vocabulary
+# nor YSO publishes a cross-reference between
+# <http://id.loc.gov/vocabulary/countries/{code}> and the corresponding
+# YSO concept. This file is our own bridge: one skos:exactMatch into
+# main YSO plus inlined fi/sv/en prefLabels (cached from YSO at the
+# time this file was written, so it stays useful even when Fuseki is
+# offline at Skosify time).
+#
+# Coverage: every LoC MARC country code observed in the Helmet
+# 500-sample as of 2026-06-09 (21 codes) plus a generous "common
+# countries" set seeded from YSO. Extend by adding more rows as
+# missing codes surface in a run — the
+# `_synthesise_country_labels` Skosify pass is data-driven; no code
+# change needed.
+#
+# Per-code research source: LoC MARC country code list
+# (https://www.loc.gov/marc/countries/cou_home.html — codes are
+# 2-3 chars, not ISO 3166); YSO concept URI + prefLabels via the
+# loaded `<http://www.yso.fi/onto/yso/>` Fuseki graph.
+#
+# License: CC0 (this bridge is our own contribution; YSO labels are
+# Finto-curated under their own CC0 release).
+
+@prefix bridge: <http://urn.fi/URN:NBN:fi:bib:bridge/loc-countries/> .
+@prefix loc:    <http://id.loc.gov/vocabulary/countries/> .
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
+@prefix yso:    <http://www.yso.fi/onto/yso/> .
+
+# === Bridge graph identifier ===
+
+bridge: a skos:ConceptScheme ;
+    rdfs:label "Local LoC MARC country code ↔ YSO bridge"@en ;
+    rdfs:comment "Project-owned bridge — see docs/bffi_limitations.md L-12."@en .
+
+# === Countries observed in the 500-record sample ===
+
+loc:ch  skos:exactMatch yso:p104984 ;
+        skos:prefLabel  "Kiina"@fi, "Kina"@sv, "China"@en ;
+        skos:notation   "ch" .
+
+loc:dk  skos:exactMatch yso:p94439 ;
+        skos:prefLabel  "Tanska"@fi, "Danmark"@sv, "Denmark"@en ;
+        skos:notation   "dk" .
+
+loc:er  skos:exactMatch yso:p104987 ;
+        skos:prefLabel  "Viro"@fi, "Estland"@sv, "Estonia"@en ;
+        skos:notation   "er" .
+
+loc:fi  skos:exactMatch yso:p94426 ;
+        skos:prefLabel  "Suomi"@fi, "Finland"@sv, "Finland"@en ;
+        skos:notation   "fi" .
+
+loc:fr  skos:exactMatch yso:p104968 ;
+        skos:prefLabel  "Ranska"@fi, "Frankrike"@sv, "France"@en ;
+        skos:notation   "fr" .
+
+loc:gr  skos:exactMatch yso:p105037 ;
+        skos:prefLabel  "Kreikka"@fi, "Grekland"@sv, "Greece"@en ;
+        skos:notation   "gr" .
+
+loc:gw  skos:exactMatch yso:p105087 ;
+        skos:prefLabel  "Saksa"@fi, "Tyskland"@sv, "Germany"@en ;
+        skos:notation   "gw" .
+
+loc:ir  skos:exactMatch yso:p105280 ;
+        skos:prefLabel  "Iran"@fi, "Iran"@sv, "Iran"@en ;
+        skos:notation   "ir" .
+
+loc:it  skos:exactMatch yso:p105111 ;
+        skos:prefLabel  "Italia"@fi, "Italien"@sv, "Italy"@en ;
+        skos:notation   "it" .
+
+loc:lv  skos:exactMatch yso:p94259 ;
+        skos:prefLabel  "Latvia"@fi, "Lettland"@sv, "Latvia"@en ;
+        skos:notation   "lv" .
+
+loc:ne  skos:exactMatch yso:p105190 ;
+        skos:prefLabel  "Alankomaat"@fi, "Nederländerna"@sv, "Netherlands"@en ;
+        skos:notation   "ne" .
+
+loc:ru  skos:exactMatch yso:p94479 ;
+        skos:prefLabel  "Venäjä"@fi, "Ryssland"@sv, "Russia"@en ;
+        skos:notation   "ru" .
+
+loc:si  skos:exactMatch yso:p105234 ;
+        skos:prefLabel  "Singapore"@fi, "Singapore"@sv, "Singapore"@en ;
+        skos:notation   "si" .
+
+loc:sp  skos:exactMatch yso:p105209 ;
+        skos:prefLabel  "Espanja"@fi, "Spanien"@sv, "Spain"@en ;
+        skos:notation   "sp" .
+
+loc:sw  skos:exactMatch yso:p94383 ;
+        skos:prefLabel  "Ruotsi"@fi, "Sverige"@sv, "Sweden"@en ;
+        skos:notation   "sw" .
+
+loc:th  skos:exactMatch yso:p105243 ;
+        skos:prefLabel  "Thaimaa"@fi, "Thailand"@sv, "Thailand"@en ;
+        skos:notation   "th" .
+
+loc:xxk skos:exactMatch yso:p107128 ;
+        skos:prefLabel  "Englanti"@fi, "England"@sv, "England"@en ;
+        skos:notation   "xxk" ;
+        rdfs:comment    "LoC MARC `xxk` denotes England specifically; the broader 'United Kingdom' concept is yso:p104990 (Iso-Britannia). We bridge to England here because that's the MARC code's literal meaning."@en .
+
+loc:xxu skos:exactMatch yso:p105078 ;
+        skos:prefLabel  "Yhdysvallat"@fi, "Förenta staterna"@sv, "United States"@en ;
+        skos:notation   "xxu" .
+
+# Codes observed in the 500-sample whose meaning needs verification
+# against the LoC MARC country code list before we can bridge them:
+#
+# - aa : not in the official LoC MARC country code list — likely a
+#        data-entry typo or pre-1980 obsolete code. Skip until we
+#        identify the actual country it was meant for.
+# - un : appears in the LoC MARC code list (per
+#        https://www.loc.gov/marc/countries/) but its mapping is
+#        ambiguous (possibly pre-1991 Ukraine; possibly USSR-era).
+#        Skip until verified against a sample record.
+# - xx : LoC sentinel "no place, unknown, or undetermined" — no
+#        country bridge appropriate; downstream consumers should
+#        handle the URI as opaque.
+
+# === Common countries not in the 500-sample (seed set, alphabetical) ===
+
+loc:au  skos:exactMatch yso:p105294 ;
+        skos:prefLabel  "Itävalta"@fi, "Österrike"@sv, "Austria"@en ;
+        skos:notation   "au" .
+
+loc:at  skos:exactMatch yso:p105116 ;
+        skos:prefLabel  "Australia"@fi, "Australien"@sv, "Australia"@en ;
+        skos:notation   "at" .
+
+loc:be  skos:exactMatch yso:p105206 ;
+        skos:prefLabel  "Belgia"@fi, "Belgien"@sv, "Belgium"@en ;
+        skos:notation   "be" .
+
+loc:ag  skos:exactMatch yso:p108007 ;
+        skos:prefLabel  "Argentiina"@fi, "Argentina"@sv, "Argentina"@en ;
+        skos:notation   "ag" .
+
+loc:bl  skos:exactMatch yso:p108126 ;
+        skos:prefLabel  "Brasilia (valtio)"@fi, "Brasilien"@sv, "Brazil"@en ;
+        skos:notation   "bl" .
+
+loc:bu  skos:exactMatch yso:p106673 ;
+        skos:prefLabel  "Bulgaria"@fi, "Bulgarien"@sv, "Bulgaria"@en ;
+        skos:notation   "bu" .
+
+loc:ca  skos:exactMatch yso:p105377 ;
+        skos:prefLabel  "Kanada"@fi, "Kanada"@sv, "Canada"@en ;
+        skos:notation   "ca" .
+
+loc:cl  skos:exactMatch yso:p108111 ;
+        skos:prefLabel  "Chile"@fi, "Chile"@sv, "Chile"@en ;
+        skos:notation   "cl" .
+
+loc:cy  skos:exactMatch yso:p106039 ;
+        skos:prefLabel  "Kypros"@fi, "Cypern"@sv, "Cyprus"@en ;
+        skos:notation   "cy" .
+
+loc:enk skos:exactMatch yso:p107128 ;
+        skos:prefLabel  "Englanti"@fi, "England"@sv, "England"@en ;
+        skos:notation   "enk" ;
+        rdfs:comment    "Alias for xxk in some Helmet records."@en .
+
+loc:ko  skos:exactMatch yso:p105182 ;
+        skos:prefLabel  "Korean tasavalta"@fi, "Republiken Korea"@sv, "South Korea"@en ;
+        skos:notation   "ko" .
+
+loc:kn  skos:exactMatch yso:p105548 ;
+        skos:prefLabel  "Korean kansantasavalta"@fi, "Folkrepubliken Korea"@sv, "North Korea"@en ;
+        skos:notation   "kn" .
+
+loc:hu  skos:exactMatch yso:p105029 ;
+        skos:prefLabel  "Unkari"@fi, "Ungern"@sv, "Hungary"@en ;
+        skos:notation   "hu" .
+
+loc:ic  skos:exactMatch yso:p105820 ;
+        skos:prefLabel  "Islanti"@fi, "Island"@sv, "Iceland"@en ;
+        skos:notation   "ic" .
+
+loc:ie  skos:exactMatch yso:p105195 ;
+        skos:prefLabel  "Irlanti"@fi, "Irland"@sv, "Ireland"@en ;
+        skos:notation   "ie" .
+
+loc:ii  skos:exactMatch yso:p105027 ;
+        skos:prefLabel  "Intia"@fi, "Indien"@sv, "India"@en ;
+        skos:notation   "ii" .
+
+loc:io  skos:exactMatch yso:p105242 ;
+        skos:prefLabel  "Indonesia"@fi, "Indonesien"@sv, "Indonesia"@en ;
+        skos:notation   "io" .
+
+loc:is  skos:exactMatch yso:p105162 ;
+        skos:prefLabel  "Israel"@fi, "Israel"@sv, "Israel"@en ;
+        skos:notation   "is" .
+
+loc:ja  skos:exactMatch yso:p105023 ;
+        skos:prefLabel  "Japani"@fi, "Japan"@sv, "Japan"@en ;
+        skos:notation   "ja" .
+
+loc:li  skos:exactMatch yso:p94268 ;
+        skos:prefLabel  "Liettua"@fi, "Litauen"@sv, "Lithuania"@en ;
+        skos:notation   "li" .
+
+loc:mx  skos:exactMatch yso:p105032 ;
+        skos:prefLabel  "Meksiko"@fi, "Mexico"@sv, "Mexico"@en ;
+        skos:notation   "mx" .
+
+loc:no  skos:exactMatch yso:p94309 ;
+        skos:prefLabel  "Norja"@fi, "Norge"@sv, "Norway"@en ;
+        skos:notation   "no" .
+
+loc:nz  skos:exactMatch yso:p105384 ;
+        skos:prefLabel  "Uusi-Seelanti"@fi, "Nya Zeeland"@sv, "New Zealand"@en ;
+        skos:notation   "nz" .
+
+loc:ph  skos:exactMatch yso:p105189 ;
+        skos:prefLabel  "Filippiinit"@fi, "Filippinerna"@sv, "Philippines"@en ;
+        skos:notation   "ph" .
+
+loc:pl  skos:exactMatch yso:p105244 ;
+        skos:prefLabel  "Puola"@fi, "Polen"@sv, "Poland"@en ;
+        skos:notation   "pl" .
+
+loc:po  skos:exactMatch yso:p105409 ;
+        skos:prefLabel  "Portugali"@fi, "Portugal"@sv, "Portugal"@en ;
+        skos:notation   "po" .
+
+loc:rm  skos:exactMatch yso:p105030 ;
+        skos:prefLabel  "Romania"@fi, "Rumänien"@sv, "Romania"@en ;
+        skos:notation   "rm" .
+
+loc:sa  skos:exactMatch yso:p105098 ;
+        skos:prefLabel  "Etelä-Afrikka"@fi, "Sydafrika"@sv, "South Africa"@en ;
+        skos:notation   "sa" .
+
+loc:sz  skos:exactMatch yso:p105295 ;
+        skos:prefLabel  "Sveitsi"@fi, "Schweiz"@sv, "Switzerland"@en ;
+        skos:notation   "sz" .
+
+loc:tu  skos:exactMatch yso:p105573 ;
+        skos:prefLabel  "Turkki"@fi, "Turkiet"@sv, "Turkey"@en ;
+        skos:notation   "tu" .
+
+loc:ua  skos:exactMatch yso:p107664 ;
+        skos:prefLabel  "Ukraina"@fi, "Ukraina"@sv, "Ukraine"@en ;
+        skos:notation   "ua" .
+
+loc:ue  skos:exactMatch yso:p105841 ;
+        skos:prefLabel  "Egypti"@fi, "Egypten"@sv, "Egypt"@en ;
+        skos:notation   "ue" .
+
+loc:vm  skos:exactMatch yso:p104988 ;
+        skos:prefLabel  "Vietnam"@fi, "Vietnam"@sv, "Vietnam"@en ;
+        skos:notation   "vm" .

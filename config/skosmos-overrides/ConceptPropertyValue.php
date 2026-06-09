@@ -1,0 +1,292 @@
+<?php
+
+/**
+ * Class for handling concept property values.
+ */
+class ConceptPropertyValue extends VocabularyDataObject
+{
+    /** submembers */
+    private $submembers;
+    /** property type */
+    private $type;
+    /** content language */
+    private $clang;
+    /** whether the property value is external w.r.t. to the subject resource */
+    private $external;
+    /** ordered list items if this value is an RDF list */
+    private $listItems;
+    /** whether the RDF list was truncated due to max limit */
+    private $listTruncated;
+
+    public function __construct($model, $vocab, $resource, $prop, $clang = '')
+    {
+        parent::__construct($model, $vocab, $resource);
+        $this->submembers = array();
+        $this->type = $prop;
+        $this->clang = $clang;
+        $this->listItems = null;
+        $this->listTruncated = false;
+        // check if the resource is external to the current vocabulary
+        $this->external = ($this->getLabel('', 'null', false) === null);
+        if ($this->external) {
+            // if we find the resource in another vocabulary, use it instead
+            $exvocab = $this->getExVocab();
+            if ($exvocab !== null) {
+                $this->vocab = $exvocab;
+            }
+        }
+        // check if this resource is an RDF list and parse it
+        $this->parseRdfList();
+    }
+
+    public function __toString()
+    {
+        return is_string($this->getLabel()) ? $this->getLabel() : $this->getLabel()->getValue();
+    }
+
+    public function getLang()
+    {
+        return $this->model->getLang();
+    }
+
+    public function getSortKey()
+    {
+        return strtolower($this->getLabel());
+    }
+
+    public function getLabel($lang = '', $fallbackToUri = 'uri', $allowExternal = true)
+    {
+        if ($this->clang) {
+            $lang = $this->clang;
+        }
+        if ($this->vocab->getConfig()->getLanguageOrder($lang)) {
+            foreach ($this->vocab->getConfig()->getLanguageOrder($lang) as $fallback) {
+                if ($this->resource->label($fallback) !== null) {
+                    return $this->resource->label($fallback);
+                }
+                // We need to check all the labels in case one of them matches a subtag of the current language
+                if ($this->resource->allLiterals('skos:prefLabel')) {
+                    foreach ($this->resource->allLiterals('skos:prefLabel') as $label) {
+                        // the label lang code is a subtag of the UI lang eg. en-GB - create a new literal with the main language
+                        if ($label !== null && strpos($label->getLang(), $fallback . '-') === 0) {
+                            return EasyRdf\Literal::create($label, $fallback);
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($this->resource->label($lang) !== null) { // current language
+            return $this->resource->label($lang);
+        } elseif ($this->resource->label($this->vocab->getConfig()->getDefaultLanguage()) !== null) { // vocab default language
+            return $this->resource->label($this->vocab->getConfig()->getDefaultLanguage());
+        } elseif ($this->resource->label() !== null) { // any language
+            return $this->resource->label();
+        } elseif ($this->resource->getLiteral('rdf:value', $lang) !== null) { // current language
+            return $this->resource->getLiteral('rdf:value', $lang);
+        } elseif ($this->resource->getLiteral('rdf:value') !== null) { // any language
+            return $this->resource->getLiteral('rdf:value');
+        }
+
+        // see if we can find a label in another vocabulary known by the skosmos instance
+        if ($allowExternal) {
+            $label = $this->getExternalLabel($this->vocab, $this->getUri(), $lang);
+            if ($label) {
+                return $label;
+            }
+        }
+
+        if ($fallbackToUri == 'uri') {
+            // return uri if no label is found
+            return $this->resource->shorten() ? $this->resource->shorten() : $this->getUri();
+        }
+        return null;
+    }
+
+    public function getType()
+    {
+        return $this->type;
+    }
+
+    public function getUri()
+    {
+        // BFFI pipeline override: when the value is a blank node
+        // (e.g. a bffi:Contribution or bffi:Relation chain), the
+        // bnode's own URI ("_:genid…") isn't resolvable and produces
+        // a 404 on click. Detour through the bnode's primary outgoing
+        // link so the row links to a real concept page. The bnode's
+        // composed ``skos:prefLabel`` is unchanged and remains the
+        // visible link text — preserving role / relationship suffix
+        // while making the row clickable.
+        //
+        // Detour table (first non-bnode match wins):
+        //   - ``bffi:agent`` — set by
+        //     ``_synthesise_contribution_labels`` on
+        //     ``bffi:contribution`` bnodes.
+        //   - ``bffi:associatedResource`` — set by
+        //     ``_synthesise_relation_labels`` on ``bffi:relation``
+        //     bnodes (related Work / Hub / series).
+        //
+        // For these branches to find their detour triple, the
+        // companion Skosify passes also emit a ``rdf:value`` on the
+        // bnode — that triggers Skosmos's deeper bnode property
+        // fetch in ``GenericSparql::generateConceptInfoQuery``;
+        // without it the EasyRdf graph sees only ``rdf:type`` +
+        // ``skos:prefLabel`` on the bnode and the detour predicate
+        // is missing. See
+        // ``_mirror_preflabel_as_rdf_value`` in
+        // ``src/bffi_pipeline/stages/m10/skosify_run.py``.
+        //
+        // EasyRdf::Resource::get accepts either a registered CURIE
+        // ("foo:bar") or a full URI wrapped in angle brackets
+        // ("<http://…>"). ``bffi:`` isn't a registered namespace in
+        // Skosmos's default EasyRdf setup, so pass the angle-bracket
+        // form.
+        if ($this->resource->isBNode()) {
+            $detourPredicates = array(
+                '<http://urn.fi/URN:NBN:fi:schema:bffi:agent>',
+                '<http://urn.fi/URN:NBN:fi:schema:bffi:associatedResource>',
+            );
+            foreach ($detourPredicates as $predicate) {
+                $target = $this->resource->get($predicate);
+                if ($target !== null && !$target->isBNode()) {
+                    return $target->getUri();
+                }
+            }
+        }
+        return $this->resource->getUri();
+    }
+
+    public function getExVocab()
+    {
+        return $this->model->guessVocabularyFromURI($this->getUri(), $this->vocab->getId());
+    }
+
+    public function getVocab()
+    {
+        return $this->vocab;
+    }
+
+    public function getVocabName()
+    {
+        return $this->vocab->getShortName();
+    }
+
+    public function addSubMember($member, $lang = '')
+    {
+        $label = $member->getLabel($lang) ? $member->getLabel($lang) : $member->getLabel();
+        $this->submembers[$label->getValue()] = $member;
+        $this->sortSubMembers();
+    }
+
+    public function getSubMembers()
+    {
+        if (empty($this->submembers)) {
+            return null;
+        }
+
+        return $this->submembers;
+    }
+
+    private function sortSubMembers()
+    {
+        if (!empty($this->submembers)) {
+            ksort($this->submembers);
+        }
+
+    }
+
+    public function isExternal()
+    {
+        return $this->external;
+    }
+
+    public function getNotation()
+    {
+        if ($this->vocab->getConfig()->showNotation() && $this->resource->get('skos:notation')) {
+            return $this->resource->get('skos:notation')->getValue();
+        }
+
+    }
+
+    public function isReified()
+    {
+        return (!$this->resource->label() && $this->resource->getLiteral('rdf:value'));
+    }
+
+    public function getReifiedPropertyValues()
+    {
+        $ret = array();
+        $props = $this->resource->propertyUris();
+        foreach ($props as $prop) {
+            $prop = (EasyRdf\RdfNamespace::shorten($prop) !== null) ? EasyRdf\RdfNamespace::shorten($prop) : $prop;
+            $propkey = str_starts_with($prop, 'dc11:') ?
+                str_replace('dc11:', 'dc:', $prop) : $prop;
+            foreach ($this->resource->allLiterals($prop) as $val) {
+                if ($prop !== 'rdf:value') { // shown elsewhere
+                    $ret[$this->model->getText($propkey)] = new ConceptPropertyValueLiteral($this->model, $this->vocab, $this->resource, $val, $prop);
+                }
+            }
+            foreach ($this->resource->allResources($prop) as $val) {
+                $ret[$this->model->getText($propkey)] = new ConceptPropertyValue($this->model, $this->vocab, $val, $prop, $this->clang);
+            }
+        }
+        return $ret;
+    }
+
+    /**
+     * Check if this resource represents an RDF list (has rdf:first property)
+     * and parse the list items in order
+     */
+    private function parseRdfList()
+    {
+        // Check if this resource has rdf:first (indicating it's a list node)
+        if ($this->resource->getResource('rdf:first') === null) {
+            return; // Not an RDF list
+        }
+
+        $this->listItems = array();
+        $currentNode = $this->resource;
+        $itemsLimit = $this->model->getConfig()->getRdfListItemsLimit();
+        $iteration = 0;
+
+        while ($currentNode !== null && !($itemsLimit > 0 && $iteration >= $itemsLimit)) {
+            $item = $currentNode->getResource('rdf:first');
+            if ($item !== null) {
+                $listItemValue = new ConceptPropertyValue($this->model, $this->vocab, $item, $this->type, $this->clang);
+                $this->listItems[] = $listItemValue;
+            }
+            $iteration++;
+
+            $restNode = $currentNode->getResource('rdf:rest');
+            $isEndOfList = $restNode === null || $restNode->getUri() === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#nil';
+
+            if ($isEndOfList) {
+                $this->listTruncated = false;
+                $currentNode = null;
+            } else {
+                $currentNode = $restNode;
+            }
+        }
+
+        if ($currentNode !== null && $itemsLimit > 0 && $iteration >= $itemsLimit) {
+            $this->listTruncated = true;
+        }
+    }
+
+    public function isRdfList()
+    {
+        return $this->listItems !== null && count($this->listItems) > 0;
+    }
+
+    public function getRdfListItems()
+    {
+        return $this->listItems;
+    }
+
+    public function isRdfListTruncated()
+    {
+        return $this->listTruncated;
+    }
+
+}

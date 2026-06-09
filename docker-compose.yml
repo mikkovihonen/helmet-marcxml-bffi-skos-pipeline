@@ -48,6 +48,20 @@ services:
       # M11: vocabulary config per docs/archived/marcxml-to-bffi-skosmos-pipeline.md § 4.
       # The container reads /var/www/html/config.ttl on startup.
       - ./config/skosmos-config.ttl:/var/www/html/config.ttl:ro
+      # Twig template override: the bundled concept-card template wraps
+      # blank-node property values in <a> tags that 404 because bnode
+      # URIs ("_:genid…") aren't resolvable. Our patched template skips
+      # the link branch for bnodes so their skos:prefLabel (added by the
+      # Skosify ``_synthesise_bnode_prefLabel_mirrors`` pass) renders
+      # as inline text. See ``config/skosmos-overrides/`` for what's
+      # patched.
+      - ./config/skosmos-overrides/concept-card.inc.twig:/var/www/html/src/view/concept-card.inc.twig:ro
+      # PHP-level override: ConceptPropertyValue::getUri returns the
+      # bnode's bffi:agent URI for contribution blank nodes so the
+      # "Tekijyys" row links to the agent's concept page while
+      # keeping the composed "<agent> (<role>)" prefLabel as the
+      # link text. See config/skosmos-overrides/README.md.
+      - ./config/skosmos-overrides/ConceptPropertyValue.php:/var/www/html/src/model/ConceptPropertyValue.php:ro
     restart: unless-stopped
 
   # P-11 Phase D: local observability stack. Scrapes the
