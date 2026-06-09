@@ -29,19 +29,23 @@ ASK {
 PREFIX bf:   <http://id.loc.gov/ontologies/bibframe/>
 PREFIX bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:>
 
-# P-45 commit 2: bf:identifiedBy moved from canonical Work onto
-# Manifestation (each Manifestation is 1:1 with one Helmet bib record).
+# P-45 commit 2: identifiers moved from canonical Work onto Manifestation
+# (each Manifestation is 1:1 with one Helmet bib record).
+# P-53 (commit 03b54e5) renamed the predicate from bf:identifiedBy to
+# bffi:identifiedBy in the canonical graph; bf:source survives in the
+# closed-set "deliberately bf:*" list, so the source attribution still
+# uses bf:source.
 # This ASK pins the new invariant AND the Work → Expression ← Manifestation
 # walk that lets cataloguer tooling rediscover the bib_id from a Work:
 #   Work --bffi:hasExpression--> Expression
 #        <--bffi:expressionManifested-- Manifestation
-#        --bf:identifiedBy--> Helmet-sourced identifier
+#        --bffi:identifiedBy--> Helmet-sourced identifier
 ASK {
     ?w a bffi:Work ;
        bffi:hasExpression ?e .
     ?m a bffi:Manifestation ;
        bffi:expressionManifested ?e ;
-       bf:identifiedBy [
+       bffi:identifiedBy [
            bf:source <http://urn.fi/URN:NBN:fi:bib:source:helmet>
        ] .
 }
