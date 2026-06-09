@@ -44,6 +44,8 @@ from bffi_pipeline.stages.m8 import (
 )
 from bffi_pipeline.stages.m8.mint import (
     _propagate_expression_passthrough,
+    _propagate_marc_key,
+    _propagate_subject_typing,
     _propagate_work_typing,
 )
 from bffi_pipeline.stages.m8.runner import (
@@ -2438,6 +2440,51 @@ def test_propagate_work_typing_routes_bffi_subclasses_to_canonical() -> None:
     # ``_emit_canonical_work``; duplicating would be harmless but
     # adds noise to the audit).
     assert (canonical, RDF.type, V.BFFI.Work) not in g
+
+
+def test_propagate_marc_key_copies_every_raw_node_marc_key_triple() -> None:
+    """``bflc:marcKey`` triples on raw bib URIs (Agents, Topics, Hubs,
+    etc.) propagate verbatim into canonical. The round-trip's
+    ``_name_subfields_from_marc_key`` reads from canonical, not from
+    per-record M3 output — without this pass, $c / $d / $l / $o /
+    $t subfields get collapsed into $a on the recon. See
+    ``scratchpad/2026-06-09-roundtrip-diff.md``."""
+    raw_graph = Graph()
+    agent = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b12191139#Agent600-21")
+    hub = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b20122470#Hub730-46")
+    raw_graph.add((agent, V.BFLC.marcKey, Literal("60004$aMikki Hiiri$c(fiktiivinen hahmo)")))
+    raw_graph.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal("7300 $aTomtarnas julnatt,$lsuomi (Tonttujen jouluyö)$gSefve, Vilhelm"),
+        )
+    )
+
+    g = Graph()
+    count = _propagate_marc_key(g, raw_graph)
+
+    assert count == 2
+    assert (agent, V.BFLC.marcKey, None) in g
+    assert (hub, V.BFLC.marcKey, None) in g
+
+
+def test_propagate_subject_typing_copies_direct_raw_typing() -> None:
+    """Baseline: the raw graph's ``rdf:type`` on a subject URI lands
+    in canonical. The transitive exactMatch-walk variant runs in
+    Skosify (after M9 writes the exactMatch triples) — see
+    ``test_skosify_run.test_subject_typing_propagated_via_exact_match``
+    for the matching post-M9 step."""
+    raw_graph = Graph()
+    work = URIRef("http://urn.fi/URN:NBN:fi:bib:work:rawA")
+    raw_temporal = URIRef("http://urn.fi/URN:NBN:fi:bib:raw/b19845637#Temporal648-29")
+    raw_graph.add((work, V.BFFI.subject, raw_temporal))
+    raw_graph.add((raw_temporal, RDF.type, V.BFFI.Temporal))
+
+    g = Graph()
+    _propagate_subject_typing(g, raw_graph)
+
+    assert (raw_temporal, RDF.type, V.BFFI.Temporal) in g
 
 
 def test_propagate_expression_passthrough_carries_component_contribution_chain() -> None:

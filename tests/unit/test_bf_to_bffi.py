@@ -31,6 +31,7 @@ from bffi_pipeline.stages.m3 import (
 )
 from bffi_pipeline.stages.m3.post_process import (
     _enrich_aggregation_components_with_agents,
+    _merge_duplicate_provision_activities,
 )
 from bffi_pipeline.stages.m3.runner import (
     _convert_one,
@@ -2283,3 +2284,113 @@ def test_validation_tsv_is_header_only_when_no_failures(tmp_path: Path) -> None:
     path = tmp_path / "_validation.tsv"
     _emit_validation_tsv(path, [])
     assert path.read_text() == "helmet_bib_id\tshape_message\toutput_file\n"
+
+
+# --- _merge_duplicate_provision_activities ----------------------------------
+
+
+def _build_provision_activity_graph(
+    *, with_normalised: bool, place_lang: str | None = None
+) -> tuple[Graph, URIRef, BNode, BNode]:
+    """Build a Manifestation with two ProvisionActivity blank nodes
+    mirroring marc2bibframe2's double-emit shape.
+
+    Node A carries only ``bflc:simple*`` strings (the literal-only
+    transcription). Node B carries the same ``bflc:simple*`` strings
+    plus ``bf:date`` / ``bf:place`` when ``with_normalised`` is True.
+    Returns (graph, manif, node_a, node_b).
+    """
+    g = Graph()
+    V.bind_canonical_prefixes(g)
+    manif = URIRef("urn:test:manif/1")
+    node_a = BNode()
+    node_b = BNode()
+    g.add((manif, RDF.type, V.BFFI.Manifestation))
+    for node in (node_a, node_b):
+        g.add((manif, V.BFFI.provisionActivity, node))
+        g.add((node, RDF.type, V.BF.ProvisionActivity))
+        g.add((node, RDF.type, V.BF.Publication))
+        place_lit = Literal("London", lang=place_lang) if place_lang else Literal("London")
+        g.add((node, V.BFLC.simplePlace, place_lit))
+        g.add((node, V.BFLC.simpleAgent, Literal("Wise Publications")))
+        g.add((node, V.BFLC.simpleDate, Literal("c1997")))
+    if with_normalised:
+        g.add(
+            (
+                node_b,
+                V.BF.date,
+                Literal("1997", datatype=URIRef("http://id.loc.gov/datatypes/edtf")),
+            )
+        )
+        g.add((node_b, V.BF.place, URIRef("http://id.loc.gov/vocabulary/countries/xxk")))
+    return g, manif, node_a, node_b
+
+
+def test_merge_duplicate_provision_activities_collapses_to_richer_node() -> None:
+    """Two ProvisionActivity blank nodes with the same ``bflc:simple*``
+    fingerprint and the same type set collapse to a single node. The
+    node carrying the 008-derived ``bf:date`` / ``bf:place`` wins
+    (more outgoing triples)."""
+    g, manif, node_a, node_b = _build_provision_activity_graph(with_normalised=True)
+    _merge_duplicate_provision_activities(g)
+    survivors = list(g.objects(manif, V.BFFI.provisionActivity))
+    assert len(survivors) == 1
+    survivor = survivors[0]
+    assert survivor == node_b
+    assert (survivor, V.BF.date, None) in g
+    assert (survivor, V.BF.place, None) in g
+    assert (survivor, V.BFLC.simplePlace, Literal("London")) in g
+    assert (node_a, None, None) not in g
+
+
+def test_merge_duplicate_provision_activities_preserves_singletons() -> None:
+    """A Manifestation carrying exactly one ProvisionActivity is
+    untouched (the helper short-circuits on len < 2)."""
+    g = Graph()
+    V.bind_canonical_prefixes(g)
+    manif = URIRef("urn:test:manif/1")
+    node = BNode()
+    g.add((manif, RDF.type, V.BFFI.Manifestation))
+    g.add((manif, V.BFFI.provisionActivity, node))
+    g.add((node, RDF.type, V.BF.ProvisionActivity))
+    g.add((node, V.BFLC.simplePlace, Literal("London")))
+    triples_before = len(g)
+    _merge_duplicate_provision_activities(g)
+    assert len(g) == triples_before
+
+
+def test_merge_duplicate_provision_activities_keeps_distinct_activities() -> None:
+    """Distinct activities (e.g. Publication + Distribution) carrying
+    different ``bflc:simple*`` content don't group — both survive."""
+    g, manif, node_a, _node_b = _build_provision_activity_graph(with_normalised=False)
+    # Reclassify node_a as Distribution with a different agent.
+    g.remove((node_a, RDF.type, V.BF.Publication))
+    g.add((node_a, RDF.type, V.BF.Distribution))
+    g.remove((node_a, V.BFLC.simpleAgent, Literal("Wise Publications")))
+    g.add((node_a, V.BFLC.simpleAgent, Literal("Some Distributor")))
+    _merge_duplicate_provision_activities(g)
+    survivors = set(g.objects(manif, V.BFFI.provisionActivity))
+    assert len(survivors) == 2
+
+
+def test_merge_duplicate_provision_activities_language_tagged_literals_match() -> None:
+    """Language-tagged literals participate in the signature: when
+    both nodes carry the same ``"London"@en`` literal, they still
+    group and collapse."""
+    g, manif, _node_a, _node_b = _build_provision_activity_graph(
+        with_normalised=True, place_lang="en"
+    )
+    _merge_duplicate_provision_activities(g)
+    survivors = list(g.objects(manif, V.BFFI.provisionActivity))
+    assert len(survivors) == 1
+    assert (survivors[0], V.BFLC.simplePlace, Literal("London", lang="en")) in g
+
+
+def test_merge_duplicate_provision_activities_is_idempotent() -> None:
+    """Re-running the merge pass on an already-collapsed graph leaves
+    the survivor and its triples unchanged."""
+    g, _manif, _node_a, _node_b = _build_provision_activity_graph(with_normalised=True)
+    _merge_duplicate_provision_activities(g)
+    first_pass_len = len(g)
+    _merge_duplicate_provision_activities(g)
+    assert len(g) == first_pass_len

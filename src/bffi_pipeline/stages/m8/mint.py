@@ -210,6 +210,11 @@ def _propagate_subject_typing(g: Graph, raw_graph: Graph) -> int:
     routes on — other rdf:type triples on subject URIs (e.g.
     ``madsrdf:Topic``) aren't relevant.
 
+    Note: M9-reconciled YSO URIs (where source MARC had no ``$0``)
+    get their type propagated via ``skos:exactMatch`` later, in
+    Skosify's :func:`_propagate_subject_typing_via_exact_match`,
+    because the exactMatch triples are added by M9 AFTER M8 runs.
+
     Returns triples copied.
     """
     count = 0
@@ -247,6 +252,34 @@ def _propagate_from_marc_field(g: Graph, raw_graph: Graph) -> int:
     count = 0
     for s, _p, o in raw_graph.triples((None, V.fromMarcField, None)):
         g.add((s, V.fromMarcField, o))
+        count += 1
+    return count
+
+
+def _propagate_marc_key(g: Graph, raw_graph: Graph) -> int:
+    """Copy every ``?entity bflc:marcKey "<tag-ind1-ind2>$a…"`` triple
+    from the raw graph to canonical.
+
+    marc2bibframe2 emits ``bflc:marcKey`` on each raw bib URI it mints
+    (``#Agent600-N``, ``#Agent100-N``, ``#Agent700-N``, ``#Hub730-N``,
+    etc.) as a verbatim transcription of the source MARC subfields.
+    The round-trip converter's ``_name_subfields_from_marc_key``
+    parses it to recover the source $c / $d / $l / $o / $t etc. that
+    marc2bibframe2 collapses into a single ``rdfs:label`` or
+    ``bf:mainTitle``. Without this propagation pass, the marcKey
+    survives in the per-record bffi/<bib>.ttl but doesn't reach
+    canonical, and the round-trip falls back to label-only — emitting
+    e.g. ``600 $a Mikki Hiiri (fiktiivinen hahmo)`` instead of
+    ``600 $a Mikki Hiiri $c (fiktiivinen hahmo)``.
+
+    Same shape as :func:`_propagate_from_marc_field`. Idempotent;
+    rdflib add is set-semantics.
+
+    Returns triples copied.
+    """
+    count = 0
+    for s, _p, o in raw_graph.triples((None, V.BFLC.marcKey, None)):
+        g.add((s, V.BFLC.marcKey, o))
         count += 1
     return count
 

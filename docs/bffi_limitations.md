@@ -698,6 +698,251 @@ source MARCXML directly.
 
 ---
 
+## L-12 — No LoC `vocabulary/countries/*` ↔ YSO bridge in published authority data (Finto / NLF interoperability gap, not technically BFFI)
+
+**Case** Every Helmet record encodes a country of publication
+through MARC 008 positions 15-17 (a 3-character MARC country code,
+e.g. `xxk` = United Kingdom, `fi ` = Finland, `ru ` = Russia).
+`marc2bibframe2` mints
+`bf:place <http://id.loc.gov/vocabulary/countries/{code}>` on the
+ProvisionActivity from those bytes (`ConvSpec-Process8-ProvAct.xsl`
+lines 878-884, using `$countries = "http://id.loc.gov/vocabulary/
+countries/"` from `variables.xsl:26`); M3 SPARQL carries the URI
+through into the canonical BFFI Manifestation; Skosify lifts the
+same URI onto the Manifestation as `dct:spatial` for Skosmos
+display (see `_synthesise_provision_display` in
+`src/bffi_pipeline/stages/m10/skosify_run.py:229`).
+
+The LoC countries vocabulary publishes **only English `rdfs:label`
+literals** for these URIs. The Finnish-cataloguing audience needs
+`skos:prefLabel @fi` (`"Suomi"`), `@sv` (`"Finland"`), `@en`
+(`"Finland"`) — the project's display priority. **YSO main**
+(`http://www.yso.fi/onto/yso/`, the same Fuseki graph that
+`load_finto.py` already loads) has these multilingual labels for
+every modern country (`yso:p94426` "Suomi"@fi / "Finland"@sv /
+"Finland"@en; `yso:p94479` "Venäjä"@fi / "Ryssland"@sv /
+"Russia"@en; etc.) — note that the country-level concepts live
+in main YSO, not in the YSO-paikat sub-vocabulary as one might
+expect from the name. But **neither side publishes a
+`skos:exactMatch` / `owl:sameAs` bridge** between the two URI
+spaces:
+
+- LoC's `countries.skos.rdf` carries no Finto cross-references.
+- YSO main concepts carry no LoC `vocabulary/countries/*`
+  exactMatches (spot-checked Finland, Sweden, Russia, France
+  on the Finto Skosmos UI — none cite the LoC URI).
+- Wikidata DOES have a property `P3866` ("MARC country code")
+  that maps Wikidata items to LoC MARC codes AND a property
+  `P2347` ("YSO ID") that maps the same items to YSO concepts,
+  so a Wikidata-mediated crosswalk exists but isn't built into
+  either authority's published SKOS feed.
+
+**Source MARC** — Helmet example b18685389 (Russian DVD,
+008 positions 15-17 = `ru `):
+```
+008   …090714s2007    ru 322        s   vlrus d
+```
+
+**BFFI graph state**:
+```turtle
+<…manifestation:469…> bffi:provisionActivity [
+    a bf:ProvisionActivity, bf:Publication ;
+    bf:place <http://id.loc.gov/vocabulary/countries/ru> ;
+    …
+] ;
+dct:spatial <http://id.loc.gov/vocabulary/countries/ru> .
+```
+Neither `<countries/ru>` nor any peer concept carries a
+multilingual prefLabel in the canonical graph or in the Fuseki
+graphs `load_finto.py` populates. Cataloguer-review surfaces, the
+typing-review HTML, and the Skosmos concept pages render the bare
+URI tail (`ru`, `fi`, `xxk`) instead of `"Venäjä"` / `"Suomi"` /
+`"Englanti"`.
+
+**Reconstructed MARC**: not affected — round-trip recovers the
+008 positions from `bf:place` regardless of what labels we
+attach to the URI.
+
+**Why the data quality is degraded**: the URI is correct and
+stable; what's missing is the *translation surface* a Finnish
+cataloguer-review consumer expects. The label gap exists in
+authority-data interop space, **not** in BFFI's ontology or in
+marc2bibframe2's conversion — both correctly preserve the URI.
+The gap manifests because:
+
+1. LoC publishes the canonical MARC-country URIs but in their
+   own scheme (`<vocabulary/countries/*>`), with English-only
+   labels.
+2. Finto / NLF curates equivalent place concepts in YSO-paikat
+   with NLF-quality multilingual labels, but in YSO-paikat URIs.
+3. Neither published authority connects the two — the Wikidata
+   crosswalk is the only bridge and it isn't in either feed.
+
+**Conclusion: documented as an authority-interop gap; addressed
+locally with a project-owned bridge graph; escalated to NLF for
+upstream resolution.**
+
+Three resolution paths, in ascending order of scope:
+
+1. **Local bridge graph (interim)** — vendor a small CC0 TTL
+   under `vocab/loc-countries-bridge.ttl` with `skos:exactMatch`
+   (to YSO main) plus inlined `skos:prefLabel @fi/@sv/@en`
+   (cached from YSO at file-creation time) per LoC country code.
+   A Skosify pass `_synthesise_country_labels` walks every
+   `bf:place` / `dct:spatial` reference in the canonical graph
+   and copies the bridge's prefLabels onto the LoC URI before
+   write-out — Skosmos then renders the multilingual labels on
+   the LoC concept page without needing to follow the
+   `exactMatch` at query time. Bridge is small (the 500-sample
+   has ~21 distinct codes; full corpus likely ~150-200; LoC's
+   total is ~290 including historical codes like
+   `yu` Yugoslavia, `gx` East Germany). Light maintenance:
+   countries change rarely, the file is appended manually when
+   a missing code surfaces in a run.
+
+2. **Wikidata-derived snapshot (richer alternative to path 1)** —
+   use Wikidata's `P3866` and `P2347` properties to mint the
+   bridge from a single SPARQL query against
+   `query.wikidata.org`, plus a fi/sv/en/de/fr label pull on
+   the same Wikidata items as a fallback when YSO-paikat lacks
+   coverage. Snapshot to a CC0 TTL vendored alongside path 1.
+
+3. **Upstream contribution to YSO-paikat (long-term)** — propose
+   to NLF / Finto that YSO-paikat publish `skos:exactMatch`
+   triples to `<http://id.loc.gov/vocabulary/countries/*>` for
+   every place concept that has an unambiguous MARC-country
+   counterpart. This is the canonical fix — it benefits every
+   downstream consumer of NLF authority data, not just this
+   pipeline — and is on the table once we have a
+   working bridge to point at as a proof-of-concept.
+
+The local bridge (path 1, optionally extended by path 2) is the
+near-term plan. Adding the YSO-paikat `exactMatch` triples to
+the upstream feed is a candidate for an NLF / Finto conversation;
+not in scope for the current pipeline.
+
+---
+
+## L-13 — Personal-name sub-components ($b/$c/$d/$q on 100/600/700/etc.) and 730/240 subfield boundaries ($l/$o/$h) round-trip via `bflc:marcKey` only
+
+**Case** MARC fields modelling people and uniform titles carry rich
+sub-component structure inside a single datafield. For personal
+names (X00, 600, 700) the source typically looks like
+```
+600 1 4  $a Hiiri, Mikki,  $c (fiktiivinen hahmo),  $d 1928-
+700 1 _  $a Brueghel, Pieter,  $c the Elder,  $d -1569
+```
+and for uniform titles (240, 730)
+```
+730 0 _  $a Tomtarnas julnatt,  $l suomi (Tonttujen jouluyö); $o sov., mieskuoro / $g Sefve, Vilhelm
+240 1 0  $a Symphony,  $n no. 5,  $r C minor,  $s arr.
+```
+The individual subfields carry typed sub-components (title-with-name
+$c, dates $d, fuller name $q, numeration $b, language of work $l,
+arrangement $o, key $r, version $s). MARC's data model treats these
+as distinct subfields with cataloguer-meaningful boundaries.
+
+**BFFI graph state**: marc2bibframe2 collapses every personal-name
+sub-component into a single `rdfs:label` literal on a `bf:Agent` /
+`bf:Person` / `bf:Organization` node and preserves the boundary
+information ONLY in a parallel `bflc:marcKey` literal:
+```turtle
+<#Agent600-21> a bffi:Person ;
+    rdfs:label "Mikki Hiiri (fiktiivinen hahmo)" ;
+    bflc:marcKey "60004$aMikki Hiiri$c(fiktiivinen hahmo)" .
+```
+Same shape for uniform-title Hubs:
+```turtle
+<#Hub730-46> a bf:Hub ;
+    bflc:marcKey "7300 $aTomtarnas julnatt,$lsuomi (…) /$gSefve, Vilhelm" ;
+    bffi:title [ bffi:mainTitle "Tomtarnas julnatt, suomi (…) / Sefve, Vilhelm" ] .
+```
+
+**Reconstructed MARC** (with marcKey-driven recovery shipped after
+the 2026-06-09 round-trip diff scan):
+```
+600 _ 7  $a Mikki Hiiri  $c (fiktiivinen hahmo)
+730 0 _  $a Tomtarnas julnatt,  $l suomi (…)  $o sov., …  $g Sefve, Vilhelm
+```
+The subfield boundaries survive because `_name_subfields_from_marc_key`
+(for 6XX/7XX) and the `marcKey-first` tier in `_related_title_subfields`
+(for 730) + `_emit_uniform_title` (for 240) parse the `bflc:marcKey`
+literal verbatim. **Without marcKey, those subfields collapse into
+$a** — the b20122470 / b12191139 reproducers in
+`scratchpad/2026-06-09-roundtrip-diff.md`.
+
+**Why no structured BFFI predicate covers this**:
+
+1. **`docs/lkd.rdf` does not define name-component predicates**.
+   Spot-checked: no `bffi:nameDate`, `bffi:nameTitle`,
+   `bffi:nameNumeration`, `bffi:nameFullerForm`, no equivalent
+   `bffi:titleLanguage` on the Title node, no
+   `bffi:titleMediumQualifier`. `bf:Agent` / `bffi:Person` carry
+   `rdfs:label` and nothing more granular.
+
+2. **The BFLC ontology *does* define them**
+   (`bflc:date`, `bflc:title`, `bflc:numeration`, `bflc:fuller`),
+   but those terms are not aliased in `docs/lkd.rdf`. The project's
+   BFFI namespace discipline allows direct BIBFRAME / BFLC use, so
+   we COULD emit `bflc:date` / `bflc:title` / etc. on canonical
+   agents — but only if marc2bibframe2 emits them in the first place.
+
+3. **marc2bibframe2 does not emit them either**. I enumerated every
+   `bflc:*` term marc2bibframe2's XSL produces:
+   ```
+   AppliesTo, CreatorCharacteristic, DemographicGroup, EncodingLevel,
+   GovernmentPubType, MachineModel, MetadataLicensor,
+   MovingImageTechnique, OperatingSystem, ProgrammingLanguage,
+   SerialPubType, SeriesAnalysis/Classification/Numbering/…/Tracing,
+   applicableInstitution, appliesTo, citation, creatorCharacteristic,
+   encodingLevel, governmentPubType, marcKey, metadataLicensor,
+   movingImageTechnique, nonSortNum, projectedProvisionDate,
+   serialPubType, seriesTreatment, simpleAgent, simpleDate, simplePlace
+   ```
+   No `bflc:date`, `bflc:title`, `bflc:numeration`, `bflc:fuller`,
+   `bflc:titleLanguage`, `bflc:arrangement`. The
+   `ConvSpec-1XX,7XX,8XX-names.xsl` template builds a combined
+   `rdfs:label` via `tChopPunct` and writes `bflc:marcKey` alongside;
+   the sub-component boundaries live nowhere else.
+
+**Conclusion: marcKey IS the preservation mechanism — acceptable.**
+marc2bibframe2's implicit design contract: `rdfs:label` is for
+human display, `bflc:marcKey` is for structured fidelity. The
+round-trip respects that contract by parsing marcKey when subfield
+structure matters. The dependency is flagged with `$9 marckey-bypass`
+on each emitted row so the audit surfaces it.
+
+**Out-of-scope future paths**:
+
+1. **Propose new BFFI predicates to NLF.** Candidate set:
+   `bffi:nameDate`, `bffi:nameTitle`, `bffi:nameNumeration`,
+   `bffi:nameFullerForm` on `bffi:Agent`; `bffi:titleLanguage`,
+   `bffi:titleMediumQualifier`, `bffi:arrangementStatement` on
+   `bffi:Title`. Solves the BFFI ontology side. Doesn't fix the
+   marc2bibframe2 emit gap — would still need either a fork
+   (forbidden) or an M2-post pass that parses source MARC and emits
+   the structured triples ahead of M3.
+
+2. **Pre-M3 enrichment pass** that parses source MARC directly and
+   writes `bflc:date` / `bflc:title` / etc. onto the bib-raw entity
+   before M3 SPARQL fires. The marcKey is already there — this would
+   just hoist parsed components onto dedicated predicates. Mostly
+   benefits downstream LKD consumers (queryable name components)
+   rather than the round-trip (which has marcKey directly). Estimated:
+   ~4-6 h.
+
+3. **Wait for marc2bibframe2 upstream.** If marc2bibframe2 ever
+   adopts the BFLC name-component predicates, our pipeline would
+   inherit them automatically. No timeline; not assumed.
+
+The marcKey-driven recovery in `src/bffi_pipeline/marc_roundtrip/converter.py`
+(`_name_subfields_from_marc_key`, `_related_title_subfields`,
+`_emit_uniform_title`) covers the round-trip use case completely.
+Downstream consumers needing queryable sub-components should either
+parse marcKey themselves or wait for path 2 above.
+
+---
+
 ## How to add a new entry
 
 When you find a round-trip case where:

@@ -81,8 +81,19 @@ CONSTRUCT {
            bffi:relationship       ?hubRelationship ;
            bffi:associatedResource ?bfHub .
   ?bfHub   a               bf:Hub ;
+           a               ?hubArrangementType ;
            bffi:title      ?bfHubTitle ;
-           bflc:marcKey    ?hubMarcKey .
+           bflc:marcKey    ?hubMarcKey ;
+           bf:language     ?hubLanguage ;
+           bf:musicMedium  ?hubMusicMedium ;
+           bf:keyMode      ?hubKeyMode ;
+           bffi:version    ?hubVersion .
+  ?hubLanguage a              bf:Language ;
+               rdfs:label     ?hubLanguageLabel .
+  ?hubMusicMedium a           bf:MusicMedium ;
+                  rdfs:label  ?hubMusicMediumLabel .
+  ?hubKeyMode a               bf:KeyMode ;
+              rdfs:label      ?hubKeyModeLabel .
   ?bfHubTitle bffi:mainTitle  ?hubMainTitle ;
               bffi:partNumber ?hubPartNumber ;
               bffi:partName   ?hubPartName .
@@ -567,6 +578,30 @@ WHERE {
       OPTIONAL { ?bfHubTitle bf:partName   ?hubPartName }
     }
     OPTIONAL { ?bfHub bflc:marcKey ?hubMarcKey }
+    # Structured-predicate passthrough for MARC 730 $l / $m / $r / $s / $o.
+    # marc2bibframe2 emits these on the bf:Hub alongside the marcKey;
+    # propagating them lets the round-trip read structured BFFI/BIBFRAME
+    # predicates instead of parsing marcKey. See docs/bffi_limitations.md
+    # L-13 for the per-subfield mapping rationale ($r → bf:keyMode rather
+    # than bffi:musicKey because the BFFI alias only matches the legacy
+    # bf:musicKey literal shape, not bf:keyMode's structured class).
+    OPTIONAL {
+      ?bfHub bf:language ?hubLanguage .
+      ?hubLanguage a bf:Language ; rdfs:label ?hubLanguageLabel .
+    }
+    OPTIONAL {
+      ?bfHub bf:musicMedium ?hubMusicMedium .
+      ?hubMusicMedium a bf:MusicMedium ; rdfs:label ?hubMusicMediumLabel .
+    }
+    OPTIONAL {
+      ?bfHub bf:keyMode ?hubKeyMode .
+      ?hubKeyMode a bf:KeyMode ; rdfs:label ?hubKeyModeLabel .
+    }
+    OPTIONAL { ?bfHub bf:version ?hubVersion }
+    OPTIONAL {
+      ?bfHub a ?hubArrangementType .
+      FILTER(?hubArrangementType = bf:Arrangement)
+    }
   }
 
   # MARC 740 (added entry — uncontrolled related/analytical title).

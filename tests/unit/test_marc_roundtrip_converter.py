@@ -806,6 +806,265 @@ def test_700_ind2_2_not_emitted_when_no_aggregating_components(tmp_path) -> None
     assert analytical == []
 
 
+def test_700_ind2_2_from_hub_marckey_preserves_author_role_title(tmp_path) -> None:
+    """Source ``700 ind1=1 ind2=2 $a<author> $e<role>. $t<title>``
+    (analytical added entry in compilation volumes) round-trips
+    intact: the round-trip detects the marcKey source-tag prefix
+    ``70012`` on a Hub linked from the Manifestation's
+    ``bffi:relation``, emits ``700 ind1=1 ind2=2 $a $e $t``, and
+    skips the default ``730`` emit so the author isn't dropped.
+    Replays the b26222668 b26222668 lossy pattern fixed in this
+    commit."""
+    g = _build_minimal_graph()
+    rel = URIRef("urn:rel/analytical-1")
+    hub = URIRef("urn:hub/analytical-1")
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add(
+        (
+            rel,
+            V.BFFI.relationship,
+            URIRef("http://id.loc.gov/vocabulary/relationship/relatedwork"),
+        )
+    )
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal("70012$aMechelin, L.,$eförfattare.$tSamfundets syftemål."),
+        )
+    )
+
+    rec = reconstruct_marc(g, MANIF)
+    all_700 = rec.element.findall("m:datafield[@tag='700']", NS)
+    analytical = [df for df in all_700 if df.attrib.get("ind2") == "2"]
+    assert len(analytical) == 1
+    df = analytical[0]
+    assert df.attrib["ind1"] == "1"
+    assert _subfield(df, "a") == "Mechelin, L.,"
+    assert _subfield(df, "e") == "författare."
+    assert _subfield(df, "t") == "Samfundets syftemål."
+    # And no 730 emitted for this same Hub (would have been the
+    # pre-fix output, dropping the author).
+    all_730 = rec.element.findall("m:datafield[@tag='730']", NS)
+    assert all(_subfield(d, "a") != "Samfundets syftemål." for d in all_730)
+
+
+def test_730_still_emitted_for_hub_with_730_marckey(tmp_path) -> None:
+    """A Hub whose ``bflc:marcKey`` source tag is ``730`` keeps the
+    original 730 routing — the analytical-entry detour only fires
+    for source-700-ind2=2."""
+    g = _build_minimal_graph()
+    rel = URIRef("urn:rel/uniform-1")
+    hub = URIRef("urn:hub/uniform-1")
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add(
+        (
+            rel,
+            V.BFFI.relationship,
+            URIRef("http://id.loc.gov/vocabulary/relationship/relatedwork"),
+        )
+    )
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add((hub, V.BFLC.marcKey, Literal("7300 $aFame /$gGore, Michael")))
+
+    rec = reconstruct_marc(g, MANIF)
+    all_730 = rec.element.findall("m:datafield[@tag='730']", NS)
+    assert len(all_730) == 1
+    df_730 = all_730[0]
+    assert _subfield(df_730, "a") == "Fame /"
+    assert _subfield(df_730, "g") == "Gore, Michael"
+    # And NO 700 ind2=2 from the Hub path (the Phase G.bis aggregation
+    # path is what would emit a 700 from a 730 with $g — not exercised
+    # here because no bffi:aggregates edges in this fixture).
+    all_700 = rec.element.findall("m:datafield[@tag='700']", NS)
+    analytical = [df for df in all_700 if df.attrib.get("ind2") == "2"]
+    assert analytical == []
+
+
+def test_730_preserves_l_and_o_subfields_from_marckey(tmp_path) -> None:
+    """Per b20122470 round-trip diff scan: when source 730 carries
+    ``$a / $l / $o / $g`` subfields, marc2bibframe2's ``bf:mainTitle``
+    concatenates them all into one string. The round-trip must use
+    the ``bflc:marcKey`` literal as the source of truth — preferring
+    it over ``bf:mainTitle`` — so the source ``$l suomi (Tonttujen
+    jouluyö)`` and ``$o sov., mieskuoro`` survive as their own
+    subfields instead of merging into ``$a``."""
+    g = _build_minimal_graph()
+    rel = URIRef("urn:rel/730-with-l-and-o")
+    hub = URIRef("urn:hub/730-with-l-and-o")
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add(
+        (
+            rel,
+            V.BFFI.relationship,
+            URIRef("http://id.loc.gov/vocabulary/relationship/relatedwork"),
+        )
+    )
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal(
+                "7300 $aDeck the hall,$lsuomi (Kuusen kotiin tuoda saamme);"
+                "$osov., mieskuoro /$gtrad."
+            ),
+        )
+    )
+    # bf:mainTitle would have the all-concatenated form;
+    # marcKey should win in tier 1.
+    title_node = URIRef("urn:title/730-with-l-and-o")
+    g.add((hub, V.BFFI.title, title_node))
+    g.add(
+        (
+            title_node,
+            V.BFFI.mainTitle,
+            Literal("Deck the hall, suomi (Kuusen kotiin tuoda saamme); sov., mieskuoro / trad."),
+        )
+    )
+
+    rec = reconstruct_marc(g, MANIF)
+    all_730 = rec.element.findall("m:datafield[@tag='730']", NS)
+    assert len(all_730) == 1
+    df = all_730[0]
+    assert _subfield(df, "a") == "Deck the hall,"
+    assert _subfield(df, "l") == "suomi (Kuusen kotiin tuoda saamme);"
+    assert _subfield(df, "o") == "sov., mieskuoro /"
+    assert _subfield(df, "g") == "trad."
+
+
+def test_730_structured_predicates_override_marckey_subfields(tmp_path) -> None:
+    """When the Hub carries BIBFRAME structured predicates
+    (``bf:musicMedium``/``bf:keyMode``/``bf:version``/``bf:language``)
+    alongside ``bflc:marcKey``, the round-trip prefers the structured
+    label as the subfield value. The marcKey still drives subfield
+    ORDER (and contributes other subfields without a structured
+    counterpart, e.g. ``$a``/``$g``)."""
+    g = _build_minimal_graph()
+    rel = URIRef("urn:rel/structured-hub")
+    hub = URIRef("urn:hub/structured-hub")
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add(
+        (
+            rel,
+            V.BFFI.relationship,
+            URIRef("http://id.loc.gov/vocabulary/relationship/relatedwork"),
+        )
+    )
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal(
+                "7300 $aSymphony,$lsuomi (Sinfonia)$mpiano$rC minor$sarr.$ostructured-not-emitted"
+            ),
+        )
+    )
+    # Structured predicates carrying CANONICAL values (deliberately
+    # different from the marcKey-embedded text so the assertion proves
+    # the override fires).
+    lang = URIRef("urn:hub/structured-hub-lang")
+    g.add((hub, V.BF.language, lang))
+    g.add((lang, RDF.type, V.BF.Language))
+    g.add((lang, V.RDFS.label, Literal("STRUCTURED-lang")))
+    mm = URIRef("urn:hub/structured-hub-mm")
+    g.add((hub, V.BF.musicMedium, mm))
+    g.add((mm, RDF.type, V.BF.MusicMedium))
+    g.add((mm, V.RDFS.label, Literal("STRUCTURED-medium")))
+    km = URIRef("urn:hub/structured-hub-km")
+    g.add((hub, V.BF.keyMode, km))
+    g.add((km, RDF.type, V.BF.KeyMode))
+    g.add((km, V.RDFS.label, Literal("STRUCTURED-key")))
+    g.add((hub, V.BFFI.version, Literal("STRUCTURED-version")))
+
+    rec = reconstruct_marc(g, MANIF)
+    all_730 = rec.element.findall("m:datafield[@tag='730']", NS)
+    assert len(all_730) == 1
+    df = all_730[0]
+    # $a comes from marcKey (no structured override exists).
+    assert _subfield(df, "a") == "Symphony,"
+    # The four overridden subfields take their values from the
+    # structured predicates, NOT marcKey.
+    assert _subfield(df, "l") == "STRUCTURED-lang"
+    assert _subfield(df, "m") == "STRUCTURED-medium"
+    assert _subfield(df, "r") == "STRUCTURED-key"
+    assert _subfield(df, "s") == "STRUCTURED-version"
+
+
+def test_730_falls_back_to_marckey_when_structured_predicates_absent(tmp_path) -> None:
+    """Without structured predicates the override map is empty and
+    the marcKey value is used verbatim — preserving the existing
+    b20122470 fix path for older records that lack the structured
+    BIBFRAME shapes."""
+    g = _build_minimal_graph()
+    rel = URIRef("urn:rel/marckey-only-hub")
+    hub = URIRef("urn:hub/marckey-only-hub")
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add(
+        (
+            rel,
+            V.BFFI.relationship,
+            URIRef("http://id.loc.gov/vocabulary/relationship/relatedwork"),
+        )
+    )
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    g.add(
+        (
+            hub,
+            V.BFLC.marcKey,
+            Literal("7300 $aTomtarnas julnatt,$lsuomi (Tonttujen jouluyö) /$gSefve, Vilhelm"),
+        )
+    )
+    rec = reconstruct_marc(g, MANIF)
+    df = rec.element.find("m:datafield[@tag='730']", NS)
+    assert df is not None
+    assert _subfield(df, "a") == "Tomtarnas julnatt,"
+    assert _subfield(df, "l") == "suomi (Tonttujen jouluyö) /"
+    assert _subfield(df, "g") == "Sefve, Vilhelm"
+
+
+def test_700_ind2_2_skipped_when_marckey_absent(tmp_path) -> None:
+    """A Hub with no ``bflc:marcKey`` falls through to the default
+    730 path (no analytical-entry routing possible without the
+    source-tag prefix)."""
+    g = _build_minimal_graph()
+    rel = URIRef("urn:rel/no-marckey")
+    hub = URIRef("urn:hub/no-marckey")
+    g.add((MANIF, V.BFFI.relation, rel))
+    g.add((rel, RDF.type, V.BFFI.Relation))
+    g.add(
+        (
+            rel,
+            V.BFFI.relationship,
+            URIRef("http://id.loc.gov/vocabulary/relationship/relatedwork"),
+        )
+    )
+    g.add((rel, V.BFFI.associatedResource, hub))
+    g.add((hub, RDF.type, V.BF.Hub))
+    title_node = URIRef("urn:title/no-marckey")
+    g.add((hub, V.BFFI.title, title_node))
+    g.add((title_node, V.BFFI.mainTitle, Literal("Some Title")))
+
+    rec = reconstruct_marc(g, MANIF)
+    all_700 = rec.element.findall("m:datafield[@tag='700']", NS)
+    analytical = [df for df in all_700 if df.attrib.get("ind2") == "2"]
+    assert analytical == []
+    all_730 = rec.element.findall("m:datafield[@tag='730']", NS)
+    assert any(_subfield(df, "a") == "Some Title" for df in all_730)
+
+
 def test_700_emits_translator_added_entry(minimal_record: ET.Element) -> None:
     df = _datafield(minimal_record, "700")
     assert df is not None

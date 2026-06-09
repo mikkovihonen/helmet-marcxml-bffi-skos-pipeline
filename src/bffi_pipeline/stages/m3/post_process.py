@@ -146,6 +146,70 @@ def _enrich_aggregation_components_with_agents(bffi_graph: Graph) -> None:
         bffi_graph.add((agent, RDFS.label, Literal(agent_label)))
 
 
+def _merge_duplicate_provision_activities(bffi_graph: Graph) -> None:
+    """Collapse duplicate ``bffi:provisionActivity`` blank nodes on each
+    Manifestation into a single node, merging their outgoing triples.
+
+    Source 260/264 fields end up as TWO ``bf:ProvisionActivity`` blank
+    nodes in the BIBFRAME marc2bibframe2 emits — one carrying the
+    ``bflc:simple*`` transcription only, one carrying the same
+    ``bflc:simple*`` plus the 008-derived ``bf:date`` / ``bf:place``
+    normalisation. The round-trip converter walks both targets and
+    emits two identical 264 rows. See ConvSpec-Process8-ProvAct.xsl
+    lines 214 + 460 for the upstream double-emit; modifying the
+    submodule is prohibited per CLAUDE.md so we collapse the
+    duplication at the BFFI canonical layer.
+
+    Grouping signature: ``(rdf:type set, bflc:simplePlace literals,
+    bflc:simpleAgent literals, bflc:simpleDate literals)``. Within a
+    group, the node with the most outgoing triples wins (so the
+    richer ``bf:date`` / ``bf:place``-bearing node survives); losers
+    have their non-redundant triples copied onto the winner, then are
+    removed along with the Manifestation's ``bffi:provisionActivity``
+    edge pointing at them.
+
+    Manifestations with one ProvisionActivity, or with multiple
+    legitimately distinct activities (e.g. Publication + Distribution
+    + Manufacture for serials), are unaffected — distinct activities
+    differ in their type set or their ``bflc:simple*`` content and
+    don't group.
+    """
+    for manif in bffi_graph.subjects(RDF.type, V.BFFI.Manifestation):
+        targets = [
+            t for t in bffi_graph.objects(manif, V.BFFI.provisionActivity) if isinstance(t, BNode)
+        ]
+        if len(targets) < 2:  # noqa: PLR2004 — need two activities to deduplicate
+            continue
+        groups: dict[
+            tuple[frozenset[URIRef], frozenset[Literal], frozenset[Literal], frozenset[Literal]],
+            list[BNode],
+        ] = {}
+        for t in targets:
+            types = frozenset(o for o in bffi_graph.objects(t, RDF.type) if isinstance(o, URIRef))
+            places = frozenset(
+                o for o in bffi_graph.objects(t, V.BFLC.simplePlace) if isinstance(o, Literal)
+            )
+            agents = frozenset(
+                o for o in bffi_graph.objects(t, V.BFLC.simpleAgent) if isinstance(o, Literal)
+            )
+            dates = frozenset(
+                o for o in bffi_graph.objects(t, V.BFLC.simpleDate) if isinstance(o, Literal)
+            )
+            sig = (types, places, agents, dates)
+            groups.setdefault(sig, []).append(t)
+        for nodes in groups.values():
+            if len(nodes) < 2:  # noqa: PLR2004 — singleton groups need no merge
+                continue
+            winner = max(nodes, key=lambda n: sum(1 for _ in bffi_graph.triples((n, None, None))))
+            for loser in nodes:
+                if loser == winner:
+                    continue
+                for _s, p, o in list(bffi_graph.triples((loser, None, None))):
+                    bffi_graph.add((winner, p, o))
+                    bffi_graph.remove((loser, p, o))
+                bffi_graph.remove((manif, V.BFFI.provisionActivity, loser))
+
+
 def _tag_manifestation_pref_labels_with_primary_language(bffi_graph: Graph, source: Graph) -> None:
     """Pre-tag ``bffi:Manifestation``-side ``skos:prefLabel`` literals
     with the record's primary language so the LLM title-language
@@ -273,6 +337,11 @@ def post_process(
     # subfield. Drives the round-trip 700 ind2=2 analytical-entry emit
     # path and feeds M9 component-agent reconciliation.
     _enrich_aggregation_components_with_agents(bffi_graph)
+    # Collapse marc2bibframe2's double-emitted ProvisionActivity blank
+    # nodes (one literal-only, one 008-normalised) into a single node
+    # per Manifestation so the round-trip emits one 264 per source
+    # 260/264.
+    _merge_duplicate_provision_activities(bffi_graph)
     # NOTE: a M3 post-pass that lifted Finnish / Swedish ``$e`` role
     # terms onto a LoC relator URI used to live here
     # (``relator_term_enrichment.enrich_role_uris``). It was removed

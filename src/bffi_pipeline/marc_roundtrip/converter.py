@@ -1441,13 +1441,51 @@ class _Reconstructor:
             else:
                 tag, ind1, ind2 = "240", "1", "0"
             structured = self._hub_title_part_subs(hub)
-            # P-168 — BFFI-native first when the Hub has no
-            # structured ``$n``/``$p``: mainTitle IS the clean ``$a``
-            # value (modulo the trailing language-label suffix).
-            # When structured ``$n``/``$p`` ARE present, mainTitle is
-            # the concatenated form (``"$a $n, $p"``) and we can't
-            # recover clean ``$a`` by subtraction — fall through to
-            # marcKey for that case.
+            structured_codes = {code for code, _ in structured}
+            # Tier 1 — marcKey preserves source subfield structure.
+            # marc2bibframe2's marcKey on a uniform-title Hub is a
+            # COMPOSITE 1XX + 130/240 key, e.g.
+            # ``1001 $aMorosinotto…$ekirjoittaja.$tGrandissimi.$nDISC.$lVenäjä``.
+            # Only the title-of-work side — everything from ``$t``
+            # onwards — round-trips to the 240/130 row. Subfields
+            # before ``$t`` (``$a`` author name, ``$e`` relator, ``$d``
+            # dates) come from the paired 1XX and emit via
+            # ``_emit_primary_contribution``. ``$t`` itself maps to
+            # 240/130 ``$a``.
+            mk_lit = self._first_marc_key(hub)
+            structured_override = self._hub_structured_subfield_overrides(hub)
+            if mk_lit is not None:
+                parsed = _parse_marc_key_subfields(str(mk_lit))
+                title_split = next((i for i, (code, _v) in enumerate(parsed) if code == "t"), None)
+                if title_split is not None:
+                    exclude = {"0", "2", "4", "5", "6", "9"}
+                    base: list[tuple[str, str]] = []
+                    for code, value in parsed[title_split:]:
+                        if code in exclude:
+                            continue
+                        if code == "t":
+                            base.append(("a", value))
+                        elif code in ("n", "p") and code in structured_codes:
+                            # Defer to structured ``bf:partNumber`` /
+                            # ``bf:partName`` for cleaner part labels.
+                            continue
+                        else:
+                            base.append((code, structured_override.get(code, value)))
+                    subs = _merge_structured_parts(base, structured)
+                    if subs:
+                        self._emit_datafield(
+                            record,
+                            tag,
+                            *subs,
+                            ind1=ind1,
+                            ind2=ind2,
+                            lineage=self._lineage_token(hub),
+                            marckey_bypass=True,
+                        )
+                        return
+            # Tier 2 — BFFI-native fallback when no marcKey: derive
+            # ``$a`` from ``bf:mainTitle`` (minus the language-label
+            # suffix) and ``$l`` from the Hub's language link.
             if not structured:
                 language_label = self._hub_language_label(hub)
                 main_title_a = self._hub_main_title_a(hub, language_label)
@@ -1466,41 +1504,6 @@ class _Reconstructor:
                         lineage=self._lineage_token(hub),
                     )
                     return
-            # Fallback — structured ``$n``/``$p`` present (mainTitle is
-            # concatenated, ``$a`` not derivable by subtraction) or no
-            # BFFI predicates available at all. Parse marcKey to
-            # recover ``$a`` (from ``$t``) and ``$l``. Flagged as
-            # marckey_bypass so the audit shows the dependency on the
-            # legacy path.
-            mk_lit = self._first_marc_key(hub)
-            if mk_lit is None:
-                continue
-            structured_codes = {code for code, _ in structured}
-            parsed = _parse_marc_key_subfields(str(mk_lit))
-            base: list[tuple[str, str]] = []
-            used_marckey = False
-            for code, value in parsed:
-                if code == "t":
-                    base.append(("a", value))
-                    used_marckey = True
-                elif code == "l":
-                    base.append(("l", value))
-                    used_marckey = True
-                elif code in ("n", "p") and code not in structured_codes:
-                    base.append((code, value))
-                    used_marckey = True
-            subs = _merge_structured_parts(base, structured)
-            if subs:
-                self._emit_datafield(
-                    record,
-                    tag,
-                    *subs,
-                    ind1=ind1,
-                    ind2=ind2,
-                    lineage=self._lineage_token(hub),
-                    marckey_bypass=used_marckey,
-                )
-                return
 
     def _hub_title_part_subs(self, hub: Node) -> list[tuple[str, str]]:
         """Read the Hub's structured ``bf:Title`` for ``bf:partNumber``
@@ -2725,6 +2728,12 @@ class _Reconstructor:
             for resource in self.graph.objects(rel, V.BFFI.associatedResource):
                 types = set(self.graph.objects(resource, RDF.type))
                 if V.BF.Hub in types:
+                    # Source-700-ind2=2 (analytical name/title added entry)
+                    # ends up as a Hub here too. Route those via the
+                    # 700 ind2=2 emit instead of the 730 path so the
+                    # author + role + title survive on a single MARC row.
+                    if self._emit_analytical_added_entry_from_hub(record, resource):
+                        continue
                     tag = "730"
                 elif V.BF.Work in types:
                     tag = "740"
@@ -2743,56 +2752,170 @@ class _Reconstructor:
                     marckey_bypass=used_marckey,
                 )
 
+    def _emit_analytical_added_entry_from_hub(self, record: Element, hub: Node) -> bool:
+        """If ``hub``'s ``bflc:marcKey`` source-tag is 700 with ind2=2,
+        emit ``700 ind1=? ind2=2 $a <name> $e <role> $t <title>`` and
+        return True; otherwise return False (caller emits 730/740).
+
+        marc2bibframe2 maps every source ``700 ind2=2`` (MARC analytical
+        author/title added entry — typical pattern for compilation /
+        anthology volumes carrying per-essay contributor + title) to a
+        ``bf:Hub`` linked from the bf:Instance via ``bf:relation``. The
+        Hub carries both ``bf:title → bf:mainTitle`` AND
+        ``bf:contribution → bf:Agent``. M3 SPARQL aggregation preserves
+        the Hub on the Manifestation's ``bffi:relation`` but the
+        structured contribution chain isn't propagated downstream;
+        ``bflc:marcKey`` IS, so we parse it here.
+
+        Without this routing, every analytical-entry Hub would emit a
+        ``730 $a <title>`` row stripping the author — see
+        ``docs/bffi_limitations.md`` discussion in b26222668 review.
+        """
+        marc_key_lit: Literal | None = None
+        for mk in self.graph.objects(hub, V.BFLC.marcKey):
+            if isinstance(mk, Literal):
+                marc_key_lit = mk
+                break
+        if marc_key_lit is None:
+            return False
+        marc_key = str(marc_key_lit)
+        parsed = _parse_marc_key_tag_and_indicators(marc_key)
+        if parsed is None:
+            return False
+        tag, ind1, ind2 = parsed
+        if tag != "700" or ind2 != "2":
+            return False
+        # Preserve source subfield order from the marcKey. Exclude
+        # subfields our pipeline owns: $6 is marc2bibframe2's 880
+        # linkage (handled separately by the vernacular emit path) and
+        # $9 is our local lineage subfield (emitted by ``_emit_datafield``
+        # via the lineage parameter, not via the marcKey).
+        exclude_codes = {"6", "9"}
+        sub_order = _parse_marc_key_subfields(marc_key)
+        subs: list[tuple[str, str]] = [
+            (code, value) for code, value in sub_order if code not in exclude_codes
+        ]
+        if not subs:
+            return False
+        self._emit_datafield(
+            record,
+            "700",
+            *subs,
+            ind1=ind1,
+            ind2="2",
+            lineage=self._lineage_token(hub),
+            marckey_bypass=True,
+        )
+        return True
+
     def _related_title_subfields(self, hub: Node) -> tuple[tuple[tuple[str, str], ...], bool]:
         """Build the 730 / 740 subfield tuple for one related title.
 
         Returns ``(subfields, used_marckey)``. Three tiers, preferring
-        BFFI-native paths (no ``marckey_bypass`` flag) before falling
-        back to ``bflc:marcKey`` parsing:
+        ``bflc:marcKey`` first because it preserves the full source
+        subfield structure (``$a / $l / $o / $g / $n / $p`` etc.).
+        The ``bf:mainTitle`` literal alone concatenates all of those
+        subfields into one string — see b20122470 730 round-trip
+        where ``$lsuomi`` and ``$osov.`` get merged into ``$a``.
 
-        Tier 1 — **bf:mainTitle split** (P-168 BFFI-native): take the
-        ``bf:title → bf:Title → bf:mainTitle`` literal and split on
-        ``" / "`` for ``$a`` (title proper) + ``$g`` (responsibility /
-        composer reference). Combined with structured
-        ``bf:partNumber`` / ``bf:partName`` for ``$n`` / ``$p``. No
-        marckey_bypass — both ``mainTitle`` and the part predicates
-        are dedicated BFFI predicates marc2bibframe2 emits natively.
-
-        Tier 2 — **bflc:marcKey** (legacy fallback): parses ``$a`` +
-        ``$g`` + ``$n`` + ``$p`` from the marcKey string. Used only
-        when the Hub has no ``bf:title`` / ``bf:mainTitle`` chain.
-        Flagged as ``marckey_bypass`` so the audit shows the
+        Tier 1 — **bflc:marcKey** (P-50): parse every subfield in
+        source-MARC order. Pass-through codes for 730: ``a``, ``l``,
+        ``o``, ``g``, ``n``, ``p``, ``i``, ``t``, ``x``, ``v``.
+        ``$0`` / ``$2`` / ``$4`` / ``$5`` / ``$6`` / ``$9`` are
+        excluded (re-emitted by dedicated paths or pipeline-owned).
+        Flagged as ``marckey_bypass`` so the audit surfaces the
         dependency.
+
+        Tier 2 — **bf:mainTitle split** (BFFI-native fallback): split
+        on ``" / "`` for ``$a`` + ``$g`` when no marcKey is present.
+        Combined with structured ``bf:partNumber`` / ``bf:partName``
+        for ``$n`` / ``$p``.
 
         Tier 3 — **structured only**: ``$n`` / ``$p`` only when the
         Hub has neither marcKey nor title. Defensive.
         """
         structured = self._hub_title_part_subs(hub)
         structured_codes = {code for code, _ in structured}
-        # Tier 1 — BFFI-native bf:mainTitle split
+        # Structured-predicate overrides — read the BIBFRAME/BFFI
+        # native predicates marc2bibframe2 emits alongside marcKey
+        # ($l, $m, $r, $s in particular) so the round-trip can prefer
+        # them over marcKey-parsed values. Returns ``{}`` when the Hub
+        # carries no structured predicates (the common case for older
+        # records / marcKey-only Hubs).
+        structured_override = self._hub_structured_subfield_overrides(hub)
+        # Tier 1 — marcKey preserves source subfield structure
+        for mk in self.graph.objects(hub, V.BFLC.marcKey):
+            if not isinstance(mk, Literal):
+                continue
+            parsed = _parse_marc_key_subfields(str(mk))
+            if not parsed:
+                continue
+            exclude = {"0", "2", "4", "5", "6", "9"}
+            base = [
+                (
+                    code,
+                    structured_override.get(code, value),
+                )
+                for code, value in parsed
+                if code not in exclude and not (code in ("n", "p") and code in structured_codes)
+            ]
+            if base:
+                return _merge_structured_parts(base, structured), True
+        # Tier 2 — BFFI-native bf:mainTitle split
         for title in self.graph.objects(hub, V.BFFI.title):
             for mt in self.graph.objects(title, V.BFFI.mainTitle):
                 if isinstance(mt, Literal):
                     base = list(_split_title_responsibility(str(mt)))
                     if base:
                         return _merge_structured_parts(base, structured), False
-        # Tier 2 — marcKey fallback
-        for mk in self.graph.objects(hub, V.BFLC.marcKey):
-            if not isinstance(mk, Literal):
-                continue
-            parsed = _parse_marc_key_subfields(str(mk), ("a", "n", "p", "g"))
-            if not parsed:
-                continue
-            base = []
-            used_marckey = False
-            for code, value in parsed:
-                if code in ("n", "p") and code in structured_codes:
-                    continue
-                base.append((code, value))
-                used_marckey = True
-            return _merge_structured_parts(base, structured), used_marckey
         # Tier 3 — structured only
         return tuple(structured), False
+
+    def _hub_structured_subfield_overrides(self, hub: Node) -> dict[str, str]:
+        """Read BIBFRAME structured predicates that marc2bibframe2 emits
+        alongside ``bflc:marcKey`` on uniform-title Hubs (240 / 130 /
+        730) and return a per-subfield-code override map.
+
+        Mapping (set by M3 SPARQL `bf_to_bffi_expression.rq` +
+        `bf_to_bffi_manifestation.rq` Hub blocks):
+
+          - ``bf:language → bf:Language → rdfs:label`` → ``$l``
+          - ``bf:musicMedium → bf:MusicMedium → rdfs:label`` → ``$m``
+          - ``bf:keyMode → bf:KeyMode → rdfs:label`` → ``$r`` (note:
+            BFFI has no ``bffi:keyMode``; ``bf:keyMode`` is the
+            BIBFRAME-direct form — see docs/bffi_limitations.md L-13)
+          - ``bffi:version`` literal → ``$s``
+
+        ``$o`` (arrangement statement) intentionally NOT covered — the
+        type marker ``rdf:type bf:Arrangement`` flags existence but
+        marc2bibframe2 doesn't preserve the literal ``$o`` text in
+        structured form; the marcKey carries the text. ``$n``/``$p``
+        come from ``bf:partNumber``/``bf:partName`` via
+        ``_hub_title_part_subs`` (a separate path).
+        """
+        out: dict[str, str] = {}
+        # Two-hop predicate→label chains: (subfield_code, link_predicate).
+        for code, link in (("l", V.BF.language), ("m", V.BF.musicMedium), ("r", V.BF.keyMode)):
+            label = self._first_two_hop_label(hub, link)
+            if label is not None:
+                out[code] = label
+        # Direct literal predicates.
+        for ver in self.graph.objects(hub, V.BFFI.version):
+            if isinstance(ver, Literal):
+                out["s"] = str(ver)
+                break
+        return out
+
+    def _first_two_hop_label(self, source: Node, link_predicate: URIRef) -> str | None:
+        """Walk ``source → link_predicate → rdfs:label`` and return the
+        first ``rdfs:label`` literal, or ``None``. Used to flatten the
+        ``bf:keyMode → bf:KeyMode → rdfs:label`` style two-hop chains
+        marc2bibframe2 emits on uniform-title Hubs."""
+        for target in self.graph.objects(source, link_predicate):
+            for lbl in self.graph.objects(target, V.RDFS.label):
+                if isinstance(lbl, Literal):
+                    return str(lbl)
+        return None
 
     def _emit_bib_id_local(self, record: Element, bib_id: str | None) -> None:
         if not bib_id:
@@ -2927,6 +3050,27 @@ class _Reconstructor:
                 lineage=self._lineage_token(subject),
             )
         return seq
+
+
+def _parse_marc_key_tag_and_indicators(marc_key: str) -> tuple[str, str, str] | None:
+    """Parse the leading tag + 2 indicators from a ``bflc:marcKey``.
+
+    marcKey format from marc2bibframe2 is
+    ``<tag><ind1><ind2>(optional space)$a...`` — e.g. ``"70012$aMechelin"``
+    (tag=700, ind1=1, ind2=2) or ``"7300 $aFame /$gGore"`` (tag=730,
+    ind1=0, ind2=" "). Returns ``(tag, ind1, ind2)`` or ``None`` when
+    the string is too short or doesn't look like a marcKey.
+
+    Indicators are stored as single characters; ``" "`` (space) is a
+    valid indicator value and is returned verbatim — callers should
+    compare against ``" "`` not the empty string.
+    """
+    if len(marc_key) < 5:  # noqa: PLR2004 — 3 tag chars + 2 indicators is the minimum marcKey shape
+        return None
+    tag = marc_key[:3]
+    if not tag.isdigit():
+        return None
+    return tag, marc_key[3], marc_key[4]
 
 
 def _parse_marc_key_subfields(

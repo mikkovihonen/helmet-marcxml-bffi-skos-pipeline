@@ -34,6 +34,7 @@ from bffi_pipeline.stages.m8.mint import (
     _propagate_from_marc_field,
     _propagate_loc_vocab_labels,
     _propagate_manifestations,
+    _propagate_marc_key,
     _propagate_raw_agent_identifiers,
     _propagate_subject_links,
     _propagate_subject_typing,
@@ -261,6 +262,15 @@ def apply_merge(  # noqa: PLR0912, PLR0915 — terminal-step orchestrator: loads
         # "this triple came from MARC field <bib>:<tag>:<ord>" without
         # walking back to per-record M3 output.
         _propagate_from_marc_field(g, raw_corpus_graph)
+        # Source-faithful subfield reconstruction — the round-trip's
+        # ``_name_subfields_from_marc_key`` reads ``bflc:marcKey`` to
+        # recover $c / $d / $l / $o / $t etc. that marc2bibframe2
+        # collapses into a single rdfs:label / mainTitle. Without this,
+        # round-trip emits e.g. ``600 $a Mikki Hiiri (fiktiivinen
+        # hahmo)`` instead of ``600 $a Mikki Hiiri $c (fiktiivinen
+        # hahmo)``. See scratchpad/2026-06-09-roundtrip-diff.md for the
+        # full subfield-concatenation issue surface.
+        _propagate_marc_key(g, raw_corpus_graph)
         # P-50 Phase C — SubjectLink reification triples (Work →
         # hasSubjectLink → SubjectLink → subjectTarget). Link nodes
         # are per-record so they pass through canonical verbatim
