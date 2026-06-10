@@ -52,9 +52,9 @@ Plus **evaluation harness** — round-trip diff (`MARCXML → BFFI → MARCXML` 
 The rewrite is large enough that committing to specific phase boundaries before the first prototype runs is premature. The rough sequence:
 
 1. **Scaffold the rewrite branch**: minimal repo layout (CLI, sparql/, third_party/ submodule reference, tests/, observability event-sidecar from day 1). Lift the carry-over assets listed above.
-2. **MARC → BIBFRAME**: wrap marc2bibframe2 with the thin driver. Run on the curated dev sample (13 bibs) end-to-end.
+2. **MARC → BIBFRAME**: wrap marc2bibframe2 with the thin driver. Run on the curated dev sample (≈20 k records: a 20 k slice of the Helmet corpus unioned with the identified problem records — e.g. b10007428's 100 × MARC 730 cross-product) end-to-end.
 3. **BIBFRAME → BFFI v0**: emit BFFI-only canonical Turtle. p-56 Phase 1 (clean rename) baked in. No discriminator routings yet — emit will fall short on Hub / Identifier-scheme / Title-variant / Series-link until step 6.
-4. **BFFI → MARC v0**: reverse converter reading BFFI predicates only. Round-trip the 13-bib dev sample end-to-end (MARC → BFFI → MARC).
+4. **BFFI → MARC v0**: reverse converter reading BFFI predicates only. Round-trip the dev sample end-to-end (MARC → BFFI → MARC).
 5. **Eval harness v0**: round-trip diff + cataloguer-review HTML wrapping pillars 2-4. Establish corpus-scale baseline against main.
 6. **p-56 Phase 4 routings**: Hub, Identifier-scheme, Title-variant, Series-link, Audio. The reverse converter (pillar 4) updates to read the new discriminator predicates instead of `bf:*` typing keys. Eval harness signals correctness.
 7. **p-56 Phase 5 music interim**: `bffi:readMarc382` + `bffi:musicKey` literal collapse against BFFI 1.0.0 in the forward direction; reverse converter reads the literals back to MARC 382 / 384 verbatim.
@@ -66,7 +66,7 @@ Each numbered step warrants its own plan once we have signal from the previous o
 
 1. **Submodule sharing or rewrite-branch copy?** The `third_party/marc2bibframe2/` submodule is identical on main and rewrite. Sharing via git submodule reference (the rewrite branch inherits main's pointer) is the obvious answer; flag if there's reason to vendor a separate snapshot.
 2. **Skosmos as eval surface?** The round-trip diff + cataloguer-review HTML covers conversion correctness mechanically. Skosmos display adds visual inspection but requires running the Docker stack. Default to: keep the cataloguer-review HTML as the primary eval surface; add Skosmos only if it shows value during eval-harness work.
-3. **Curated dev sample size during rewrite?** The 13-bib sample is enough to validate end-to-end correctness but might not surface corpus-scale failure modes early. The 800 k full-corpus run is the canonical scaling check (step 8) — the known-problem records from main are already in the corpus, so no intermediate slice is required.
+3. **Dev sample composition.** Locked in: ≈20 k records (a 20 k slice of the Helmet corpus) unioned with the identified problem records main has surfaced (e.g. b10007428's 100 × MARC 730 cross-product, plus any others discovered during scaffold + step 5 baseline). Same sample drives steps 2-7; step 8 (full corpus) is the canonical scaling check. The 13-bib curated sample from main is retired in favour of this larger one because 13 records don't surface enough variety to catch real corpus issues.
 4. **Merge or replace?** When rewrite reaches parity on conversion + eval — does it merge into main (preserving the reconciliation stages there), or does it become the new main (with the reconciliation stages reimplemented or imported back later)? Defer until rewrite reaches that point.
 
 ## Verification
@@ -84,4 +84,4 @@ The rewrite lives on its own branch. If it doesn't work out, the rewrite branch 
 
 ## Suggested next step
 
-Cut the `rewrite` branch from this commit. Then on the rewrite branch, start with step 1 (scaffold) and step 2 (MARC → BIBFRAME wrapper). The first observable milestone is end-to-end MARC → BFFI → MARC of the 13-bib dev sample with BFFI-only emit, the reverse converter reading only `bffi:*` predicates, and a round-trip diff showing the closed-namespace discipline holding in both directions.
+Cut the `rewrite` branch from this commit. Then on the rewrite branch, start with step 1 (scaffold) and step 2 (MARC → BIBFRAME wrapper). The first observable milestone is end-to-end MARC → BFFI → MARC of the curated dev sample (≈20 k + problem records) with BFFI-only emit, the reverse converter reading only `bffi:*` predicates, and a round-trip diff showing the closed-namespace discipline holding in both directions.
