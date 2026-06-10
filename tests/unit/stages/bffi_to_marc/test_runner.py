@@ -498,6 +498,67 @@ def test_emit_marcxml_emits_084_classification() -> None:
     assert sf_a.text == "82.3"
 
 
+def test_emit_marcxml_emits_100_for_primary_personal_contributor() -> None:
+    """``bffi:PrimaryContribution`` with a ``bffi:Person`` agent emits
+    MARC 100 \\$a (with the role's LoC relator code in \\$4)."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+
+    contrib = URIRef("http://example.org/b1#contrib-1")
+    g.add((contrib, RDF.type, BFFI.Contribution))
+    g.add((contrib, RDF.type, BFFI.PrimaryContribution))
+    g.add((work, BFFI.contribution, contrib))
+    agent = URIRef("http://example.org/b1#agent-1")
+    g.add((agent, RDF.type, BFFI.Person))
+    g.add((agent, RDFS.label, Literal("Auster, Paul")))
+    g.add((contrib, BFFI.agent, agent))
+    g.add((contrib, BFFI.role, URIRef("http://id.loc.gov/vocabulary/relators/aut")))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df100 = root.find(f"{{{MARC21_NS}}}datafield[@tag='100']")
+    assert df100 is not None
+    assert df100.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "Auster, Paul"  # type: ignore[union-attr]
+    assert df100.find(f"{{{MARC21_NS}}}subfield[@code='4']").text == "aut"  # type: ignore[union-attr]
+
+
+def test_emit_marcxml_emits_710_for_added_corporate_contributor() -> None:
+    """A non-primary ``bffi:Contribution`` with a ``bffi:Organization``
+    agent emits MARC 710 \\$a — the added corporate entry."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+
+    contrib = URIRef("http://example.org/b1#contrib-1")
+    g.add((contrib, RDF.type, BFFI.Contribution))  # not Primary
+    g.add((work, BFFI.contribution, contrib))
+    agent = URIRef("http://example.org/b1#agent-1")
+    g.add((agent, RDF.type, BFFI.Organization))
+    g.add((agent, RDFS.label, Literal("Helsingin yliopisto")))
+    g.add((contrib, BFFI.agent, agent))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df710 = root.find(f"{{{MARC21_NS}}}datafield[@tag='710']")
+    assert df710 is not None
+    assert df710.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "Helsingin yliopisto"  # type: ignore[union-attr]
+    # No role → no $4
+    assert df710.find(f"{{{MARC21_NS}}}subfield[@code='4']") is None
+
+
 def test_emit_marcxml_skips_unsupported_identifier_schemes() -> None:
     """Identifier blocks with a bffi:source URI not in the dispatch
     table are skipped — those land in their own follow-on commits.

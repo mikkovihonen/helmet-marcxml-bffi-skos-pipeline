@@ -27,6 +27,9 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `022` | `##` | `$a` — ISSN value | ?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <http://id.loc.gov/vocabulary/identifiers/issn> ; rdf:value ?issn] | — |
 | `041` | `##` | `$a` — 3-letter language code (one per language) | ?m bffi:language <http://id.loc.gov/vocabulary/languages/{code}> — the last URI segment is the MARC code | — |
 | `084` | `##` | `$a` — classification number | ?m bffi:workManifested ?work . ?work bffi:classification [a bffi:Classification ; bffi:classificationPortion ?number] | Generic-scheme classification emit. Helmet-local 09X (091/092/094/095/097) and standard 050/080/082 dispatching by source is a follow-on. |
+| `100` | `##` | `$a` — personal name<br>`$4` — LoC relator code | ?m bffi:workManifested ?work . ?work bffi:contribution [a bffi:PrimaryContribution ; bffi:agent ?agent ; bffi:role ?role] . ?agent a bffi:Person ; rdfs:label ?name . $4 = local-name of ?role (the LoC relator URI) | — |
+| `110` | `##` | `$a` — corporate / jurisdiction name<br>`$4` — LoC relator code | Same as 100, but with ?agent a bffi:Organization (or bffi:Jurisdiction) on a primary contribution | — |
+| `111` | `##` | `$a` — meeting / conference name<br>`$4` — LoC relator code | Same as 100, but with ?agent a bffi:Meeting on a primary contribution | — |
 | `245` | `00` | `$a` — main title<br>`$b` — subtitle<br>`$c` — statement of responsibility | ?m bffi:title / bffi:Title / bffi:mainTitle (mandatory) + bffi:subtitle (optional); responsibility comes from ?m bffi:responsibilityStatement | First bffi:title block wins. See known limitations below. |
 | `260` | `##` | `$a` — publication / distribution statement | ?m bffi:publicationStatement ?text — the transcribed pre-RDA statement | BFFI carries the publication statement as a single transcribed literal — the round-trip emit puts the whole string in $a. |
 | `300` | `##` | `$a` — extent<br>`$c` — dimensions | ?m bffi:extent / bffi:Extent / rdfs:label (for $a) and ?m bffi:dimensions literal (for $c) | First-extent-wins for multi-extent records (rare). |
@@ -42,8 +45,11 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `650` | `##` | `$a` — topical term subject heading | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label — `?subject` is typed `bffi:Topic` | — |
 | `651` | `##` | `$a` — geographic name subject heading | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label — `?subject` is typed `bffi:Place` | — |
 | `655` | `##` | `$a` — genre / form term | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label — `?subject` is typed `bffi:GenreForm` | — |
+| `700` | `##` | `$a` — personal name<br>`$4` — LoC relator code | Same chain as 100, but the contribution is NOT typed bffi:PrimaryContribution — added-entry contributors land in 7XX | — |
+| `710` | `##` | `$a` — corporate / jurisdiction name<br>`$4` — LoC relator code | Same as 700, but with ?agent a bffi:Organization or bffi:Jurisdiction | — |
+| `711` | `##` | `$a` — meeting / conference name<br>`$4` — LoC relator code | Same as 700, but with ?agent a bffi:Meeting | — |
 
-_22 MARC tags currently emitted._
+_28 MARC tags currently emitted._
 
 <!-- END AUTO: shipped -->
 

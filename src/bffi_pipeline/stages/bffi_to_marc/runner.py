@@ -30,7 +30,7 @@ Stage label for observability sidecar events: ``bffi2marc``.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, TypeVar
@@ -325,6 +325,117 @@ class _TitleParts:
 
     main: str
     subtitle: str | None = None
+
+
+#: Maps a BFFI agent class to a ``(primary_tag, added_tag)`` MARC pair.
+#: Primary contributions (``bffi:PrimaryContribution``-typed) emit as
+#: MARC 1XX; all others emit as MARC 7XX of the matching agent type.
+#: ``bffi:Jurisdiction`` is corporate-like in MARC.
+_AGENT_TYPE_TO_MARC_TAG_PAIR: Final[dict[URIRef, tuple[str, str]]] = {
+    BFFI.Person: ("100", "700"),
+    BFFI.Organization: ("110", "710"),
+    BFFI.Jurisdiction: ("110", "710"),
+    BFFI.Meeting: ("111", "711"),
+}
+
+
+@dataclass(frozen=True)
+class _ContributorEmit:
+    """One MARC contributor datafield (100/110/111/700/710/711)."""
+
+    tag: str
+    label: str
+    relator: str | None
+
+
+def _agent_marc_tag(graph: Graph, agent: URIRef, *, is_primary: bool) -> str | None:
+    """Pick the MARC tag for a contribution from the agent's class type
+    + primary/added flag. Returns ``None`` if no type signal matches."""
+    for agent_type, (primary_tag, added_tag) in _AGENT_TYPE_TO_MARC_TAG_PAIR.items():
+        if (agent, RDF.type, agent_type) in graph:
+            return primary_tag if is_primary else added_tag
+    return None
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="100",
+        indicators=(" ", " "),
+        subfields=(("a", "personal name"), ("4", "LoC relator code")),
+        source=(
+            "?m bffi:workManifested ?work . "
+            "?work bffi:contribution [a bffi:PrimaryContribution ; "
+            "bffi:agent ?agent ; bffi:role ?role] . "
+            "?agent a bffi:Person ; rdfs:label ?name . "
+            "$4 = local-name of ?role (the LoC relator URI)"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="110",
+        indicators=(" ", " "),
+        subfields=(("a", "corporate / jurisdiction name"), ("4", "LoC relator code")),
+        source=(
+            "Same as 100, but with ?agent a bffi:Organization "
+            "(or bffi:Jurisdiction) on a primary contribution"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="111",
+        indicators=(" ", " "),
+        subfields=(("a", "meeting / conference name"), ("4", "LoC relator code")),
+        source="Same as 100, but with ?agent a bffi:Meeting on a primary contribution",
+    ),
+    MarcEmitMeta(
+        tag="700",
+        indicators=(" ", " "),
+        subfields=(("a", "personal name"), ("4", "LoC relator code")),
+        source=(
+            "Same chain as 100, but the contribution is NOT typed "
+            "bffi:PrimaryContribution — added-entry contributors land in 7XX"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="710",
+        indicators=(" ", " "),
+        subfields=(("a", "corporate / jurisdiction name"), ("4", "LoC relator code")),
+        source="Same as 700, but with ?agent a bffi:Organization or bffi:Jurisdiction",
+    ),
+    MarcEmitMeta(
+        tag="711",
+        indicators=(" ", " "),
+        subfields=(("a", "meeting / conference name"), ("4", "LoC relator code")),
+        source="Same as 700, but with ?agent a bffi:Meeting",
+    ),
+)
+def _extract_contributors(graph: Graph, manifestation: URIRef) -> list[_ContributorEmit]:
+    """Walk ``?work bffi:contribution`` blocks and emit MARC 1XX (for
+    ``bffi:PrimaryContribution``) or 7XX (for added entries), picking
+    the digit-pair from the agent's class type (Person → X00, Corporate
+    / Jurisdiction → X10, Meeting → X11).
+
+    Emits ``$a`` from ``rdfs:label`` on the agent and ``$4`` (LoC
+    relator code) from the local-name of ``bffi:role``. Multiple
+    contributors produce multiple datafields, sorted for determinism.
+    """
+    work = _find_work_for_manifestation(graph, manifestation)
+    if work is None:
+        return []
+    emits: list[_ContributorEmit] = []
+    for contrib in graph.objects(work, BFFI.contribution):
+        is_primary = (contrib, RDF.type, BFFI.PrimaryContribution) in graph
+        agent = next(graph.objects(contrib, BFFI.agent), None)
+        if not isinstance(agent, URIRef):
+            continue
+        label = next(graph.objects(agent, RDFS.label), None)
+        if not isinstance(label, Literal):
+            continue
+        tag = _agent_marc_tag(graph, agent, is_primary=is_primary)
+        if tag is None:
+            continue
+        role = next(graph.objects(contrib, BFFI.role), None)
+        relator = local_name(role) if isinstance(role, URIRef) else None
+        emits.append(_ContributorEmit(tag=tag, label=str(label), relator=relator))
+    return sorted(emits, key=lambda e: (e.tag, e.label))
 
 
 @marc_emit(
@@ -706,6 +817,22 @@ def _append_simple_a_datafields(record: etree._Element, tag: str, values: tuple[
         sf_a.text = value
 
 
+def _append_contributor_datafields(
+    record: etree._Element, contributors: Iterable[_ContributorEmit]
+) -> None:
+    """Append one MARC contributor datafield per emit: ``$a`` carries the
+    agent label, ``$4`` (if present) carries the LoC relator code.
+    Indicators are blank — the smart name-type / role indicator
+    population is a follow-on."""
+    for c in contributors:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=c.tag, ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = c.label
+        if c.relator:
+            sf_4 = etree.SubElement(df, f"{_MARC}subfield", code="4")
+            sf_4.text = c.relator
+
+
 def _build_marc_record(
     *,
     bib_id: str,
@@ -718,6 +845,7 @@ def _build_marc_record(
     physical: _PhysicalDescription | None,
     rda: _RdaDescriptors,
     classifications: list[str],
+    contributors: list[_ContributorEmit],
     subjects: list[_SubjectEmit],
     general_notes: list[str],
 ) -> etree._Element:
@@ -746,6 +874,10 @@ def _build_marc_record(
         for code in language_codes:
             sf_a = etree.SubElement(df041, f"{_MARC}subfield", code="a")
             sf_a.text = code
+
+    # Primary contributors (MARC 100/110/111) come before 245 in MARC
+    # tag order.
+    _append_contributor_datafields(record, (c for c in contributors if c.tag.startswith("1")))
 
     if title_parts is not None:
         df245 = etree.SubElement(record, f"{_MARC}datafield", tag="245", ind1="0", ind2="0")
@@ -788,6 +920,9 @@ def _build_marc_record(
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
         sf_a.text = subj.label
 
+    # Added contributors (MARC 700/710/711) come after 6XX subjects.
+    _append_contributor_datafields(record, (c for c in contributors if c.tag.startswith("7")))
+
     return record
 
 
@@ -812,6 +947,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     physical = _extract_physical_description(graph, manifestation)
     rda = _extract_rda_descriptors(graph, manifestation)
     classifications = _extract_classifications(graph, manifestation)
+    contributors = _extract_contributors(graph, manifestation)
     subjects = _extract_subject_datafields(graph, manifestation)
     general_notes = _extract_general_notes(graph, manifestation)
     record = _build_marc_record(
@@ -825,6 +961,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         physical=physical,
         rda=rda,
         classifications=classifications,
+        contributors=contributors,
         subjects=subjects,
         general_notes=general_notes,
     )
