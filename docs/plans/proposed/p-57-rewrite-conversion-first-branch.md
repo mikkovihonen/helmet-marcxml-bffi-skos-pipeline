@@ -2,17 +2,22 @@
 
 **Status**: proposed (2026-06-10). The `rewrite` branch is cut from the same commit that introduces this proposal.
 
-**Scope**: a focused reimplementation covering MARCXML export, marc2bibframe (LoC XSLT), BIBFRAME → BFFI conversion, and an evaluation harness — running cleanly over the full ~800 k-record Helmet corpus. **No clustering, no reconciliation.** M5 (embeddings), M6 (LLM judge), M7-M9 (reconciliation) are explicitly out of scope for the rewrite; if Skosmos display is needed for evaluation it lands as a passive viewer, not an enrichment surface.
+**Scope**: a focused reimplementation covering MARCXML export, MARC → BIBFRAME (LoC marc2bibframe2 XSLT), BIBFRAME → BFFI conversion, **BFFI → MARC reverse conversion**, and an evaluation harness — running cleanly over the full ~800 k-record Helmet corpus. **Bidirectional conversion: both MARC → BFFI and BFFI → MARC are first-class on this branch.** **No clustering, no reconciliation.** M5 (embeddings), M6 (LLM judge), M7-M9 (reconciliation) are explicitly out of scope for the rewrite; if Skosmos display is needed for evaluation it lands as a passive viewer, not an enrichment surface.
 
-**Driver**: the conversion side (MARCXML → BIBFRAME → BFFI) is the foundation everything else builds on. Recent diagnostics — the 20 k-record run killed on b10007428's 100 × MARC 730 → 200 `bf:Hub` cross-product blow-up, the p-56 hard-cut transition committing the codebase to zero `bf:*` in the BFFI emit — point at structural decisions in the conversion layer that are easier to bake into a fresh implementation than to retrofit. The existing pipeline carries six months of accreted reconciliation logic on top of a conversion layer that hasn't been corpus-scale-validated. A conversion-first rewrite gets the foundation right before re-investing in the downstream stages.
+**Driver**: the conversion side (MARCXML ↔ BIBFRAME ↔ BFFI in both directions) is the foundation everything else builds on. Recent diagnostics — the 20 k-record run killed on b10007428's 100 × MARC 730 → 200 `bf:Hub` cross-product blow-up, the p-56 hard-cut transition committing the codebase to zero `bf:*` in the BFFI emit, the marcKey-bypass audit (P-49) exposing that the round-trip is silently smuggling cataloguer-typed MARC strings through the graph to mask structural shortfalls — all point at structural decisions in the conversion layer that are easier to bake into a fresh implementation than to retrofit. The existing pipeline carries six months of accreted reconciliation logic on top of a conversion layer that hasn't been corpus-scale-validated. A conversion-first rewrite gets the foundation right before re-investing in the downstream stages.
 
 ## In / out of scope
 
 ### In scope (rewrite branch)
-- **MARCXML export** — input from the Helmet Sierra dump (`/Users/mikkovihonen/Workspace/helmet-sierra-data-tools/output/marcxml/` per existing memory). Per-record file layout matches the existing corpus.
-- **marc2bibframe** — the LoC XSLT (`third_party/marc2bibframe2/` submodule) wrapped by a thin driver. Behavior unchanged from main.
-- **BIBFRAME → BFFI** — SPARQL CONSTRUCT (or equivalent RDF processing) reading the marc2bibframe output and emitting BFFI-only canonical Turtle. Bakes in p-56 from day 1: zero `bf:*` in the emit, every routing per `docs/bf_to_bffi_mapping.md`.
-- **Evaluation harness** — round-trip diff (`canonical.ttl → MARCXML → canonical.ttl`) at corpus scale, cataloguer-review HTML, mapping-discipline tests (closed-namespace regression, marcKey-bypass counts).
+
+Four conversion pillars + the eval harness:
+
+1. **MARCXML export** — input from the Helmet Sierra dump (`/Users/mikkovihonen/Workspace/helmet-sierra-data-tools/output/marcxml/` per existing memory). Per-record file layout matches the existing corpus.
+2. **MARC → BIBFRAME** — the LoC marc2bibframe2 XSLT (`third_party/marc2bibframe2/` submodule) wrapped by a thin driver. Behavior unchanged from main.
+3. **BIBFRAME → BFFI** — SPARQL CONSTRUCT (or equivalent RDF processing) reading the marc2bibframe output and emitting BFFI-only canonical Turtle. Bakes in p-56 from day 1: zero `bf:*` in the emit, every routing per `docs/bf_to_bffi_mapping.md`.
+4. **BFFI → MARC** — the reverse direction. Reads the BFFI canonical graph (BFFI predicates only — does NOT consult the BIBFRAME intermediate and MUST NOT read `bffi-prov:` pipeline-internal provenance for content decisions, per the bffi_limitations.md cardinal rule) and reconstructs MARCXML. Used for round-trip verification, the diff residue registry, and downstream MARC consumers that may want to re-derive MARC from BFFI without reading the original Sierra dump.
+
+Plus **evaluation harness** — round-trip diff (`MARCXML → BFFI → MARCXML` end-to-end via pillars 2-4), cataloguer-review HTML, mapping-discipline tests (closed-namespace regression, marcKey-bypass counts).
 
 ### Out of scope (stays on main)
 - M5 embeddings, M6 LLM judge, M7-M9 reconciliation (KANTO / Finto / YSO / KAUNO / VIAF).
@@ -30,10 +35,10 @@
 
 ### What gets rewritten from spec
 
-- `src/bffi_pipeline/cli.py` and the orchestrator — simpler shape with three stages (export / convert / eval) instead of M1-M10.
-- `sparql/bf_to_bffi_*.rq` — start from the main-branch versions as reference but emit `bffi:*` only (no `bf:*` legacy); discriminator routings from p-56 Phase 4 baked in.
-- Round-trip converter — read-side reads BFFI predicates only (no `bf:*` typing as routing key).
-- Test fixtures — reuse the gold MARCXML inputs from main; rewrite the assertion files to expect BFFI-only emit.
+- CLI / orchestrator — simpler shape with the five stages (export / marc2bibframe / bibframe2bffi / bffi2marc / roundtrip_eval) instead of main's M1-M10.
+- Forward-conversion SPARQL (`bf_to_bffi_*.rq` or equivalent) — start from the main-branch versions as reference but emit `bffi:*` only (no `bf:*` legacy); discriminator routings from p-56 Phase 4 baked in.
+- Reverse-conversion converter (BFFI → MARC) — read-side reads BFFI predicates only (no `bf:*` typing as a routing key, no `bffi-prov:` provenance as a content source). The marcKey-bypass audit from P-49 informs which subfield reconstructions are genuine vs marcKey-smuggled; the rewrite aims to ship the converter with the bypass count strictly lower than main's baseline.
+- Test fixtures — reuse the gold MARCXML inputs from main; rewrite the assertion files to expect BFFI-only emit (both directions) and the new diff distribution.
 
 ## Branch policy
 
@@ -46,13 +51,14 @@
 
 The rewrite is large enough that committing to specific phase boundaries before the first prototype runs is premature. The rough sequence:
 
-1. **Scaffold the rewrite branch**: minimal repo layout (cli.py, sparql/, third_party/ submodule reference, tests/). Lift the carry-over assets listed above.
-2. **MARCXML → BIBFRAME**: wrap marc2bibframe2 with the thin driver. Run on the curated dev sample (13 bibs) end-to-end.
-3. **BIBFRAME → BFFI v0**: emit BFFI-only canonical Turtle. p-56 Phase 1 (clean rename) baked in. No discriminator routings yet — emit will fall short on Hub / Identifier-scheme / Title-variant / Series-link until phase 4.
-4. **Eval harness v0**: round-trip diff + cataloguer-review HTML. Establish corpus-scale baseline.
-5. **p-56 Phase 4 routings**: Hub, Identifier-scheme, Title-variant, Series-link, Audio. Eval harness signals correctness.
-6. **p-56 Phase 5 music interim**: bffi:readMarc382 + bffi:musicKey literal collapse against BFFI 1.0.0.
-7. **Full corpus run**: 800 k records, end-to-end conversion + eval. Diagnose corpus-scale failure modes (cross-product blow-ups, memory ceilings, throughput).
+1. **Scaffold the rewrite branch**: minimal repo layout (CLI, sparql/, third_party/ submodule reference, tests/, observability event-sidecar from day 1). Lift the carry-over assets listed above.
+2. **MARC → BIBFRAME**: wrap marc2bibframe2 with the thin driver. Run on the curated dev sample (13 bibs) end-to-end.
+3. **BIBFRAME → BFFI v0**: emit BFFI-only canonical Turtle. p-56 Phase 1 (clean rename) baked in. No discriminator routings yet — emit will fall short on Hub / Identifier-scheme / Title-variant / Series-link until step 6.
+4. **BFFI → MARC v0**: reverse converter reading BFFI predicates only. Round-trip the 13-bib dev sample end-to-end (MARC → BFFI → MARC).
+5. **Eval harness v0**: round-trip diff + cataloguer-review HTML wrapping pillars 2-4. Establish corpus-scale baseline against main.
+6. **p-56 Phase 4 routings**: Hub, Identifier-scheme, Title-variant, Series-link, Audio. The reverse converter (pillar 4) updates to read the new discriminator predicates instead of `bf:*` typing keys. Eval harness signals correctness.
+7. **p-56 Phase 5 music interim**: `bffi:readMarc382` + `bffi:musicKey` literal collapse against BFFI 1.0.0 in the forward direction; reverse converter reads the literals back to MARC 382 / 384 verbatim.
+8. **Full corpus run**: 800 k records, end-to-end MARC → BFFI → MARC + eval. Diagnose corpus-scale failure modes (cross-product blow-ups, memory ceilings, throughput) in both directions.
 
 Each numbered step warrants its own plan once we have signal from the previous one.
 
@@ -67,9 +73,10 @@ Each numbered step warrants its own plan once we have signal from the previous o
 
 A successful rewrite is gauged on:
 
-- **Closed-namespace discipline**: zero `bf:*` URIs in any `canonical.ttl` emitted by the rewrite branch. Enforced by the test extension in p-56's verification section.
+- **Closed-namespace discipline (forward direction)**: zero `bf:*` URIs in any canonical BFFI Turtle emitted by the rewrite branch. Enforced by the test extension in p-56's verification section.
+- **bffi-prov discipline (reverse direction)**: the BFFI → MARC converter reads only the `bffi:` (+ `skos:` / `dct:` / `rdf:` / `rdfs:` / `owl:`) namespaces for content reconstruction. Static-source test fails the build if the reverse converter imports or queries any `bffi-prov:` predicate as a content source. Pipeline-internal provenance is fair game for UI / pairing machinery (e.g. lineage tokens on diff rows), never for emit content.
 - **Round-trip parity**: round-trip diff (`MARCXML → BFFI → MARCXML`) shows the same `identical` / `changed` / `lost` / `tag-changed` / `marckey-bypass` distribution as a comparable run on main, **with the marckey-bypass count strictly lower** (Phase 4 routings read BFFI-side predicates, eliminating the bypass on Hub / VariantTitle / Identifier rows).
-- **Corpus scale**: 800 k-record full-corpus conversion completes in bounded wall-clock and memory. The b10007428 cross-product class of failure does not appear (verified by including b10007428 + similar high-cardinality records in the eval set).
+- **Corpus scale**: 800 k-record full-corpus conversion (both directions) completes in bounded wall-clock and memory. The b10007428 cross-product class of failure does not appear (verified by including b10007428 + similar high-cardinality records in the eval set).
 
 ## Rollback
 
@@ -77,4 +84,4 @@ The rewrite lives on its own branch. If it doesn't work out, the rewrite branch 
 
 ## Suggested next step
 
-Cut the `rewrite` branch from this commit. Then on the rewrite branch, start with step 1 (scaffold) and step 2 (MARCXML → BIBFRAME wrapper). The first observable milestone is end-to-end conversion of the 13-bib dev sample with BFFI-only emit and a round-trip diff showing the closed-namespace discipline holding.
+Cut the `rewrite` branch from this commit. Then on the rewrite branch, start with step 1 (scaffold) and step 2 (MARC → BIBFRAME wrapper). The first observable milestone is end-to-end MARC → BFFI → MARC of the 13-bib dev sample with BFFI-only emit, the reverse converter reading only `bffi:*` predicates, and a round-trip diff showing the closed-namespace discipline holding in both directions.
