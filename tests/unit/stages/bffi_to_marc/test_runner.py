@@ -177,6 +177,100 @@ def test_emit_marcxml_emits_245_c_when_responsibility_statement_present() -> Non
     assert sf_c.text == "directed by Guy Hamilton ; screenplay by Richard Maibaum"
 
 
+def test_emit_marcxml_emits_020_isbn_datafield() -> None:
+    """An ISBN identifier block on the Manifestation produces a MARC
+    020 datafield with the value in $a. The dispatch reads the
+    bffi:source URI to pick the right MARC tag."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="A book",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    isbn_block = URIRef("http://example.org/isbn-1")
+    g.add((isbn_block, RDF.type, BFFI.Identifier))
+    g.add(
+        (
+            isbn_block,
+            BFFI.source,
+            URIRef("http://id.loc.gov/vocabulary/identifiers/isbn"),
+        )
+    )
+    g.add((isbn_block, RDF.value, Literal("9780123456789")))
+    g.add((manifestation, BFFI.identifiedBy, isbn_block))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df020 = root.find(f"{{{MARC21_NS}}}datafield[@tag='020']")
+    assert df020 is not None
+    sf_a = df020.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    assert sf_a is not None
+    assert sf_a.text == "9780123456789"
+
+
+def test_emit_marcxml_emits_022_issn_datafield() -> None:
+    """An ISSN identifier block produces a 022 datafield. Same dispatch
+    pattern as ISBN — different bffi:source URI maps to a different
+    MARC tag."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="A serial",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    issn_block = URIRef("http://example.org/issn-1")
+    g.add((issn_block, RDF.type, BFFI.Identifier))
+    g.add(
+        (
+            issn_block,
+            BFFI.source,
+            URIRef("http://id.loc.gov/vocabulary/identifiers/issn"),
+        )
+    )
+    g.add((issn_block, RDF.value, Literal("0028-0836")))
+    g.add((manifestation, BFFI.identifiedBy, issn_block))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df022 = root.find(f"{{{MARC21_NS}}}datafield[@tag='022']")
+    assert df022 is not None
+    sf_a = df022.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    assert sf_a is not None
+    assert sf_a.text == "0028-0836"
+
+
+def test_emit_marcxml_skips_unsupported_identifier_schemes() -> None:
+    """Identifier blocks with a bffi:source URI not in the dispatch
+    table are skipped — those land in their own follow-on commits.
+    The Local block (which carries the bib ID for 001) is also skipped
+    here; it has no bffi:source URI in the dispatch table."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",  # produces a bffi:Local identifier block
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    # Add a UPC identifier (not yet in the dispatch table).
+    upc_block = URIRef("http://example.org/upc-1")
+    g.add((upc_block, RDF.type, BFFI.Identifier))
+    g.add(
+        (
+            upc_block,
+            BFFI.source,
+            URIRef("http://id.loc.gov/vocabulary/identifiers/upc"),
+        )
+    )
+    g.add((upc_block, RDF.value, Literal("123456")))
+    g.add((manifestation, BFFI.identifiedBy, upc_block))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    # No 020 / 022 / 024 — UPC is not yet dispatched.
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='020']") is None
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='022']") is None
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='024']") is None
+
+
 def test_emit_marcxml_falls_back_to_uri_fragment_when_no_local_block() -> None:
     """The BIBFRAME emit shape from marc2bibframe2 puts the bib ID in the
     URI path component. If no Local identifier exists in the graph, the

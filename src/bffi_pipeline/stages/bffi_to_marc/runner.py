@@ -152,19 +152,69 @@ def _extract_responsibility_statement(graph: Graph, manifestation: URIRef) -> st
     return str(value) if isinstance(value, Literal) else None
 
 
+#: Identifier-scheme URI → MARC datafield tag. Each ``bffi:identifiedBy``
+#: block on a Manifestation carries a ``bffi:source`` URI naming the
+#: LoC identifier scheme; this dispatch table converts those URIs into
+#: the right MARC tag for the round-trip emit.
+_IDENTIFIER_SCHEME_TO_MARC_TAG: Final[dict[URIRef, str]] = {
+    URIRef("http://id.loc.gov/vocabulary/identifiers/isbn"): "020",
+    URIRef("http://id.loc.gov/vocabulary/identifiers/issn"): "022",
+}
+
+
+@dataclass(frozen=True)
+class _IdentifierEmit:
+    """One MARC identifier datafield's worth of content (tag + value)."""
+
+    tag: str
+    value: str
+
+
+def _extract_identifier_datafields(graph: Graph, manifestation: URIRef) -> list[_IdentifierEmit]:
+    """Walk every ``bffi:identifiedBy`` block and convert to a MARC
+    datafield emit when its ``bffi:source`` URI is in the dispatch table.
+
+    Local IDs (with no ``bffi:source`` or a source not in the table)
+    are skipped — they're either the 001-bound bib ID (handled
+    separately) or an identifier scheme we don't yet emit. Each
+    additional scheme lands as its own follow-on commit by extending
+    :data:`_IDENTIFIER_SCHEME_TO_MARC_TAG`.
+    """
+    emits: list[_IdentifierEmit] = []
+    for ident in graph.objects(manifestation, BFFI.identifiedBy):
+        source = next(graph.objects(ident, BFFI.source), None)
+        if not isinstance(source, URIRef):
+            continue
+        tag = _IDENTIFIER_SCHEME_TO_MARC_TAG.get(source)
+        if tag is None:
+            continue
+        value = next(graph.objects(ident, RDF.value), None)
+        if not isinstance(value, Literal):
+            continue
+        emits.append(_IdentifierEmit(tag=tag, value=str(value)))
+    return emits
+
+
 def _build_marc_record(
     *,
     bib_id: str,
     title_parts: _TitleParts | None,
     responsibility: str | None,
+    identifiers: list[_IdentifierEmit],
 ) -> etree._Element:
-    """Build one MARCXML ``<record>`` element with the v0 field set."""
+    """Build one MARCXML ``<record>`` element with the v0+ field set."""
     record = etree.Element(f"{_MARC}record")
     leader = etree.SubElement(record, f"{_MARC}leader")
     leader.text = _LEADER_PLACEHOLDER
 
     cf001 = etree.SubElement(record, f"{_MARC}controlfield", tag="001")
     cf001.text = bib_id
+
+    # 020 ISBN / 022 ISSN come before 245 in MARC ordering convention.
+    for ident in identifiers:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=ident.tag, ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = ident.value
 
     if title_parts is not None:
         df245 = etree.SubElement(record, f"{_MARC}datafield", tag="245", ind1="0", ind2="0")
@@ -194,10 +244,12 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         raise BffiToMarcError(f"no bib ID found for manifestation {manifestation}")
     title_parts = _extract_main_title_parts(graph, manifestation)
     responsibility = _extract_responsibility_statement(graph, manifestation)
+    identifiers = _extract_identifier_datafields(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
         title_parts=title_parts,
         responsibility=responsibility,
+        identifiers=identifiers,
     )
     return etree.tostring(
         record,
