@@ -78,10 +78,26 @@ LOC_IDENTIFIER_SCHEMES: Final[dict[URIRef, URIRef]] = {
     BF.Lccn: URIRef("http://id.loc.gov/vocabulary/identifiers/lccn"),
     BF.Upc: URIRef("http://id.loc.gov/vocabulary/identifiers/upc"),
     BF.Ismn: URIRef("http://id.loc.gov/vocabulary/identifiers/ismn"),
+    BF.Isrc: URIRef("http://id.loc.gov/vocabulary/identifiers/isrc"),
+    BF.Strn: URIRef("http://id.loc.gov/vocabulary/identifiers/strn"),
+    BF.Nbn: URIRef("http://id.loc.gov/vocabulary/identifiers/nbn"),
+    BF.MusicPlate: URIRef("http://id.loc.gov/vocabulary/identifiers/music-plate"),
+    BF.MatrixNumber: URIRef("http://id.loc.gov/vocabulary/identifiers/matrix-number"),
+    BF.PublisherNumber: URIRef("http://id.loc.gov/vocabulary/identifiers/publisher-number"),
     BF.VideoRecordingNumber: URIRef(
         "http://id.loc.gov/vocabulary/identifiers/videorecording-number"
     ),
     BF.OtherIdentifier: URIRef("http://id.loc.gov/vocabulary/identifiers/other"),
+}
+
+#: Predicate-side gaps with no direct ``bffi:*`` equivalent in `lkd.rdf`
+#: but a natural routing through the structured ``bffi:relation`` chain
+#: (same shape as Series-link). Each maps the BIBFRAME predicate to a
+#: LoC ``vocabulary/relationship/<term>`` URI that the Relation bnode
+#: carries on its ``bffi:relationship`` slot.
+RELATION_PREDICATE_ROUTINGS: Final[dict[URIRef, URIRef]] = {
+    BF.hasSeries: URIRef("http://id.loc.gov/vocabulary/relationship/series"),
+    BF.accompaniedBy: URIRef("http://id.loc.gov/vocabulary/relationship/accompaniedby"),
 }
 
 #: P-56 Phase 3 axis-pick: BIBFRAME classes that BFFI splits into
@@ -214,6 +230,25 @@ def route_audio(graph: Graph) -> int:
 # --- routing 4: Series-link ---------------------------------------------
 
 
+def _route_predicate_via_relation(graph: Graph, bf_pred: URIRef, relationship_uri: URIRef) -> int:
+    """Rewrite ``?m <bf_pred> ?o`` to the structured ``bffi:relation`` chain.
+
+    Used by Series-link routing and any other BIBFRAME predicate that
+    BFFI exposes through the general ``bffi:Relation`` shape with a
+    LoC-namespaced ``bffi:relationship`` URI.
+    """
+    rewritten = 0
+    for s, _, o in list(graph.triples((None, bf_pred, None))):
+        graph.remove((s, bf_pred, o))
+        rel_bnode = BNode()
+        graph.add((s, BFFI.relation, rel_bnode))
+        graph.add((rel_bnode, RDF.type, BFFI.Relation))
+        graph.add((rel_bnode, BFFI.relationship, relationship_uri))
+        graph.add((rel_bnode, BFFI.associatedResource, o))
+        rewritten += 1
+    return rewritten
+
+
 def route_series_links(graph: Graph) -> int:
     """``?m bf:hasSeries ?s`` → structured ``bffi:relation`` chain.
 
@@ -222,15 +257,23 @@ def route_series_links(graph: Graph) -> int:
     ``bffi:associatedResource ?s``. ``?m bffi:relation [relation-bnode]``
     threads it back onto the Manifestation.
     """
+    return _route_predicate_via_relation(graph, BF.hasSeries, SERIES_RELATIONSHIP)
+
+
+def route_relation_predicates(graph: Graph) -> int:
+    """Catch-all for predicates with no direct ``bffi:*`` equivalent but a
+    natural routing through ``bffi:relation`` (see
+    :data:`RELATION_PREDICATE_ROUTINGS`). Covers ``bf:accompaniedBy``
+    today; the table extends with future true-gap predicates.
+
+    Excludes ``bf:hasSeries`` (handled by :func:`route_series_links`
+    above so its counter stays separate in the observability summary).
+    """
     rewritten = 0
-    for m, _, s in list(graph.triples((None, BF.hasSeries, None))):
-        graph.remove((m, BF.hasSeries, s))
-        rel_bnode = BNode()
-        graph.add((m, BFFI.relation, rel_bnode))
-        graph.add((rel_bnode, RDF.type, BFFI.Relation))
-        graph.add((rel_bnode, BFFI.relationship, SERIES_RELATIONSHIP))
-        graph.add((rel_bnode, BFFI.associatedResource, s))
-        rewritten += 1
+    for bf_pred, relationship_uri in RELATION_PREDICATE_ROUTINGS.items():
+        if bf_pred == BF.hasSeries:
+            continue
+        rewritten += _route_predicate_via_relation(graph, bf_pred, relationship_uri)
     return rewritten
 
 
@@ -358,6 +401,7 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "title_variant": route_title_variants(graph),
         "audio": route_audio(graph),
         "series_link": route_series_links(graph),
+        "relation_predicate": route_relation_predicates(graph),
         "hub": route_hubs(graph),
         "axis_default_class": route_axis_default_classes(graph),
         "axis_default_predicate": route_axis_default_predicates(graph),

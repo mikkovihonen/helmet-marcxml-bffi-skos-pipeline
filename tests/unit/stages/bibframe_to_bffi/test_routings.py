@@ -12,6 +12,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     BFFI,
     BFLC,
     LOC_IDENTIFIER_SCHEMES,
+    RELATION_PREDICATE_ROUTINGS,
     SERIES_RELATIONSHIP,
     TITLE_VARIANT_CLASSES,
     _hub_target_type,
@@ -22,6 +23,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     route_axis_default_predicates,
     route_hubs,
     route_identifier_schemes,
+    route_relation_predicates,
     route_series_links,
     route_title_variants,
 )
@@ -215,6 +217,7 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "title_variant": 1,
         "audio": 1,
         "series_link": 1,
+        "relation_predicate": 0,
         "hub": 1,
         "axis_default_class": 0,
         "axis_default_predicate": 0,
@@ -253,6 +256,44 @@ def test_route_axis_default_classes_no_op_when_already_routed() -> None:
 
 
 # --- routing 7 (axis-default predicates) --------------------------------
+
+
+# --- routing 8 (catch-all relation-predicate routing) -------------------
+
+
+def test_route_relation_predicates_handles_bf_accompaniedby() -> None:
+    """``bf:accompaniedBy`` is a true gap in lkd.rdf (no bffi:* equivalent).
+    The catch-all routing maps it through the structured bffi:relation
+    chain with a LoC-namespaced relationship URI — same shape as Series-link."""
+    g = Graph()
+    book = URIRef("http://example.org/book")
+    cd = URIRef("http://example.org/cd")
+    g.add((book, BF.accompaniedBy, cd))
+
+    rewritten = route_relation_predicates(g)
+    assert rewritten == 1
+    assert (book, BF.accompaniedBy, cd) not in g
+
+    rel_objs = list(g.objects(book, BFFI.relation))
+    assert len(rel_objs) == 1
+    rel = rel_objs[0]
+    assert (rel, RDF.type, BFFI.Relation) in g
+    assert (rel, BFFI.relationship, RELATION_PREDICATE_ROUTINGS[BF.accompaniedBy]) in g
+    assert (rel, BFFI.associatedResource, cd) in g
+
+
+def test_route_relation_predicates_skips_bf_hasseries() -> None:
+    """``bf:hasSeries`` has its own dedicated routing function so the
+    catch-all leaves it alone (avoid double-counting in the
+    observability summary)."""
+    g = Graph()
+    m = URIRef("http://example.org/m")
+    s = URIRef("http://example.org/s")
+    g.add((m, BF.hasSeries, s))
+    rewritten = route_relation_predicates(g)
+    assert rewritten == 0
+    # bf:hasSeries triple is still there — series_link routing handles it.
+    assert (m, BF.hasSeries, s) in g
 
 
 def test_route_axis_default_predicates_rewrites_each_predicate() -> None:
