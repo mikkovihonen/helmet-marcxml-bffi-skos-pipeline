@@ -522,35 +522,57 @@ def _extract_general_notes(graph: Graph, manifestation: URIRef) -> list[str]:
     return sorted(texts)
 
 
+@dataclass(frozen=True)
+class _ClassificationEmit:
+    """One MARC 084 datafield: portion + optional scheme code."""
+
+    portion: str
+    code: str | None
+
+
 @marc_emit(
     MarcEmitMeta(
         tag="084",
         indicators=(" ", " "),
-        subfields=(("a", "classification number"),),
+        subfields=(
+            ("a", "classification number"),
+            ("2", "scheme code (e.g. 'ykl')"),
+        ),
         source=(
             "?m bffi:workManifested ?work . "
             "?work bffi:classification [a bffi:Classification ; "
-            "bffi:classificationPortion ?number]"
+            "bffi:classificationPortion ?number ; "
+            "bffi:source [a bffi:Source ; bffi:code ?code]]"
         ),
         notes=(
-            "Generic-scheme classification emit. Helmet-local 09X "
-            "(091/092/094/095/097) and standard 050/080/082 dispatching "
-            "by source is a follow-on."
+            "$2 emitted when bffi:source / bffi:code is present (e.g. 'ykl'); "
+            "omitted otherwise. Helmet-local 09X (091/092/094/095/097) "
+            "classifications are lost upstream of BFFI (marc2bibframe2 "
+            "drops them) — see the BFFI ontology-limitations registry. "
+            "Standard 050/080/082 dispatching by source is a follow-on."
         ),
     )
 )
-def _extract_classifications(graph: Graph, manifestation: URIRef) -> list[str]:
+def _extract_classifications(graph: Graph, manifestation: URIRef) -> list[_ClassificationEmit]:
     """Walk classification blocks on the Work and return each
-    ``bffi:classificationPortion`` literal. Used for MARC 084 emit."""
+    ``bffi:classificationPortion`` paired with its optional scheme code.
+    Used for MARC 084 emit."""
     work = _find_work_for_manifestation(graph, manifestation)
     if work is None:
         return []
-    portions = []
+    emits: list[_ClassificationEmit] = []
     for cls_block in graph.objects(work, BFFI.classification):
         portion = next(graph.objects(cls_block, BFFI.classificationPortion), None)
-        if isinstance(portion, Literal):
-            portions.append(str(portion))
-    return sorted(portions)
+        if not isinstance(portion, Literal):
+            continue
+        code: str | None = None
+        source_block = next(graph.objects(cls_block, BFFI.source), None)
+        if source_block is not None:
+            code_lit = next(graph.objects(source_block, BFFI.code), None)
+            if isinstance(code_lit, Literal):
+                code = str(code_lit)
+        emits.append(_ClassificationEmit(portion=str(portion), code=code))
+    return sorted(emits, key=lambda e: (e.portion, e.code or ""))
 
 
 @marc_emit(
@@ -891,6 +913,19 @@ def _append_contributor_datafields(
             sf_4.text = c.relator
 
 
+def _append_classification_datafields(
+    record: etree._Element, classifications: list[_ClassificationEmit]
+) -> None:
+    """Append MARC 084 datafields with ``$a`` portion and optional ``$2`` scheme."""
+    for cls in classifications:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag="084", ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = cls.portion
+        if cls.code is not None:
+            sf_2 = etree.SubElement(df, f"{_MARC}subfield", code="2")
+            sf_2.text = cls.code
+
+
 def _append_added_title_datafields(
     record: etree._Element, added_titles: list[_AddedTitleEmit]
 ) -> None:
@@ -912,7 +947,7 @@ def _build_marc_record(
     language_codes: list[str],
     physical: _PhysicalDescription | None,
     rda: _RdaDescriptors,
-    classifications: list[str],
+    classifications: list[_ClassificationEmit],
     contributors: list[_ContributorEmit],
     subjects: list[_SubjectEmit],
     general_notes: list[str],
@@ -936,7 +971,7 @@ def _build_marc_record(
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
         sf_a.text = ident.value
 
-    _append_simple_a_datafields(record, "084", tuple(classifications))
+    _append_classification_datafields(record, classifications)
 
     if language_codes:
         df041 = etree.SubElement(record, f"{_MARC}datafield", tag="041", ind1=" ", ind2=" ")

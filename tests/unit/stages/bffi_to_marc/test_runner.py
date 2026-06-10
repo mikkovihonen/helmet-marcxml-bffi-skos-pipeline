@@ -496,6 +496,43 @@ def test_emit_marcxml_emits_084_classification() -> None:
     sf_a = df084.find(f"{{{MARC21_NS}}}subfield[@code='a']")
     assert sf_a is not None
     assert sf_a.text == "82.3"
+    # Without bffi:source, no $2 subfield emits.
+    assert df084.find(f"{{{MARC21_NS}}}subfield[@code='2']") is None
+
+
+def test_emit_marcxml_emits_084_scheme_code_in_subfield_2() -> None:
+    """``bffi:Classification`` with ``bffi:source [a bffi:Source ; bffi:code "ykl"]``
+    produces MARC 084 ``$a 82.3 $2 ykl``. This is the Helmet-canonical
+    shape — every 084 in the corpus carries a scheme code; without ``$2``
+    the reconstructed record loses the scheme attribution."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+    cls_block = URIRef("http://example.org/b1#cls-1")
+    g.add((cls_block, RDF.type, BFFI.Classification))
+    g.add((cls_block, BFFI.classificationPortion, Literal("82.3")))
+    src = URIRef("http://example.org/b1#cls-1-src")
+    g.add((src, RDF.type, BFFI.Source))
+    g.add((src, BFFI.code, Literal("ykl")))
+    g.add((cls_block, BFFI.source, src))
+    g.add((work, BFFI.classification, cls_block))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df084 = root.find(f"{{{MARC21_NS}}}datafield[@tag='084']")
+    assert df084 is not None
+    sf_a = df084.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    sf_2 = df084.find(f"{{{MARC21_NS}}}subfield[@code='2']")
+    assert sf_a is not None
+    assert sf_2 is not None
+    assert sf_a.text == "82.3"
+    assert sf_2.text == "ykl"
 
 
 def test_emit_marcxml_emits_100_for_primary_personal_contributor() -> None:
