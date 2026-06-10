@@ -122,8 +122,42 @@ The bench surfaced one infrastructure issue and a clean priority-ranked backlog 
   - `closed_namespace_residue`: 19,936 (pre) → **66 records (0.3%)** after the full routing set.
   - Routing counters: 189,344 `bflc_marckey_renamed` · 73,293 Hub · 60,164 axis-default-predicate · 31,034 axis-default-class · 19,465 identifier-scheme · 1,402 title-variant · 1,251 relation-predicate (`bf:accompaniedBy`).
   - Two true gaps remain (need NLF input or a per-instance decision): `bf:provisionActivityStatement` (102x) and `bf:Statement` (4x). Both lack any `bffi:*` counterpart in `lkd.rdf`.
-- ⬜ Steps 7-8 to follow.
+- ✅ **Step 7 — Music interim (P-56 Phase 5)** (commits `64cafdc` music-key + `6eee1c9` music-medium). `route_music_key` collapses `bf:keyMode → bf:KeyMode` structured bnodes into the existing `bffi:musicKey` literal predicate. `route_music_medium` collapses the BIBFRAME `bf:ensemble → bf:Ensemble → bf:mediumComponent → bf:mediumOfPerformance` tree into a `bffi:musicMedium → bffi:MusicMedium` block carrying a synthesised `bffi:readMarc382` summary string. Plus defensive drops for `bf:mode` / `bf:Mode` / `bf:tempo` / `bf:dramaticRole` / `bf:numberOfHands` / `bf:usesMediumOfPerformance` — never emitted by marc2bibframe2 (verified by XSLT grep). Zero corpus prevalence in the 20 k bench so the routings are insurance; the L-NN limitation note documents that `bffi:readMarc382` is best-effort synth, not byte-identical to source MARC 382 (marc2bibframe2 doesn't preserve the source field verbatim on the `bf:Ensemble` bnode).
+
+  **Zero GAPs milestone:** with step 7's routings shipped, every BIBFRAME 3.0.1 declared term (450 total — 224 classes + 226 properties) has an explicit handling. The diagnostic CLI tally:
+
+  ```
+  BIBFRAME terms analysed: 450
+    direct (1-hop equivalentClass/Property): 278
+    indirect (2-3 hops via taxonomy / meta): 130
+    routed (no lkd.rdf reach, handled by routing code): 42
+    unreachable (true GAPs — no path, no routing): 0
+  ```
+
+  The auto-generated mapping doc's per-row tally also confirms zero GAP rows across both Classes and Predicates tables. A regression-guard test (`test_zero_gap_terms_milestone`) locks the invariant: any future ontology refresh that adds an un-handled term fires the check.
+
+  Architectural side-projects landed alongside step 7:
+  - **Decorator-driven routing registry** (commit `8bbbb73`). Single source of truth for routing metadata. Each routing function in `routings.py` is decorated with `@routing(terms=…, replacement=…, link_kind=…)`; the auto-table generator walks `ROUTING_REGISTRY` instead of maintaining a parallel registry. Adding a routing costs one edit; drift is eliminated.
+  - **Shared `rdf_utils.py` module** (same commit). Low-level URI helpers like `local_name` moved out of `diagnostic/mapping_coverage.py` to a layer below `stages/` so routings.py can use them without creating a `diagnostic → routings` import cycle.
+  - **Diagnostic `routed` bucket** (commit `127c998`). The `diagnose-mappings` CLI now reports four buckets instead of three: direct / indirect / routed / unreachable. `bf:Hub`, `bf:provisionActivityStatement`, and the PMO music terms — all routed in code but unreachable via lkd.rdf alone — surface in the routed bucket instead of being miscategorised as unreachable.
+
+- ◐ **Step 4 follow-ons — BFFI → MARC field families** (in progress). The plan calls for one MARC field family per commit, prioritised by the 20 k bench's lost-distribution backlog. Shipped so far (each one its own commit):
+  - `aa84ef0` — MARC 245 \$b subtitle + \$c responsibility statement. Closes ~15 k 'changed' records.
+  - `115c54d` — MARC 020 ISBN + 022 ISSN. Establishes the dispatch-table pattern for `bffi:source` URIs → MARC tags. Closes ~9 k 'lost' 020 records (plus an ISSN tail).
+  - `e165cc9` — MARC 041 language codes + MARC 300 physical description. Closes ~35 k 'lost' records combined.
+  - `f987bf7` — MARC 6XX subject datafields (600/610/611/630/648/650/651/655). Establishes the Manifestation → Work walk + URI-fragment tag-discrimination pattern. Closes ~86 k 'lost' subject records.
+
+  Still pending: MARC 700/710 contributors (~103 k), 730/740 uniform titles (~77 k), 008/005 control fields (~33 k), Helmet local classifications 091/092/094/095/097 (~75 k), 260 publication (~19 k), 084 classification (~21 k), 852 holdings (~21 k), 336/337/338 RDA terms (~29 k), 500 notes (~7 k). Each lands as its own follow-on commit; the pattern is well-established (extract helper + record-build wiring + tests + commit).
+
+- ◯ **Step 8 — Full corpus run** (operator-ready, no code blockers). With the routing surface complete (step 7) and a meaningful chunk of the BFFI → MARC field-family work shipped (step 4 in progress), the 800 k-record full-corpus run can be executed any time. The run's diff distribution will surface (a) any unhandled MARC family remaining and (b) any cross-product / memory / throughput failure modes at corpus scale. Re-running periodically as more field families ship gives a continuous regression signal on the lost / changed bucket.
 
 ## Suggested next step
 
-The BFFI graph is now ~99.7% closed-namespace clean on the 20 k bench. The eval-harness `lost` distribution is unchanged because the BFFI → MARC reverse converter still emits only `leader` + `001` + `245 $a` — every other MARC field reads from BFFI structures the reverse converter doesn't visit yet. Step-4 follow-ons (one MARC field family per commit, prioritised by the `lost` distribution: 700 added entries → 730 added uniform titles → 650 subjects → Helmet local classifications → 008 control field → 041 language → 260 publication → 020 ISBN → …) translate the closed BFFI shape back into MARC and watch the `lost` count fall. Step 6 has already done the structural setup these follow-ons need (every BFFI block now uses the right anchor class + discriminator predicate).
+The structural rewrite (steps 1-7) is complete and the BFFI graph is **100% closed-namespace clean** on the 20 k bench (zero GAP terms across all 450 BIBFRAME 3.0.1 declared terms). Step 4 follow-ons continue incrementally; each new field family is a self-contained commit (extract helper + record-build wiring + tests). Recommended priority for the next commits in this thread:
+
+1. **MARC 700/710 contributors** — biggest remaining lost-distribution bucket (~103 k). Walks `bffi:contribution → bffi:Contribution → bffi:agent + bffi:role` chains on the Work; needs to discriminate primary (MARC 100) from added entries (MARC 700) and emit relator codes.
+2. **MARC 008 / 005 control fields** (~33 k). Reads adminMetadata (changeDate, descriptionLanguage) + language + publicationStatement → fixed-position 008; adminMetadata.changeDate → 005.
+3. **Helmet local classifications 091/092/094/095/097** (~75 k). Marc2bibframe2 emits these as `bf:Classification` blocks; the reverse converter needs to pick the right MARC 09X tag based on the classification source.
+4. **MARC 730/740 uniform titles** (~77 k). Walks `bffi:title` blocks where `bffi:marcKey` first 3 chars are 730/740 (distinguishing variant titles from the primary 245).
+
+Step 8 (full 800 k corpus run) can be executed any time after these ship — re-running periodically gives a continuous regression signal on the lost / changed bucket.
