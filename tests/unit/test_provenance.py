@@ -6,10 +6,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-import typer
 from rdflib import Graph, Literal, URIRef
 
-from bffi_pipeline.cli import _parse_age_spec
 from bffi_pipeline.provenance import logger as P
 from bffi_pipeline.provenance import vocab as V
 from bffi_pipeline.provenance import writer as W
@@ -445,17 +443,7 @@ def test_stale_warning_silent_when_compaction_recent(tmp_path: Path) -> None:
     assert W.stale_provenance_warning(provenance_path=prov, meta_path=meta) is None
 
 
-# --- _parse_age_spec via the CLI -----------------------------------------
-
-
-def test_age_spec_accepts_d_suffix() -> None:
-    assert _parse_age_spec("90d") == 90
-    assert _parse_age_spec("0d") == 0
-    assert _parse_age_spec("30") == 30
-
-
-def test_age_spec_rejects_garbage() -> None:
-    with pytest.raises(typer.BadParameter):
-        _parse_age_spec("ninety days")
-    with pytest.raises(typer.BadParameter):
-        _parse_age_spec("-5d")
+# _parse_age_spec test (was here on main) lives with the `runs prune`
+# CLI subcommand on `main`; that subcommand isn't in the rewrite branch's
+# conversion-first scope. When a runs-lifecycle subcommand re-lands, lift
+# the test alongside it.

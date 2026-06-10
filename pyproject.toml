@@ -1,7 +1,7 @@
 [project]
 name = "bffi-pipeline"
 version = "0.1.0"
-description = "MARCXML to BFFI Works/Expressions to Skosmos pipeline (pro bono for the National Library of Finland)."
+description = "MARCXML ↔ BIBFRAME ↔ BFFI conversion pipeline (pro bono for the National Library of Finland)."
 license = "Apache-2.0"
 authors = [{ name = "Mikko Vihonen" }]
 requires-python = ">=3.14"
@@ -16,25 +16,17 @@ dependencies = [
     "pymarc>=5.3",
     "lxml>=6",
     "pyshacl>=0.31",
-    "skosify>=2.3",
-    "SPARQLWrapper>=2.0",
-    "langchain-openai>=1",
-    "sentence-transformers>=5",
-    "faiss-cpu>=1.13",
     "python-ulid>=3",
     "jinja2>=3.1",
     "httpx>=0.28",
     "requests>=2.33",
-    "lingua-language-detector>=2.2",
-    # P-11 Phase D: local-only Prometheus exporter for the
-    # ``bffi-pipeline serve-metrics`` subcommand. The dep is pulled in
-    # only when the operator runs serve-metrics; pipeline stages never
-    # import it. Outbound-telemetry-free — the exporter just exposes a
-    # local ``/metrics`` endpoint that the operator's own Prometheus
-    # container scrapes. See docs/proposals/prop-11-structured-observability.md.
+    # Local-only Prometheus exporter for the `bffi-pipeline serve-metrics`
+    # subcommand. Pulled in only when the operator runs serve-metrics;
+    # pipeline stages never import it. Outbound-telemetry-free — the
+    # exporter exposes a local /metrics endpoint that the operator's own
+    # Prometheus container scrapes. See docs/observability.md.
     "prometheus-client>=0.25",
-    # `marcxml_export_pipeline.sierra` — Sierra Postgres replica → MARCXML
-    # export, migrated from the (now-archived) helmet-sierra-data-tools repo.
+    # marcxml_export_pipeline.sierra — Sierra Postgres replica → MARCXML export.
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.31",
 ]
@@ -71,41 +63,9 @@ ignore = ["PLR0913"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR2004"]
-# Heavy ML imports (sentence_transformers, faiss, numpy) and the LangChain
-# client are deferred to function bodies on purpose so the rest of the CLI
-# does not pay the multi-second import cost.
-"src/bffi_pipeline/stages/m5/build.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m5/embed.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m5/faiss_index.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m5/runner.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m6/batch.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m6/clients.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m6/runner.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m3/contributions.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m3/language_detect.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m3/runner.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m9/apply.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m9/authority_clients.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m9/graph_mutate.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m9/picker_cache.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m9/picker_chain.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m9/requests.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m9/runner.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m10/load_finto.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/m10/skosify_run.py" = ["PLC0415"]
-"src/bffi_pipeline/eval/embed_benchmark.py" = ["PLC0415"]
-"src/bffi_pipeline/eval/harness.py" = ["PLC0415"]
-"src/bffi_pipeline/title_lang.py" = ["PLC0415"]
-"src/bffi_pipeline/title_lang_llm.py" = ["PLC0415"]
-"src/bffi_pipeline/contrib_extract_llm.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/bf_to_bffi.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/load_finto.py" = ["PLC0415"]
-"src/bffi_pipeline/stages/merge.py" = ["PLR0915"]
-"src/bffi_pipeline/cli.py" = ["PLC0415"]
-# SQLAlchemy + dotenv are deferred to function bodies so the CLI
-# entry point starts quickly when not actually streaming from the
-# DB (e.g. invoking just for `--help`), and so the module imports
-# cleanly without optional dotenv installed.
+# SQLAlchemy + dotenv are deferred to function bodies in the Sierra exporter
+# so the CLI entry point starts quickly when not actually streaming from the
+# DB, and so the module imports cleanly without optional dotenv installed.
 "src/marcxml_export_pipeline/sierra/marcxml.py" = ["PLC0415"]
 
 [tool.mypy]
@@ -118,22 +78,14 @@ namespace_packages = true
 
 [[tool.mypy.overrides]]
 module = [
-    "faiss",
-    "faiss.*",
-    "sentence_transformers",
-    "sentence_transformers.*",
-    "skosify",
-    "skosify.*",
     "pyshacl",
     "pyshacl.*",
-    "SPARQLWrapper",
-    "SPARQLWrapper.*",
     "pymarc",
     "pymarc.*",
 ]
 ignore_missing_imports = true
 
-# pymarc 5.x ships ``py.typed`` but several methods (Record.add_field,
+# pymarc 5.x ships py.typed but several methods (Record.add_field,
 # marcxml.record_to_xml, …) are unannotated. Silence the cascading
 # "Call to untyped function" errors on the one module that uses these
 # calls heavily; the rest of the Sierra-export logic stays under
@@ -144,13 +96,7 @@ disable_error_code = ["no-untyped-call"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# P-40 Phase C.2: pytest-asyncio 1.x's default mode differs from 0.x.
-# "strict" requires every async test to be marked `@pytest.mark.asyncio`
-# (or use a fixture that implies it); a missing marker fails loudly
-# rather than silently collecting as sync. Set explicitly so the
-# contract is re-readable and survives future pytest-asyncio defaults.
 asyncio_mode = "strict"
 markers = [
-    "integration: tests that require Docker services (Fuseki/Skosmos)",
-    "requires_llm: tests that additionally require a running Ollama instance",
+    "integration: tests that require Docker services (Fuseki/Grafana)",
 ]
