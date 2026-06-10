@@ -119,6 +119,19 @@ def test_inherited_status_when_subclass_chain_reaches_bffi() -> None:
     assert "bffi:Title" in row
 
 
+def test_drop_status_when_routing_is_marked_is_drop() -> None:
+    """``bf:variantType`` (redundant with marcKey) and ``bf:noteType`` (no BFFI
+    carrier) are dropped at emit. The auto-table must tag them with the
+    distinct ``drop`` status — not the generic ``routed`` status — so the
+    semantic is visible at a glance."""
+    blocks = build_blocks()
+    variant_row = _row_with_term(blocks.predicates_block, "variantType")
+    note_type_row = _row_with_term(blocks.predicates_block, "noteType")
+    for row in (variant_row, note_type_row):
+        assert "**drop**" in row
+        assert "**routed**" not in row
+
+
 def test_gap_status_when_no_link_and_no_routing() -> None:
     """``bf:Ensemble`` is one of BIBFRAME 3.0.1's PMO additions; BFFI
     1.0.0 predates the absorption and has no relation to it. No

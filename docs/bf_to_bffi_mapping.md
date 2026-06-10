@@ -20,6 +20,7 @@ The two ontologies together let the conversion derive routings the bare `lkd.rdf
 |---|---|
 | **clean** | Direct 1-hop `owl:equivalentClass` / `owl:equivalentProperty` to a `bffi:*` term. The clean-rename pass handles it; nothing else needed. |
 | **routed** | No direct equivalence; the per-instance data determines which existing `bffi:*` class applies (see the routing callouts below each table). The `Handler` column names the routing function. |
+| **drop** | The triple is deleted at emit time — either because the signal is redundant with another channel (`bf:variantType` is encoded in `bffi:marcKey`'s MARC tag) or because BFFI has no carrier and reaching for a foreign vocabulary would violate namespace discipline. Drops are bounded data losses; each gets an entry in `docs/bffi_limitations.md` (e.g. L-14 for `bf:noteType`). |
 | ***semantic-shift*** | Best reach uses `bffi-meta:broadMatch` / `closeMatch` / `narrowMatch` / `exactMatch`. The BFFI side carries a related but not identical concept. |
 | ***inherited*** | Best reach is a taxonomy walk through `rdfs:subClassOf` / `rdfs:subPropertyOf` chains; an ancestor's clean rename covers the term transitively (e.g. `bf:AbbreviatedTitle` reaches `bffi:Title` via the BIBFRAME class hierarchy + the `bffi:Title ≡ bf:Title` equivalence). |
 | **GAP** | No path of any length and no routing handler — requires NLF input, a new routing, or a future BFFI release. |
@@ -562,7 +563,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:notation` | **clean** | `bffi:notation` | owl:equivalentProperty | — |
 | `bf:note` | *inherited* | `bffi:note` | rdfs:subPropertyOf | — |
 | `bf:noteFor` | **routed** | `bffi:note` (triple-swap: ?note bf:noteFor ?subj → ?subj bffi:note ?note) | inverse-direction swap | `route_note_for` |
-| `bf:noteType` | **routed** | `dct:type` (DC Terms standard-vocab substitute) | standard-vocab substitute | `route_note_type` |
+| `bf:noteType` | **drop** | no BFFI carrier — literal note categorisation isn't modelled in lkd.rdf (registered as L-14 in `docs/bffi_limitations.md`) | no BFFI carrier; documented limitation | `drop_note_type` |
 | `bf:numberOfHands` | **GAP** | — | — | — |
 | `bf:originDate` | **clean** | `bffi:originDate` | owl:equivalentProperty | — |
 | `bf:originPlace` | **clean** | `bffi:originPlace` | owl:equivalentProperty | — |
@@ -640,13 +641,13 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:usageAndAccessPolicy` | *inherited* | `bffi:usageAndAccessPolicy` | rdfs:subPropertyOf | — |
 | `bf:usesMediumOfPerformance` | **GAP** | — | — | — |
 | `bf:validDate` | **clean** | `bffi:validDate` | owl:equivalentProperty | — |
-| `bf:variantType` | **routed** | *(dropped)* — redundant with the title-variant `bffi:marcKey` discriminator | drop (redundant signal) | `drop_variant_type` |
+| `bf:variantType` | **drop** | redundant with the title-variant `bffi:marcKey` discriminator | redundant signal | `drop_variant_type` |
 | `bf:version` | **clean** | `bffi:version` | owl:equivalentProperty | — |
 | `bf:videoCharacteristic` | **clean** | `bffi:videoCharacteristic` | owl:equivalentProperty | — |
 | `bf:voice` | **GAP** | — | — | — |
 | `bf:voiceType` | **GAP** | — | — | — |
 
-_226 terms total: 134 clean, 54 inherited, 18 GAP, 15 routed, 5 semantic-shift._
+_226 terms total: 134 clean, 54 inherited, 18 GAP, 13 routed, 5 semantic-shift, 2 drop._
 
 <!-- END AUTO: predicates -->
 
@@ -820,17 +821,12 @@ Zero corpus prevalence in the 20 k bench — these are insurance routings agains
 
 - `?note bf:noteFor ?subject` → `?subject bffi:note ?note`
 
-## Standard-vocab substitutes — DC Terms
+## Drops — no BFFI carrier, or redundant signal
 
-When `lkd.rdf` has no equivalent and minting a `bffi:*` term isn't an option (the BFFI namespace is closed), the BFFI namespace-discipline rule (CLAUDE.md) says to reuse a standard term. One case ships today:
+Two predicates are dropped instead of routed:
 
-- `?note bf:noteType "Summary"` → `?note dct:type "Summary"`
-
-`bf:noteType` is a `DatatypeProperty` with `rdfs:Literal` range; `dct:type` is the DC Terms standard predicate for resource categorisation and accepts both literal and URI values. No `bffi:*` term needed.
-
-## Redundant-signal drops
-
-`bf:variantType` (`?title bf:variantType "parallel"`) is removed entirely. The title-variant routing's `bffi:marcKey` discriminator already encodes the variant type via the first-3-char MARC tag (`246` parallel, `740` analytical added, etc.), so the predicate is redundant. Dropping it avoids the closed-namespace residue without information loss.
+- **`bf:variantType`** (`?title bf:variantType "parallel"`) — redundant. The title-variant routing's `bffi:marcKey` discriminator already encodes the variant type via the first-3-char MARC tag (`246` parallel, `740` analytical added, etc.). Dropping it avoids closed-namespace residue without information loss.
+- **`bf:noteType`** (`?note bf:noteType "Summary"`) — no BFFI carrier. BFFI 1.0.0 deliberately didn't model literal note categorisation; `bffi:Note` has zero predicates declared with it as domain and only `bffi:TitleNote` as a subclass. Reaching for a foreign vocabulary (`dct:type`, `skos:notation`) would contradict the "DC Terms → BFFI alternatives" pattern below, which expects BFFI-native carriers wherever possible. The drop is registered as **L-14** in `docs/bffi_limitations.md` and is a candidate for a future BFFI extension via NLF conversation. Bounded loss: the note's text content (`rdfs:label`) typically encodes the categorisation implicitly ("Bibliography: …", "Summary: …").
 
 ## Defensive guard — undeclared `bf:*` terms are dropped
 

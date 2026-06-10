@@ -74,10 +74,6 @@ BFLC: Final[Namespace] = Namespace("http://id.loc.gov/ontologies/bflc/")
 #: BFFI emit namespace.
 BFFI: Final[Namespace] = Namespace("http://urn.fi/URN:NBN:fi:schema:bffi:")
 
-#: DC Terms — used by the ``bf:noteType`` routing. Standard vocab,
-#: allowed under the BFFI namespace discipline rule (CLAUDE.md).
-DCT: Final[Namespace] = Namespace("http://purl.org/dc/terms/")
-
 #: LoC identifier-scheme vocabulary stem. Every BIBFRAME ``bf:Identifier``
 #: subclass routes to ``<stem><scheme-token>`` on ``bffi:source``.
 _LOC_IDENTIFIER_SCHEME_STEM: Final[str] = "http://id.loc.gov/vocabulary/identifiers/"
@@ -719,22 +715,30 @@ def route_note_for(graph: Graph) -> int:
     return rewritten
 
 
-def route_note_type(graph: Graph) -> int:
-    """Rewrite ``?note bf:noteType ?type`` as ``?note dct:type ?type``.
+def drop_note_type(graph: Graph) -> int:
+    """Drop every ``?note bf:noteType ?type`` triple.
 
     ``bf:noteType`` carries a Literal categorisation of a Note (e.g.
-    "Summary", "Biography"). lkd.rdf has no ``bffi:noteType`` and no
-    way to type a Note bnode with a literal-flavoured category. DC
-    Terms' ``dct:type`` is the standard predicate for resource
-    categorisation and is allowed under the BFFI namespace discipline
-    rule (CLAUDE.md: "Reuse an existing standard term").
+    "Summary", "Biography", "Bibliography"). BFFI 1.0.0 deliberately
+    didn't model literal note typing — ``bffi:Note`` has zero predicates
+    declared with it as domain, and the only subclass is
+    ``bffi:TitleNote``. Reaching for a foreign vocabulary substitute
+    (``dct:type``, ``skos:notation``) would violate the "DC Terms → BFFI
+    alternatives" pattern documented in the mapping doc, which expects
+    BFFI-native carriers wherever possible.
+
+    The drop is documented in ``docs/bffi_limitations.md`` as L-14 —
+    a candidate for a future ``bffi:noteType`` extension via NLF
+    conversation. The note's text content (in ``rdfs:label`` /
+    ``bffi:note``) typically carries the categorisation implicitly
+    ("Bibliography: …", "Summary: …"), so this is bounded data loss
+    pending the ontology extension.
     """
-    rewritten = 0
+    dropped = 0
     for s, _, o in list(graph.triples((None, BF.noteType, None))):
         graph.remove((s, BF.noteType, o))
-        graph.add((s, DCT.type, o))
-        rewritten += 1
-    return rewritten
+        dropped += 1
+    return dropped
 
 
 # --- bf:variantType drop (redundant with marcKey discriminator) ---------
@@ -780,7 +784,7 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "hub": route_hubs(graph),
         "inverse_predicate": route_inverse_predicates(graph),
         "note_for": route_note_for(graph),
-        "note_type": route_note_type(graph),
+        "note_type_dropped": drop_note_type(graph),
         "variant_type_dropped": drop_variant_type(graph),
     }
     # The remaining three routings each split their counters into

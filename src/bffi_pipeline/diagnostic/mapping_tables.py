@@ -75,11 +75,17 @@ DEFAULT_DOC_PATH: Final[Path] = (
 
 @dataclass(frozen=True)
 class _Routing:
-    """One routing-callout entry from :mod:`...stages.bibframe_to_bffi.routings`."""
+    """One routing-callout entry from :mod:`...stages.bibframe_to_bffi.routings`.
+
+    Set ``is_drop=True`` for routings that delete the triple rather than
+    rewrite it — the auto-table renders these with the distinct
+    ``**drop**`` status so the semantic is visible at a glance.
+    """
 
     handler: str
     replacement: str
     link_kind: str
+    is_drop: bool = False
 
 
 def _identifier_scheme_replacement(bf_class: URIRef) -> str:
@@ -192,15 +198,20 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
     )
 
     registry[_r.BF.noteType] = _Routing(
-        handler="route_note_type",
-        replacement="`dct:type` (DC Terms standard-vocab substitute)",
-        link_kind="standard-vocab substitute",
+        handler="drop_note_type",
+        replacement=(
+            "no BFFI carrier — literal note categorisation isn't modelled in lkd.rdf "
+            "(registered as L-14 in `docs/bffi_limitations.md`)"
+        ),
+        link_kind="no BFFI carrier; documented limitation",
+        is_drop=True,
     )
 
     registry[_r.BF.variantType] = _Routing(
         handler="drop_variant_type",
-        replacement="*(dropped)* — redundant with the title-variant `bffi:marcKey` discriminator",
-        link_kind="drop (redundant signal)",
+        replacement="redundant with the title-variant `bffi:marcKey` discriminator",
+        link_kind="redundant signal",
+        is_drop=True,
     )
 
     return registry
@@ -306,7 +317,7 @@ def _compute_row(
     if routing is not None:
         return Row(
             bf_term=bf_term,
-            status="**routed**",
+            status="**drop**" if routing.is_drop else "**routed**",
             replacement=routing.replacement,
             link_kind=routing.link_kind,
             also_satisfies="—",

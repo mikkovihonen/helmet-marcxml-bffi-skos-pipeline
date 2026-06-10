@@ -10,7 +10,6 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     BF,
     BFFI,
     BFLC,
-    DCT,
     INVERSE_PREDICATE_ROUTINGS,
     RELATION_PREDICATE_ROUTINGS,
     SERIES_RELATIONSHIP,
@@ -18,6 +17,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     _hub_target_type,
     _identifier_scheme_token,
     apply_all_routings,
+    drop_note_type,
     drop_undeclared_bf_terms,
     drop_variant_type,
     loc_scheme_uri,
@@ -28,7 +28,6 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     route_identifier_schemes,
     route_inverse_predicates,
     route_note_for,
-    route_note_type,
     route_provision_activity_statement,
     route_relation_predicates,
     route_series_links,
@@ -268,7 +267,7 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "hub": 1,
         "inverse_predicate": 0,
         "note_for": 0,
-        "note_type": 0,
+        "note_type_dropped": 0,
         "variant_type_dropped": 0,
         "axis_default_class_work": 0,
         "axis_default_class_expression": 1,  # bf:Audio → NonMusicAudioExpression
@@ -726,19 +725,25 @@ def test_route_note_for_swaps_to_forward_bffi_note() -> None:
     assert (note, BF.noteFor, subject) not in g
 
 
-def test_route_note_type_renames_to_dct_type() -> None:
-    """``?note bf:noteType "Summary"`` becomes ``?note dct:type "Summary"`` —
-    DC Terms' standard categorisation predicate stands in for the
-    missing ``bffi:noteType`` (allowed by BFFI namespace discipline:
-    reuse a standard term)."""
+def test_drop_note_type_removes_uncarried_categorisation() -> None:
+    """``bf:noteType`` carries a literal categorisation BFFI 1.0.0
+    doesn't model — no ``bffi:noteType`` predicate, no relevant
+    ``bffi:Note`` subclass for arbitrary values. Reaching for a foreign
+    vocabulary (``dct:type``, ``skos:notation``) would violate the
+    "DC Terms → BFFI alternatives" pattern, so the routing drops the
+    triple and registers the loss in ``docs/bffi_limitations.md``."""
     g = Graph()
     note = URIRef("http://example.org/note")
     g.add((note, BF.noteType, Literal("Summary")))
+    g.add((note, RDFS.label, Literal("Summary text…")))
 
-    rewritten = route_note_type(g)
-    assert rewritten == 1
-    assert (note, DCT.type, Literal("Summary")) in g
+    dropped = drop_note_type(g)
+    assert dropped == 1
+    # bf:noteType triple removed.
     assert (note, BF.noteType, Literal("Summary")) not in g
+    # Note text survives — the categorisation context is preserved
+    # implicitly in the note body.
+    assert (note, RDFS.label, Literal("Summary text…")) in g
 
 
 # --- bf:Review (class) + bf:review (predicate) -------------------------

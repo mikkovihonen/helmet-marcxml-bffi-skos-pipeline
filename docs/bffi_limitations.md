@@ -940,6 +940,37 @@ parse marcKey themselves or wait for path 2 above.
 
 ---
 
+## L-14 — `bf:noteType` literal categorisation has no BFFI carrier
+
+**Case** BIBFRAME's `bf:noteType` is a `DatatypeProperty` (range `rdfs:Literal`) that categorises a `bf:Note` block with a vocabulary label — typical values: `"Summary"`, `"Biography"`, `"Bibliography"`, `"Performer"`, `"Language"`, `"Restrictions on Access"`. BFFI 1.0.0 has no equivalent: `bffi:Note` has zero predicates declared with it as domain, the only subclass is `bffi:TitleNote`, and there's no `bffi:noteType` / `bffi:noteCategory` / similar literal-carrier predicate.
+
+**Source BIBFRAME** (the input shape after MARC → BIBFRAME via marc2bibframe2):
+
+```turtle
+<manifestation> bf:note [
+    a bf:Note ;
+    rdfs:label "Includes bibliographic references and index." ;
+    bf:noteType "Bibliography"
+] .
+```
+
+**BFFI emit** — the converter drops the `bf:noteType` triple:
+
+```turtle
+<manifestation> bffi:note [
+    a bffi:Note ;
+    rdfs:label "Includes bibliographic references and index."
+] .
+```
+
+**Why BFFI can't restore the categorisation alone** lkd.rdf intentionally didn't model literal note typing. The categorisation conventionally appears in the note text itself (`"Bibliography: includes references"`, `"Summary: …"`), so the information is usually recoverable from `rdfs:label` — but not as a structured predicate. Routing the literal value through a foreign vocabulary (`dct:type`, `skos:notation`) would violate the "DC Terms → BFFI alternatives" pattern documented in `docs/bf_to_bffi_mapping.md`, which expects BFFI-native carriers whenever possible.
+
+**Conclusion: drop the triple — deferred to NLF.** The drop is implemented as `drop_note_type` in `src/bffi_pipeline/stages/bibframe_to_bffi/routings.py` and surfaces as the `note_type_dropped` counter in the observability `end` event. Zero corpus prevalence in the 20 k bench, so the loss is bounded and observable.
+
+**Candidate fix (NLF conversation):** propose either a new `bffi:noteType` literal predicate on `bffi:Note`, or a richer subclass hierarchy under `bffi:Note` matching the common BIBFRAME note-type values. Until ratified, the drop is the right behaviour — synthesising a fake `bffi:*` term locally would violate namespace discipline.
+
+---
+
 ## How to add a new entry
 
 When you find a round-trip case where:
