@@ -58,7 +58,7 @@ The rewrite is large enough that committing to specific phase boundaries before 
 5. **Eval harness v0**: round-trip diff + cataloguer-review HTML wrapping pillars 2-4. Establish corpus-scale baseline against main.
 6. **p-56 Phase 4 routings**: Hub, Identifier-scheme, Title-variant, Series-link, Audio. The reverse converter (pillar 4) updates to read the new discriminator predicates instead of `bf:*` typing keys. Eval harness signals correctness.
 7. **p-56 Phase 5 music interim**: `bffi:readMarc382` + `bffi:musicKey` literal collapse against BFFI 1.0.0 in the forward direction; reverse converter reads the literals back to MARC 382 / 384 verbatim.
-8. **Full corpus run**: 800 k records, end-to-end MARC → BFFI → MARC + eval. Diagnose corpus-scale failure modes (cross-product blow-ups, memory ceilings, throughput) in both directions.
+8. **Full corpus run**: 800 k records, end-to-end MARC → BFFI → MARC + eval. Diagnose corpus-scale failure modes (cross-product blow-ups, memory ceilings, throughput) in both directions. The known-problem records from main (b10007428's 100 × MARC 730 cross-product + any other high-cardinality cases) are already in the 800 k corpus — the full-corpus run is the catch.
 
 Each numbered step warrants its own plan once we have signal from the previous one.
 
@@ -66,7 +66,7 @@ Each numbered step warrants its own plan once we have signal from the previous o
 
 1. **Submodule sharing or rewrite-branch copy?** The `third_party/marc2bibframe2/` submodule is identical on main and rewrite. Sharing via git submodule reference (the rewrite branch inherits main's pointer) is the obvious answer; flag if there's reason to vendor a separate snapshot.
 2. **Skosmos as eval surface?** The round-trip diff + cataloguer-review HTML covers conversion correctness mechanically. Skosmos display adds visual inspection but requires running the Docker stack. Default to: keep the cataloguer-review HTML as the primary eval surface; add Skosmos only if it shows value during eval-harness work.
-3. **Curated dev sample size during rewrite?** The 13-bib sample is enough to validate end-to-end correctness but might not surface corpus-scale failure modes early. Consider sampling a 1 k / 10 k / 100 k progression alongside the dev sample.
+3. **Curated dev sample size during rewrite?** The 13-bib sample is enough to validate end-to-end correctness but might not surface corpus-scale failure modes early. The 800 k full-corpus run is the canonical scaling check (step 8) — the known-problem records from main are already in the corpus, so no intermediate slice is required.
 4. **Merge or replace?** When rewrite reaches parity on conversion + eval — does it merge into main (preserving the reconciliation stages there), or does it become the new main (with the reconciliation stages reimplemented or imported back later)? Defer until rewrite reaches that point.
 
 ## Verification
