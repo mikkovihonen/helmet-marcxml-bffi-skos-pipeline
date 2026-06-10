@@ -48,8 +48,10 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `700` | `##` | `$a` — personal name<br>`$4` — LoC relator code | Same chain as 100, but the contribution is NOT typed bffi:PrimaryContribution — added-entry contributors land in 7XX | — |
 | `710` | `##` | `$a` — corporate / jurisdiction name<br>`$4` — LoC relator code | Same as 700, but with ?agent a bffi:Organization or bffi:Jurisdiction | — |
 | `711` | `##` | `$a` — meeting / conference name<br>`$4` — LoC relator code | Same as 700, but with ?agent a bffi:Meeting | — |
+| `730` | `0#` | `$a` — uniform title heading | ?m bffi:relation [bffi:associatedResource ?target] . ?target bffi:marcKey ?key (where ?key begins with '730') . ?target bffi:title / bffi:Title / bffi:mainTitle ?heading | Added-entry uniform titles. Subfields beyond $a (e.g. $g miscellaneous info, $l language, $n part number) are preserved on bffi:marcKey but not reconstructed in the emit yet. |
+| `740` | `0#` | `$a` — added analytical title | Same chain as 730 but with bffi:marcKey beginning with '740' | — |
 
-_28 MARC tags currently emitted._
+_30 MARC tags currently emitted._
 
 <!-- END AUTO: shipped -->
 

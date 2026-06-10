@@ -559,6 +559,65 @@ def test_emit_marcxml_emits_710_for_added_corporate_contributor() -> None:
     assert df710.find(f"{{{MARC21_NS}}}subfield[@code='4']") is None
 
 
+def test_emit_marcxml_emits_730_from_relation_chain() -> None:
+    """A bffi:relation chain pointing at a Hub-routed Work whose
+    bffi:marcKey begins with '730' produces a MARC 730 \\$a with the
+    main title. The discriminator is the marcKey tag prefix."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    rel = URIRef("http://example.org/b1#rel-1")
+    g.add((rel, RDF.type, BFFI.Relation))
+    g.add((m, BFFI.relation, rel))
+
+    hub = URIRef("http://example.org/b1#Hub730-1")
+    g.add((hub, RDF.type, BFFI.Work))
+    g.add((hub, BFFI.marcKey, Literal("7300 $aAngel /$gChild, Desmond")))
+    g.add((rel, BFFI.associatedResource, hub))
+
+    title_block = URIRef("http://example.org/b1#title-hub-730")
+    g.add((title_block, RDF.type, BFFI.Title))
+    g.add((title_block, BFFI.mainTitle, Literal("Angel")))
+    g.add((hub, BFFI.title, title_block))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df730 = root.find(f"{{{MARC21_NS}}}datafield[@tag='730']")
+    assert df730 is not None
+    sf_a = df730.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    assert sf_a is not None
+    assert sf_a.text == "Angel"
+
+
+def test_emit_marcxml_ignores_relation_targets_without_730_or_740_marckey() -> None:
+    """Relation chains pointing at series/accompanied-by/etc. targets
+    (marcKey beginning with 4XX/5XX/etc.) are NOT emitted as 730/740 —
+    those routings own those tags separately."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    rel = URIRef("http://example.org/b1#rel-1")
+    g.add((rel, RDF.type, BFFI.Relation))
+    g.add((m, BFFI.relation, rel))
+    series_work = URIRef("http://example.org/b1#Hub830-1")
+    g.add((series_work, RDF.type, BFFI.SeriesWork))
+    g.add((series_work, BFFI.marcKey, Literal("8300 $aSome series")))
+    g.add((rel, BFFI.associatedResource, series_work))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='730']") is None
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='740']") is None
+
+
 def test_emit_marcxml_skips_unsupported_identifier_schemes() -> None:
     """Identifier blocks with a bffi:source URI not in the dispatch
     table are skipped — those land in their own follow-on commits.

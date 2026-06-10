@@ -438,6 +438,64 @@ def _extract_contributors(graph: Graph, manifestation: URIRef) -> list[_Contribu
     return sorted(emits, key=lambda e: (e.tag, e.label))
 
 
+@dataclass(frozen=True)
+class _AddedTitleEmit:
+    """One MARC 730/740 added-title datafield (tag + heading text)."""
+
+    tag: str
+    title: str
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="730",
+        indicators=("0", " "),
+        subfields=(("a", "uniform title heading"),),
+        source=(
+            "?m bffi:relation [bffi:associatedResource ?target] . "
+            "?target bffi:marcKey ?key (where ?key begins with '730') . "
+            "?target bffi:title / bffi:Title / bffi:mainTitle ?heading"
+        ),
+        notes=(
+            "Added-entry uniform titles. Subfields beyond $a (e.g. $g "
+            "miscellaneous info, $l language, $n part number) are "
+            "preserved on bffi:marcKey but not reconstructed in the "
+            "emit yet."
+        ),
+    ),
+    MarcEmitMeta(
+        tag="740",
+        indicators=("0", " "),
+        subfields=(("a", "added analytical title"),),
+        source=("Same chain as 730 but with bffi:marcKey beginning with '740'"),
+    ),
+)
+def _extract_added_titles(graph: Graph, manifestation: URIRef) -> list[_AddedTitleEmit]:
+    """Walk the Manifestation's relation chain and find every related
+    resource whose ``bffi:marcKey`` begins with ``"730"`` or ``"740"``
+    (the source-MARC-tag discriminator preserved by the title-variant
+    routing). For each, extract the title from
+    ``bffi:title / bffi:Title / bffi:mainTitle`` and emit a MARC
+    datafield."""
+    emits: list[_AddedTitleEmit] = []
+    for rel in graph.objects(manifestation, BFFI.relation):
+        for target in graph.objects(rel, BFFI.associatedResource):
+            if not isinstance(target, URIRef):
+                continue
+            marc_key = next(graph.objects(target, BFFI.marcKey), None)
+            if not isinstance(marc_key, Literal):
+                continue
+            tag = str(marc_key)[:3]
+            if tag not in ("730", "740"):
+                continue
+            for title_block in graph.objects(target, BFFI.title):
+                main = next(graph.objects(title_block, BFFI.mainTitle), None)
+                if isinstance(main, Literal):
+                    emits.append(_AddedTitleEmit(tag=tag, title=str(main)))
+                    break
+    return sorted(emits, key=lambda e: (e.tag, e.title))
+
+
 @marc_emit(
     MarcEmitMeta(
         tag="500",
@@ -833,6 +891,16 @@ def _append_contributor_datafields(
             sf_4.text = c.relator
 
 
+def _append_added_title_datafields(
+    record: etree._Element, added_titles: list[_AddedTitleEmit]
+) -> None:
+    """Append 730 / 740 added-title datafields after the 7XX contributor block."""
+    for added in added_titles:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=added.tag, ind1="0", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = added.title
+
+
 def _build_marc_record(
     *,
     bib_id: str,
@@ -848,6 +916,7 @@ def _build_marc_record(
     contributors: list[_ContributorEmit],
     subjects: list[_SubjectEmit],
     general_notes: list[str],
+    added_titles: list[_AddedTitleEmit],
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
     record = etree.Element(f"{_MARC}record")
@@ -923,6 +992,8 @@ def _build_marc_record(
     # Added contributors (MARC 700/710/711) come after 6XX subjects.
     _append_contributor_datafields(record, (c for c in contributors if c.tag.startswith("7")))
 
+    _append_added_title_datafields(record, added_titles)
+
     return record
 
 
@@ -950,6 +1021,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     contributors = _extract_contributors(graph, manifestation)
     subjects = _extract_subject_datafields(graph, manifestation)
     general_notes = _extract_general_notes(graph, manifestation)
+    added_titles = _extract_added_titles(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
         change_date=change_date,
@@ -964,6 +1036,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         contributors=contributors,
         subjects=subjects,
         general_notes=general_notes,
+        added_titles=added_titles,
     )
     return etree.tostring(
         record,
