@@ -21,8 +21,7 @@ Index of plans on the `rewrite` branch (the conversion-first pipeline reimplemen
 
 | Plan | Title | Status |
 |---|---|---|
-
-*(No plans yet on the `rewrite` branch. Plans can be imported from `main` as needed — `git show main:docs/plans/proposed/p-NN-<slug>.md` then write under the new naming.)*
+| [p-057](p-057-rewrite-conversion-first-branch.md) | Conversion-first pipeline rewrite on the `rewrite` branch | **active** — step 1 (scaffold) shipped at `b242261`; step 2 (MARC → BIBFRAME wrapper) next. |
 
 ## Importing from main
 
