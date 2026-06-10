@@ -25,6 +25,11 @@ from typing import Annotated
 import typer
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.runs import (
+    InvalidRunDirError,
+    mint_run_dir,
+    validate_under_run_dir,
+)
 from bffi_pipeline.stages.bffi_to_marc.runner import (
     ConversionOptions as BffiToMarcOptions,
 )
@@ -44,11 +49,49 @@ from bffi_pipeline.stages.marc_to_bibframe.runner import (
 from bffi_pipeline.stages.marc_to_bibframe.xslt import XsltPaths
 from bffi_pipeline.stages.roundtrip_eval.runner import EvalOptions, run_eval
 
+
+def _require_run_dir(path: Path, *, option_label: str) -> None:
+    """Enforce the run-dir convention on a stage's output path.
+
+    Operators mint a fresh run via ``bffi-pipeline new-run`` and pass
+    a path inside that directory to each stage's ``--output-dir`` (or
+    ``--html``) option. Any other path errors out before the stage
+    starts work.
+    """
+    try:
+        validate_under_run_dir(path)
+    except InvalidRunDirError as exc:
+        typer.echo(f"error: {option_label}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
 app = typer.Typer(
     name="bffi-pipeline",
     no_args_is_help=True,
     help="MARCXML ↔ BIBFRAME ↔ BFFI conversion pipeline (rewrite branch).",
 )
+
+
+@app.command("new-run")
+def new_run_command() -> None:
+    """Mint a fresh canonical run directory under `runs/` and print its path.
+
+    The directory name follows ``yyyymmdd-hhmm-<6hex>`` (UTC timestamp +
+    6 random hex chars). Capture the printed path and feed it (or a
+    sub-path under it) to each stage's ``--output-dir`` option so the
+    convention is enforced consistently across the pipeline.
+
+    Example:
+
+        $ RUN=$(bffi-pipeline new-run)
+        $ bffi-pipeline marc-to-bibframe \\
+              --input-dir <marc> --output-dir $RUN/bibframe
+        $ bffi-pipeline bibframe-to-bffi \\
+              --input-dir $RUN/bibframe --output-dir $RUN/bffi
+        $ ...
+    """
+    run_dir = mint_run_dir()
+    typer.echo(str(run_dir))
 
 
 @app.command("export")
@@ -118,6 +161,7 @@ def marc_to_bibframe_command(
     are logged via the observability sidecar and counted in the summary;
     the run continues past per-record failures.
     """
+    _require_run_dir(output_dir, option_label="--output-dir")
     settings = get_settings()
     options = ConversionOptions(
         input_dir=input_dir,
@@ -169,6 +213,7 @@ def bibframe_to_bffi_command(
     Phase 1 rename) is counted in the summary so step 6 can target the
     surviving terms.
     """
+    _require_run_dir(output_dir, option_label="--output-dir")
     options = BibframeToBffiOptions(input_dir=input_dir, output_dir=output_dir)
     summary = bibframe_to_bffi_convert_corpus(options=options)
     typer.echo(
@@ -212,6 +257,7 @@ def bffi_to_marc_command(
     commits add field families one at a time so the diff harness gives a
     clean per-family verification signal.
     """
+    _require_run_dir(output_dir, option_label="--output-dir")
     options = BffiToMarcOptions(input_dir=input_dir, output_dir=output_dir)
     summary = bffi_to_marc_convert_corpus(options=options)
     typer.echo(
@@ -267,6 +313,8 @@ def roundtrip_eval_command(
     follow-on commit — for v0 they show up as paired ``lost`` + ``added``
     rows the operator reads alongside each other.
     """
+    if html_path is not None:
+        _require_run_dir(html_path, option_label="--html")
     options = EvalOptions(
         source_dir=source_dir,
         reconstructed_dir=reconstructed_dir,

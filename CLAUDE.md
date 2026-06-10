@@ -62,6 +62,7 @@ No clustering, no LLM judge, no reconciliation, no Skosmos load enrichment. Anyt
 
 - Before starting work on a plan, read it through. If you're not working off a plan, check `docs/plans/README.md` first to see whether a plan or proposal already covers the work.
 - `make lint && make test` must pass before any commit.
+- **Canonical run-directory convention**: every pipeline invocation writes into a `runs/<yyyymmdd-hhmm-<6hex>>/` directory (UTC timestamp + 6 random hex chars). Mint one with `bffi-pipeline new-run` and pass it (or sub-paths under it) to each stage's `--output-dir` / `--html` option. The CLI validates this on every output-side argument; non-canonical paths exit with `error: --output-dir: …` before the stage starts. Existing ad-hoc directories like `runs/test-step5-20k/` predate the convention and aren't re-used. See `src/bffi_pipeline/runs.py`.
 - Commit messages tag the relevant stage or plan phase, e.g. `convert: BIBFRAME → BFFI routing for bf:Hub` or `P-057 Phase A: scaffold conversion driver`.
 
 ## What not to do
