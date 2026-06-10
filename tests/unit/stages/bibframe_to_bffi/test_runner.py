@@ -155,9 +155,9 @@ def test_convert_corpus_summary_and_sidecar_events(tmp_path: Path) -> None:
     # tackle. Bound: at most one residual-per-record, so <= 2 for two
     # identical copies.
     assert end["counters"]["closed_namespace_residue"] <= 2
-    # Routings fired non-zero times — at minimum the bflc:marcKey
-    # rename runs once (the vendored record has marcKey literals).
-    assert end["counters"]["routing_bflc_marckey_renamed"] >= 1
+    # Routings fired non-zero times — at minimum the identifier-scheme
+    # routing rewrites the ISBN/ISSN blocks the vendored record carries.
+    assert end["counters"]["routing_identifier_scheme"] >= 1
 
 
 def test_convert_corpus_emits_failed_event_on_bad_input(tmp_path: Path) -> None:

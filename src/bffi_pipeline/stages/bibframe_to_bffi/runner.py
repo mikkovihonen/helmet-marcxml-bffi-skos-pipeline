@@ -129,10 +129,12 @@ def convert_one(
     Returns ``(output_path, residual_bf_count, routing_counters)``.
     Pipeline order:
 
-      1. ``rename_graph`` applies p-56 Phase 1 clean renames.
+      1. ``rename_graph`` applies p-56 Phase 1 clean renames (including
+         BFLC aliases — ``bflc:marcKey`` / ``bflc:simplePlace`` / etc.
+         all rename to their ``bffi:*`` counterparts here).
       2. ``apply_all_routings`` applies p-56 Phase 4 discriminator
          routings (Identifier-scheme, Title-variant, Audio, Series-link,
-         Hub) + the ``bflc:marcKey`` → ``bffi:marcKey`` rename.
+         Hub).
       3. Residual ``bf:*`` URIs are counted — non-zero means a term
          family beyond what Phase 1 + Phase 4 cover.
 

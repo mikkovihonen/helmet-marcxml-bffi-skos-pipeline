@@ -9,7 +9,6 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     AXIS_DEFAULT_CLASSES,
     BF,
     BFFI,
-    BFLC,
     INVERSE_PREDICATE_ROUTINGS,
     RELATION_PREDICATE_ROUTINGS,
     ROUTING_REGISTRY,
@@ -26,7 +25,6 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     drop_undeclared_bf_terms,
     drop_variant_type,
     loc_scheme_uri,
-    rename_bflc_marckey,
     route_axis_default_classes,
     route_axis_default_predicates,
     route_hubs,
@@ -119,19 +117,6 @@ def test_routing_meta_is_hashable_dataclass() -> None:
         link_kind="k",
     )
     {meta}  # noqa: B018 — just checking the type is hashable
-
-
-# --- bflc:marcKey rename ------------------------------------------------
-
-
-def test_rename_bflc_marckey_rewrites_predicate_and_keeps_literal() -> None:
-    g = Graph()
-    s = URIRef("http://example.org/m")
-    g.add((s, BFLC.marcKey, Literal("24500$aA Title")))
-    rewritten = rename_bflc_marckey(g)
-    assert rewritten == 1
-    assert (s, BFLC.marcKey, Literal("24500$aA Title")) not in g
-    assert (s, BFFI.marcKey, Literal("24500$aA Title")) in g
 
 
 # --- Identifier-scheme routing -----------------------------------------
@@ -338,15 +323,15 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
     m = URIRef("http://example.org/m")
     s = URIRef("http://example.org/s")
     g.add((m, BF.hasSeries, s))
-    # Hub (with a marcKey that needs the bflc rename first)
+    # Hub: the marcKey arrives as bffi:marcKey because the generic
+    # rename_graph pass renames bflc:marcKey upstream of this routing.
     hub = URIRef("http://example.org/hub")
     g.add((hub, RDF.type, BF.Hub))
-    g.add((hub, BFLC.marcKey, Literal("73002$aFoo")))
+    g.add((hub, BFFI.marcKey, Literal("73002$aFoo")))
 
     counters = apply_all_routings(g)
 
     assert counters == {
-        "bflc_marckey_renamed": 1,
         "identifier_scheme": 1,
         "title_variant": 1,
         "series_link": 1,

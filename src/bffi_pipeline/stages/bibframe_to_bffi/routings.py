@@ -14,8 +14,9 @@ mapping doc:
    → ``bffi:Identifier`` + ``bffi:source <loc-scheme-URI>``.
 2. **Title-variant** — ``bf:VariantTitle`` / ``bf:ParallelTitle`` /
    ``bf:KeyTitle`` / ``bf:CollectiveTitle`` → ``bffi:Title``. The
-   ``bffi:marcKey`` discriminator is preserved by the
-   ``bflc:marcKey`` → ``bffi:marcKey`` rename below.
+   ``bffi:marcKey`` discriminator survives the generic ``rename_graph``
+   pass (which renames ``bflc:marcKey`` to ``bffi:marcKey`` via the
+   ``owl:equivalentProperty`` extracted from ``lkd.rdf``).
 3. **Series-link** — ``bf:hasSeries`` → ``bffi:relation`` ⇒ structured
    ``bffi:Relation`` bnode with ``bffi:relationship
    <vocabulary/relationship/series>`` + ``bffi:associatedResource``.
@@ -29,11 +30,6 @@ mapping doc:
    assertions; see :data:`_WORK_AXIS_SIGNALS`).
 6. **Axis-default predicate** — ``bf:instanceOf`` / ``bf:hasInstance``
    / ``bf:issuance`` → BFFI defaults per :data:`AXIS_DEFAULT_PREDICATES`.
-
-Plus one prerequisite rename:
-
-- ``bflc:marcKey`` → ``bffi:marcKey`` (`owl:equivalentProperty` per
-  ``lkd.rdf``; emit-side closes to ``bffi:`` for downstream consumers).
 
 Each routing is a single graph-mutation function returning the number
 of patterns it rewrote (or a per-discriminator counter dict for the
@@ -69,10 +65,6 @@ from bffi_pipeline.rdf_utils import local_name
 #: BIBFRAME namespace — the input side. Routings remove triples that
 #: still carry these URIs after the clean-rename pass.
 BF: Final[Namespace] = Namespace("http://id.loc.gov/ontologies/bibframe/")
-
-#: BFLC (LoC) extension namespace — carries ``marcKey`` at the BIBFRAME
-#: side; we close it to ``bffi:`` for downstream consumers.
-BFLC: Final[Namespace] = Namespace("http://id.loc.gov/ontologies/bflc/")
 
 #: BFFI emit namespace.
 BFFI: Final[Namespace] = Namespace("http://urn.fi/URN:NBN:fi:schema:bffi:")
@@ -357,26 +349,6 @@ TITLE_VARIANT_CLASSES: Final[tuple[URIRef, ...]] = (
 SERIES_RELATIONSHIP: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/relationship/series")
 
 
-# --- prerequisite rename -------------------------------------------------
-
-
-def rename_bflc_marckey(graph: Graph) -> int:
-    """Rewrite every ``?s bflc:marcKey ?lit`` to ``?s bffi:marcKey ?lit``.
-
-    ``bffi:marcKey owl:equivalentProperty bflc:marcKey`` per ``lkd.rdf``;
-    closing to the BFFI namespace at emit time keeps consumers on a
-    single vocabulary. The literal value is preserved verbatim — the
-    downstream discriminator (first-3-char tag + subfield codes) reads
-    the same content.
-    """
-    rewritten = 0
-    for s, _, o in list(graph.triples((None, BFLC.marcKey, None))):
-        graph.remove((s, BFLC.marcKey, o))
-        graph.add((s, BFFI.marcKey, o))
-        rewritten += 1
-    return rewritten
-
-
 # --- routing 1: Identifier-scheme ---------------------------------------
 
 
@@ -440,7 +412,9 @@ def route_title_variants(graph: Graph) -> int:
 
     BFFI deliberately collapses the BIBFRAME Title subclass tree into
     one class with marcKey-discriminated instances. The marcKey itself
-    is preserved by :func:`rename_bflc_marckey`.
+    is preserved by the generic ``rename_graph`` pass (which renames
+    ``bflc:marcKey`` to ``bffi:marcKey`` via the ``owl:equivalentProperty``
+    rule extracted from ``lkd.rdf``).
     """
     rewritten = 0
     for bf_class in TITLE_VARIANT_CLASSES:
@@ -570,8 +544,9 @@ def route_hubs(graph: Graph) -> int:
     """``bf:Hub`` → ``bffi:Work`` / ``bffi:Expression`` / leaf subclass.
 
     Per-instance choice driven by the ``bffi:marcKey`` literal already
-    attached to the Hub bnode (which started as ``bflc:marcKey`` from
-    marc2bibframe2 — :func:`rename_bflc_marckey` must run first).
+    attached to the Hub bnode (which started as ``bflc:marcKey`` in the
+    marc2bibframe2 output and was renamed to ``bffi:marcKey`` by the
+    generic ``rename_graph`` pass before this routing runs).
     """
     rewritten = 0
     for hub in list(graph.subjects(RDF.type, BF.Hub)):
@@ -1425,16 +1400,16 @@ def drop_subseries_residue(graph: Graph) -> int:
 def apply_all_routings(graph: Graph) -> dict[str, int]:
     """Apply every Phase 4 routing in dependency order.
 
-    Order matters: the ``bflc:marcKey`` rename has to happen *before*
-    Hub routing, because the Hub discriminator reads ``bffi:marcKey``
-    (the post-rename name). Identifier / Title / Audio / Series-link
+    Prerequisite: the generic ``rename_graph`` pass must have run before
+    this — that's what renames ``bflc:marcKey`` to ``bffi:marcKey`` (and
+    every other ``owl:equivalentProperty``-aliased term), which the Hub
+    discriminator below reads. Identifier / Title / Audio / Series-link
     are independent and can run in any order.
 
     Returns a per-routing counter dict suitable for inclusion in the
     observability ``end`` event.
     """
     counters: dict[str, int] = {
-        "bflc_marckey_renamed": rename_bflc_marckey(graph),
         "identifier_scheme": route_identifier_schemes(graph),
         "title_variant": route_title_variants(graph),
         "series_link": route_series_links(graph),

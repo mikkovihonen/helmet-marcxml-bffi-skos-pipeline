@@ -40,6 +40,17 @@ from bffi_pipeline.config import get_settings
 
 BFFI_NAMESPACE: Final[str] = "http://urn.fi/URN:NBN:fi:schema:bffi:"
 BF_NAMESPACE: Final[str] = "http://id.loc.gov/ontologies/bibframe/"
+BFLC_NAMESPACE: Final[str] = "http://id.loc.gov/ontologies/bflc/"
+
+#: Source namespaces whose terms ``lkd.rdf`` may declare BFFI aliases for.
+#: BIBFRAME is the obvious one; BIBFRAME-LC (``bflc:``) carries
+#: marc2bibframe2-specific extensions (``marcKey``, ``simplePlace`` /
+#: ``simpleAgent`` / ``simpleDate``, ``nonSortNum``, etc.) for which the
+#: BFFI ontology declares parallel ``bffi:*`` properties via
+#: ``owl:equivalentProperty``. The rule extractor must consider both
+#: namespaces so the rename table is complete; otherwise BFLC terms
+#: leak unrenamed into the BFFI emit graph.
+_SOURCE_NAMESPACES: Final[tuple[str, ...]] = (BF_NAMESPACE, BFLC_NAMESPACE)
 
 
 @dataclass(frozen=True)
@@ -72,7 +83,8 @@ class CleanRenameRules:
 
 
 def _is_bf(uri: URIRef) -> bool:
-    return str(uri).startswith(BF_NAMESPACE)
+    """True for any source-namespace URI (BIBFRAME or BIBFRAME-LC)."""
+    return any(str(uri).startswith(ns) for ns in _SOURCE_NAMESPACES)
 
 
 def _is_bffi(uri: URIRef) -> bool:
