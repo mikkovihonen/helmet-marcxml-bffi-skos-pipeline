@@ -1043,36 +1043,110 @@ def test_emit_marcxml_ignores_relation_targets_without_730_or_740_marckey() -> N
     assert root.find(f"{{{MARC21_NS}}}datafield[@tag='740']") is None
 
 
-def test_emit_marcxml_skips_unsupported_identifier_schemes() -> None:
+def test_emit_marcxml_emits_024_with_indicator_per_scheme() -> None:
+    """UPC / ISMN / EAN identifier blocks all emit as MARC 024 with the
+    correct ind1: 1=UPC, 2=ISMN, 3=EAN. This is the LoC convention."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    for scheme, value in [
+        ("upc", "123456"),
+        ("ismn", "M-2306-7118-7"),
+        ("ean", "6420614617359"),
+    ]:
+        block = URIRef(f"http://example.org/{scheme}-1")
+        g.add((block, RDF.type, BFFI.Identifier))
+        g.add(
+            (
+                block,
+                BFFI.source,
+                URIRef(f"http://id.loc.gov/vocabulary/identifiers/{scheme}"),
+            )
+        )
+        g.add((block, RDF.value, Literal(value)))
+        g.add((manifestation, BFFI.identifiedBy, block))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df024s = root.findall(f"{{{MARC21_NS}}}datafield[@tag='024']")
+    assert len(df024s) == 3
+    by_ind1 = {df.get("ind1"): df for df in df024s}
+    assert set(by_ind1.keys()) == {"1", "2", "3"}
+    assert by_ind1["1"].find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "123456"  # type: ignore[union-attr]
+    assert by_ind1["2"].find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "M-2306-7118-7"  # type: ignore[union-attr]
+    assert by_ind1["3"].find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "6420614617359"  # type: ignore[union-attr]
+
+
+def test_emit_marcxml_emits_028_with_assigner_in_subfield_b() -> None:
+    """Audio-issue-number identifier → MARC 028 ind1=0 ind2=1 \\$a value
+    \\$b assigner-name (e.g. ``$b MGM DVD $a 16197-58``). The dispatch
+    reads ``bffi:assigner`` for the publisher / issuing-body label."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    ident = URIRef("http://example.org/audio-1")
+    g.add((ident, RDF.type, BFFI.Identifier))
+    g.add(
+        (
+            ident,
+            BFFI.source,
+            URIRef("http://id.loc.gov/vocabulary/identifiers/audio-issue-number"),
+        )
+    )
+    g.add((ident, RDF.value, Literal("16197-58")))
+    assigner = URIRef("http://example.org/assigner-1")
+    g.add((assigner, RDF.type, BFFI.Organization))
+    g.add((assigner, RDFS.label, Literal("MGM DVD")))
+    g.add((ident, BFFI.assigner, assigner))
+    g.add((m, BFFI.identifiedBy, ident))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df028 = root.find(f"{{{MARC21_NS}}}datafield[@tag='028']")
+    assert df028 is not None
+    assert df028.get("ind1") == "0"
+    assert df028.get("ind2") == "1"
+    sf_a = df028.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    sf_b = df028.find(f"{{{MARC21_NS}}}subfield[@code='b']")
+    assert sf_a is not None and sf_a.text == "16197-58"
+    assert sf_b is not None and sf_b.text == "MGM DVD"
+
+
+def test_emit_marcxml_skips_identifiers_with_unmapped_source() -> None:
     """Identifier blocks with a bffi:source URI not in the dispatch
     table are skipped — those land in their own follow-on commits.
     The Local block (which carries the bib ID for 001) is also skipped
     here; it has no bffi:source URI in the dispatch table."""
     g = _build_minimal_bffi_graph(
         manifestation_uri="http://example.org/b123#Instance",
-        bib_id="b123",  # produces a bffi:Local identifier block
+        bib_id="b123",
         title="t",
     )
     manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
-    # Add a UPC identifier (not yet in the dispatch table).
-    upc_block = URIRef("http://example.org/upc-1")
-    g.add((upc_block, RDF.type, BFFI.Identifier))
+    other_block = URIRef("http://example.org/other-1")
+    g.add((other_block, RDF.type, BFFI.Identifier))
     g.add(
         (
-            upc_block,
+            other_block,
             BFFI.source,
-            URIRef("http://id.loc.gov/vocabulary/identifiers/upc"),
+            URIRef("http://id.loc.gov/vocabulary/identifiers/some-future-scheme"),
         )
     )
-    g.add((upc_block, RDF.value, Literal("123456")))
-    g.add((manifestation, BFFI.identifiedBy, upc_block))
+    g.add((other_block, RDF.value, Literal("xyz-123")))
+    g.add((manifestation, BFFI.identifiedBy, other_block))
 
     marcxml = emit_marcxml(g, manifestation=manifestation)
     root = etree.fromstring(marcxml)
-    # No 020 / 022 / 024 — UPC is not yet dispatched.
     assert root.find(f"{{{MARC21_NS}}}datafield[@tag='020']") is None
     assert root.find(f"{{{MARC21_NS}}}datafield[@tag='022']") is None
     assert root.find(f"{{{MARC21_NS}}}datafield[@tag='024']") is None
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='028']") is None
 
 
 def test_emit_marcxml_falls_back_to_uri_fragment_when_no_local_block() -> None:

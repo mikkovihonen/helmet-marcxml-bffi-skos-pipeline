@@ -25,6 +25,8 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `005` | `—` | — | ?m bffi:adminMetadata [a bffi:AdminMetadata ; bffi:changeDate ?date] | — |
 | `020` | `##` | `$a` — ISBN value | ?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <http://id.loc.gov/vocabulary/identifiers/isbn> ; rdf:value ?isbn] | — |
 | `022` | `##` | `$a` — ISSN value | ?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <http://id.loc.gov/vocabulary/identifiers/issn> ; rdf:value ?issn] | — |
+| `024` | `0-3#` | `$a` — EAN / UPC / ISMN value | ?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <…/identifiers/upc|ismn|ean> ; rdf:value ?value] — ind1 selects the scheme (1=UPC, 2=ISMN, 3=EAN). | — |
+| `028` | `0-60-3` | `$a` — publisher / distributor number value<br>`$b` — issuing publisher / distributor name | ?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <…/identifiers/audio-issue-number> ; rdf:value ?value ; bffi:assigner [a bffi:Organization ; rdfs:label ?name]] — ind1=0 for audio issue numbers; ind2=1 = note maker / no added entry (the Helmet default). | — |
 | `041` | `##` | `$a` — 3-letter language code (one per language) | ?m bffi:language <http://id.loc.gov/vocabulary/languages/{code}> — the last URI segment is the MARC code | — |
 | `084` | `##` | `$a` — classification number<br>`$2` — scheme code (e.g. 'ykl') | ?m bffi:workManifested ?work . ?work bffi:classification [a bffi:Classification ; bffi:classificationPortion ?number ; bffi:source [a bffi:Source ; bffi:code ?code]] | $2 emitted when bffi:source / bffi:code is present (e.g. 'ykl'); omitted otherwise. Helmet-local 09X (091/092/094/095/097) classifications are lost upstream of BFFI (marc2bibframe2 drops them) — see the Known limitations section below. Standard 050/080/082 dispatching by source is a follow-on. |
 | `100` | `##` | `$a` — personal / corporate / meeting name<br>`$e` — relator term (cataloguer's free-text role, e.g. 'näyttelijä')<br>`$4` — LoC relator code (e.g. 'aut') | ?m bffi:workManifested ?work . ?work bffi:contribution [a bffi:PrimaryContribution ; bffi:agent ?agent ; bffi:role ?role] . ?agent a bffi:Person ; rdfs:label ?name . $4 = local-name of ?role when ?role is a LoC relator URI; $e = rdfs:label of ?role when ?role is a bnode with a label. | — |
@@ -53,7 +55,7 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `730` | `0#` | `$a` — uniform title heading<br>`$g` — miscellaneous information<br>`$l` — language of a work<br>`$n` — number of part / section of a work<br>`$o` — arrangement statement for music<br>`$p` — name of part / section of a work | ?m bffi:relation [bffi:associatedResource ?target] . ?target bffi:marcKey ?key (where ?key begins with '730') . All subfields and indicators are read verbatim from ?key. | Indicators and every subfield are reconstructed from bffi:marcKey verbatim. The auto-table lists the common subfields seen in the corpus ($a $g $l $n $o $p); any additional subfield codes carried in bffi:marcKey are emitted in the order they appear. |
 | `740` | `0#` | `$a` — added analytical title<br>`$n` — number of part / section<br>`$p` — name of part / section | Same chain as 730 but with bffi:marcKey beginning with '740' | Indicators (including nonfiling-character counts in ind1) and every subfield are reconstructed from bffi:marcKey verbatim — same shape as 730. |
 
-_32 MARC tags currently emitted._
+_34 MARC tags currently emitted._
 
 <!-- END AUTO: shipped -->
 

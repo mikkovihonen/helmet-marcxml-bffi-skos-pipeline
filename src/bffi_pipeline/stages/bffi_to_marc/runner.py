@@ -852,18 +852,53 @@ def _extract_responsibility_statement(graph: Graph, manifestation: URIRef) -> st
 #: block on a Manifestation carries a ``bffi:source`` URI naming the
 #: LoC identifier scheme; this dispatch table converts those URIs into
 #: the right MARC tag for the round-trip emit.
-_IDENTIFIER_SCHEME_TO_MARC_TAG: Final[dict[URIRef, str]] = {
-    URIRef("http://id.loc.gov/vocabulary/identifiers/isbn"): "020",
-    URIRef("http://id.loc.gov/vocabulary/identifiers/issn"): "022",
+@dataclass(frozen=True)
+class _IdentifierScheme:
+    """MARC datafield shape for one ``bffi:source`` identifier scheme.
+
+    The pair ``(ind1, ind2)`` is fixed per scheme — e.g. EAN is always
+    MARC 024 ind1=3 — even though the source-MARC tag (020 / 022 / 024 /
+    028) groups several distinct schemes under one numeric tag with the
+    indicator picking the kind.
+    """
+
+    tag: str
+    ind1: str
+    ind2: str
+
+
+_IDENTIFIER_SCHEME_TO_MARC: Final[dict[URIRef, _IdentifierScheme]] = {
+    URIRef("http://id.loc.gov/vocabulary/identifiers/isbn"): _IdentifierScheme("020", " ", " "),
+    URIRef("http://id.loc.gov/vocabulary/identifiers/issn"): _IdentifierScheme("022", " ", " "),
+    # MARC 024 — Other Standard Identifier. ind1 picks the scheme:
+    # 1 = UPC, 2 = ISMN, 3 = EAN.
+    URIRef("http://id.loc.gov/vocabulary/identifiers/upc"): _IdentifierScheme("024", "1", " "),
+    URIRef("http://id.loc.gov/vocabulary/identifiers/ismn"): _IdentifierScheme("024", "2", " "),
+    URIRef("http://id.loc.gov/vocabulary/identifiers/ean"): _IdentifierScheme("024", "3", " "),
+    # MARC 028 — Publisher / Distributor Number. ind1 picks the kind:
+    # 0 = Issue number (audio); 1 = Matrix; 2 = Plate; 3 = Other music;
+    # 4 = Videorecording; 5 = Publisher; 6 = Distributor.
+    URIRef("http://id.loc.gov/vocabulary/identifiers/audio-issue-number"): _IdentifierScheme(
+        "028", "0", "1"
+    ),
 }
 
 
 @dataclass(frozen=True)
 class _IdentifierEmit:
-    """One MARC identifier datafield's worth of content (tag + value)."""
+    """One MARC identifier datafield's worth of content.
+
+    ``assigner`` carries the issuing body's name (the ``rdfs:label`` of
+    a ``bffi:Organization`` referenced by ``bffi:assigner``) and emits
+    as MARC ``$b`` on schemes where the source field carries it
+    (notably 028).
+    """
 
     tag: str
+    ind1: str
+    ind2: str
     value: str
+    assigner: str | None
 
 
 @dataclass(frozen=True)
@@ -1163,30 +1198,71 @@ def _subject_marc_tag(graph: Graph, subj_node: URIRef) -> str | None:
             "rdf:value ?issn]"
         ),
     ),
+    MarcEmitMeta(
+        tag="024",
+        indicators=("0-3", " "),
+        subfields=(("a", "EAN / UPC / ISMN value"),),
+        source=(
+            "?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <…/identifiers/upc|ismn|ean> ; "
+            "rdf:value ?value] — ind1 selects the scheme (1=UPC, 2=ISMN, 3=EAN)."
+        ),
+    ),
+    MarcEmitMeta(
+        tag="028",
+        indicators=("0-6", "0-3"),
+        subfields=(
+            ("a", "publisher / distributor number value"),
+            ("b", "issuing publisher / distributor name"),
+        ),
+        source=(
+            "?m bffi:identifiedBy [a bffi:Identifier ; "
+            "bffi:source <…/identifiers/audio-issue-number> ; rdf:value ?value ; "
+            "bffi:assigner [a bffi:Organization ; rdfs:label ?name]] — "
+            "ind1=0 for audio issue numbers; ind2=1 = note maker / no added "
+            "entry (the Helmet default)."
+        ),
+    ),
 )
 def _extract_identifier_datafields(graph: Graph, manifestation: URIRef) -> list[_IdentifierEmit]:
     """Walk every ``bffi:identifiedBy`` block and convert to a MARC
     datafield emit when its ``bffi:source`` URI is in the dispatch table.
 
-    Local IDs (with no ``bffi:source`` or a source not in the table)
-    are skipped — they're either the 001-bound bib ID (handled
-    separately) or an identifier scheme we don't yet emit. Each
-    additional scheme lands as its own follow-on commit by extending
-    :data:`_IDENTIFIER_SCHEME_TO_MARC_TAG`.
+    Local IDs (with no ``bffi:source`` or a source not in the table) are
+    skipped — they're either the 001-bound bib ID (handled separately)
+    or an identifier scheme we don't yet emit. Each additional scheme
+    lands by extending :data:`_IDENTIFIER_SCHEME_TO_MARC`.
     """
     emits: list[_IdentifierEmit] = []
     for ident in graph.objects(manifestation, BFFI.identifiedBy):
         source = next(graph.objects(ident, BFFI.source), None)
         if not isinstance(source, URIRef):
             continue
-        tag = _IDENTIFIER_SCHEME_TO_MARC_TAG.get(source)
-        if tag is None:
+        scheme = _IDENTIFIER_SCHEME_TO_MARC.get(source)
+        if scheme is None:
             continue
         value = next(graph.objects(ident, RDF.value), None)
         if not isinstance(value, Literal):
             continue
-        emits.append(_IdentifierEmit(tag=tag, value=str(value)))
+        emits.append(
+            _IdentifierEmit(
+                tag=scheme.tag,
+                ind1=scheme.ind1,
+                ind2=scheme.ind2,
+                value=str(value),
+                assigner=_extract_assigner_label(graph, ident),
+            )
+        )
     return emits
+
+
+def _extract_assigner_label(graph: Graph, ident: Node) -> str | None:
+    """Return the ``rdfs:label`` of the identifier's ``bffi:assigner``
+    organisation (used for MARC 028 ``$b``), or ``None`` when absent."""
+    assigner = next(graph.objects(ident, BFFI.assigner), None)
+    if assigner is None:
+        return None
+    label = next(graph.objects(assigner, RDFS.label), None)
+    return str(label) if isinstance(label, Literal) else None
 
 
 def _append_simple_a_datafields(record: etree._Element, tag: str, values: tuple[str, ...]) -> None:
@@ -1218,6 +1294,26 @@ def _append_contributor_datafields(
         if c.relator:
             sf_4 = etree.SubElement(df, f"{_MARC}subfield", code="4")
             sf_4.text = c.relator
+
+
+def _append_identifier_datafields(
+    record: etree._Element, identifiers: list[_IdentifierEmit]
+) -> None:
+    """Append one MARC datafield per identifier emit.
+
+    ``$a`` carries the identifier value; ``$b`` carries the assigner /
+    issuing publisher label when present (e.g. MARC 028 ``$b MGM DVD``).
+    Indicators come from the per-scheme dispatch table.
+    """
+    for ident in identifiers:
+        df = etree.SubElement(
+            record, f"{_MARC}datafield", tag=ident.tag, ind1=ident.ind1, ind2=ident.ind2
+        )
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = ident.value
+        if ident.assigner is not None:
+            sf_b = etree.SubElement(df, f"{_MARC}subfield", code="b")
+            sf_b.text = ident.assigner
 
 
 def _append_note_datafields(record: etree._Element, notes: list[_NoteEmit]) -> None:
@@ -1358,11 +1454,10 @@ def _build_marc_record(
         cf005 = etree.SubElement(record, f"{_MARC}controlfield", tag="005")
         cf005.text = change_date
 
-    # 020 ISBN / 022 ISSN come before 041 / 245 / 300 in MARC tag order.
-    for ident in identifiers:
-        df = etree.SubElement(record, f"{_MARC}datafield", tag=ident.tag, ind1=" ", ind2=" ")
-        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
-        sf_a.text = ident.value
+    # 020 / 022 / 024 / 028 identifiers come before 041 / 245 / 300 in
+    # MARC tag order. Indicators and the optional $b assigner come from
+    # the per-emit fields populated by the scheme dispatcher.
+    _append_identifier_datafields(record, identifiers)
 
     _append_classification_datafields(record, classifications)
 
