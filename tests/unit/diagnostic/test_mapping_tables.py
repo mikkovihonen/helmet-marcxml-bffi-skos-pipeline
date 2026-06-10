@@ -132,13 +132,23 @@ def test_drop_status_when_routing_is_marked_is_drop() -> None:
         assert "**routed**" not in row
 
 
-def test_gap_status_when_no_link_and_no_routing() -> None:
-    """``bf:Ensemble`` is one of BIBFRAME 3.0.1's PMO additions; BFFI
-    1.0.0 predates the absorption and has no relation to it. No
-    routing handler covers it either — status is `GAP`."""
+def test_zero_gap_terms_milestone() -> None:
+    """Every BIBFRAME 3.0.1 term either has a clean rename, a discriminator
+    routing, an inheritance chain, a semantic-shift link, or a documented
+    drop. The ``GAP`` status indicates a term with no path of any kind —
+    a true ontology gap. The current milestone: zero GAPs across all
+    450 declared terms (224 classes + 226 properties).
+
+    If this test starts failing: a future ontology refresh added a term
+    that doesn't fit any existing pattern. Either add a routing for it,
+    register it as a defensive drop with a documented limitation, or
+    propose a BFFI extension via NLF — don't ignore. The GAP status
+    rendering is still tested indirectly via the routing-status fixtures."""
     blocks = build_blocks()
-    row = _row_with_term(blocks.classes_block, "Ensemble")
-    assert "**GAP**" in row
+    classes_gaps = [line for line in blocks.classes_block.splitlines() if "**GAP**" in line]
+    predicates_gaps = [line for line in blocks.predicates_block.splitlines() if "**GAP**" in line]
+    assert classes_gaps == [], f"unexpected class GAPs: {classes_gaps}"
+    assert predicates_gaps == [], f"unexpected predicate GAPs: {predicates_gaps}"
 
 
 def test_hub_is_routed_with_marckey_discriminator() -> None:
@@ -168,15 +178,17 @@ def test_provision_activity_statement_routed_via_uri_fragment() -> None:
 
 
 def test_classes_tally_line_includes_expected_buckets() -> None:
-    """The summary line below the Classes table should mention all five
-    statuses by name (with their counts)."""
+    """The summary line below the Classes table mentions the active
+    bucket statuses (the line only shows non-zero counts). At the
+    current "zero GAPs" milestone, ``GAP`` legitimately drops from
+    the line; ``clean`` and ``routed`` (the two largest buckets)
+    remain non-zero and stay listed."""
     blocks = build_blocks()
     tally_line = blocks.classes_block.strip().splitlines()[-1]
     assert tally_line.startswith("_")
     assert "terms total" in tally_line
     assert "clean" in tally_line
     assert "routed" in tally_line
-    assert "GAP" in tally_line
 
 
 # --- doc-drift guard ----------------------------------------------------

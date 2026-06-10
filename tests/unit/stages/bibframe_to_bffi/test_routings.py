@@ -18,6 +18,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     _identifier_scheme_token,
     apply_all_routings,
     drop_music_mode_residue,
+    drop_music_residue,
     drop_note_type,
     drop_subseries_residue,
     drop_undeclared_bf_terms,
@@ -30,6 +31,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     route_identifier_schemes,
     route_inverse_predicates,
     route_music_key,
+    route_music_medium,
     route_note_for,
     route_provision_activity_statement,
     route_relation_predicates,
@@ -275,6 +277,8 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "subseries_dropped": 0,
         "music_key_collapsed": 0,
         "music_mode_dropped": 0,
+        "music_medium_collapsed": 0,
+        "music_medium_residue_dropped": 0,
         "axis_default_class_work": 0,
         "axis_default_class_expression": 1,  # bf:Audio → NonMusicAudioExpression
         "instance_of_work": 0,
@@ -942,3 +946,182 @@ def test_drop_music_mode_residue_no_op_when_absent() -> None:
     """Empty graph: zero drops. Locks the no-op for the corpus-prevalent
     case (zero occurrences in the 500-file sample)."""
     assert drop_music_mode_residue(Graph()) == 0
+
+
+# --- medium-of-performance collapse (bf:ensemble tree → bffi:musicMedium) ---
+
+
+def test_route_music_medium_collapses_full_382_tree() -> None:
+    """A complete MARC 382 emit (multiple components, qualifier, per-component
+    and total ensembleSize, status=partial) collapses to a single
+    bffi:musicMedium block carrying a semicolon-separated synth string."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    ens, comp1, mop1, qual1, size1, comp2, mop2, total, status = (BNode() for _ in range(9))
+    g.add((work, BF.ensemble, ens))
+    g.add((ens, RDF.type, BF.Ensemble))
+    g.add((ens, BF.mediumComponent, comp1))
+    g.add((ens, BF.mediumComponent, comp2))
+    g.add((ens, BF.ensembleSize, total))
+    g.add((ens, BF.status, status))
+    g.add((status, RDFS.label, Literal("partial")))
+    g.add((comp1, BF.mediumOfPerformance, mop1))
+    g.add((comp1, BF.mediumComponentQualifier, qual1))
+    g.add((comp1, BF.ensembleSize, size1))
+    g.add((mop1, RDFS.label, Literal("violin")))
+    g.add((qual1, RDFS.label, Literal("solo")))
+    g.add((size1, RDFS.label, Literal("1")))
+    g.add((comp2, BF.mediumOfPerformance, mop2))
+    g.add((mop2, RDFS.label, Literal("piano")))
+    g.add((total, RDFS.label, Literal("2")))
+
+    rewritten = route_music_medium(g)
+    assert rewritten == 1
+
+    # One bffi:musicMedium block emerged.
+    mm_objs = list(g.objects(work, BFFI.musicMedium))
+    assert len(mm_objs) == 1
+    mm = mm_objs[0]
+    assert (mm, RDF.type, BFFI.MusicMedium) in g
+    # Synth string carries every label component in order.
+    label = str(next(g.objects(mm, BFFI.readMarc382)))
+    assert label == "violin (solo), n=1; piano; ensemble: 2; (partial)"
+
+    # Source bf:ensemble link gone; its subtree wiped (no bf:* residue).
+    assert (work, BF.ensemble, ens) not in g
+    bf_namespace = "http://id.loc.gov/ontologies/bibframe/"
+    for s, p, o in g:
+        for node in (s, p, o):
+            if isinstance(node, URIRef):
+                assert not str(node).startswith(bf_namespace), f"bf:* leak: {node}"
+
+
+def test_route_music_medium_handles_minimal_component() -> None:
+    """A component with just a MoP label (no qualifier, no size) renders
+    as the bare label."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    ens, comp, mop = (BNode() for _ in range(3))
+    g.add((work, BF.ensemble, ens))
+    g.add((ens, BF.mediumComponent, comp))
+    g.add((comp, BF.mediumOfPerformance, mop))
+    g.add((mop, RDFS.label, Literal("flute")))
+
+    route_music_medium(g)
+    mm = next(g.objects(work, BFFI.musicMedium))
+    assert str(next(g.objects(mm, BFFI.readMarc382))) == "flute"
+
+
+def test_route_music_medium_handles_marc_048_bare_instrument() -> None:
+    """MARC 048 emits bare ``bf:instrument`` / ``bf:voice`` on the Work
+    (no enclosing bf:ensemble). Each becomes its own bffi:MusicMedium
+    block carrying the simple label."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    inst1, inst2, voi = (BNode() for _ in range(3))
+    g.add((work, BF.instrument, inst1))
+    g.add((work, BF.instrument, inst2))
+    g.add((work, BF.voice, voi))
+    g.add((inst1, RDFS.label, Literal("guitar")))
+    g.add((inst2, RDFS.label, Literal("drums")))
+    g.add((voi, RDFS.label, Literal("soprano")))
+
+    rewritten = route_music_medium(g)
+    assert rewritten == 3
+    # Three separate bffi:musicMedium blocks emerged.
+    mm_blocks = list(g.objects(work, BFFI.musicMedium))
+    assert len(mm_blocks) == 3
+    labels = {str(next(g.objects(mm, BFFI.readMarc382))) for mm in mm_blocks}
+    assert labels == {"guitar", "drums", "soprano"}
+
+
+def test_route_music_medium_empty_ensemble_emits_typed_marker() -> None:
+    """A bf:ensemble bnode with no labels extractable still produces the
+    structural bffi:musicMedium → bffi:MusicMedium marker, but no
+    bffi:readMarc382 literal (since there's nothing to carry)."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    ens = BNode()
+    g.add((work, BF.ensemble, ens))
+    g.add((ens, RDF.type, BF.Ensemble))
+
+    rewritten = route_music_medium(g)
+    assert rewritten == 1
+    mm = next(g.objects(work, BFFI.musicMedium))
+    assert (mm, RDF.type, BFFI.MusicMedium) in g
+    assert not list(g.objects(mm, BFFI.readMarc382))
+
+
+def test_route_music_medium_drops_entire_bnode_subtree() -> None:
+    """Every bf:* triple anchored in the original ensemble subtree is
+    removed — including grandchild bnodes (e.g. bf:MediumComponent
+    typed bnodes inside the ensemble)."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    ens, comp, mop = (BNode() for _ in range(3))
+    g.add((work, BF.ensemble, ens))
+    g.add((ens, RDF.type, BF.Ensemble))
+    g.add((ens, BF.mediumComponent, comp))
+    g.add((comp, RDF.type, BF.MediumComponent))
+    g.add((comp, BF.mediumOfPerformance, mop))
+    g.add((mop, RDF.type, BF.MediumOfPerformance))
+    g.add((mop, RDFS.label, Literal("oboe")))
+
+    route_music_medium(g)
+    # Every bnode in the source tree is fully drained.
+    for bn in (ens, comp, mop):
+        assert not list(g.triples((bn, None, None))), f"residue triples remain on {bn}"
+
+
+def test_route_music_medium_multilingual_label_first_only() -> None:
+    """When a MoP node has multiple rdfs:labels (e.g. multilingual),
+    the synth picks one (the first iterated). The contract is "pick a
+    representative label" — round-trip eval users querying for a
+    specific language should use the source MARC, not the synth string."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    ens, comp, mop = (BNode() for _ in range(3))
+    g.add((work, BF.ensemble, ens))
+    g.add((ens, BF.mediumComponent, comp))
+    g.add((comp, BF.mediumOfPerformance, mop))
+    g.add((mop, RDFS.label, Literal("violin", lang="en")))
+    g.add((mop, RDFS.label, Literal("viulu", lang="fi")))
+
+    route_music_medium(g)
+    mm = next(g.objects(work, BFFI.musicMedium))
+    label = str(next(g.objects(mm, BFFI.readMarc382)))
+    # One of the two languages — both are acceptable representatives.
+    assert label in ("violin", "viulu")
+
+
+# --- bf:tempo / bf:dramaticRole / bf:numberOfHands / bf:usesMediumOfPerformance + classes ---
+
+
+def test_drop_music_residue_removes_predicates_and_class_typings() -> None:
+    """marc2bibframe2 doesn't emit any of these 6 PMO terms (verified by
+    grep across the XSLT). Defensive drop covers both predicates and
+    class-typing triples for all six."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    tempo_node, dr_node = BNode(), BNode()
+    g.add((work, BF.tempo, tempo_node))
+    g.add((work, BF.dramaticRole, dr_node))
+    g.add((work, BF.numberOfHands, Literal("4")))
+    g.add((work, BF.usesMediumOfPerformance, BNode()))
+    g.add((tempo_node, RDF.type, BF.Tempo))
+    g.add((dr_node, RDF.type, BF.DramaticRole))
+
+    dropped = drop_music_residue(g)
+    # 4 predicates + 2 class-typings = 6
+    assert dropped == 6
+    assert not list(g.triples((work, BF.tempo, None)))
+    assert not list(g.triples((work, BF.dramaticRole, None)))
+    assert not list(g.triples((work, BF.numberOfHands, None)))
+    assert not list(g.triples((work, BF.usesMediumOfPerformance, None)))
+    assert (tempo_node, RDF.type, BF.Tempo) not in g
+    assert (dr_node, RDF.type, BF.DramaticRole) not in g
+
+
+def test_drop_music_residue_no_op_when_absent() -> None:
+    """Empty graph: zero drops (corpus-prevalent case)."""
+    assert drop_music_residue(Graph()) == 0

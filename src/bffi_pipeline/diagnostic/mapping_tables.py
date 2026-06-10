@@ -226,6 +226,7 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
         )
 
     _register_music_key_family(registry)
+    _register_music_medium_family(registry)
     return registry
 
 
@@ -267,6 +268,64 @@ def _register_music_key_family(registry: dict[URIRef, _Routing]) -> None:
     for bf_cls in _r._MUSIC_MODE_CLASSES:
         registry[bf_cls] = _Routing(
             handler="drop_music_mode_residue",
+            replacement=("not emitted by the LoC marc2bibframe2 XSLT — defensive drop"),
+            link_kind="defensive (upstream-stability)",
+            is_drop=True,
+        )
+
+
+def _register_music_medium_family(registry: dict[URIRef, _Routing]) -> None:
+    """Medium-of-performance family (PMO music). The active routing
+    (:func:`route_music_medium`) collapses the BIBFRAME bf:ensemble
+    structured tree into a single bffi:musicMedium block carrying a
+    synthesised bffi:readMarc382 literal. The 6 PMO terms marc2bibframe2
+    never emits get the defensive drop."""
+    _ACTIVE_PREDICATES = (
+        _r.BF.ensemble,
+        _r.BF.mediumComponent,
+        _r.BF.mediumOfPerformance,
+        _r.BF.mediumComponentQualifier,
+        _r.BF.ensembleSize,
+        _r.BF.ensembleType,
+        _r.BF.instrument,
+        _r.BF.instrumentalType,
+        _r.BF.voice,
+        _r.BF.voiceType,
+    )
+    _ACTIVE_CLASSES = (
+        _r.BF.Ensemble,
+        _r.BF.EnsembleSize,
+        _r.BF.MediumComponent,
+        _r.BF.MediumOfPerformance,
+        _r.BF.MediumComponentQualifier,
+        _r.BF.MusicEnsemble,
+        _r.BF.MusicInstrument,
+        _r.BF.MusicVoice,
+    )
+    for bf_term in (*_ACTIVE_PREDICATES, *_ACTIVE_CLASSES):
+        registry[bf_term] = _Routing(
+            handler="route_music_medium",
+            replacement=(
+                "`bffi:musicMedium` → `bffi:MusicMedium` bnode with a "
+                "synthesised `bffi:readMarc382` literal — labels from the "
+                "BIBFRAME tree collapsed into a semicolon-separated summary"
+            ),
+            link_kind="structured-tree → synth literal collapse",
+        )
+    for bf_pred in _r._MUSIC_RESIDUE_PREDICATES:
+        registry[bf_pred] = _Routing(
+            handler="drop_music_residue",
+            replacement=(
+                "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
+                "(forward path: append the value to the `bffi:readMarc382` "
+                "synth string if upstream begins emitting)"
+            ),
+            link_kind="defensive (upstream-stability)",
+            is_drop=True,
+        )
+    for bf_cls in _r._MUSIC_RESIDUE_CLASSES:
+        registry[bf_cls] = _Routing(
+            handler="drop_music_residue",
             replacement=("not emitted by the LoC marc2bibframe2 XSLT — defensive drop"),
             link_kind="defensive (upstream-stability)",
             is_drop=True,

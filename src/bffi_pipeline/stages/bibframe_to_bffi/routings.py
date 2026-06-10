@@ -778,6 +778,25 @@ _SUBSERIES_PREDICATES: Final[tuple[URIRef, ...]] = (
 _MUSIC_MODE_PREDICATES: Final[tuple[URIRef, ...]] = (BF.mode,)
 _MUSIC_MODE_CLASSES: Final[tuple[URIRef, ...]] = (BF.Mode,)
 
+#: BIBFRAME 3.0.1 medium-of-performance PMO terms NOT emitted by the LoC
+#: marc2bibframe2 XSLT. The active MoP terms — bf:ensemble, bf:Ensemble,
+#: bf:mediumOfPerformance, bf:MediumOfPerformance, bf:mediumComponent,
+#: bf:MediumComponent, bf:mediumComponentQualifier,
+#: bf:MediumComponentQualifier, bf:MusicEnsemble, bf:MusicInstrument,
+#: bf:MusicVoice, bf:ensembleSize, bf:ensembleType, bf:instrument,
+#: bf:instrumentalType, bf:voice, bf:voiceType — are all handled by
+#: :func:`route_music_medium`. The terms below are defensive only.
+_MUSIC_RESIDUE_PREDICATES: Final[tuple[URIRef, ...]] = (
+    BF.tempo,
+    BF.dramaticRole,
+    BF.numberOfHands,
+    BF.usesMediumOfPerformance,
+)
+_MUSIC_RESIDUE_CLASSES: Final[tuple[URIRef, ...]] = (
+    BF.Tempo,
+    BF.DramaticRole,
+)
+
 
 def route_music_key(graph: Graph) -> int:
     """Collapse the BIBFRAME ``bf:keyMode`` structured bnode into a
@@ -830,6 +849,213 @@ def route_music_key(graph: Graph) -> int:
             graph.remove((s, p, o))
         rewritten += 1
     return rewritten
+
+
+def _first_label(graph: Graph, node: Node) -> str | None:
+    """First ``rdfs:label`` literal on ``node`` as a plain string, or None."""
+    for label in graph.objects(node, RDFS.label):
+        return str(label)
+    return None
+
+
+def _drop_bnode_subgraph(graph: Graph, root: Node) -> None:
+    """Recursively delete every triple anchored at ``root`` and its
+    descendants.
+
+    Bnode descendants are followed completely (every triple anchored at
+    them is removed). URI descendants are partially cleaned — only their
+    ``rdf:type bf:*`` and ``rdfs:label`` triples are removed, since they
+    may be shared LoC vocabulary URIs (e.g. ``<…/ensemblesize/ensemble>``
+    is marc2bibframe2's typed instance of ``bf:EnsembleSize``; the URI
+    itself is harmless but the rdf:type triple is a bf:* residue we
+    want gone). This keeps the cleanup conservative on URI references.
+    """
+    visited: set[Node] = set()
+    stack: list[Node] = [root]
+    while stack:
+        node = stack.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        # Discover children before removing anything.
+        for _, _, obj in graph.triples((node, None, None)):
+            if isinstance(obj, BNode | URIRef) and obj not in visited:
+                stack.append(obj)
+        if isinstance(node, BNode):
+            # Bnode: drop every triple anchored at it.
+            for s, p, o in list(graph.triples((node, None, None))):
+                graph.remove((s, p, o))
+        else:
+            # URIRef: drop only the bf:*-related residue (rdf:type bf:* and
+            # rdfs:label), leaving any unrelated triples intact in case
+            # the URI is shared with other parts of the graph.
+            bf_namespace = str(BF)
+            for s, p, o in list(graph.triples((node, RDF.type, None))):
+                if isinstance(o, URIRef) and str(o).startswith(bf_namespace):
+                    graph.remove((s, p, o))
+            for s, p, o in list(graph.triples((node, RDFS.label, None))):
+                graph.remove((s, p, o))
+
+
+def _synthesise_mop_string(graph: Graph, ensemble_node: Node) -> str:
+    """Synthesise a semicolon-separated MoP summary from a ``bf:Ensemble``
+    subtree. The output format is best-effort human-readable and is the
+    canonical carrier for ``bffi:readMarc382``; it is NOT byte-identical
+    to the source MARC 382 field (marc2bibframe2 doesn't preserve the
+    source field verbatim — see the L-NN limitation entry)."""
+    parts: list[str] = []
+
+    for comp in graph.objects(ensemble_node, BF.mediumComponent):
+        mop_labels = [
+            lab
+            for mop in graph.objects(comp, BF.mediumOfPerformance)
+            if (lab := _first_label(graph, mop)) is not None
+        ]
+        if not mop_labels:
+            continue
+        formatted = "/".join(mop_labels)
+        qualifier_labels = [
+            lab
+            for q in graph.objects(comp, BF.mediumComponentQualifier)
+            if (lab := _first_label(graph, q)) is not None
+        ]
+        if qualifier_labels:
+            formatted += f" ({', '.join(qualifier_labels)})"
+        for size_node in graph.objects(comp, BF.ensembleSize):
+            if (size := _first_label(graph, size_node)) is not None:
+                formatted += f", n={size}"
+                break
+        parts.append(formatted)
+
+    # Top-level ensembleSize (total performers / total ensembles).
+    for size_node in graph.objects(ensemble_node, BF.ensembleSize):
+        if (size := _first_label(graph, size_node)) is not None:
+            parts.append(f"ensemble: {size}")
+            break
+
+    # Status (e.g. "partial" from MARC 382 ind1=1).
+    for status_node in graph.objects(ensemble_node, BF.status):
+        if (status := _first_label(graph, status_node)) is not None:
+            parts.append(f"({status})")
+            break
+
+    return "; ".join(parts)
+
+
+def _emit_music_medium(graph: Graph, work: Node, literal: str | None) -> None:
+    """Emit a ``?work bffi:musicMedium [a bffi:MusicMedium; ...]`` block.
+
+    When ``literal`` is non-empty, attach it as ``bffi:readMarc382`` on
+    the new bnode. When empty / None, emit just the typed bnode (the
+    structural marker survives even when no labels were extractable).
+    """
+    mm = BNode()
+    graph.add((work, BFFI.musicMedium, mm))
+    graph.add((mm, RDF.type, BFFI.MusicMedium))
+    if literal:
+        graph.add((mm, BFFI.readMarc382, Literal(literal)))
+
+
+def route_music_medium(graph: Graph) -> int:
+    """Collapse the BIBFRAME medium-of-performance structured tree into
+    ``bffi:musicMedium → bffi:MusicMedium`` bnodes carrying a synthesised
+    ``bffi:readMarc382`` literal on the parent Work.
+
+    Three input shapes are handled:
+
+    1. **MARC 382 nested tree** — marc2bibframe2 emits:
+
+       .. code-block:: turtle
+
+           <work> bf:ensemble [
+               a bf:Ensemble ;
+               bf:mediumComponent [
+                   bf:mediumOfPerformance [rdfs:label "violin"] ;
+                   bf:mediumComponentQualifier [rdfs:label "solo"]
+               ] ;
+               bf:mediumComponent [
+                   bf:mediumOfPerformance [rdfs:label "piano"]
+               ] ;
+               bf:ensembleSize [rdfs:label "2"]
+           ] .
+
+       The routing synthesises a semicolon-separated summary like
+       ``"violin (solo); piano; ensemble: 2"`` and attaches it as
+       ``bffi:readMarc382``.
+
+    2. **MARC 048 bare ``bf:instrument`` / ``bf:voice``** — emitted
+       outside any enclosing ``bf:ensemble``. Each becomes its own
+       ``bffi:MusicMedium`` bnode with the bare label as
+       ``bffi:readMarc382``.
+
+    3. **Stray ``bf:mediumOfPerformance`` / ``bf:mediumComponent``** —
+       defensive cleanup (shouldn't occur after the ensemble walk, but
+       handles edge cases).
+
+    All ``bf:*`` triples in the source subtree are dropped; the
+    structured PMO classes (``bf:Ensemble`` / ``bf:MediumComponent`` /
+    etc.) are removed implicitly when their bnodes are purged.
+
+    Returns the count of ``bffi:musicMedium`` blocks emitted.
+
+    **Lossiness note.** marc2bibframe2 doesn't preserve the source MARC
+    382 field verbatim (no ``bflc:marcKey`` on the ``bf:Ensemble``
+    bnode, unlike 6XX / X30 entities). The ``bffi:readMarc382``
+    literal we emit is a synthesised summary from the BIBFRAME tree's
+    labels, not the original MARC string. Round-trip to MARC 382 will
+    reconstruct from this summary — see the limitations doc.
+    """
+    rewritten = 0
+
+    # Step 1: structured MARC 382 trees.
+    for work, _, ensemble_node in list(graph.triples((None, BF.ensemble, None))):
+        literal = _synthesise_mop_string(graph, ensemble_node)
+        _emit_music_medium(graph, work, literal)
+        graph.remove((work, BF.ensemble, ensemble_node))
+        _drop_bnode_subgraph(graph, ensemble_node)
+        rewritten += 1
+
+    # Step 2: bare MARC 048 emits (bf:instrument / bf:voice) and any
+    # surviving bare bf:mediumOfPerformance. Each gets its own
+    # bffi:MusicMedium bnode with the simple label.
+    for predicate in (BF.instrument, BF.voice, BF.mediumOfPerformance):
+        for work, _, node in list(graph.triples((None, predicate, None))):
+            label = _first_label(graph, node)
+            _emit_music_medium(graph, work, label)
+            graph.remove((work, predicate, node))
+            if isinstance(node, BNode):
+                _drop_bnode_subgraph(graph, node)
+            rewritten += 1
+
+    # Step 3: defensive — strip any orphan bf:mediumComponent left over.
+    for s, _, o in list(graph.triples((None, BF.mediumComponent, None))):
+        graph.remove((s, BF.mediumComponent, o))
+        if isinstance(o, BNode):
+            _drop_bnode_subgraph(graph, o)
+
+    return rewritten
+
+
+def drop_music_residue(graph: Graph) -> int:
+    """Drop the BIBFRAME 3.0.1 PMO medium-of-performance terms the LoC
+    marc2bibframe2 XSLT never emits: ``bf:tempo``, ``bf:dramaticRole``,
+    ``bf:numberOfHands``, ``bf:usesMediumOfPerformance`` (predicates);
+    ``bf:Tempo``, ``bf:DramaticRole`` (classes). Defensive parallel to
+    :func:`drop_music_mode_residue` and :func:`drop_subseries_residue`.
+
+    If upstream changes, these should be expanded into the
+    :func:`route_music_medium` synthesis (append tempo / dramatic-role
+    / number-of-hands annotations to the MoP summary string)."""
+    dropped = 0
+    for predicate in _MUSIC_RESIDUE_PREDICATES:
+        for s, _, o in list(graph.triples((None, predicate, None))):
+            graph.remove((s, predicate, o))
+            dropped += 1
+    for cls in _MUSIC_RESIDUE_CLASSES:
+        for s in list(graph.subjects(RDF.type, cls)):
+            graph.remove((s, RDF.type, cls))
+            dropped += 1
+    return dropped
 
 
 def drop_music_mode_residue(graph: Graph) -> int:
@@ -912,6 +1138,8 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "subseries_dropped": drop_subseries_residue(graph),
         "music_key_collapsed": route_music_key(graph),
         "music_mode_dropped": drop_music_mode_residue(graph),
+        "music_medium_collapsed": route_music_medium(graph),
+        "music_medium_residue_dropped": drop_music_residue(graph),
     }
     # The remaining three routings each split their counters into
     # per-discriminator buckets so the observability summary surfaces

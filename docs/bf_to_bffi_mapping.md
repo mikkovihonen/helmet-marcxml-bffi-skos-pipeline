@@ -93,15 +93,15 @@ The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-t
 | `bf:DissertationIdentifier` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/dissertation-identifier>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Distribution` | **clean** | `bffi:Distribution` | owl:equivalentClass | `bf:ProvisionActivity` | — |
 | `bf:Doi` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/doi>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
-| `bf:DramaticRole` | **GAP** | — | — | — | — |
+| `bf:DramaticRole` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop | defensive (upstream-stability) | — | `drop_music_residue` |
 | `bf:Ean` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/ean>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Eidr` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/eidr>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Electronic` | **clean** | `bffi:Electronic` | owl:equivalentClass | `bf:Instance` | — |
 | `bf:Emulsion` | **clean** | `bffi:Emulsion` | owl:equivalentClass | — | — |
 | `bf:EncodedBitrate` | **clean** | `bffi:EncodedBitrate` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
 | `bf:EncodingFormat` | **clean** | `bffi:EncodingFormat` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
-| `bf:Ensemble` | **GAP** | — | — | — | — |
-| `bf:EnsembleSize` | **GAP** | — | — | — | — |
+| `bf:Ensemble` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | — | `route_music_medium` |
+| `bf:EnsembleSize` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | — | `route_music_medium` |
 | `bf:Enumeration` | **clean** | `bffi:Enumeration` | owl:equivalentClass | `bf:EnumerationAndChronology` | — |
 | `bf:EnumerationAndChronology` | **clean** | `bffi:EnumerationAndChronology` | owl:equivalentClass | — | — |
 | `bf:Event` | **clean** | `bffi:Event` | owl:equivalentClass | — | — |
@@ -152,9 +152,9 @@ The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-t
 | `bf:Material` | **clean** | `bffi:Material` | owl:equivalentClass | — | — |
 | `bf:MatrixNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/matrix-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Media` | **clean** | `bffi:Media` | owl:equivalentClass | — | — |
-| `bf:MediumComponent` | **GAP** | — | — | — | — |
-| `bf:MediumComponentQualifier` | **GAP** | — | — | — | — |
-| `bf:MediumOfPerformance` | **GAP** | — | — | — | — |
+| `bf:MediumComponent` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | — | `route_music_medium` |
+| `bf:MediumComponentQualifier` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | — | `route_music_medium` |
+| `bf:MediumOfPerformance` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | — | `route_music_medium` |
 | `bf:Meeting` | **clean** | `bffi:Meeting` | owl:equivalentClass | `bf:Agent` | — |
 | `bf:Microform` | **clean** | `bffi:Microform` | owl:equivalentClass | `bf:Instance` | — |
 | `bf:MixedMaterial` | **clean** | `bffi:MixedMaterial` | owl:equivalentClass | `bf:Work` | — |
@@ -167,14 +167,14 @@ The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-t
 | `bf:Multimedia` | **clean** | `bffi:Multimedia` | owl:equivalentClass | `bf:Work` | — |
 | `bf:MusicAudio` | **routed** | `bffi:MusicWork` (Work-axis) / `bffi:MusicAudioExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:MusicDistributorNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/music-distributor-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
-| `bf:MusicEnsemble` | **GAP** | — | — | — | — |
+| `bf:MusicEnsemble` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | — | `route_music_medium` |
 | `bf:MusicFormat` | **clean** | `bffi:MusicFormat` | owl:equivalentClass | — | — |
-| `bf:MusicInstrument` | **GAP** | — | — | — | — |
+| `bf:MusicInstrument` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | — | `route_music_medium` |
 | `bf:MusicMedium` | **clean** | `bffi:MusicMedium` | owl:equivalentClass | — | — |
 | `bf:MusicNotation` | **clean** | `bffi:MusicNotation` | owl:equivalentClass | `bf:Notation` | — |
 | `bf:MusicPlate` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/music-plate>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:MusicPublisherNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/music-publisher-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
-| `bf:MusicVoice` | **GAP** | — | — | — | — |
+| `bf:MusicVoice` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | — | `route_music_medium` |
 | `bf:Nbn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/nbn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:NonMusicAudio` | **routed** | `bffi:NonMusicAudioWork` (Work-axis) / `bffi:NonMusicAudioExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:NotatedMovement` | **clean** | `bffi:NotatedMovement` | owl:equivalentClass | `bf:Work` | — |
@@ -245,7 +245,7 @@ The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-t
 | `bf:Tactile` | **clean** | `bffi:Tactile` | owl:equivalentClass | `bf:Instance` | — |
 | `bf:TactileNotation` | **clean** | `bffi:TactileNotation` | owl:equivalentClass | `bf:Notation` | — |
 | `bf:TapeConfig` | **clean** | `bffi:TapeConfig` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
-| `bf:Tempo` | **GAP** | — | — | — | — |
+| `bf:Tempo` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop | defensive (upstream-stability) | — | `drop_music_residue` |
 | `bf:Temporal` | **clean** | `bffi:Temporal` | owl:equivalentClass | — | — |
 | `bf:Text` | **clean** | `bffi:Text` | owl:equivalentClass | `bf:Work` | — |
 | `bf:ThematicCatalogNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/thematic-catalog-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
@@ -265,7 +265,7 @@ The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-t
 | `bf:VideogamePlatformId` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/videogame-platform-id>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Work` | **clean** | `bffi:BibframeWork` | owl:equivalentClass | — | — |
 
-_224 terms total: 144 clean, 65 routed, 10 GAP, 2 inherited, 2 semantic-shift, 1 drop._
+_224 terms total: 144 clean, 73 routed, 3 drop, 2 inherited, 2 semantic-shift._
 
 <!-- END AUTO: classes -->
 
@@ -484,16 +484,16 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:dimensions` | **clean** | `bffi:dimensions` | owl:equivalentProperty | — |
 | `bf:dissertation` | **clean** | `bffi:dissertation` | owl:equivalentProperty | — |
 | `bf:distributionStatement` | **clean** | `bffi:distributionStatement` | owl:equivalentProperty | — |
-| `bf:dramaticRole` | **GAP** | — | — | — |
+| `bf:dramaticRole` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop (forward path: append the value to the `bffi:readMarc382` synth string if upstream begins emitting) | defensive (upstream-stability) | `drop_music_residue` |
 | `bf:duration` | *semantic-shift* | `bffi:durationOfRepresentativeExpression` | bffi-meta:closeMatch | — |
 | `bf:edition` | **clean** | `bffi:edition` | owl:equivalentProperty | — |
 | `bf:editionEnumeration` | **clean** | `bffi:editionEnumeration` | owl:equivalentProperty | — |
 | `bf:editionStatement` | **clean** | `bffi:editionStatement` | owl:equivalentProperty | — |
 | `bf:electronicLocator` | **clean** | `bffi:electronicLocator` | owl:equivalentProperty | — |
 | `bf:emulsion` | **clean** | `bffi:emulsion` | owl:equivalentProperty | — |
-| `bf:ensemble` | **GAP** | — | — | — |
-| `bf:ensembleSize` | **GAP** | — | — | — |
-| `bf:ensembleType` | **GAP** | — | — | — |
+| `bf:ensemble` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
+| `bf:ensembleSize` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
+| `bf:ensembleType` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
 | `bf:enumerationAndChronology` | **clean** | `bffi:enumerationAndChronology` | owl:equivalentProperty | — |
 | `bf:equinox` | **clean** | `bffi:equinox` | owl:equivalentProperty | — |
 | `bf:eventContent` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
@@ -530,8 +530,8 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:index` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:indexOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:instanceOf` | **routed** | `bffi:workManifested` (Work-axis) / `bffi:expressionManifested` (Expression-axis) | discriminator: subject's/object's Expression-axis signal | `route_axis_default_predicates` |
-| `bf:instrument` | **GAP** | — | — | — |
-| `bf:instrumentalType` | **GAP** | — | — | — |
+| `bf:instrument` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
+| `bf:instrumentalType` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
 | `bf:intendedAudience` | **clean** | `bffi:intendedAudience` | owl:equivalentProperty | — |
 | `bf:issuance` | **routed** | `bffi:issuance` (flat rename) | flat rename (no per-statement axis alternative) | `route_axis_default_predicates` |
 | `bf:itemOf` | **clean** | `bffi:itemOf` | owl:equivalentProperty | — |
@@ -546,9 +546,9 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:material` | **clean** | `bffi:material` | owl:equivalentProperty | — |
 | `bf:materialOf` | **routed** | `bffi:material` (triple-swap: ?s → ?o) | inverse-direction swap | `route_inverse_predicates` |
 | `bf:media` | **clean** | `bffi:media` | owl:equivalentProperty | — |
-| `bf:mediumComponent` | **GAP** | — | — | — |
-| `bf:mediumComponentQualifier` | **GAP** | — | — | — |
-| `bf:mediumOfPerformance` | **GAP** | — | — | — |
+| `bf:mediumComponent` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
+| `bf:mediumComponentQualifier` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
+| `bf:mediumOfPerformance` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
 | `bf:mergedToForm` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:mergerOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:mode` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop (forward path: append mode value to the `bffi:musicKey` literal if upstream begins emitting) | defensive (upstream-stability) | `drop_music_mode_residue` |
@@ -564,7 +564,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:note` | *inherited* | `bffi:note` | rdfs:subPropertyOf | — |
 | `bf:noteFor` | **routed** | `bffi:note` (triple-swap: ?note bf:noteFor ?subj → ?subj bffi:note ?note) | inverse-direction swap | `route_note_for` |
 | `bf:noteType` | **drop** | no BFFI carrier — BFFI 1.0.0 doesn't model literal note categorisation; candidate for a future BFFI extension via NLF | no BFFI carrier; bounded data loss | `drop_note_type` |
-| `bf:numberOfHands` | **GAP** | — | — | — |
+| `bf:numberOfHands` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop (forward path: append the value to the `bffi:readMarc382` synth string if upstream begins emitting) | defensive (upstream-stability) | `drop_music_residue` |
 | `bf:originDate` | **clean** | `bffi:originDate` | owl:equivalentProperty | — |
 | `bf:originPlace` | **clean** | `bffi:originPlace` | owl:equivalentProperty | — |
 | `bf:originalVersion` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
@@ -631,7 +631,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:table` | **clean** | `bffi:table` | owl:equivalentProperty | — |
 | `bf:tableOfContents` | **clean** | `bffi:tableOfContents` | owl:equivalentProperty | — |
 | `bf:tableSeq` | **clean** | `bffi:tableSeq` | owl:equivalentProperty | — |
-| `bf:tempo` | **GAP** | — | — | — |
+| `bf:tempo` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop (forward path: append the value to the `bffi:readMarc382` synth string if upstream begins emitting) | defensive (upstream-stability) | `drop_music_residue` |
 | `bf:temporalCoverage` | **clean** | `bffi:temporalCoverage` | owl:equivalentProperty | — |
 | `bf:title` | **clean** | `bffi:title` | owl:equivalentProperty | — |
 | `bf:titleOf` | **clean** | `bffi:titleOf` | owl:equivalentProperty | — |
@@ -639,15 +639,15 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:translationOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:unit` | **clean** | `bffi:unit` | owl:equivalentProperty | — |
 | `bf:usageAndAccessPolicy` | *inherited* | `bffi:usageAndAccessPolicy` | rdfs:subPropertyOf | — |
-| `bf:usesMediumOfPerformance` | **GAP** | — | — | — |
+| `bf:usesMediumOfPerformance` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop (forward path: append the value to the `bffi:readMarc382` synth string if upstream begins emitting) | defensive (upstream-stability) | `drop_music_residue` |
 | `bf:validDate` | **clean** | `bffi:validDate` | owl:equivalentProperty | — |
 | `bf:variantType` | **drop** | redundant with the title-variant `bffi:marcKey` discriminator | redundant signal | `drop_variant_type` |
 | `bf:version` | **clean** | `bffi:version` | owl:equivalentProperty | — |
 | `bf:videoCharacteristic` | **clean** | `bffi:videoCharacteristic` | owl:equivalentProperty | — |
-| `bf:voice` | **GAP** | — | — | — |
-| `bf:voiceType` | **GAP** | — | — | — |
+| `bf:voice` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
+| `bf:voiceType` | **routed** | `bffi:musicMedium` → `bffi:MusicMedium` bnode with a synthesised `bffi:readMarc382` literal — labels from the BIBFRAME tree collapsed into a semicolon-separated summary | structured-tree → synth literal collapse | `route_music_medium` |
 
-_226 terms total: 134 clean, 54 inherited, 14 routed, 14 GAP, 5 semantic-shift, 5 drop._
+_226 terms total: 134 clean, 54 inherited, 24 routed, 9 drop, 5 semantic-shift._
 
 <!-- END AUTO: predicates -->
 
@@ -689,17 +689,26 @@ What's lost:
 
 **Version context.** BFFI 1.0.0 (the BFFI ontology's `owl:versionInfo`) is based on **BIBFRAME 2.4.0**. The Library of Congress released **BIBFRAME 3.0 in December 2025**, whose headline change is that NDMSO **absorbed the Performed Music Ontology (PMO) into core BIBFRAME**, adding or refining: `bf:MediumOfPerformance`, `bf:MediumComponent`, `bf:Ensemble`, `bf:EnsembleSize`, `bf:KeyMode`, `bf:Mode`, `bf:Tempo`, `bf:DramaticRole`, `bf:MediumComponentQualifier`, `bf:OpusNumber`, `bf:SerialNumber`, `bf:ThematicCatalogNumber` (each carrying `dct:modified 2025-12-01` with ticket `GH134`). BFFI does not include BFFI-namespace equivalents for these PMO-imported classes, and won't be extended to add them — the canonical BFFI shape for music-medium and music-key data uses the existing literal-carrier vocabulary.
 
-**Medium-of-performance routing**: collapse the BIBFRAME structured-decomposition tree (`bf:mediumOfPerformance`, `bf:mediumComponent`, `bf:ensemble`, plus the BIBFRAME 3.0 PMO siblings `bf:Ensemble`, `bf:EnsembleSize`, `bf:DramaticRole`, `bf:MediumComponentQualifier`) into a single literal on the existing `bffi:MusicMedium` block:
+**Medium-of-performance routing (shipped):** collapse the BIBFRAME structured-decomposition tree (`bf:ensemble` → `bf:Ensemble` → nested `bf:mediumComponent` / `bf:mediumOfPerformance` / `bf:mediumComponentQualifier` / `bf:ensembleSize` / `bf:status`, plus bare `bf:instrument` / `bf:voice` from MARC 048) into a single literal on a `bffi:MusicMedium` bnode:
 
 ```turtle
 <work>
     bffi:musicMedium [
         a bffi:MusicMedium ;
-        bffi:readMarc382 "1\\b vn$nvc$na 015\\$2 marcmusperf"
+        bffi:readMarc382 "violin (solo), n=1; piano; ensemble: 2; (partial)"
     ] .
 ```
 
-`bffi:readMarc382` (English label: *"read-only 382 field"*) is the only property the BFFI ontology declares with `bffi:MusicMedium` as its domain. It holds the verbatim MARC 382 string on the MusicMedium block, with the decomposition (individual instrument / voice / ensemble / part-count) encoded inside the literal as MARC text rather than separate RDF triples. `bffi:musicMedium`'s English label is literally **"music medium of performance"** — semantically the same role as `bf:mediumOfPerformance`.
+The synth string format:
+- Each `bf:mediumComponent` renders as `<label>` plus optional ` (<qualifier>)` and ` , n=<count>`
+- Multiple components joined by `; `
+- Top-level `bf:ensembleSize` rendered as `; ensemble: <total>`
+- Top-level `bf:status` (e.g. partial from MARC 382 ind1=1) rendered as `; (<status>)`
+- Bare MARC 048 emit (one `bf:instrument` or `bf:voice` per source MARC code) produces one `bffi:musicMedium` block per source triple, each carrying just the instrument label
+
+`bffi:readMarc382` (English label: *"read-only 382 field"*, `owl:equivalentProperty bflc:readMarc382`) is the only property the BFFI ontology declares with `bffi:MusicMedium` as its domain. **The literal we emit is a synthesised summary, not the verbatim source MARC 382** — marc2bibframe2 doesn't preserve the source field as a `bflc:marcKey` literal on the `bf:Ensemble` bnode (unlike 6XX / X30 entities), so the synth string is the best we can produce from the BIBFRAME graph alone. Round-trip to MARC 382 reconstructs from this summary; not byte-identical to the source. Documented as a known-acceptable lossiness for this routing.
+
+**Defensive drops (PMO terms marc2bibframe2 doesn't emit):** `bf:tempo`, `bf:dramaticRole`, `bf:numberOfHands`, `bf:usesMediumOfPerformance` (predicates) and `bf:Tempo`, `bf:DramaticRole` (classes). The XSLT survey returned zero hits; the drop is insurance against a future upstream change. If upstream begins emitting these, the forward path is to append the value to the `bffi:readMarc382` synth string.
 
 **Music-key routing (shipped):** collapse the BIBFRAME structured `bf:keyMode → bf:KeyMode` bnode into the existing `bffi:musicKey` Literal datatype property. marc2bibframe2 emits:
 
