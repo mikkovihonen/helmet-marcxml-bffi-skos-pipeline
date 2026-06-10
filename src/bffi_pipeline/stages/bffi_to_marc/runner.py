@@ -117,19 +117,46 @@ def _extract_bib_id_from_uri(manifestation: URIRef) -> str | None:
     return tail or None
 
 
-def _extract_main_title(graph: Graph, manifestation: URIRef) -> str | None:
-    """Walk ``?m bffi:title / bffi:mainTitle`` and return the first match."""
+@dataclass(frozen=True)
+class _TitleParts:
+    """The 245-field-worth of content extracted from one bffi:Title block."""
+
+    main: str
+    subtitle: str | None = None
+
+
+def _extract_main_title_parts(graph: Graph, manifestation: URIRef) -> _TitleParts | None:
+    """Walk the first ``?m bffi:title / bffi:Title`` block and pull
+    ``bffi:mainTitle`` (mandatory) + ``bffi:subtitle`` (optional).
+
+    Returns ``None`` when no title block has a ``bffi:mainTitle``. v0
+    picks the first block; primary-vs-variant discrimination (by
+    ``bffi:marcKey``) lands in a follow-on.
+    """
     for title_block in graph.objects(manifestation, BFFI.title):
         main = next(graph.objects(title_block, BFFI.mainTitle), None)
-        if isinstance(main, Literal):
-            return str(main)
+        if not isinstance(main, Literal):
+            continue
+        subtitle = next(graph.objects(title_block, BFFI.subtitle), None)
+        return _TitleParts(
+            main=str(main),
+            subtitle=str(subtitle) if isinstance(subtitle, Literal) else None,
+        )
     return None
+
+
+def _extract_responsibility_statement(graph: Graph, manifestation: URIRef) -> str | None:
+    """Return the first ``bffi:responsibilityStatement`` literal on the
+    Manifestation, or ``None`` if absent. Maps directly to MARC 245 $c."""
+    value = next(graph.objects(manifestation, BFFI.responsibilityStatement), None)
+    return str(value) if isinstance(value, Literal) else None
 
 
 def _build_marc_record(
     *,
     bib_id: str,
-    main_title: str | None,
+    title_parts: _TitleParts | None,
+    responsibility: str | None,
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0 field set."""
     record = etree.Element(f"{_MARC}record")
@@ -139,10 +166,16 @@ def _build_marc_record(
     cf001 = etree.SubElement(record, f"{_MARC}controlfield", tag="001")
     cf001.text = bib_id
 
-    if main_title is not None:
+    if title_parts is not None:
         df245 = etree.SubElement(record, f"{_MARC}datafield", tag="245", ind1="0", ind2="0")
         sf_a = etree.SubElement(df245, f"{_MARC}subfield", code="a")
-        sf_a.text = main_title
+        sf_a.text = title_parts.main
+        if title_parts.subtitle is not None:
+            sf_b = etree.SubElement(df245, f"{_MARC}subfield", code="b")
+            sf_b.text = title_parts.subtitle
+        if responsibility is not None:
+            sf_c = etree.SubElement(df245, f"{_MARC}subfield", code="c")
+            sf_c.text = responsibility
 
     return record
 
@@ -159,8 +192,13 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     )
     if bib_id is None:
         raise BffiToMarcError(f"no bib ID found for manifestation {manifestation}")
-    main_title = _extract_main_title(graph, manifestation)
-    record = _build_marc_record(bib_id=bib_id, main_title=main_title)
+    title_parts = _extract_main_title_parts(graph, manifestation)
+    responsibility = _extract_responsibility_statement(graph, manifestation)
+    record = _build_marc_record(
+        bib_id=bib_id,
+        title_parts=title_parts,
+        responsibility=responsibility,
+    )
     return etree.tostring(
         record,
         pretty_print=True,

@@ -113,6 +113,70 @@ def test_emit_marcxml_minimal_record_round_trips_bib_id_and_title() -> None:
     assert sf_a.text == "Test Title"
 
 
+def test_emit_marcxml_emits_245_b_when_subtitle_is_present() -> None:
+    """A bffi:Title block carrying both bffi:mainTitle and bffi:subtitle
+    produces a 245 datafield with $a and $b subfields. Maps to MARC 245
+    where $b is the parallel/subtitle portion."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="Main Title",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    title_block = next(g.objects(manifestation, BFFI.title))
+    g.add((title_block, BFFI.subtitle, Literal("an explanatory subtitle")))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df245 = root.find(f"{{{MARC21_NS}}}datafield[@tag='245']")
+    assert df245 is not None
+    sf_a = df245.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    sf_b = df245.find(f"{{{MARC21_NS}}}subfield[@code='b']")
+    assert sf_a is not None and sf_a.text == "Main Title"
+    assert sf_b is not None and sf_b.text == "an explanatory subtitle"
+
+
+def test_emit_marcxml_omits_245_b_when_subtitle_absent() -> None:
+    """No bffi:subtitle → no $b subfield (record stays in v0 shape)."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="Bare Title",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df245 = root.find(f"{{{MARC21_NS}}}datafield[@tag='245']")
+    assert df245 is not None
+    assert df245.find(f"{{{MARC21_NS}}}subfield[@code='b']") is None
+
+
+def test_emit_marcxml_emits_245_c_when_responsibility_statement_present() -> None:
+    """bffi:responsibilityStatement on the Manifestation maps to MARC 245
+    $c (statement of responsibility — directors, screenwriters, etc.)."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="A Film",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    g.add(
+        (
+            manifestation,
+            BFFI.responsibilityStatement,
+            Literal("directed by Guy Hamilton ; screenplay by Richard Maibaum"),
+        )
+    )
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df245 = root.find(f"{{{MARC21_NS}}}datafield[@tag='245']")
+    sf_c = df245.find(f"{{{MARC21_NS}}}subfield[@code='c']") if df245 is not None else None
+    assert sf_c is not None
+    assert sf_c.text == "directed by Guy Hamilton ; screenplay by Richard Maibaum"
+
+
 def test_emit_marcxml_falls_back_to_uri_fragment_when_no_local_block() -> None:
     """The BIBFRAME emit shape from marc2bibframe2 puts the bib ID in the
     URI path component. If no Local identifier exists in the graph, the
