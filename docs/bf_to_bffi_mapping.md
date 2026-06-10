@@ -618,9 +618,9 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:subject` | **clean** | `bffi:subject` | owl:equivalentProperty | — |
 | `bf:subjectOf` | **clean** | `bffi:subjectOf` | owl:equivalentProperty | — |
 | `bf:sublocation` | **clean** | `bffi:sublocation` | owl:equivalentProperty | — |
-| `bf:subseriesEnumeration` | **GAP** | — | — | — |
+| `bf:subseriesEnumeration` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop (see forward-looking note below the Predicates table) | defensive (upstream-stability) | `drop_subseries_residue` |
 | `bf:subseriesOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
-| `bf:subseriesStatement` | **GAP** | — | — | — |
+| `bf:subseriesStatement` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop (see forward-looking note below the Predicates table) | defensive (upstream-stability) | `drop_subseries_residue` |
 | `bf:subtitle` | **clean** | `bffi:subtitle` | owl:equivalentProperty | — |
 | `bf:succeededBy` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:summary` | **clean** | `bffi:summary` | owl:equivalentProperty | — |
@@ -647,7 +647,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:voice` | **GAP** | — | — | — |
 | `bf:voiceType` | **GAP** | — | — | — |
 
-_226 terms total: 134 clean, 54 inherited, 18 GAP, 13 routed, 5 semantic-shift, 2 drop._
+_226 terms total: 134 clean, 54 inherited, 16 GAP, 13 routed, 5 semantic-shift, 4 drop._
 
 <!-- END AUTO: predicates -->
 
@@ -821,12 +821,25 @@ Zero corpus prevalence in the 20 k bench — these are insurance routings agains
 
 - `?note bf:noteFor ?subject` → `?subject bffi:note ?note`
 
-## Drops — no BFFI carrier, or redundant signal
+## Drops — no BFFI carrier, redundant signal, or defensive
 
-Two predicates are dropped instead of routed:
+Four predicates are dropped instead of routed:
 
 - **`bf:variantType`** (`?title bf:variantType "parallel"`) — redundant. The title-variant routing's `bffi:marcKey` discriminator already encodes the variant type via the first-3-char MARC tag (`246` parallel, `740` analytical added, etc.). Dropping it avoids closed-namespace residue without information loss.
 - **`bf:noteType`** (`?note bf:noteType "Summary"`) — no BFFI carrier. BFFI 1.0.0 deliberately didn't model literal note categorisation; `bffi:Note` has zero predicates declared with it as domain and only `bffi:TitleNote` as a subclass. Reaching for a foreign vocabulary (`dct:type`, `skos:notation`) would contradict the "DC Terms → BFFI alternatives" pattern below, which expects BFFI-native carriers wherever possible. Candidate for a future BFFI extension via NLF conversation. Bounded loss: the note's text content (`rdfs:label`) typically encodes the categorisation implicitly ("Bibliography: …", "Summary: …").
+- **`bf:subseriesStatement`** + **`bf:subseriesEnumeration`** — defensive. BIBFRAME 3.0.1 declares both predicates, but the LoC marc2bibframe2 XSLT (our actual upstream) never emits them — subseries information in MARC 490 / 8XX gets folded into ordinary `bf:Series` + `bf:seriesEnumeration` shapes instead. Verified by `grep -rn 'subseries…'` returning zero hits across the XSLT tree, and corroborated by zero occurrences in a 500-file Helmet corpus sample. The drop covers the case where a future upstream change surfaces these — see the forward-looking note below for the marcKey-based pairing strategy that should replace the drop at that point.
+
+### Forward-looking note — pairing subseries with parent series via `bflc:marcKey`
+
+If a future BIBFRAME upstream begins emitting `bf:subseriesStatement` / `bf:subseriesEnumeration`, the proper handling is to attach the subseries content to the **right parent Series entity**, not just to copy it as a literal. The signal that makes the pairing tractable is the `bflc:marcKey` literal already attached to each Series entity by marc2bibframe2 — its first 3 characters identify the source MARC field tag (`490` transcribed series, `800` series-author Hub, `810` series-corporate Hub, `811` series-meeting Hub, `830` series uniform-title Hub).
+
+Concretely, the routing would:
+
+1. For each Manifestation with multiple `bffi:relation → bffi:SeriesWork` chains (after the existing Series-link routing has minted them), inspect each SeriesWork's `bffi:marcKey` literal.
+2. For each `bf:subseriesStatement` / `bf:subseriesEnumeration` triple on the Manifestation, find the SeriesWork whose marcKey tag matches the subseries data's originating field. (For the simple single-series case this is trivial; for multi-series cases the marcKey tag disambiguates.)
+3. Attach the subseries content to the chosen SeriesWork via `bffi:partName` / `bffi:partNumber` (Option 3 from the design discussion — these existing BFFI predicates carry the "part name + number" semantic cleanly when attached to a SeriesWork entity).
+
+Until upstream changes, the drop ensures closed-namespace cleanliness. The counter (`subseries_dropped`) surfaces any drop in the observability summary — a non-zero value indicates upstream has begun emitting these and the marcKey-pairing routing should be implemented.
 
 ## Defensive guard — undeclared `bf:*` terms are dropped
 

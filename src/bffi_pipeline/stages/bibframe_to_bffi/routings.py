@@ -761,6 +761,44 @@ def drop_variant_type(graph: Graph) -> int:
     return dropped
 
 
+#: BIBFRAME predicates declared by the ontology that marc2bibframe2 does
+#: NOT emit in its XSLT — defensive drops for upstream-stability rather
+#: than hot-path routing decisions. Verified by ``grep -rn 'subseries…'``
+#: across ``third_party/marc2bibframe2/xsl/`` returning zero hits.
+_SUBSERIES_PREDICATES: Final[tuple[URIRef, ...]] = (
+    BF.subseriesStatement,
+    BF.subseriesEnumeration,
+)
+
+
+def drop_subseries_residue(graph: Graph) -> int:
+    """Drop every ``bf:subseriesStatement`` / ``bf:subseriesEnumeration`` triple.
+
+    Defensive routing for terms BIBFRAME 3.0.1 declares but our actual
+    upstream (the LoC marc2bibframe2 XSLT) never emits — subseries
+    information in MARC 490 / 8XX gets folded into ordinary
+    ``bf:Series`` + ``bf:seriesEnumeration`` triples instead of these
+    specialised literal predicates. Zero corpus prevalence across the
+    500-file sample. Drop avoids closed-namespace residue.
+
+    If upstream ever changes — a new marc2bibframe2 version or a
+    different MARC-to-BIBFRAME converter feeding us data — the
+    routing should be replaced by one that pairs each subseries
+    literal with its parent series via the ``bflc:marcKey`` literal
+    on the Series entity (the first 3 chars of which give the source
+    MARC tag, e.g. ``490`` / ``800`` / ``810`` / ``811`` / ``830``).
+    Subseries data on a 490-marcKey-tagged Series belongs to that
+    Series; pair by matching marcKey prefixes when multiple Series
+    entities exist on one Manifestation.
+    """
+    dropped = 0
+    for predicate in _SUBSERIES_PREDICATES:
+        for s, _, o in list(graph.triples((None, predicate, None))):
+            graph.remove((s, predicate, o))
+            dropped += 1
+    return dropped
+
+
 # --- top-level entry point ----------------------------------------------
 
 
@@ -786,6 +824,7 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "note_for": route_note_for(graph),
         "note_type_dropped": drop_note_type(graph),
         "variant_type_dropped": drop_variant_type(graph),
+        "subseries_dropped": drop_subseries_residue(graph),
     }
     # The remaining three routings each split their counters into
     # per-discriminator buckets so the observability summary surfaces

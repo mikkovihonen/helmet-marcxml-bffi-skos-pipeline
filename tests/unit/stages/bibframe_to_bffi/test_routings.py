@@ -18,6 +18,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     _identifier_scheme_token,
     apply_all_routings,
     drop_note_type,
+    drop_subseries_residue,
     drop_undeclared_bf_terms,
     drop_variant_type,
     loc_scheme_uri,
@@ -269,6 +270,7 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "note_for": 0,
         "note_type_dropped": 0,
         "variant_type_dropped": 0,
+        "subseries_dropped": 0,
         "axis_default_class_work": 0,
         "axis_default_class_expression": 1,  # bf:Audio → NonMusicAudioExpression
         "instance_of_work": 0,
@@ -802,3 +804,33 @@ def test_drop_variant_type_removes_redundant_triple() -> None:
     assert dropped == 1
     assert (title, BF.variantType, Literal("parallel")) not in g
     assert (title, BFFI.marcKey, Literal("24631$aParallel form")) in g
+
+
+# --- bf:subseriesStatement / bf:subseriesEnumeration drop --------------
+
+
+def test_drop_subseries_residue_removes_both_predicates() -> None:
+    """marc2bibframe2's XSLT never emits these (grep -rn returns zero
+    hits across the XSLT tree); BIBFRAME 3.0.1 declares them. Defensive
+    drop avoids closed-namespace residue if a future upstream begins
+    emitting them — the proper handling at that point is marcKey-based
+    pairing with the parent Series entity, not a literal copy."""
+    g = Graph()
+    series = URIRef("http://example.org/series")
+    g.add((series, BF.subseriesStatement, Literal("Subseries B")))
+    g.add((series, BF.subseriesEnumeration, Literal("vol. 3")))
+    # An unrelated triple must survive.
+    g.add((series, BFFI.seriesStatement, Literal("Series A")))
+
+    dropped = drop_subseries_residue(g)
+    assert dropped == 2
+    assert (series, BF.subseriesStatement, Literal("Subseries B")) not in g
+    assert (series, BF.subseriesEnumeration, Literal("vol. 3")) not in g
+    assert (series, BFFI.seriesStatement, Literal("Series A")) in g
+
+
+def test_drop_subseries_residue_no_op_when_predicates_absent() -> None:
+    """Empty graph: the routing reports zero drops. Locks the no-op
+    behaviour for the predominant corpus shape (zero prevalence in the
+    500-file sample)."""
+    assert drop_subseries_residue(Graph()) == 0

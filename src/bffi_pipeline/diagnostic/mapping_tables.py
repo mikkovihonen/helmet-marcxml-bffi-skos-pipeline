@@ -214,6 +214,17 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
         is_drop=True,
     )
 
+    for bf_pred in _r._SUBSERIES_PREDICATES:
+        registry[bf_pred] = _Routing(
+            handler="drop_subseries_residue",
+            replacement=(
+                "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
+                "(see forward-looking note below the Predicates table)"
+            ),
+            link_kind="defensive (upstream-stability)",
+            is_drop=True,
+        )
+
     return registry
 
 
