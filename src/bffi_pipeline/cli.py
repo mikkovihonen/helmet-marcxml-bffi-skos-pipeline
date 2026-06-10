@@ -25,6 +25,12 @@ from typing import Annotated
 import typer
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.stages.bibframe_to_bffi.runner import (
+    ConversionOptions as BibframeToBffiOptions,
+)
+from bffi_pipeline.stages.bibframe_to_bffi.runner import (
+    convert_corpus as bibframe_to_bffi_convert_corpus,
+)
 from bffi_pipeline.stages.marc_to_bibframe.runner import (
     ConversionOptions,
     convert_corpus,
@@ -126,14 +132,46 @@ def marc_to_bibframe_command(
 
 
 @app.command("bibframe-to-bffi")
-def bibframe_to_bffi_command() -> None:
+def bibframe_to_bffi_command(
+    input_dir: Annotated[
+        Path,
+        typer.Option(
+            "--input-dir",
+            help="Directory of per-record BIBFRAME RDF/XML files (`*.bibframe.xml`).",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Where to write per-record BFFI Turtle (`<stem>.bffi.ttl`).",
+        ),
+    ],
+) -> None:
     """BIBFRAME → BFFI canonical Turtle (BFFI-only emit).
 
-    Applies the BIBFRAME-to-BFFI SPARQL CONSTRUCTs in `sparql/`,
-    materialising every routing decision per `docs/bf_to_bffi_mapping.md`.
-    Zero `bf:*` URIs appear in the output (p-56 hard-cut transition).
+    Step 3 v0 — implements p-56 Phase 1 only (clean rename via every
+    `owl:equivalentClass` / `owl:equivalentProperty` row from
+    `vocab/lkd.rdf`). No discriminator routings yet — Hub /
+    Identifier-scheme / Title-variant / Series-link / Audio / Music
+    land in step 6 / 7. Per-record `bf:*` residue (terms with no
+    Phase 1 rename) is counted in the summary so step 6 can target the
+    surviving terms.
     """
-    raise NotImplementedError("bibframe-to-bffi stage scaffolded; not yet implemented")
+    options = BibframeToBffiOptions(input_dir=input_dir, output_dir=output_dir)
+    summary = bibframe_to_bffi_convert_corpus(options=options)
+    typer.echo(
+        f"bibframe-to-bffi: total={summary.total} "
+        f"converted={summary.converted} failed={summary.failed} "
+        f"closed_namespace_residue={summary.closed_namespace_residue}",
+        err=True,
+    )
+    if summary.failed > 0:
+        raise typer.Exit(code=1)
 
 
 @app.command("bffi-to-marc")
