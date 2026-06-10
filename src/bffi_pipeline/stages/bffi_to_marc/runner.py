@@ -406,12 +406,25 @@ class _ContributorEmit:
     ``"aut"``) used for ``$4``; ``relator_term`` is the cataloguer's
     free-text term (e.g. Finnish ``"näyttelijä"``) used for ``$e``.
     Either, both, or neither may be present depending on what the
-    source MARC carried."""
+    source MARC carried.
+
+    ``ind1`` / ``ind2`` come from the agent's ``bffi:marcKey`` when
+    present (preserves the source-MARC indicators verbatim); otherwise
+    they default to blank.
+
+    ``extra_subfields`` carries codes the source MARC had beyond
+    ``$a`` / ``$e`` / ``$4`` (e.g. ``$t`` analytical title, ``$c``
+    qualification, ``$d`` dates). These are parsed from the agent's
+    ``bffi:marcKey`` and emitted in marcKey order between ``$e`` and
+    ``$4`` per MARC X00 subfield convention."""
 
     tag: str
     label: str
     relator: str | None
     relator_term: str | None
+    ind1: str
+    ind2: str
+    extra_subfields: tuple[tuple[str, str], ...]
 
 
 def _agent_marc_tag(graph: Graph, agent: URIRef, *, is_primary: bool) -> str | None:
@@ -425,7 +438,13 @@ def _agent_marc_tag(graph: Graph, agent: URIRef, *, is_primary: bool) -> str | N
 
 _CONTRIBUTOR_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
     ("a", "personal / corporate / meeting name"),
+    ("b", "subordinate unit (corporate / meeting; marcKey-driven)"),
+    ("c", "qualifier (e.g. fictional-character flag; marcKey-driven)"),
+    ("d", "dates of birth / death / activity (marcKey-driven)"),
     ("e", "relator term (cataloguer's free-text role, e.g. 'näyttelijä')"),
+    ("g", "miscellaneous information (marcKey-driven)"),
+    ("t", "title within work — analytical added entry (marcKey-driven)"),
+    ("0", "authority URI (marcKey-driven)"),
     ("4", "LoC relator code (e.g. 'aut')"),
 )
 
@@ -498,27 +517,84 @@ def _extract_contributors(graph: Graph, manifestation: URIRef) -> list[_Contribu
     if work is None:
         return []
     emits: list[_ContributorEmit] = []
-    for contrib in graph.objects(work, BFFI.contribution):
-        is_primary = (contrib, RDF.type, BFFI.PrimaryContribution) in graph
-        agent = next(graph.objects(contrib, BFFI.agent), None)
-        if not isinstance(agent, URIRef):
-            continue
-        label = next(graph.objects(agent, RDFS.label), None)
-        if not isinstance(label, Literal):
-            continue
-        tag = _agent_marc_tag(graph, agent, is_primary=is_primary)
-        if tag is None:
-            continue
-        relator, relator_term = _extract_role_codes(graph, contrib)
-        emits.append(
-            _ContributorEmit(
-                tag=tag,
-                label=str(label),
-                relator=relator,
-                relator_term=relator_term,
-            )
-        )
+    seen_contribs: set[Node] = set()
+    for anchor in _contribution_anchors(graph, manifestation, work):
+        for contrib in graph.objects(anchor, BFFI.contribution):
+            if contrib in seen_contribs:
+                continue
+            seen_contribs.add(contrib)
+            emit = _build_contributor_emit(graph, contrib)
+            if emit is not None:
+                emits.append(emit)
     return sorted(emits, key=lambda e: (e.tag, e.label, e.relator_term or "", e.relator or ""))
+
+
+def _contribution_anchors(graph: Graph, manifestation: URIRef, work: URIRef) -> list[URIRef]:
+    """Return every node whose ``bffi:contribution`` is in scope for the
+    Manifestation: the main Work, plus any Hub Work reachable via
+    ``bffi:relation`` from the Work or Manifestation. Analytical added
+    entries (source MARC ``700 _ 2`` etc.) attach the contribution to a
+    Hub Work rather than the main Work, so the walk has to cover both."""
+    anchors: list[URIRef] = [work]
+    for source in (work, manifestation):
+        for rel in graph.objects(source, BFFI.relation):
+            for target in graph.objects(rel, BFFI.associatedResource):
+                if isinstance(target, URIRef):
+                    anchors.append(target)
+    return anchors
+
+
+def _build_contributor_emit(graph: Graph, contrib: Node) -> _ContributorEmit | None:
+    """Build one ``_ContributorEmit`` from a contribution bnode, or
+    ``None`` when the agent / label / tag can't be resolved."""
+    is_primary = (contrib, RDF.type, BFFI.PrimaryContribution) in graph
+    agent = next(graph.objects(contrib, BFFI.agent), None)
+    if not isinstance(agent, URIRef):
+        return None
+    label = next(graph.objects(agent, RDFS.label), None)
+    if not isinstance(label, Literal):
+        return None
+    tag = _agent_marc_tag(graph, agent, is_primary=is_primary)
+    if tag is None:
+        return None
+    relator, relator_term = _extract_role_codes(graph, contrib)
+    ind1, ind2, extras = _contributor_marckey_extras(graph, agent)
+    return _ContributorEmit(
+        tag=tag,
+        label=str(label),
+        relator=relator,
+        relator_term=relator_term,
+        ind1=ind1,
+        ind2=ind2,
+        extra_subfields=extras,
+    )
+
+
+_CONTRIBUTOR_STRUCTURED_CODES: Final[frozenset[str]] = frozenset({"a", "e", "4"})
+
+
+def _contributor_marckey_extras(
+    graph: Graph, agent: URIRef
+) -> tuple[str, str, tuple[tuple[str, str], ...]]:
+    """Read the agent's ``bffi:marcKey`` (if present) and return
+    ``(ind1, ind2, extra_subfields)``.
+
+    Indicators come verbatim from marcKey when available; absent
+    marcKey, both default to blank. ``extra_subfields`` is the ordered
+    tuple of ``(code, value)`` pairs from marcKey for codes NOT in the
+    structured-BFFI set (``$a`` / ``$e`` / ``$4``) — typically ``$t``
+    analytical title and ``$c`` qualifier."""
+    marc_key = next(graph.objects(agent, BFFI.marcKey), None)
+    if not isinstance(marc_key, Literal):
+        return " ", " ", ()
+    parsed = _parse_marc_key(str(marc_key))
+    if parsed is None:
+        return " ", " ", ()
+    _tag, ind1, ind2, subfields = parsed
+    extras = tuple(
+        (code, value) for code, value in subfields if code not in _CONTRIBUTOR_STRUCTURED_CODES
+    )
+    return ind1, ind2, extras
 
 
 def _extract_role_codes(graph: Graph, contrib: Node) -> tuple[str | None, str | None]:
@@ -1339,17 +1415,21 @@ def _append_contributor_datafields(
     record: etree._Element, contributors: Iterable[_ContributorEmit]
 ) -> None:
     """Append one MARC contributor datafield per emit. Subfield order
-    follows the MARC spec: ``$a`` (name) → ``$e`` (relator term, free
-    text) → ``$4`` (LoC relator code). Each is optional except ``$a``.
-    Indicators are blank — the smart name-type / role indicator
-    population is a follow-on."""
+    follows the MARC X00 spec: ``$a`` (name) → ``$e`` (relator term,
+    free text) → extras from marcKey (``$t`` analytical title, ``$c``
+    qualifier, ``$d`` dates, …) → ``$4`` (LoC relator code). Each is
+    optional except ``$a``. Indicators come from the agent's marcKey
+    when present, else default to blank."""
     for c in contributors:
-        df = etree.SubElement(record, f"{_MARC}datafield", tag=c.tag, ind1=" ", ind2=" ")
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=c.tag, ind1=c.ind1, ind2=c.ind2)
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
         sf_a.text = c.label
         if c.relator_term:
             sf_e = etree.SubElement(df, f"{_MARC}subfield", code="e")
             sf_e.text = c.relator_term
+        for code, value in c.extra_subfields:
+            sf = etree.SubElement(df, f"{_MARC}subfield", code=code)
+            sf.text = value
         if c.relator:
             sf_4 = etree.SubElement(df, f"{_MARC}subfield", code="4")
             sf_4.text = c.relator

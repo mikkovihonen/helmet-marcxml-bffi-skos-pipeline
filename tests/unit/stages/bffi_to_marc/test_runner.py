@@ -952,6 +952,47 @@ def test_emit_marcxml_emits_700_with_both_e_and_4_when_both_signals_present() ->
     assert sf_values == ["Hamilton, Guy,", "ohjaaja", "drt"]
 
 
+def test_emit_marcxml_emits_700_with_analytical_title_from_marckey() -> None:
+    """For analytical 700 entries (source ind2=2) the agent's
+    ``bffi:marcKey`` preserves the full source row verbatim — including
+    ``$t`` (title within work). The reverse converter parses marcKey
+    and emits any subfield code beyond ``$a`` / ``$e`` / ``$4``
+    (typically ``$t``, sometimes ``$c`` / ``$d``) plus the source
+    indicators."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+
+    contrib = URIRef("http://example.org/b1#contrib-1")
+    g.add((contrib, RDF.type, BFFI.Contribution))
+    g.add((work, BFFI.contribution, contrib))
+    agent = URIRef("http://example.org/b1#agent-1")
+    g.add((agent, RDF.type, BFFI.Person))
+    g.add((agent, RDFS.label, Literal("Tikka, Eeva")))
+    g.add((agent, BFFI.marcKey, Literal("70012$aTikka, Eeva.$tVarjolaiva")))
+    g.add((contrib, BFFI.agent, agent))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df700 = root.find(f"{{{MARC21_NS}}}datafield[@tag='700']")
+    assert df700 is not None
+    # Indicators come from marcKey: ind1=1 (surname), ind2=2 (analytical).
+    assert df700.get("ind1") == "1"
+    assert df700.get("ind2") == "2"
+    sf_codes = [sf.get("code") for sf in df700.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df700.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "t"]
+    # $a still comes from the structured rdfs:label (without source's
+    # trailing punctuation); $t comes from marcKey verbatim.
+    assert sf_values == ["Tikka, Eeva", "Varjolaiva"]
+
+
 def test_emit_marcxml_emits_710_for_added_corporate_contributor() -> None:
     """A non-primary ``bffi:Contribution`` with a ``bffi:Organization``
     agent emits MARC 710 \\$a — the added corporate entry."""
