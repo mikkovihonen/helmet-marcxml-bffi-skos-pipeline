@@ -26,6 +26,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.mappings import (
     CleanRenameRules,
     load_rules,
 )
+from bffi_pipeline.stages.bibframe_to_bffi.routings import apply_all_routings
 
 STAGE: Final[str] = "bibframe2bffi"
 
@@ -50,10 +51,14 @@ class ConversionSummary:
     total: int = 0
     converted: int = 0
     failed: int = 0
-    #: Records that contained at least one ``bf:*`` URI after rename.
-    #: A non-zero value indicates a closed-namespace discipline gap —
-    #: typically a discriminator-routed term not yet handled by step 6.
+    #: Records that contained at least one ``bf:*`` URI after rename +
+    #: Phase 4 routings. A non-zero value indicates a closed-namespace
+    #: discipline gap on a term family not yet covered.
     closed_namespace_residue: int = 0
+    #: Corpus-wide totals of how many times each Phase 4 routing fired.
+    #: Surfaces in the observability ``end`` event so the operator can
+    #: see, e.g. "this run rewrote 9 525 bf:Isbn instances".
+    routing_counters: dict[str, int] = field(default_factory=dict)
     failures: list[tuple[Path, str]] = field(default_factory=list)
 
 
@@ -118,15 +123,21 @@ def convert_one(
     *,
     options: ConversionOptions,
     rules: CleanRenameRules,
-) -> tuple[Path, int]:
+) -> tuple[Path, int, dict[str, int]]:
     """Convert one BIBFRAME RDF/XML file to BFFI Turtle.
 
-    Returns ``(output_path, residual_bf_count)``. A non-zero residual
-    count means at least one ``bf:*`` URI survived the rename pass —
-    expected for records with discriminator-routed terms until step 6
-    lands. The caller decides whether to treat that as a per-record
-    success or a partial-failure (Phase 1 treats it as a success but
-    surfaces the count in the summary).
+    Returns ``(output_path, residual_bf_count, routing_counters)``.
+    Pipeline order:
+
+      1. ``rename_graph`` applies p-56 Phase 1 clean renames.
+      2. ``apply_all_routings`` applies p-56 Phase 4 discriminator
+         routings (Identifier-scheme, Title-variant, Audio, Series-link,
+         Hub) + the ``bflc:marcKey`` → ``bffi:marcKey`` rename.
+      3. Residual ``bf:*`` URIs are counted — non-zero means a term
+         family beyond what Phase 1 + Phase 4 cover.
+
+    The routing counters are per-record; the caller aggregates them
+    into the corpus summary.
     """
     output_path = options.output_dir / f"{bibframe_path.stem.removesuffix('.bibframe')}.bffi.ttl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +149,7 @@ def convert_one(
         raise BibframeToBffiError(f"rdflib parse failed for {bibframe_path}: {exc}") from exc
 
     output_graph = rename_graph(input_graph, rules)
+    routing_counters = apply_all_routings(output_graph)
     residual = len(_residual_bf_uris(output_graph))
 
     # rdflib's RDF/XML parser is permissive and accepts URIs containing
@@ -156,7 +168,7 @@ def convert_one(
         ) from exc
 
     output_path.write_text(turtle, encoding="utf-8")
-    return output_path, residual
+    return output_path, residual, routing_counters
 
 
 def convert_corpus(*, options: ConversionOptions) -> ConversionSummary:
@@ -186,10 +198,12 @@ def convert_corpus(*, options: ConversionOptions) -> ConversionSummary:
 
     for idx, path in enumerate(bibframe_files, start=1):
         try:
-            _, residual = convert_one(path, options=options, rules=rules)
+            _, residual, routings = convert_one(path, options=options, rules=rules)
             summary.converted += 1
             if residual > 0:
                 summary.closed_namespace_residue += 1
+            for name, count in routings.items():
+                summary.routing_counters[name] = summary.routing_counters.get(name, 0) + count
         except BibframeToBffiError as exc:
             summary.failed += 1
             message = str(exc)
@@ -214,6 +228,7 @@ def convert_corpus(*, options: ConversionOptions) -> ConversionSummary:
             "success": summary.converted,
             "failed": summary.failed,
             "closed_namespace_residue": summary.closed_namespace_residue,
+            **{f"routing_{name}": count for name, count in summary.routing_counters.items()},
         },
     )
 

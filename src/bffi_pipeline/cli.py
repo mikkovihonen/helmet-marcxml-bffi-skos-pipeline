@@ -216,10 +216,14 @@ def bibframe_to_bffi_command(
     _require_run_dir(output_dir, option_label="--output-dir")
     options = BibframeToBffiOptions(input_dir=input_dir, output_dir=output_dir)
     summary = bibframe_to_bffi_convert_corpus(options=options)
+    routings = " ".join(
+        f"{name}={count}" for name, count in sorted(summary.routing_counters.items())
+    )
     typer.echo(
         f"bibframe-to-bffi: total={summary.total} "
         f"converted={summary.converted} failed={summary.failed} "
-        f"closed_namespace_residue={summary.closed_namespace_residue}",
+        f"closed_namespace_residue={summary.closed_namespace_residue} | "
+        f"routings: {routings}",
         err=True,
     )
     if summary.failed > 0:
