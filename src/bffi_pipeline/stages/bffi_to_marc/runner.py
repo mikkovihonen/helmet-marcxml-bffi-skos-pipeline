@@ -237,24 +237,78 @@ def _extract_change_date(graph: Graph, manifestation: URIRef) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class _PublicationEmit:
+    """One MARC 260 datafield's content, split into structured subfields.
+
+    Any combination of place / agent / date can be absent (or all three —
+    in which case the fallback ``statement`` carries the flat transcribed
+    string from ``bffi:publicationStatement``). ISBD trailing punctuation
+    is applied at emit time, not stored here."""
+
+    place: str | None
+    agent: str | None
+    date: str | None
+    statement: str | None
+
+
 @marc_emit(
     MarcEmitMeta(
         tag="260",
         indicators=(" ", " "),
-        subfields=(("a", "publication / distribution statement"),),
-        source="?m bffi:publicationStatement ?text — the transcribed pre-RDA statement",
+        subfields=(
+            ("a", "place of publication / distribution"),
+            ("b", "publisher / distributor name"),
+            ("c", "date of publication / distribution"),
+        ),
+        source=(
+            "?m bffi:provisionActivity ?pa . ?pa a bffi:Publication ; "
+            "bffi:simplePlace ?place ; bffi:simpleAgent ?agent ; "
+            "bffi:simpleDate ?date . "
+            "Fallback: ?m bffi:publicationStatement ?text — emits in $a "
+            "as a single flat string when the structured parts are absent."
+        ),
         notes=(
-            "BFFI carries the publication statement as a single transcribed "
-            "literal — the round-trip emit puts the whole string in $a."
+            'ISBD trailing punctuation (" :" before $b, "," before $c) is '
+            "added at emit time. If no Publication-typed provisionActivity "
+            "carries the structured parts, the flat bffi:publicationStatement "
+            "is the fallback — whole transcribed string in $a."
         ),
     )
 )
-def _extract_publication_statement(graph: Graph, manifestation: URIRef) -> str | None:
-    """Return the first ``bffi:publicationStatement`` literal on the
-    Manifestation. Maps to MARC 260 $a (the transcribed full
-    statement; structured $a/$b/$c split is not available from this
-    BFFI predicate alone)."""
-    value = next(graph.objects(manifestation, BFFI.publicationStatement), None)
+def _extract_publication(graph: Graph, manifestation: URIRef) -> _PublicationEmit | None:
+    """Walk the Manifestation's ``bffi:provisionActivity`` blocks for the
+    first Publication-typed activity and return its structured place /
+    agent / date. Falls back to ``bffi:publicationStatement`` when no
+    structured parts are present."""
+    place: str | None = None
+    agent: str | None = None
+    date: str | None = None
+    for pa in graph.objects(manifestation, BFFI.provisionActivity):
+        if (pa, RDF.type, BFFI.Publication) not in graph:
+            continue
+        if place is None:
+            place = _first_literal(graph, pa, BFFI.simplePlace)
+        if agent is None:
+            agent = _first_literal(graph, pa, BFFI.simpleAgent)
+        if date is None:
+            date = _first_literal(graph, pa, BFFI.simpleDate)
+        if place and agent and date:
+            break
+    statement: str | None = None
+    if place is None and agent is None and date is None:
+        value = next(graph.objects(manifestation, BFFI.publicationStatement), None)
+        if isinstance(value, Literal):
+            statement = str(value)
+    if place is None and agent is None and date is None and statement is None:
+        return None
+    return _PublicationEmit(place=place, agent=agent, date=date, statement=statement)
+
+
+def _first_literal(graph: Graph, subject: Node, predicate: URIRef) -> str | None:
+    """Return the first literal value of ``predicate`` on ``subject``,
+    or ``None`` if absent / not a literal."""
+    value = next(graph.objects(subject, predicate), None)
     return str(value) if isinstance(value, Literal) else None
 
 
@@ -1104,6 +1158,41 @@ def _append_contributor_datafields(
             sf_4.text = c.relator
 
 
+def _append_publication_datafield(record: etree._Element, publication: _PublicationEmit) -> None:
+    """Append the MARC 260 datafield with structured ``$a`` / ``$b`` / ``$c``
+    when ``bffi:simplePlace`` / ``bffi:simpleAgent`` / ``bffi:simpleDate``
+    are present on the Publication-typed provisionActivity. Falls back to
+    a single ``$a`` carrying the flat ``bffi:publicationStatement`` literal
+    when the structured parts are absent.
+
+    ISBD trailing punctuation is added per the MARC 260 convention:
+    ``$a "Place :"`` precedes ``$b``; ``$b "Publisher,"`` precedes ``$c``.
+    No trailing punctuation on the last present subfield.
+    """
+    df = etree.SubElement(record, f"{_MARC}datafield", tag="260", ind1=" ", ind2=" ")
+    if publication.place is None and publication.agent is None and publication.date is None:
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = publication.statement
+        return
+    if publication.place is not None:
+        place_text = publication.place
+        if publication.agent is not None:
+            place_text += " :"
+        elif publication.date is not None:
+            place_text += ","
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = place_text
+    if publication.agent is not None:
+        agent_text = publication.agent
+        if publication.date is not None:
+            agent_text += ","
+        sf_b = etree.SubElement(df, f"{_MARC}subfield", code="b")
+        sf_b.text = agent_text
+    if publication.date is not None:
+        sf_c = etree.SubElement(df, f"{_MARC}subfield", code="c")
+        sf_c.text = publication.date
+
+
 def _append_subject_datafields(record: etree._Element, subjects: list[_SubjectEmit]) -> None:
     """Append one MARC 6XX datafield per subject emit.
 
@@ -1162,7 +1251,7 @@ def _build_marc_record(
     change_date: str | None,
     title_parts: _TitleParts | None,
     responsibility: str | None,
-    publication_statement: str | None,
+    publication: _PublicationEmit | None,
     identifiers: list[_IdentifierEmit],
     language_codes: list[str],
     physical: _PhysicalDescription | None,
@@ -1214,10 +1303,8 @@ def _build_marc_record(
             sf_c = etree.SubElement(df245, f"{_MARC}subfield", code="c")
             sf_c.text = responsibility
 
-    if publication_statement is not None:
-        df260 = etree.SubElement(record, f"{_MARC}datafield", tag="260", ind1=" ", ind2=" ")
-        sf_a = etree.SubElement(df260, f"{_MARC}subfield", code="a")
-        sf_a.text = publication_statement
+    if publication is not None:
+        _append_publication_datafield(record, publication)
 
     if physical is not None:
         df300 = etree.SubElement(record, f"{_MARC}datafield", tag="300", ind1=" ", ind2=" ")
@@ -1264,7 +1351,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     change_date = _extract_change_date(graph, manifestation)
     title_parts = _extract_main_title_parts(graph, manifestation)
     responsibility = _extract_responsibility_statement(graph, manifestation)
-    publication_statement = _extract_publication_statement(graph, manifestation)
+    publication = _extract_publication(graph, manifestation)
     identifiers = _extract_identifier_datafields(graph, manifestation)
     language_codes = _extract_language_codes(graph, manifestation)
     physical = _extract_physical_description(graph, manifestation)
@@ -1279,7 +1366,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         change_date=change_date,
         title_parts=title_parts,
         responsibility=responsibility,
-        publication_statement=publication_statement,
+        publication=publication,
         identifiers=identifiers,
         language_codes=language_codes,
         physical=physical,

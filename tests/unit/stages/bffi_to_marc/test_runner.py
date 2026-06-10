@@ -488,8 +488,56 @@ def test_emit_marcxml_emits_005_change_date() -> None:
     assert cf005.text == "20260610154300.0"
 
 
-def test_emit_marcxml_emits_260_publication_statement() -> None:
-    """``bffi:publicationStatement`` literal → MARC 260 \\$a (full statement)."""
+def _add_publication_activity(
+    g: Graph,
+    manifestation: URIRef,
+    *,
+    place: str | None = None,
+    agent: str | None = None,
+    date: str | None = None,
+) -> None:
+    """Helper: attach a Publication-typed bffi:provisionActivity with
+    the requested simple* parts to the Manifestation."""
+    pa = URIRef(f"{manifestation}-pa")
+    g.add((pa, RDF.type, BFFI.ProvisionActivity))
+    g.add((pa, RDF.type, BFFI.Publication))
+    if place is not None:
+        g.add((pa, BFFI.simplePlace, Literal(place)))
+    if agent is not None:
+        g.add((pa, BFFI.simpleAgent, Literal(agent)))
+    if date is not None:
+        g.add((pa, BFFI.simpleDate, Literal(date)))
+    g.add((manifestation, BFFI.provisionActivity, pa))
+
+
+def test_emit_marcxml_emits_260_split_with_isbd_punctuation() -> None:
+    """``bffi:provisionActivity`` (Publication-typed) carrying
+    ``bffi:simplePlace`` / ``bffi:simpleAgent`` / ``bffi:simpleDate``
+    drives MARC 260 ``$a`` / ``$b`` / ``$c``. ISBD trailing punctuation
+    (\" :\" before $b, \",\" before $c) is added on emit so the result
+    matches source-MARC cataloguer convention byte-for-byte."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    _add_publication_activity(g, m, place="Helsinki", agent="WSOY", date="2010")
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df260 = root.find(f"{{{MARC21_NS}}}datafield[@tag='260']")
+    assert df260 is not None
+    sf_codes = [sf.get("code") for sf in df260.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df260.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "b", "c"]
+    assert sf_values == ["Helsinki :", "WSOY,", "2010"]
+
+
+def test_emit_marcxml_emits_260_falls_back_to_publication_statement_when_unstructured() -> None:
+    """When no Publication-typed provisionActivity carries structured
+    parts, the flat ``bffi:publicationStatement`` literal is the
+    fallback — whole transcribed string emits in $a."""
     g = _build_minimal_bffi_graph(
         manifestation_uri="http://example.org/b1#Instance",
         bib_id="b1",
@@ -502,9 +550,31 @@ def test_emit_marcxml_emits_260_publication_statement() -> None:
     root = etree.fromstring(marcxml)
     df260 = root.find(f"{{{MARC21_NS}}}datafield[@tag='260']")
     assert df260 is not None
-    sf_a = df260.find(f"{{{MARC21_NS}}}subfield[@code='a']")
-    assert sf_a is not None
-    assert sf_a.text == "Helsinki : WSOY, 2010"
+    sf_codes = [sf.get("code") for sf in df260.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df260.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a"]
+    assert sf_values == ["Helsinki : WSOY, 2010"]
+
+
+def test_emit_marcxml_emits_260_with_only_place_and_date() -> None:
+    """When $b agent is absent but $c date is present, $a takes a
+    trailing comma (the ISBD separator before $c)."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    _add_publication_activity(g, m, place="London", date="1999")
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df260 = root.find(f"{{{MARC21_NS}}}datafield[@tag='260']")
+    assert df260 is not None
+    sf_codes = [sf.get("code") for sf in df260.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df260.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "c"]
+    assert sf_values == ["London,", "1999"]
 
 
 def test_emit_marcxml_emits_336_337_338_rda_descriptors() -> None:
