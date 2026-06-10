@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from lxml import etree
 from rdflib import RDF, Graph, Literal, URIRef
+from rdflib.namespace import RDFS
 
 from bffi_pipeline.observability.events import StageEventEmitter, set_active_emitter
 from bffi_pipeline.provenance.vocab import BFFI, bind_canonical_prefixes
@@ -237,6 +238,73 @@ def test_emit_marcxml_emits_022_issn_datafield() -> None:
     sf_a = df022.find(f"{{{MARC21_NS}}}subfield[@code='a']")
     assert sf_a is not None
     assert sf_a.text == "0028-0836"
+
+
+def test_emit_marcxml_emits_300_physical_description() -> None:
+    """bffi:extent → bffi:Extent → rdfs:label produces MARC 300 \\$a;
+    bffi:dimensions on the Manifestation produces \\$c."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    extent_block = URIRef("http://example.org/extent-1")
+    g.add((extent_block, RDF.type, BFFI.Extent))
+    g.add((extent_block, RDFS.label, Literal("136 pages")))
+    g.add((manifestation, BFFI.extent, extent_block))
+    g.add((manifestation, BFFI.dimensions, Literal("24 cm")))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df300 = root.find(f"{{{MARC21_NS}}}datafield[@tag='300']")
+    assert df300 is not None
+    sf_a = df300.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    sf_c = df300.find(f"{{{MARC21_NS}}}subfield[@code='c']")
+    assert sf_a is not None and sf_a.text == "136 pages"
+    assert sf_c is not None and sf_c.text == "24 cm"
+
+
+def test_emit_marcxml_omits_300_when_no_physical_data() -> None:
+    """No extent or dimensions → no 300 datafield."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='300']") is None
+
+
+def test_emit_marcxml_emits_041_language_codes() -> None:
+    """bffi:language URIs (LoC language vocab) map to MARC 041 \\$a using
+    the URI's 3-letter local name. Multiple languages → multiple \\$a
+    subfields, sorted for determinism."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    for code in ("eng", "fin", "swe"):
+        g.add(
+            (
+                manifestation,
+                BFFI.language,
+                URIRef(f"http://id.loc.gov/vocabulary/languages/{code}"),
+            )
+        )
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df041 = root.find(f"{{{MARC21_NS}}}datafield[@tag='041']")
+    assert df041 is not None
+    sf_a_values = [sf.text for sf in df041.findall(f"{{{MARC21_NS}}}subfield[@code='a']")]
+    assert sf_a_values == ["eng", "fin", "swe"]  # sorted
 
 
 def test_emit_marcxml_skips_unsupported_identifier_schemes() -> None:

@@ -35,9 +35,11 @@ from typing import Final
 
 from lxml import etree
 from rdflib import RDF, Graph, Literal, URIRef
+from rdflib.namespace import RDFS
 
 from bffi_pipeline.observability.events import emit_if_active
 from bffi_pipeline.provenance.vocab import BFFI
+from bffi_pipeline.rdf_utils import local_name
 
 STAGE: Final[str] = "bffi2marc"
 
@@ -170,6 +172,53 @@ class _IdentifierEmit:
     value: str
 
 
+@dataclass(frozen=True)
+class _PhysicalDescription:
+    """MARC 300 components: extent (\\$a) and dimensions (\\$c)."""
+
+    extent: str | None
+    dimensions: str | None
+
+
+def _extract_physical_description(
+    graph: Graph, manifestation: URIRef
+) -> _PhysicalDescription | None:
+    """Walk ``?m bffi:extent / bffi:Extent / rdfs:label`` for the extent
+    literal and ``?m bffi:dimensions`` for the dimensions literal.
+
+    Returns ``None`` when neither is present (no MARC 300 to emit).
+    First extent and first dimensions value win; multi-extent records
+    are a follow-on (rare in the corpus)."""
+    extent_label: str | None = None
+    for extent_block in graph.objects(manifestation, BFFI.extent):
+        label = next(graph.objects(extent_block, RDFS.label), None)
+        if isinstance(label, Literal):
+            extent_label = str(label)
+            break
+    dim_value = next(graph.objects(manifestation, BFFI.dimensions), None)
+    dimensions = str(dim_value) if isinstance(dim_value, Literal) else None
+    if extent_label is None and dimensions is None:
+        return None
+    return _PhysicalDescription(extent=extent_label, dimensions=dimensions)
+
+
+def _extract_language_codes(graph: Graph, manifestation: URIRef) -> list[str]:
+    """Walk every ``?m bffi:language`` object — typically a LoC language
+    vocabulary URI like ``<http://id.loc.gov/vocabulary/languages/eng>``.
+    Returns the 3-letter MARC language codes (the URI's local name).
+
+    Deduped, deterministic ordering (sorted). Languages live on the
+    Manifestation per marc2bibframe2's MARC 008 / 041 emit pattern.
+    Maps to MARC 041 \\$a (one per language).
+    """
+    codes = {
+        local_name(obj)
+        for obj in graph.objects(manifestation, BFFI.language)
+        if isinstance(obj, URIRef)
+    }
+    return sorted(codes)
+
+
 def _extract_identifier_datafields(graph: Graph, manifestation: URIRef) -> list[_IdentifierEmit]:
     """Walk every ``bffi:identifiedBy`` block and convert to a MARC
     datafield emit when its ``bffi:source`` URI is in the dispatch table.
@@ -201,6 +250,8 @@ def _build_marc_record(
     title_parts: _TitleParts | None,
     responsibility: str | None,
     identifiers: list[_IdentifierEmit],
+    language_codes: list[str],
+    physical: _PhysicalDescription | None,
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
     record = etree.Element(f"{_MARC}record")
@@ -210,11 +261,17 @@ def _build_marc_record(
     cf001 = etree.SubElement(record, f"{_MARC}controlfield", tag="001")
     cf001.text = bib_id
 
-    # 020 ISBN / 022 ISSN come before 245 in MARC ordering convention.
+    # 020 ISBN / 022 ISSN come before 041 / 245 / 300 in MARC tag order.
     for ident in identifiers:
         df = etree.SubElement(record, f"{_MARC}datafield", tag=ident.tag, ind1=" ", ind2=" ")
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
         sf_a.text = ident.value
+
+    if language_codes:
+        df041 = etree.SubElement(record, f"{_MARC}datafield", tag="041", ind1=" ", ind2=" ")
+        for code in language_codes:
+            sf_a = etree.SubElement(df041, f"{_MARC}subfield", code="a")
+            sf_a.text = code
 
     if title_parts is not None:
         df245 = etree.SubElement(record, f"{_MARC}datafield", tag="245", ind1="0", ind2="0")
@@ -226,6 +283,15 @@ def _build_marc_record(
         if responsibility is not None:
             sf_c = etree.SubElement(df245, f"{_MARC}subfield", code="c")
             sf_c.text = responsibility
+
+    if physical is not None:
+        df300 = etree.SubElement(record, f"{_MARC}datafield", tag="300", ind1=" ", ind2=" ")
+        if physical.extent is not None:
+            sf_a = etree.SubElement(df300, f"{_MARC}subfield", code="a")
+            sf_a.text = physical.extent
+        if physical.dimensions is not None:
+            sf_c = etree.SubElement(df300, f"{_MARC}subfield", code="c")
+            sf_c.text = physical.dimensions
 
     return record
 
@@ -245,11 +311,15 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     title_parts = _extract_main_title_parts(graph, manifestation)
     responsibility = _extract_responsibility_statement(graph, manifestation)
     identifiers = _extract_identifier_datafields(graph, manifestation)
+    language_codes = _extract_language_codes(graph, manifestation)
+    physical = _extract_physical_description(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
         title_parts=title_parts,
         responsibility=responsibility,
         identifiers=identifiers,
+        language_codes=language_codes,
+        physical=physical,
     )
     return etree.tostring(
         record,
