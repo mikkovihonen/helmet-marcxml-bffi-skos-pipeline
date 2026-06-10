@@ -111,8 +111,19 @@ The bench surfaced one infrastructure issue and a clean priority-ranked backlog 
 - **Pairing edges**: 134 records went unpaired (98 source-only + 36 reconstructed-only). Likely cause: duplicate `001` values across different source records (the Helmet corpus uses filenames as bib IDs; `001` carries a legacy/source-system identifier that occasionally collides). v0 indexer is last-write-wins; switching to filename-based pairing or composite keys is a small follow-on.
 - **`lost` is dominated by the predictable field families** (top by count): MARC 700 (86 k), 730 (62 k), 650 (55 k), 084 (21 k), 852 (21 k), 008 (19 k), 097 / 091 / 095 (Helmet locals, 60 k combined), 041 (19 k), 260 (19 k), 710 (17 k), 300 (16 k), 740 (15 k), 005 (14 k), 651 (14 k), 092 (11 k), 655 (10 k), 336 / 337 / 338 (29 k combined), 020 ISBN (9 k), 094 (8 k), 500 (7 k), 600 (7 k).
 - **`changed` is dominated by 245** (15,250 instances). v0 reverse converter emits `245 $a` only; source records typically include `$b` subtitle and `$c` responsibility statement — that's the bulk of the drift.
-- ⬜ Steps 6-8 to follow.
+- ✅ **Step 6 — Discriminator routings + Phase 1-3 closures** (commits `bf170a9` → `47f4fa0`, 4 incremental commits). Shipped the full P-56 routing surface in `src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`:
+  - `bflc:marcKey` → `bffi:marcKey` rename (closes `bflc:` to BFFI ns).
+  - Phase 4 discriminator routings: Identifier-scheme (15 LoC subclasses → `bffi:Identifier` + `bffi:source`), Title-variant (4 subclasses → `bffi:Title`), Audio (default Expression axis), Series-link (`bf:hasSeries` → structured `bffi:Relation`), Hub (per-instance marcKey dispatch).
+  - Phase 3 axis-default classes (7 BIBFRAME `bffi-meta:broadMatch` families → Expression-axis default).
+  - Phase 2 axis-default predicates (`bf:instanceOf` / `bf:hasInstance` / `bf:issuance`).
+  - Catch-all `bf:accompaniedBy` → structured `bffi:relation` chain.
+  - Extended Phase 1 in `mappings.py` to walk `rdfs:subPropertyOf` (14 new `bf:*` -> `bffi:*` renames including `bf:agent` / `bf:carrier` / `bf:note` / `bf:source` / `bf:place` / `bf:date` / `bf:content`).
+  176 tests green (32 in `test_routings.py` + 11 in `test_mappings.py`). 20 k bench:
+  - `closed_namespace_residue`: 19,936 (pre) → **66 records (0.3%)** after the full routing set.
+  - Routing counters: 189,344 `bflc_marckey_renamed` · 73,293 Hub · 60,164 axis-default-predicate · 31,034 axis-default-class · 19,465 identifier-scheme · 1,402 title-variant · 1,251 relation-predicate (`bf:accompaniedBy`).
+  - Two true gaps remain (need NLF input or a per-instance decision): `bf:provisionActivityStatement` (102x) and `bf:Statement` (4x). Both lack any `bffi:*` counterpart in `lkd.rdf`.
+- ⬜ Steps 7-8 to follow.
 
 ## Suggested next step
 
-End-to-end smoke on the dev sample is now ready: `bffi-pipeline marc-to-bibframe` → `bibframe-to-bffi` → `bffi-to-marc` → `roundtrip-eval` produces the cataloguer-review HTML showing the v0 diff distribution. Use that to prioritise step-4 follow-on commits (each MARC field family — contributors / identifier schemes / subjects / provision activity / notes / language) by which diff status counts dominate. Then step 6 (p-56 Phase 4 discriminator routings) lands the BFFI-side correctness that the eval harness gates.
+The BFFI graph is now ~99.7% closed-namespace clean on the 20 k bench. The eval-harness `lost` distribution is unchanged because the BFFI → MARC reverse converter still emits only `leader` + `001` + `245 $a` — every other MARC field reads from BFFI structures the reverse converter doesn't visit yet. Step-4 follow-ons (one MARC field family per commit, prioritised by the `lost` distribution: 700 added entries → 730 added uniform titles → 650 subjects → Helmet local classifications → 008 control field → 041 language → 260 publication → 020 ISBN → …) translate the closed BFFI shape back into MARC and watch the `lost` count fall. Step 6 has already done the structural setup these follow-ons need (every BFFI block now uses the right anchor class + discriminator predicate).
