@@ -59,6 +59,7 @@ from typing import Final
 
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, RDFS
+from rdflib.term import Node
 
 from bffi_pipeline.bibframe import BibframeOntology, load_ontology
 
@@ -179,19 +180,52 @@ _WORK_AXIS_SIGNALS: Final[frozenset[URIRef]] = frozenset(
     }
 )
 
-#: P-56 Phase 2 broadMatch predicates. Each maps to a single default
-#: ``bffi:*`` substitute when no per-instance discriminator applies.
-#: The mapping doc lists multiple candidates per ``bf:*`` here; we pick
-#: the one that lines up with Helmet's main-stream usage:
+#: Per-statement axis discriminator: BIBFRAME predicates that BFFI
+#: splits into Work-axis and Expression-axis variants. Each entry maps
+#: a ``bf:*`` predicate to a ``(work_axis_pick, expression_axis_pick)``
+#: tuple. :func:`route_axis_default_predicates` picks per statement by
+#: inspecting the rdf:type of either the subject or the object,
+#: depending on the predicate's direction:
 #:
-#:   - ``bf:instanceOf`` → ``bffi:workManifested`` (Manifestation -> Work)
-#:   - ``bf:hasInstance`` → ``bffi:manifestationOfWork`` (Work -> Manifestation)
-#:   - ``bf:issuance`` → ``bffi:issuance`` (over ``bffi:extensionPlan``)
-AXIS_DEFAULT_PREDICATES: Final[dict[URIRef, URIRef]] = {
-    BF.instanceOf: BFFI.workManifested,
-    BF.hasInstance: BFFI.manifestationOfWork,
-    BF.issuance: BFFI.issuance,
+#:   - ``bf:instanceOf`` (Manifestation → Work/Expression): inspect the
+#:     OBJECT's rdf:type. Object typed bffi:Expression (or descendant)
+#:     → ``bffi:expressionManifested``; otherwise → ``bffi:workManifested``.
+#:   - ``bf:hasInstance`` (Work/Expression → Manifestation): inspect the
+#:     SUBJECT's rdf:type. Subject typed bffi:Expression (or descendant)
+#:     → ``bffi:manifestationOfExpression``; otherwise →
+#:     ``bffi:manifestationOfWork``.
+#:   - ``bf:issuance`` is a flat rename — both tuple slots are
+#:     ``bffi:issuance``. The mapping-doc-listed alternative
+#:     ``bffi:extensionPlan`` has a different domain (Work) AND a
+#:     different range class (bffi:ExtensionPlan vs bffi:Issuance), so
+#:     it's not a per-statement substitute — it's a separate concept
+#:     entirely, with zero corpus prevalence in the Helmet bench.
+AXIS_DEFAULT_PREDICATES: Final[dict[URIRef, tuple[URIRef, URIRef]]] = {
+    BF.instanceOf: (BFFI.workManifested, BFFI.expressionManifested),
+    BF.hasInstance: (BFFI.manifestationOfWork, BFFI.manifestationOfExpression),
+    BF.issuance: (BFFI.issuance, BFFI.issuance),
 }
+
+#: ``rdf:type`` assertions that signal a subject (or object) is on the
+#: Expression axis. The set covers the BFFI Expression class and its
+#: declared descendants in ``lkd.rdf`` — :func:`route_axis_default_predicates`
+#: uses this as the per-statement discriminator. Any axis-default
+#: predicate statement whose discriminator-side type intersects this
+#: set routes to the Expression-axis variant; everything else lands on
+#: the Work-axis default.
+_EXPRESSION_AXIS_SIGNALS: Final[frozenset[URIRef]] = frozenset(
+    {
+        BFFI.Expression,
+        BFFI.AggregatingExpression,
+        BFFI.MonographExpression,
+        BFFI.SeriesExpression,
+        BFFI.SerialExpression,
+        BFFI.MusicAudioExpression,
+        BFFI.MovingImageExpression,
+        BFFI.CartographyExpression,
+        BFFI.NonMusicAudioExpression,
+    }
+)
 
 #: BIBFRAME ``bf:Title`` subclasses that BFFI collapses into the
 #: ``bffi:Title`` anchor + ``bffi:marcKey`` discriminator.
@@ -534,25 +568,73 @@ def route_provision_activity_statement(graph: Graph) -> dict[str, int]:
     }
 
 
-def route_axis_default_predicates(graph: Graph) -> int:
-    """Rewrite ``bf:instanceOf`` / ``bf:hasInstance`` / ``bf:issuance``
-    to the default ``bffi:*`` substitute per :data:`AXIS_DEFAULT_PREDICATES`.
+def _expression_axis(types: set[Node]) -> bool:
+    """Helper: does ``types`` contain any Expression-axis BFFI signal?"""
+    return any(t in _EXPRESSION_AXIS_SIGNALS for t in types)
 
-    These are ``bffi-meta:broadMatch`` predicates in `lkd.rdf` (Phase 2
-    of p-56). The defaults match Helmet's main-stream usage: the
-    Manifestation manifests a Work (``bffi:workManifested``); the Work
-    has Manifestations (``bffi:manifestationOfWork``); the issuance
-    pattern is the simple ``bffi:issuance`` (not the
-    ``bffi:extensionPlan`` sibling concept reserved for serials /
-    integrating resources).
+
+def route_axis_default_predicates(graph: Graph) -> dict[str, int]:
+    """Per-statement axis discriminator for the broadMatch predicates
+    ``bf:instanceOf`` / ``bf:hasInstance`` / ``bf:issuance``.
+
+    Each statement is routed individually based on the rdf:type
+    assertions on the discriminator-side node — see
+    :data:`AXIS_DEFAULT_PREDICATES`. The signal direction differs per
+    predicate:
+
+      - ``bf:instanceOf`` (Manifestation → Work/Expression): the
+        OBJECT carries the axis signal.
+      - ``bf:hasInstance`` (Work/Expression → Manifestation): the
+        SUBJECT carries the axis signal.
+      - ``bf:issuance``: the alternative ``bffi:extensionPlan`` has
+        different domain AND range (it's a Work-side concept with a
+        different range class entirely), so this is a flat rename to
+        ``bffi:issuance`` regardless of signal.
+
+    Returns a counter dict split per predicate-and-axis so the
+    observability summary surfaces the discriminator's per-direction
+    effect.
     """
-    rewritten = 0
-    for bf_pred, bffi_pred in AXIS_DEFAULT_PREDICATES.items():
-        for s, _, o in list(graph.triples((None, bf_pred, None))):
-            graph.remove((s, bf_pred, o))
-            graph.add((s, bffi_pred, o))
-            rewritten += 1
-    return rewritten
+    counters = {
+        "instance_of_work": 0,
+        "instance_of_expression": 0,
+        "has_instance_of_work": 0,
+        "has_instance_of_expression": 0,
+        "issuance": 0,
+    }
+
+    # bf:instanceOf — discriminate by object's type.
+    work_pred, expr_pred = AXIS_DEFAULT_PREDICATES[BF.instanceOf]
+    for s, _, o in list(graph.triples((None, BF.instanceOf, None))):
+        graph.remove((s, BF.instanceOf, o))
+        object_types = set(graph.objects(o, RDF.type))
+        if _expression_axis(object_types):
+            graph.add((s, expr_pred, o))
+            counters["instance_of_expression"] += 1
+        else:
+            graph.add((s, work_pred, o))
+            counters["instance_of_work"] += 1
+
+    # bf:hasInstance — discriminate by subject's type.
+    work_pred, expr_pred = AXIS_DEFAULT_PREDICATES[BF.hasInstance]
+    for s, _, o in list(graph.triples((None, BF.hasInstance, None))):
+        graph.remove((s, BF.hasInstance, o))
+        subject_types = set(graph.objects(s, RDF.type))
+        if _expression_axis(subject_types):
+            graph.add((s, expr_pred, o))
+            counters["has_instance_of_expression"] += 1
+        else:
+            graph.add((s, work_pred, o))
+            counters["has_instance_of_work"] += 1
+
+    # bf:issuance — flat rename (both tuple slots equal bffi:issuance).
+    flat_pred, _ = AXIS_DEFAULT_PREDICATES[BF.issuance]
+    for s, _, o in list(graph.triples((None, BF.issuance, None))):
+        graph.remove((s, BF.issuance, o))
+        graph.add((s, flat_pred, o))
+        counters["issuance"] += 1
+
+    return counters
 
 
 # --- top-level entry point ----------------------------------------------
@@ -576,11 +658,11 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "series_link": route_series_links(graph),
         "relation_predicate": route_relation_predicates(graph),
         "hub": route_hubs(graph),
-        "axis_default_predicate": route_axis_default_predicates(graph),
     }
-    # The axis-default class routing and the provision-activity-statement
-    # routing both split their counters into per-discriminator buckets so
-    # the observability summary surfaces the pick distribution.
+    # The remaining three routings each split their counters into
+    # per-discriminator buckets so the observability summary surfaces
+    # the pick distribution per axis / direction.
+    counters.update(route_axis_default_predicates(graph))
     counters.update(route_axis_default_classes(graph))
     counters.update(route_provision_activity_statement(graph))
     # Runs LAST. By the time we get here, every legitimate bf:* URI

@@ -7,7 +7,6 @@ from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     AXIS_DEFAULT_CLASSES,
-    AXIS_DEFAULT_PREDICATES,
     BF,
     BFFI,
     BFLC,
@@ -263,7 +262,11 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "hub": 1,
         "axis_default_class_work": 0,
         "axis_default_class_expression": 1,  # bf:Audio → NonMusicAudioExpression
-        "axis_default_predicate": 0,
+        "instance_of_work": 0,
+        "instance_of_expression": 0,
+        "has_instance_of_work": 0,
+        "has_instance_of_expression": 0,
+        "issuance": 0,
         "provision_statement_to_date": 0,
         "provision_statement_to_note": 0,
         "dropped_undeclared_bf": 0,
@@ -561,18 +564,96 @@ def test_route_relation_predicates_skips_bf_hasseries() -> None:
     assert (m, BF.hasSeries, s) in g
 
 
-def test_route_axis_default_predicates_rewrites_each_predicate() -> None:
-    """``bf:instanceOf`` / ``bf:hasInstance`` / ``bf:issuance`` rewrite to
-    their default ``bffi:*`` counterparts per :data:`AXIS_DEFAULT_PREDICATES`."""
+def test_route_axis_default_predicates_instance_of_picks_work_when_object_untyped() -> None:
+    """``bf:instanceOf`` with an untyped object lands on the Work-axis
+    default ``bffi:workManifested`` — the safe pick matching marc2bibframe2's
+    predominant emit (Instance → Work)."""
     g = Graph()
-    for i, bf_pred in enumerate(AXIS_DEFAULT_PREDICATES):
-        s = URIRef(f"http://example.org/s-{i}")
-        o = URIRef(f"http://example.org/o-{i}")
-        g.add((s, bf_pred, o))
-    rewritten = route_axis_default_predicates(g)
-    assert rewritten == len(AXIS_DEFAULT_PREDICATES)
-    for i, (bf_pred, bffi_pred) in enumerate(AXIS_DEFAULT_PREDICATES.items()):
-        s = URIRef(f"http://example.org/s-{i}")
-        o = URIRef(f"http://example.org/o-{i}")
-        assert (s, bffi_pred, o) in g
-        assert (s, bf_pred, o) not in g
+    inst = URIRef("http://example.org/inst")
+    work = URIRef("http://example.org/work")
+    g.add((inst, BF.instanceOf, work))
+
+    counters = route_axis_default_predicates(g)
+    assert counters["instance_of_work"] == 1
+    assert counters["instance_of_expression"] == 0
+    assert (inst, BFFI.workManifested, work) in g
+    assert (inst, BF.instanceOf, work) not in g
+
+
+def test_route_axis_default_predicates_instance_of_expression_object_picks_expression() -> None:
+    """``bf:instanceOf`` with an object typed bffi:Expression lands on
+    ``bffi:expressionManifested`` — the discriminator catches the
+    Expression-axis signal on the object side."""
+    g = Graph()
+    inst = URIRef("http://example.org/inst")
+    expr = URIRef("http://example.org/expr")
+    g.add((expr, RDF.type, BFFI.Expression))
+    g.add((inst, BF.instanceOf, expr))
+
+    counters = route_axis_default_predicates(g)
+    assert counters["instance_of_expression"] == 1
+    assert counters["instance_of_work"] == 0
+    assert (inst, BFFI.expressionManifested, expr) in g
+
+
+def test_route_axis_default_predicates_has_instance_picks_work_when_subject_untyped() -> None:
+    """``bf:hasInstance`` with an untyped subject lands on
+    ``bffi:manifestationOfWork`` (the inverse-direction default)."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    inst = URIRef("http://example.org/inst")
+    g.add((work, BF.hasInstance, inst))
+
+    counters = route_axis_default_predicates(g)
+    assert counters["has_instance_of_work"] == 1
+    assert (work, BFFI.manifestationOfWork, inst) in g
+
+
+def test_route_axis_default_predicates_has_instance_expression_subject_picks_expression() -> None:
+    """``bf:hasInstance`` from an Expression URI lands on
+    ``bffi:manifestationOfExpression`` — discriminator on subject side."""
+    g = Graph()
+    expr = URIRef("http://example.org/expr")
+    inst = URIRef("http://example.org/inst")
+    g.add((expr, RDF.type, BFFI.SeriesExpression))  # a leaf Expression-axis class
+    g.add((expr, BF.hasInstance, inst))
+
+    counters = route_axis_default_predicates(g)
+    assert counters["has_instance_of_expression"] == 1
+    assert (expr, BFFI.manifestationOfExpression, inst) in g
+
+
+def test_route_axis_default_predicates_issuance_is_flat_rename_regardless_of_context() -> None:
+    """``bf:issuance`` always renames to ``bffi:issuance`` — the
+    mapping-doc-listed alternative ``bffi:extensionPlan`` has a
+    different domain AND range, so it isn't a per-statement substitute."""
+    g = Graph()
+    # Manifestation context
+    inst = URIRef("http://example.org/inst")
+    serl = URIRef("http://id.loc.gov/vocabulary/issuance/serl")
+    g.add((inst, BF.issuance, serl))
+    # Work context — same outcome.
+    work = URIRef("http://example.org/work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((work, BF.issuance, serl))
+
+    counters = route_axis_default_predicates(g)
+    assert counters["issuance"] == 2
+    assert (inst, BFFI.issuance, serl) in g
+    assert (work, BFFI.issuance, serl) in g
+    # And neither bf:issuance triple survives.
+    assert (inst, BF.issuance, serl) not in g
+    assert (work, BF.issuance, serl) not in g
+
+
+def test_route_axis_default_predicates_counter_dict_shape() -> None:
+    """Empty graph: counter dict carries all five keys at zero — locks
+    the shape downstream observability code depends on."""
+    counters = route_axis_default_predicates(Graph())
+    assert counters == {
+        "instance_of_work": 0,
+        "instance_of_expression": 0,
+        "has_instance_of_work": 0,
+        "has_instance_of_expression": 0,
+        "issuance": 0,
+    }

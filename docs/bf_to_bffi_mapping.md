@@ -513,7 +513,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:grantingInstitution` | *semantic-shift* | `bffi:grantingInstitution` | bffi-meta:closeMatch | — |
 | `bf:hasDerivative` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:hasExpression` | *semantic-shift* | `bffi:hasExpression` | bffi-meta:closeMatch | — |
-| `bf:hasInstance` | **routed** | `bffi:manifestationOfWork` (axis-default) | axis-pick (Expression default) | `route_axis_default_predicates` |
+| `bf:hasInstance` | **routed** | `bffi:manifestationOfWork` (Work-axis) / `bffi:manifestationOfExpression` (Expression-axis) | discriminator: subject's/object's Expression-axis signal | `route_axis_default_predicates` |
 | `bf:hasItem` | **clean** | `bffi:hasItem` | owl:equivalentProperty | — |
 | `bf:hasPart` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:hasReproduction` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
@@ -528,11 +528,11 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:immediateAcquisition` | **clean** | `bffi:immediateAcquisition` | owl:equivalentProperty | — |
 | `bf:index` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:indexOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
-| `bf:instanceOf` | **routed** | `bffi:workManifested` (axis-default) | axis-pick (Expression default) | `route_axis_default_predicates` |
+| `bf:instanceOf` | **routed** | `bffi:workManifested` (Work-axis) / `bffi:expressionManifested` (Expression-axis) | discriminator: subject's/object's Expression-axis signal | `route_axis_default_predicates` |
 | `bf:instrument` | **GAP** | — | — | — |
 | `bf:instrumentalType` | **GAP** | — | — | — |
 | `bf:intendedAudience` | **clean** | `bffi:intendedAudience` | owl:equivalentProperty | — |
-| `bf:issuance` | **routed** | `bffi:issuance` (axis-default) | axis-pick (Expression default) | `route_axis_default_predicates` |
+| `bf:issuance` | **routed** | `bffi:issuance` (flat rename) | flat rename (no per-statement axis alternative) | `route_axis_default_predicates` |
 | `bf:itemOf` | **clean** | `bffi:itemOf` | owl:equivalentProperty | — |
 | `bf:itemPortion` | **clean** | `bffi:itemPortion` | owl:equivalentProperty | — |
 | `bf:keyMode` | **GAP** | — | — | — |
@@ -752,13 +752,26 @@ The counter dict the routing returns is split into `axis_default_class_work` and
 
 ## Axis-default predicate routings
 
-Three `bf:*` predicates have multiple `bffi-meta:broadMatch` mappings in `lkd.rdf`. The implementation picks the one that lines up with Helmet's main-stream usage:
+Three `bf:*` predicates have multiple `bffi-meta:broadMatch` mappings in `lkd.rdf`. Two are per-statement-discriminated (the routing inspects the axis-signal side's `rdf:type` to pick Work vs Expression); the third is a flat rename because the listed alternative has a different domain and range entirely. Implementation in `route_axis_default_predicates` (`src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`):
 
-| `bf:*` predicate | Default → `bffi:*` | Notes |
+| `bf:*` predicate | Routing | Discriminator side | Work-axis pick | Expression-axis pick |
+|---|---|---|---|---|
+| `bf:instanceOf` | per-statement | object's `rdf:type` | `bffi:workManifested` | `bffi:expressionManifested` |
+| `bf:hasInstance` | per-statement | subject's `rdf:type` | `bffi:manifestationOfWork` | `bffi:manifestationOfExpression` |
+| `bf:issuance` | flat rename | — | `bffi:issuance` | `bffi:issuance` |
+
+**Why the discriminator works.** `bf:instanceOf` is "Manifestation → Work/Expression" — its object is the entity being realized. If that object is typed `bffi:Expression` (or any descendant — `bffi:SeriesExpression`, `bffi:MonographExpression`, …), the statement is realizing-an-Expression and lands on `bffi:expressionManifested`. Same logic inverted for `bf:hasInstance`: the SUBJECT is the entity-having-instances, so its type drives the pick.
+
+**Why `bf:issuance` doesn't discriminate.** lkd.rdf gives both predicates as `bffi-meta:broadMatch bf:issuance`, but they have different domains AND different ranges:
+
+| Term | Domain | Range |
 |---|---|---|
-| `bf:instanceOf` | `bffi:workManifested` | Manifestation → Work direction. Alt: `bffi:expressionManifested` when M3 emit points at an Expression. |
-| `bf:hasInstance` | `bffi:manifestationOfWork` | Work → Manifestation direction. Alt: `bffi:manifestationOfExpression`. |
-| `bf:issuance` | `bffi:issuance` | Over `bffi:extensionPlan` (which is a sibling concept for serials / integrating resources, not the basic issuance pattern). |
+| `bffi:issuance` | `bffi:Manifestation` | `bffi:Issuance` |
+| `bffi:extensionPlan` | `bffi:Work` | `bffi:ExtensionPlan` |
+
+`bffi:extensionPlan` is a Work-side concept pointing at an `ExtensionPlan` instance — not a per-statement alternative for `bf:issuance` (which carries the LoC issuance vocabulary code as its object: `serl`, `mono`, `intg`, `mulu`). Routing a `bf:issuance` statement to `bffi:extensionPlan` would mis-type the object class. Helmet's corpus has zero records that would warrant the Work-side variant; if a future case needs it, that's a separate (corpus-derived) routing decision.
+
+**Observability.** The routing returns a counter dict split per predicate-and-axis: `instance_of_work`, `instance_of_expression`, `has_instance_of_work`, `has_instance_of_expression`, `issuance`. The next 20 k bench surfaces the per-axis distribution per run.
 
 ## URI-fragment discriminator routing — `bf:provisionActivityStatement`
 

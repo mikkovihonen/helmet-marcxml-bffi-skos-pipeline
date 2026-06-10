@@ -150,11 +150,20 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
             link_kind="structured-relation chain",
         )
 
-    for bf_pred, bffi_pred in _r.AXIS_DEFAULT_PREDICATES.items():
+    for bf_pred, (work_pick, expr_pick) in _r.AXIS_DEFAULT_PREDICATES.items():
+        if work_pick == expr_pick:
+            replacement = f"`bffi:{local_name(work_pick)}` (flat rename)"
+            link_kind = "flat rename (no per-statement axis alternative)"
+        else:
+            replacement = (
+                f"`bffi:{local_name(work_pick)}` (Work-axis) / "
+                f"`bffi:{local_name(expr_pick)}` (Expression-axis)"
+            )
+            link_kind = "discriminator: subject's/object's Expression-axis signal"
         registry[bf_pred] = _Routing(
             handler="route_axis_default_predicates",
-            replacement=f"`bffi:{local_name(bffi_pred)}` (axis-default)",
-            link_kind="axis-pick (Expression default)",
+            replacement=replacement,
+            link_kind=link_kind,
         )
 
     registry[_r.BF.provisionActivityStatement] = _Routing(
