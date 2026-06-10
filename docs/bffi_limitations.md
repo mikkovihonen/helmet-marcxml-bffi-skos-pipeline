@@ -135,10 +135,9 @@ cannot be preserved verbatim.
 vocabulary survive. Records originally tagged with the legacy
 language-suffixed form lose the convention marker; the
 bibliographic content (which vocab, which subject term) is
-intact. P-51 (`docs/plans/proposed/p-51-subject-vocab-language-suffix.md`)
-proposes synthesis options (e.g., re-attach `/fin` from the `$a`
-literal's language tag) — those are convention-restoration, not
-data restoration; deferred until the production
+intact. Synthesis options exist (e.g., re-attach `/fin` from the
+`$a` literal's language tag at conversion time) but they restore
+the convention marker, not the data; deferred until the production
 diff residue signals the convention-noise is worth the policy
 call.
 
@@ -397,15 +396,13 @@ directly.
 
 **Closed set.** Anything NOT in the two tables above must be
 emitted as `bffi:*` if a `bffi:*` alias exists in `lkd.rdf`. The
-`tests/unit/test_bffi_namespace_discipline.py` test enforces that
-every `bffi:*` term in code or SPARQL exists in `lkd.rdf`; a
-companion audit (the script under § "Verification of the alias
-mapping" in `docs/plans/in-progress/p-53-bffi-aliased-terms-migration.md`)
-re-derives the alias mapping from `lkd.rdf` and flags new aliases
-worth migrating. **Adding a new `bf:*` emit to canonical.ttl
-requires either an entry in one of the two tables above (with
-reasoning) or a migration plan to the `bffi:*` counterpart if one
-exists.**
+namespace-discipline test in `tests/` enforces that every `bffi:*`
+term in code or SPARQL exists in `lkd.rdf`, and an rdflib-based
+audit (see `docs/bf_to_bffi_mapping.md`) re-derives the alias
+mapping from `lkd.rdf` and flags new aliases worth migrating.
+**Adding a new `bf:*` emit to the canonical graph requires an
+entry in one of the two tables above (with reasoning); otherwise
+the conversion routes to the `bffi:*` counterpart.**
 
 **Boundary discipline.** This list is about what `canonical.ttl`
 carries — the NLF-shippable surface. Stages and boundaries that
@@ -959,7 +956,7 @@ When you find a round-trip case where:
 five elements: case description, source MARC sample, BFFI graph
 state, reconstructed MARC sample, why-BFFI-can't-restore-it, and
 conclusion (acceptable / planned-fix / deferred). Cross-link to
-any related plan in `docs/plans/`.
+any related plan in `docs/plans/` when one applies.
 
 When a `bffi:` extension would fix the case, flag it as a candidate
 for an NLF conversation rather than minting locally — the BFFI
