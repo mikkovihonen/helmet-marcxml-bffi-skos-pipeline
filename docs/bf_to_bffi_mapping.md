@@ -340,7 +340,7 @@ For music key (`bf:KeyMode` class, `bf:keyMode` predicate, and the new BIBFRAME 
 
 NLF could mirror BIBFRAME's PMO absorption by adding BFFI-namespace equivalents — `bffi:MediumOfPerformance`, `bffi:MediumComponent`, `bffi:Ensemble`, `bffi:EnsembleSize`, `bffi:KeyMode`, `bffi:Mode`, `bffi:Tempo`, `bffi:DramaticRole`, `bffi:MediumComponentQualifier` — each `owl:equivalentClass` to its BIBFRAME counterpart, following the existing re-anchor pattern (cf. `bffi:MusicMedium ≡ bf:MusicMedium`). A BFFI emit could then shift from the `bffi:readMarc382` literal to a structured PMO-shaped chain.
 
-NLF asks (Phase 4 blockers, surfaced by BIBFRAME 3.0):
+NLF asks (surfaced by BIBFRAME 3.0):
 
 1. Will BFFI 1.1 absorb the BIBFRAME 3.0 PMO model? (Classes: `MediumOfPerformance`, `MediumComponent`, `Ensemble`, `EnsembleSize`, `KeyMode`, `Mode`, `Tempo`, `DramaticRole`, `MediumComponentQualifier`. Properties: corresponding predicate lowercased forms.)
 2. If yes, will they follow the re-anchor pattern (`bffi:X owl:equivalentClass bf:X`, BFFI subclasses below)?
