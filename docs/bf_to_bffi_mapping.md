@@ -307,15 +307,11 @@ What's lost:
 - **The `bf:hasSeries` predicate URI itself** — consumers walking `?m bf:hasSeries ?s` need to switch to `?m bffi:relation/bffi:associatedResource ?s . ?m bffi:relation/bffi:relationship <…/relationship/series>`. Same selectivity (the relationship URI distinguishes series-membership from other `bffi:relation` uses).
 - **Direct-link convenience** — Series membership now lives on a Relation bnode, not as a flat predicate on the Manifestation. Skosmos rendering needs to walk one extra hop (the Hub/Relation routing patterns already do this; same display infrastructure).
 
-### Music-medium and music-key routing — `bf:mediumOfPerformance` / `bf:mediumComponent` / `bf:ensemble` / `bf:KeyMode` → interim collapse to literal, pending BFFI absorption of BIBFRAME 3.0 PMO
+### Music-medium and music-key routing — `bf:mediumOfPerformance` / `bf:mediumComponent` / `bf:ensemble` / `bf:KeyMode` → collapse to literal
 
-**Version context.** BFFI 1.0.0 (`lkd.rdf`'s `owl:versionInfo`) is based on **BIBFRAME 2.4.0** (per its own `dct:description`). The Library of Congress released **BIBFRAME 3.0 in December 2025**, whose headline change is that NDMSO **absorbed the Performed Music Ontology (PMO) into core BIBFRAME**, adding or refining: `bf:MediumOfPerformance`, `bf:MediumComponent`, `bf:Ensemble`, `bf:EnsembleSize`, `bf:KeyMode`, `bf:Mode`, `bf:Tempo`, `bf:DramaticRole`, `bf:MediumComponentQualifier`, `bf:OpusNumber`, `bf:SerialNumber`, `bf:ThematicCatalogNumber` (each carrying `dct:modified 2025-12-01` with ticket `GH134`). BFFI predates this PMO absorption by ~1.5 years and **does not yet have BFFI-native equivalents** for the new PMO-imported classes.
+**Version context.** BFFI 1.0.0 (`lkd.rdf`'s `owl:versionInfo`) is based on **BIBFRAME 2.4.0**. The Library of Congress released **BIBFRAME 3.0 in December 2025**, whose headline change is that NDMSO **absorbed the Performed Music Ontology (PMO) into core BIBFRAME**, adding or refining: `bf:MediumOfPerformance`, `bf:MediumComponent`, `bf:Ensemble`, `bf:EnsembleSize`, `bf:KeyMode`, `bf:Mode`, `bf:Tempo`, `bf:DramaticRole`, `bf:MediumComponentQualifier`, `bf:OpusNumber`, `bf:SerialNumber`, `bf:ThematicCatalogNumber` (each carrying `dct:modified 2025-12-01` with ticket `GH134`). BFFI does not include BFFI-namespace equivalents for these PMO-imported classes, and won't be extended to add them — the canonical BFFI shape for music-medium and music-key data uses the existing literal-carrier vocabulary.
 
-A BFFI emit can therefore route these terms in two ways:
-
-**1. Interim (works today against BFFI 1.0.0): collapse to `bffi:readMarc382` literal.**
-
-For medium-of-performance terms (`bf:mediumOfPerformance`, `bf:mediumComponent`, `bf:ensemble` and the corresponding BIBFRAME 3.0 classes), route to the existing BFFI chain:
+**Medium-of-performance routing**: collapse the BIBFRAME structured-decomposition tree (`bf:mediumOfPerformance`, `bf:mediumComponent`, `bf:ensemble`, plus the BIBFRAME 3.0 PMO siblings `bf:Ensemble`, `bf:EnsembleSize`, `bf:DramaticRole`, `bf:MediumComponentQualifier`) into a single literal on the existing `bffi:MusicMedium` block:
 
 ```turtle
 <work>
@@ -327,7 +323,7 @@ For medium-of-performance terms (`bf:mediumOfPerformance`, `bf:mediumComponent`,
 
 `bffi:readMarc382` (English label: *"read-only 382 field"*) is the only property `lkd.rdf` declares with `bffi:MusicMedium` as its domain. It holds the verbatim MARC 382 string on the MusicMedium block, with the decomposition (individual instrument / voice / ensemble / part-count) encoded inside the literal as MARC text rather than separate RDF triples. `bffi:musicMedium`'s English label is literally **"music medium of performance"** — semantically the same role as `bf:mediumOfPerformance`.
 
-For music key (`bf:KeyMode` class, `bf:keyMode` predicate, and the new BIBFRAME 3.0 `bf:Mode` / `bf:Tempo`), route to the existing literal:
+**Music-key routing**: collapse the BIBFRAME structured `bf:KeyMode` block (and the BIBFRAME 3.0 PMO siblings `bf:Mode` / `bf:Tempo`) into the existing `bffi:musicKey` Literal datatype property:
 
 ```turtle
 <work> a bffi:MusicWork ;
@@ -336,27 +332,17 @@ For music key (`bf:KeyMode` class, `bf:keyMode` predicate, and the new BIBFRAME 
 
 `bffi:musicKey` has `rdfs:domain bffi:MusicWork`, is a DatatypeProperty (range Literal), and `owl:equivalentProperty bf:musicKey` — corresponds to BIBFRAME's flat-literal `bf:musicKey`, not to the structured `bf:KeyMode` block.
 
-**2. Target (after BFFI absorbs BIBFRAME 3.0 PMO): structured emit matching BFFI's anchor pattern.**
+What survives the migration:
 
-NLF could mirror BIBFRAME's PMO absorption by adding BFFI-namespace equivalents — `bffi:MediumOfPerformance`, `bffi:MediumComponent`, `bffi:Ensemble`, `bffi:EnsembleSize`, `bffi:KeyMode`, `bffi:Mode`, `bffi:Tempo`, `bffi:DramaticRole`, `bffi:MediumComponentQualifier` — each `owl:equivalentClass` to its BIBFRAME counterpart, following the existing re-anchor pattern (cf. `bffi:MusicMedium ≡ bf:MusicMedium`). A BFFI emit could then shift from the `bffi:readMarc382` literal to a structured PMO-shaped chain.
-
-NLF asks (surfaced by BIBFRAME 3.0):
-
-1. Will BFFI 1.1 absorb the BIBFRAME 3.0 PMO model? (Classes: `MediumOfPerformance`, `MediumComponent`, `Ensemble`, `EnsembleSize`, `KeyMode`, `Mode`, `Tempo`, `DramaticRole`, `MediumComponentQualifier`. Properties: corresponding predicate lowercased forms.)
-2. If yes, will they follow the re-anchor pattern (`bffi:X owl:equivalentClass bf:X`, BFFI subclasses below)?
-3. If no, will `bffi:readMarc382` remain the canonical shape (and should it gain a non-"read-only" sibling for write-side use)?
-
-What survives in the interim (current BFFI 1.0.0):
-
-- **Zero new BFFI terms required for the interim emit.** Every term in the collapse chain (`bffi:musicMedium`, `bffi:MusicMedium`, `bffi:readMarc382`, `bffi:musicKey`) is already in `lkd.rdf`.
-- **`bf:MusicMedium` recovery via inference** — `bffi:MusicMedium owl:equivalentClass bf:MusicMedium`; the BIBFRAME 2.x class is directly reachable. (BIBFRAME 3.0's `bf:MusicMedium` is unchanged by the PMO absorption.)
+- **Zero new BFFI terms required.** Every term in the collapse chain (`bffi:musicMedium`, `bffi:MusicMedium`, `bffi:readMarc382`, `bffi:musicKey`) is already in `lkd.rdf`.
+- **`bf:MusicMedium` recovery via inference** — `bffi:MusicMedium owl:equivalentClass bf:MusicMedium`; the BIBFRAME class is directly reachable. (BIBFRAME 3.0's `bf:MusicMedium` is unchanged by the PMO absorption.)
 - **Round-trip integrity** — a BFFI-to-MARC reconstruction re-emits MARC 382 verbatim from `bffi:readMarc382` (the literal IS the original MARC 382). Music-key reconstruction reads the `bffi:musicKey` literal into MARC 384.
 
-What's lost in the interim (until BFFI absorbs PMO):
+What's lost:
 
 - **Structured-decomposition queries** — `?w bf:musicMedium/bf:mediumComponent ?c` (and the new BIBFRAME 3.0 `bf:Ensemble` / `bf:MediumComponent` chains) don't materialise; consumers needing the components must parse the `bffi:readMarc382` literal or query BIBFRAME directly.
-- **Key/Mode/Tempo separation** — `?w bf:keyMode/bf:mode`, `?w bf:tempo`, the combined `bffi:musicKey "B-flat major"` literal carries the joined key+mode form but doesn't separate them.
-- **Direct PMO-class equivalence** — entities the BIBFRAME 3.0 emit types as `bf:Ensemble` (new in 3.0) have no BFFI class to land on; they collapse into the MusicMedium block.
+- **Key/Mode/Tempo separation** — `?w bf:keyMode/bf:mode`, `?w bf:tempo` — the combined `bffi:musicKey "B-flat major"` literal carries the joined key+mode form but doesn't separate them.
+- **Direct PMO-class equivalence** — entities the BIBFRAME 3.0 emit types as `bf:Ensemble`, `bf:MediumOfPerformance`, `bf:MediumComponent` (added 2025-12-01) have no BFFI class to land on; they collapse into the MusicMedium block.
 
 Sources for the BIBFRAME 3.0 release information:
 

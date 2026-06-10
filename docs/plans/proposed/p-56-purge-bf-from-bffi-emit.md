@@ -1,6 +1,6 @@
 # P-56 — Purge `bf:*` (BIBFRAME) terms from the BFFI emit
 
-**Status**: proposed. **Ship-ready via existing BFFI vocabulary** — the mapping doc resolves every former gap with property-discriminator routings; **NLF input still needed** to confirm whether the routings are the canonical BFFI shape or whether BFFI should grow new terms.
+**Status**: proposed. **Ship-ready via existing BFFI vocabulary** — the mapping doc resolves every former gap with property-discriminator routings using terms already in `lkd.rdf`. NLF will not add new BFFI terms on the basis of this work, so the routings ARE the canonical BFFI shape; NLF input is welcomed for confirmation and per-record-context defaults (e.g., Series axis pick) but does not block ship.
 
 **Scope**: every triple in `canonical.ttl` (the pipeline's BFFI-only emit) must use BFFI / SKOS / DC Terms / PROV-O terms — zero `bf:*` types, zero `bf:*` predicates. BIBFRAME (`bf:*`) stays inside the M3 conversion's INPUT graph (the marc2bibframe2 output the SPARQL CONSTRUCT reads); it must not appear in the output.
 
@@ -55,7 +55,7 @@ What each class / predicate contributes to the migration work (sample bib counts
 
 ## Migration path
 
-Four phases. Phase 1 is the bulk of the mechanical rename and ships standalone. Phases 2 and 3 are per-case decisions on the smaller residue. Phase 4 (true-gap classes) is blocked on NLF.
+Four phases. Phase 1 is the bulk of the mechanical rename and ships standalone. Phases 2 and 3 are per-case decisions on the smaller residue. Phase 4 (former true-gap classes) is resolved by the routing patterns in the mapping doc using existing BFFI vocabulary.
 
 ### Phase 1 — clean rename (no semantic change)
 
@@ -94,42 +94,40 @@ Recommended default: emit the Expression-axis subclass for axis-ambiguous cases 
 
 Risk: medium — wrong choice affects how cataloguers query "what's in series X?" / "what video Expressions exist?".
 
-### Phase 4 — former true-gap classes (now: routing or new terms, NLF-decided)
+### Phase 4 — former true-gap classes (resolved by routing patterns)
 
-The classes once considered Phase-4 blockers (`bf:Hub`, the Identifier subclasses, `bf:VariantTitle`, `bf:Audio`, `bf:KeyMode`, and the predicate `bf:hasSeries`) all have working routings in the mapping doc using existing BFFI vocabulary — the migration is therefore ship-ready. What remains for NLF is the design-decision question per term: **accept the routing as the canonical BFFI shape, or add new BFFI terms?** See the per-class design alternatives in the *Open questions for NLF* section below.
+The classes once considered Phase-4 blockers (`bf:Hub`, the Identifier subclasses, `bf:VariantTitle`, `bf:Audio`, `bf:KeyMode`, and the predicate `bf:hasSeries`) all have working routings in the mapping doc using existing BFFI vocabulary. Since NLF will not add new BFFI terms on the basis of this work, the routings are not provisional — they are the canonical BFFI shape for each term.
 
-Either path is mechanical to implement:
+The Phase-4 implementation is mechanical: emit the property-discriminator shape from the mapping doc (Hub routing, Identifier-scheme routing, Title-variant routing, Series-link routing, Music-medium and music-key routing). The SPARQL emits already use existing BFFI vocabulary; no closed-namespace test changes.
 
-- **NLF accepts the routings**: emit the property-discriminator shape from the mapping doc; the SPARQL emits already use existing BFFI vocabulary, no closed-namespace test changes.
-- **NLF adds new terms**: rename `bf:X` → `bffi:X` in the SPARQL emits; update the closed-namespace test fixture; no logic change beyond the term swap.
-
-This phase still affects the marc-roundtrip converter — the routing currently reads BIBFRAME-side typing (`bf:Hub`, `bf:VariantTitle`, etc.) as a routing key for MARC reconstruction. After Phase 4 ships either way, the converter reads BFFI-side predicates instead (`bffi:marcKey` first-3-chars, `bffi:source` URI, the structured-relation `bffi:relationship`, etc.). The mapping doc's routing callouts show the read-side for each case.
+This phase affects the marc-roundtrip converter — the routing currently reads BIBFRAME-side typing (`bf:Hub`, `bf:VariantTitle`, etc.) as a routing key for MARC reconstruction. After Phase 4 ships, the converter reads BFFI-side predicates instead (`bffi:marcKey` first-3-chars, `bffi:source` URI, the structured-relation `bffi:relationship`, etc.). The mapping doc's routing callouts show the read-side for each case.
 
 ## Open questions for NLF
 
-The mapping doc presents working **routings** for each gap term using existing BFFI vocabulary (the five routing callouts). Those routings unblock the migration without NLF input. The questions below ask NLF whether the **routing patterns are the canonical choice** or whether BFFI should grow new terms instead.
+NLF will not add new BFFI terms on the basis of this migration work. Every gap is therefore resolved by the routing patterns in the mapping doc using existing BFFI vocabulary; the questions below are for **confirmation and per-context defaults**, not term additions.
 
-### Per-class design alternatives
+### Per-class routing confirmations
 
-| BIBFRAME term | Used for | Design alternatives |
+For each former gap term, the mapping doc's routing is the working canonical shape. NLF confirmation requested for each:
+
+| BIBFRAME term | Used for | Canonical BFFI shape (per mapping doc) |
 |---|---|---|
-| `bf:Hub` (1,214 in sample) | MARC 240 / 730 / 740 / aggregate-Work component | (a) accept the Hub routing in mapping doc (route to `bffi:Expression` or `bffi:Work` by facets carried in `bflc:marcKey`); (b) NLF adds `bffi:Hub` to lkd.rdf, BFFI emits the typed class directly; (c) drop the typed shape, keep just `bffi:Title` + `rdfs:label`; (d) mint full `bffi:Work` URIs (semantically wrong for performance recordings, anonymous folk-music titles) |
-| `bf:Isbn` (684) / `bf:Issn` / `bf:Ean` (72) / `bf:AudioIssueNumber` (236) / `bf:OtherIdentifier` | MARC 020 / 022 / 024 / 028 | (a) accept the Identifier-scheme routing in mapping doc (`bffi:Identifier` + `bffi:source <…/identifiers/{scheme}>`); (b) NLF adds the subclass tree (`bffi:Isbn rdfs:subClassOf bffi:Identifier`, etc. — matches the existing `bffi:Local` / `bffi:ShelfMark` pattern); (c) `bffi:OtherIdentifier` folds into `bffi:Local` with `bffi:assigner` discriminator |
-| `bf:VariantTitle` (152) | MARC 246 / 740 ind2=0 (plus the other three BIBFRAME Title subclasses: ParallelTitle, KeyTitle, CollectiveTitle) | (a) accept the Title-variant routing in mapping doc (`bffi:Title` + `bffi:marcKey` discriminator on the MARC tag); (b) NLF adds `bffi:VariantTitle rdfs:subClassOf bffi:Title` + the three siblings |
-| `bf:Series` (386) | MARC 490 / 800 / 810 / 830 series links | Mapping doc routes via the existing axis-split classes (`bffi:SeriesWork` Work-axis / `bffi:SeriesExpression` Expression-axis), plus the `bffi:relation` chain for the linking predicate. Open: which axis is the default for ambiguous cases? |
-| `bf:Audio` | content-type parent of `bf:MusicAudio` / `bf:NonMusicAudio` | (a) accept the Audio routing in mapping doc (route to `bffi:NonMusicAudio*` since marc2bibframe2 emits `bf:Audio` only for non-music); (b) NLF adds `bffi:AudioWork` / `bffi:AudioExpression` umbrella classes |
-| `bf:KeyMode` / `bf:keyMode` | Structured key-mode block (BIBFRAME 3.0, Dec 2025 PMO absorption) | (a) accept the Music-key routing in mapping doc (fold into `bffi:musicKey` Literal); (b) NLF absorbs BIBFRAME 3.0's PMO model (add `bffi:KeyMode` class + `bffi:keyMode` object-property, alongside `bffi:Mode`, `bffi:Tempo`, `bffi:Ensemble`, `bffi:MediumOfPerformance`, `bffi:MediumComponent`, `bffi:EnsembleSize`, `bffi:DramaticRole`, `bffi:MediumComponentQualifier`) |
-| `bf:hasSeries` (120) | Series-link predicate | (a) accept the Series-link routing in mapping doc (`bffi:relation` → `bffi:Relation` bnode with `bffi:relationship <…/relationship/series>` + `bffi:associatedResource <series>`); (b) NLF adds `bffi:hasSeries` (or `bffi:isPartOfSeries`) as a direct linking predicate |
+| `bf:Hub` (1,214 in sample) | MARC 240 / 730 / 740 / aggregate-Work component | Hub routing: route to `bffi:Expression` (when language / arrangement / key / medium / version present in `bflc:marcKey`) or `bffi:Work` (otherwise). Forward the marcKey verbatim as `bffi:marcKey`. |
+| `bf:Isbn` / `bf:Issn` / `bf:Ean` / `bf:AudioIssueNumber` / `bf:OtherIdentifier` | MARC 020 / 022 / 024 / 028 | Identifier-scheme routing: `bffi:Identifier` + `bffi:source <http://id.loc.gov/vocabulary/identifiers/{scheme}>`. The LoC scheme URI is the discriminator. |
+| `bf:VariantTitle` (152) | MARC 246 / 740 ind2=0 (and the other three BIBFRAME Title subclasses: ParallelTitle, KeyTitle, CollectiveTitle) | Title-variant routing: `bffi:Title` + `bffi:marcKey` carrying the original MARC field encoding; the first 3 chars discriminate title kind. |
+| `bf:Series` (386) | MARC 490 / 800 / 810 / 830 series links | Routes via the existing axis-split classes `bffi:SeriesWork` (Work-axis) and `bffi:SeriesExpression` (Expression-axis). |
+| `bf:Audio` | Content-type parent of `bf:MusicAudio` / `bf:NonMusicAudio` | Audio routing: route to `bffi:NonMusicAudio*` (marc2bibframe2 emits `bf:Audio` only for non-music; music emits `bf:MusicAudio` directly). |
+| `bf:KeyMode` / `bf:keyMode` | Structured key-mode block (newly defined in BIBFRAME 3.0 Dec 2025 via PMO absorption) | Music-key routing: fold into the existing `bffi:musicKey` Literal datatype property (`owl:equivalentProperty bf:musicKey`). |
+| `bf:mediumOfPerformance` / `bf:mediumComponent` / `bf:ensemble` (and the BIBFRAME 3.0 PMO siblings: `bf:Ensemble`, `bf:EnsembleSize`, `bf:Mode`, `bf:Tempo`, `bf:DramaticRole`, `bf:MediumComponentQualifier`) | MARC 382 medium of performance | Music-medium routing: collapse into `bffi:musicMedium` → `bffi:MusicMedium` → `bffi:readMarc382` literal carrying the verbatim MARC 382 string. |
+| `bf:hasSeries` (120) | Series-link predicate | Series-link routing: `bffi:relation` → `bffi:Relation` bnode with `bffi:relationship <http://id.loc.gov/vocabulary/relationship/series>` + `bffi:associatedResource <series>`. |
 
 ### Policy-level questions
 
-1. **For each gap term in the table above** — is the mapping doc's routing the canonical BFFI shape, or does BFFI want to add the corresponding term(s)? Confirming the routing choices in the doc closes most of Phase 4 without ontology changes; adding terms is the more invasive path.
+1. **`bf:Series` axis default** — when MARC 490/830 produces a series link, should BFFI default to `bffi:SeriesWork` or `bffi:SeriesExpression`? The mapping doc recommends `bffi:SeriesExpression` for the common case where the bib is a localised Expression-in-series; NLF confirmation would lock the default.
 
-2. **BIBFRAME 3.0 PMO absorption** — will BFFI 1.1 mirror BIBFRAME's December 2025 PMO absorption (adding `bffi:MediumOfPerformance`, `bffi:MediumComponent`, `bffi:Ensemble`, `bffi:EnsembleSize`, `bffi:KeyMode`, `bffi:Mode`, `bffi:Tempo`, `bffi:DramaticRole`, `bffi:MediumComponentQualifier` as `owl:equivalentClass` mirrors)? Until then, the Music-medium routing's interim collapse to `bffi:readMarc382` is the working shape — should it stay even after PMO absorption, or migrate to the structured chain?
+2. **Transition window** — should the rename ship as a hard cut (emit only `bffi:*`), or a one-release transition where both `bffi:X` and the now-inferred parent `bf:X` are emitted, letting downstream consumers migrate? Strict reading of NLF guidance: hard cut.
 
-3. **`bf:Series` axis default** — when MARC 490/830 produces a series link, should BFFI default to `bffi:SeriesWork` or `bffi:SeriesExpression`? (The mapping doc recommends `bffi:SeriesExpression` for the common case where the bib is a localised Expression-in-series; NLF input would lock the default.)
-
-4. **Transition window** — should the rename ship as a hard cut (emit only `bffi:*`), or a one-release transition where both `bffi:X` and the now-inferred parent `bf:X` are emitted, letting downstream consumers migrate? Strict reading of NLF guidance: hard cut.
+3. **Confirmation per routing** — each row in the table above is the working canonical shape. NLF review can flag any routing that diverges from BFFI's design intent. (If a routing must change, the alternative would still need to use existing BFFI vocabulary — no new terms.)
 
 ## Verification
 
