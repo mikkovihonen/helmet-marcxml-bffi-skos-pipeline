@@ -6,13 +6,13 @@ This document maps every `bf:*` (BIBFRAME) term encountered when converting MARC
 
 BFFI's namespace is closed — emit-side BFFI graphs should not carry `bf:*` terms — so every `bf:*` token in the BIBFRAME intermediate needs either a direct BFFI replacement, a routing rule when no direct counterpart exists, or NLF input when no working substitute is yet defined. The mapping below enumerates each case.
 
-The Classes and Predicates tables below are **auto-generated** by `bffi-pipeline regenerate-mapping-tables` (source: `src/bffi_pipeline/diagnostic/mapping_tables.py`). The generator covers every `bf:*` term BIBFRAME 3.0.1 declares (450 in total — 224 classes + 226 properties) and consults three sources:
+The Classes and Predicates tables below are **auto-generated** by the `bffi-pipeline regenerate-mapping-tables` command. The generator covers every `bf:*` term BIBFRAME 3.0.1 declares (450 in total — 224 classes + 226 properties) and consults three sources:
 
-- **`vocab/bibframe.rdf`** — the LoC BIBFRAME ontology (3.0.1, 2025-12-03), vendored. Provides the universe of `bf:*` terms.
-- **`vocab/lkd.rdf`** — BFFI's ontology (1.0.0, based on BIBFRAME 2.4.0), vendored. Provides `bf:*` ↔ `bffi:*` mapping relations (`owl:equivalentClass`, `owl:equivalentProperty`, `rdfs:subPropertyOf`, `bffi-meta:{broadMatch,closeMatch,exactMatch,narrowMatch}`).
-- **`src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`** — the discriminator-routed terms (`bf:Hub`, `bf:Isbn` and other `bf:Identifier` descendants, `bf:VariantTitle` and the other Title subclasses, axis-default classes/predicates, `bf:hasSeries`, `bf:accompaniedBy`, `bf:provisionActivityStatement`). These have no direct `lkd.rdf` mapping but a per-instance handler at conversion time.
+- **The LoC BIBFRAME 3.0.1 ontology** (RDF/XML, 2025-12-03 release). Provides the universe of `bf:*` terms.
+- **The BFFI 1.0.0 ontology** (RDF/XML; based on BIBFRAME 2.4.0). Provides `bf:*` ↔ `bffi:*` mapping relations (`owl:equivalentClass`, `owl:equivalentProperty`, `rdfs:subPropertyOf`, `bffi-meta:{broadMatch,closeMatch,exactMatch,narrowMatch}`).
+- **The discriminator-routed terms** the pipeline applies at conversion time (`bf:Hub`, `bf:Isbn` and other `bf:Identifier` descendants, `bf:VariantTitle` and the other Title subclasses, axis-default classes/predicates, `bf:hasSeries`, `bf:accompaniedBy`, `bf:provisionActivityStatement`). These have no direct BFFI mapping but get per-instance handling.
 
-The two ontologies together let the conversion derive routings the bare `lkd.rdf` walks miss — e.g. the ontology-driven Identifier-scheme routing walks `bf:Identifier`'s 50+ subclasses in BIBFRAME and routes each to `bffi:Identifier + bffi:source <…/identifiers/{scheme}>`. Run `bffi-pipeline diagnose-mappings` for an interactive view of the BIBFRAME ↔ `lkd.rdf` reachability classification.
+The two ontologies together let the conversion derive routings the bare BFFI-side walks miss — e.g. the ontology-driven Identifier-scheme routing walks `bf:Identifier`'s 50+ subclasses in BIBFRAME and routes each to `bffi:Identifier + bffi:source <…/identifiers/{scheme}>`. The `bffi-pipeline diagnose-mappings` command provides an interactive view of the BIBFRAME ↔ BFFI reachability classification.
 
 ### Status legend
 
@@ -20,7 +20,7 @@ The two ontologies together let the conversion derive routings the bare `lkd.rdf
 |---|---|
 | **clean** | Direct 1-hop `owl:equivalentClass` / `owl:equivalentProperty` to a `bffi:*` term. The clean-rename pass handles it; nothing else needed. |
 | **routed** | No direct equivalence; the per-instance data determines which existing `bffi:*` class applies (see the routing callouts below each table). The `Handler` column names the routing function. |
-| **drop** | The triple is deleted at emit time — either because the signal is redundant with another channel (`bf:variantType` is encoded in `bffi:marcKey`'s MARC tag) or because BFFI has no carrier and reaching for a foreign vocabulary would violate namespace discipline. Drops are bounded data losses; each gets an entry in `docs/bffi_limitations.md` (e.g. L-14 for `bf:noteType`). |
+| **drop** | The triple is deleted at emit time — either because the signal is redundant with another channel (`bf:variantType` is encoded in `bffi:marcKey`'s MARC tag) or because BFFI has no carrier and reaching for a foreign vocabulary would violate namespace discipline. Drops are bounded, observable data losses; each is a candidate for a future BFFI extension via NLF. |
 | ***semantic-shift*** | Best reach uses `bffi-meta:broadMatch` / `closeMatch` / `narrowMatch` / `exactMatch`. The BFFI side carries a related but not identical concept. |
 | ***inherited*** | Best reach is a taxonomy walk through `rdfs:subClassOf` / `rdfs:subPropertyOf` chains; an ancestor's clean rename covers the term transitively (e.g. `bf:AbbreviatedTitle` reaches `bffi:Title` via the BIBFRAME class hierarchy + the `bffi:Title ≡ bf:Title` equivalence). |
 | **GAP** | No path of any length and no routing handler — requires NLF input, a new routing, or a future BFFI release. |
@@ -34,7 +34,7 @@ The two ontologies together let the conversion derive routings the bare `lkd.rdf
 
 ## Classes (sorted alphabetically)
 
-The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-tables` (source: `src/bffi_pipeline/diagnostic/mapping_tables.py`) from `vocab/bibframe.rdf` + `vocab/lkd.rdf` + the routing registry in `src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`. Do not edit between the markers — your changes will be lost on the next regeneration.
+The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-tables` command from the LoC BIBFRAME ontology, the BFFI ontology, and the pipeline's discriminator-routing registry. Do not edit between the markers — your changes will be lost on the next regeneration.
 
 <!-- BEGIN AUTO: classes -->
 
@@ -271,7 +271,7 @@ _224 terms total: 144 clean, 64 routed, 12 GAP, 2 inherited, 2 semantic-shift._
 
 ### Hub routing — `bf:Hub` → `bffi:Expression` vs `bffi:Work`
 
-`lkd.rdf` has no `bffi:Hub`. But `bf:Hub` isn't a single semantic — it's BIBFRAME's flat aggregation of two FRBR/RDA-distinct things: a Work-axis reference (e.g. "Beethoven · Symphony no. 5") vs an Expression-axis reference (e.g. "English translation of *À la recherche*"). BFFI separates them. So `bf:Hub` routes to a `bffi:Work`-side or `bffi:Expression`-side class **based on what facets the source MARC entry carries**.
+The BFFI ontology has no `bffi:Hub`. But `bf:Hub` isn't a single semantic — it's BIBFRAME's flat aggregation of two FRBR/RDA-distinct things: a Work-axis reference (e.g. "Beethoven · Symphony no. 5") vs an Expression-axis reference (e.g. "English translation of *À la recherche*"). BFFI separates them. So `bf:Hub` routes to a `bffi:Work`-side or `bffi:Expression`-side class **based on what facets the source MARC entry carries**.
 
 The discriminator is the **marcKey value** carried on every `bf:Hub` bnode in the BIBFRAME input. The routing reads it as **`bflc:marcKey`** (what marc2bibframe2 literally emits — the BFLC-standard predicate); the BFFI-side `bffi:marcKey` doesn't exist as a triple at routing time, only by `owl:equivalentProperty` inference. The marcKey value encodes the full MARC field as `<tag><ind1><ind2> <subfields>` — for example `"73002$aSymphonie no. 5$lenglanti$omikrofilmi"`. The routing reads two things from this string:
 
@@ -299,16 +299,16 @@ Routing table (read top-to-bottom; first match wins):
 
 What survives the migration without NLF input:
 
-- **Zero new BFFI terms required.** Every routed type already exists in `lkd.rdf` (`bffi:Work`, `bffi:Expression`, `bffi:Arrangement`, `bffi:MusicAudioExpression`, `bffi:NotatedMusic`, `bffi:SeriesWork`, `bffi:SeriesExpression`, `bffi:languageOfExpression`, `bffi:musicKey`, `bffi:version`, `bffi:marcKey`).
+- **Zero new BFFI terms required.** Every routed type already exists in the BFFI ontology (`bffi:Work`, `bffi:Expression`, `bffi:Arrangement`, `bffi:MusicAudioExpression`, `bffi:NotatedMusic`, `bffi:SeriesWork`, `bffi:SeriesExpression`, `bffi:languageOfExpression`, `bffi:musicKey`, `bffi:version`, `bffi:marcKey`).
 - **`bf:Work` recovery via inference**: both routes pass through the `bffi:BibframeWork ≡ bf:Work` anchor — `bffi:Work ⊑ bffi:BibframeWork ≡ bf:Work` AND `bffi:Expression ⊑ bffi:BibframeWork ≡ bf:Work`. BIBFRAME consumers reading the canonical see a `bf:Work`-shaped target either way (which is correct — BIBFRAME's `bf:Hub` is itself a `bf:Work`-shaped grouping).
 - **Round-trip integrity**: the Expression-level facets that triggered the routing (`bffi:languageOfExpression`, `bffi:musicKey`, `bffi:version`, `bffi:Arrangement` type) are themselves recoverable via existing BFFI vocabulary — the MARC `$l` / `$o` / `$r` / `$s` subfields can be reconstructed without `bf:Hub` typing.
 - **What's lost**: the BIBFRAME-specific "this is a less-rigorously-described entity" signal. BFFI's view is that sparse-description isn't a separate class — it's just a Work or Expression with minimal metadata. The information loss is ontological, not data.
 
 ### Identifier-scheme routing — every `bf:Identifier` subclass → `bffi:Identifier` + `bffi:source`
 
-`lkd.rdf` declares `bffi:Identifier ≡ bf:Identifier` but only two subclasses below it — `bffi:Local` and `bffi:ShelfMark`. BIBFRAME 3.0.1 declares **50 other subclasses** of `bf:Identifier` (ISBN, ISSN, EAN, DOI, ISNI, OCLC, opus number, music plate, postal registration, video recording number, …) — none of which `lkd.rdf` references. **Their semantic content lives at the predicate level instead**, via the existing `bffi:source` + `bffi:Source` + `bffi:code` triple structure that BFFI already declares.
+The BFFI ontology declares `bffi:Identifier ≡ bf:Identifier` but only two subclasses below it — `bffi:Local` and `bffi:ShelfMark`. BIBFRAME 3.0.1 declares **50 other subclasses** of `bf:Identifier` (ISBN, ISSN, EAN, DOI, ISNI, OCLC, opus number, music plate, postal registration, video recording number, …) — none of which the BFFI ontology references. **Their semantic content lives at the predicate level instead**, via the existing `bffi:source` + `bffi:Source` + `bffi:code` triple structure that BFFI already declares.
 
-The routing is ontology-driven (see `src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`): walk `bf:Identifier`'s descendants in the vendored `vocab/bibframe.rdf` and rewrite each one to the `bffi:Identifier` anchor + a `bffi:source <…/identifiers/<scheme-token>>` triple. The scheme-token derives from the BIBFRAME class local name via CamelCase → kebab-case (`Isbn` → `isbn`, `IssnL` → `issn-l`, `AudioIssueNumber` → `audio-issue-number`, `OclcNumber` → `oclc-number`) with two overrides (`OtherIdentifier` → `other`; `VideoRecordingNumber` → `videorecording-number`). New Identifier subclasses added to BIBFRAME in future ontology revisions get picked up automatically on the next `vocab/bibframe.rdf` refresh — no enum to maintain.
+The routing is ontology-driven: walk `bf:Identifier`'s descendants in the BIBFRAME ontology and rewrite each one to the `bffi:Identifier` anchor + a `bffi:source <…/identifiers/<scheme-token>>` triple. The scheme-token derives from the BIBFRAME class local name via CamelCase → kebab-case (`Isbn` → `isbn`, `IssnL` → `issn-l`, `AudioIssueNumber` → `audio-issue-number`, `OclcNumber` → `oclc-number`) with two overrides (`OtherIdentifier` → `other`; `VideoRecordingNumber` → `videorecording-number`). New Identifier subclasses added to BIBFRAME in future ontology revisions get picked up automatically on the next BIBFRAME refresh — no enum to maintain.
 
 The same pattern applies to local-library identifiers — a BFFI emit typically writes them as:
 
@@ -355,7 +355,7 @@ Optional qualifier carryover when MARC `$q` is present:
 
 What survives the migration without NLF input:
 
-- **Zero new BFFI terms required.** Every emit term (`bffi:Identifier`, `bffi:identifiedBy`, `bffi:source`, `bffi:qualifier`) is already in `lkd.rdf`.
+- **Zero new BFFI terms required.** Every emit term (`bffi:Identifier`, `bffi:identifiedBy`, `bffi:source`, `bffi:qualifier`) is already in the BFFI ontology.
 - **`bf:Identifier` recovery via inference** — `bffi:Identifier ≡ bf:Identifier` is the direct equivalence anchor. BIBFRAME consumers querying "all `bf:Identifier` instances" find them all.
 - **Round-trip integrity** — the `bffi:source` URI deterministically maps back to a MARC field + indicators ($2 scheme code, indicator values), so a BFFI-to-MARC reconstruction can recover `020` / `022` / `024` / `028` without `bf:*` class typing.
 - **Display-layer rendering** — the `bffi:source` URIs benefit from multilingual labels in whichever display config the consumer uses (Skosmos, a custom UI, etc.) — e.g. `"ISBN"@en, "ISBN"@fi, "ISBN"@sv`. Same pattern as labels for any other URI-typed value.
@@ -563,7 +563,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:notation` | **clean** | `bffi:notation` | owl:equivalentProperty | — |
 | `bf:note` | *inherited* | `bffi:note` | rdfs:subPropertyOf | — |
 | `bf:noteFor` | **routed** | `bffi:note` (triple-swap: ?note bf:noteFor ?subj → ?subj bffi:note ?note) | inverse-direction swap | `route_note_for` |
-| `bf:noteType` | **drop** | no BFFI carrier — literal note categorisation isn't modelled in lkd.rdf (registered as L-14 in `docs/bffi_limitations.md`) | no BFFI carrier; documented limitation | `drop_note_type` |
+| `bf:noteType` | **drop** | no BFFI carrier — BFFI 1.0.0 doesn't model literal note categorisation; candidate for a future BFFI extension via NLF | no BFFI carrier; bounded data loss | `drop_note_type` |
 | `bf:numberOfHands` | **GAP** | — | — | — |
 | `bf:originDate` | **clean** | `bffi:originDate` | owl:equivalentProperty | — |
 | `bf:originPlace` | **clean** | `bffi:originPlace` | owl:equivalentProperty | — |
@@ -687,7 +687,7 @@ What's lost:
 
 ### Music-medium and music-key routing — `bf:mediumOfPerformance` / `bf:mediumComponent` / `bf:ensemble` / `bf:KeyMode` → collapse to literal
 
-**Version context.** BFFI 1.0.0 (`lkd.rdf`'s `owl:versionInfo`) is based on **BIBFRAME 2.4.0**. The Library of Congress released **BIBFRAME 3.0 in December 2025**, whose headline change is that NDMSO **absorbed the Performed Music Ontology (PMO) into core BIBFRAME**, adding or refining: `bf:MediumOfPerformance`, `bf:MediumComponent`, `bf:Ensemble`, `bf:EnsembleSize`, `bf:KeyMode`, `bf:Mode`, `bf:Tempo`, `bf:DramaticRole`, `bf:MediumComponentQualifier`, `bf:OpusNumber`, `bf:SerialNumber`, `bf:ThematicCatalogNumber` (each carrying `dct:modified 2025-12-01` with ticket `GH134`). BFFI does not include BFFI-namespace equivalents for these PMO-imported classes, and won't be extended to add them — the canonical BFFI shape for music-medium and music-key data uses the existing literal-carrier vocabulary.
+**Version context.** BFFI 1.0.0 (the BFFI ontology's `owl:versionInfo`) is based on **BIBFRAME 2.4.0**. The Library of Congress released **BIBFRAME 3.0 in December 2025**, whose headline change is that NDMSO **absorbed the Performed Music Ontology (PMO) into core BIBFRAME**, adding or refining: `bf:MediumOfPerformance`, `bf:MediumComponent`, `bf:Ensemble`, `bf:EnsembleSize`, `bf:KeyMode`, `bf:Mode`, `bf:Tempo`, `bf:DramaticRole`, `bf:MediumComponentQualifier`, `bf:OpusNumber`, `bf:SerialNumber`, `bf:ThematicCatalogNumber` (each carrying `dct:modified 2025-12-01` with ticket `GH134`). BFFI does not include BFFI-namespace equivalents for these PMO-imported classes, and won't be extended to add them — the canonical BFFI shape for music-medium and music-key data uses the existing literal-carrier vocabulary.
 
 **Medium-of-performance routing**: collapse the BIBFRAME structured-decomposition tree (`bf:mediumOfPerformance`, `bf:mediumComponent`, `bf:ensemble`, plus the BIBFRAME 3.0 PMO siblings `bf:Ensemble`, `bf:EnsembleSize`, `bf:DramaticRole`, `bf:MediumComponentQualifier`) into a single literal on the existing `bffi:MusicMedium` block:
 
@@ -699,7 +699,7 @@ What's lost:
     ] .
 ```
 
-`bffi:readMarc382` (English label: *"read-only 382 field"*) is the only property `lkd.rdf` declares with `bffi:MusicMedium` as its domain. It holds the verbatim MARC 382 string on the MusicMedium block, with the decomposition (individual instrument / voice / ensemble / part-count) encoded inside the literal as MARC text rather than separate RDF triples. `bffi:musicMedium`'s English label is literally **"music medium of performance"** — semantically the same role as `bf:mediumOfPerformance`.
+`bffi:readMarc382` (English label: *"read-only 382 field"*) is the only property the BFFI ontology declares with `bffi:MusicMedium` as its domain. It holds the verbatim MARC 382 string on the MusicMedium block, with the decomposition (individual instrument / voice / ensemble / part-count) encoded inside the literal as MARC text rather than separate RDF triples. `bffi:musicMedium`'s English label is literally **"music medium of performance"** — semantically the same role as `bf:mediumOfPerformance`.
 
 **Music-key routing**: collapse the BIBFRAME structured `bf:KeyMode` block (and the BIBFRAME 3.0 PMO siblings `bf:Mode` / `bf:Tempo`) into the existing `bffi:musicKey` Literal datatype property:
 
@@ -712,7 +712,7 @@ What's lost:
 
 What survives the migration:
 
-- **Zero new BFFI terms required.** Every term in the collapse chain (`bffi:musicMedium`, `bffi:MusicMedium`, `bffi:readMarc382`, `bffi:musicKey`) is already in `lkd.rdf`.
+- **Zero new BFFI terms required.** Every term in the collapse chain (`bffi:musicMedium`, `bffi:MusicMedium`, `bffi:readMarc382`, `bffi:musicKey`) is already in the BFFI ontology.
 - **`bf:MusicMedium` recovery via inference** — `bffi:MusicMedium owl:equivalentClass bf:MusicMedium`; the BIBFRAME class is directly reachable. (BIBFRAME 3.0's `bf:MusicMedium` is unchanged by the PMO absorption.)
 - **Round-trip integrity** — a BFFI-to-MARC reconstruction re-emits MARC 382 verbatim from `bffi:readMarc382` (the literal IS the original MARC 382). Music-key reconstruction reads the `bffi:musicKey` literal into MARC 384.
 
@@ -733,7 +733,7 @@ This is the same pattern as the Identifier-scheme and Title-variant collapses el
 
 ## Axis-default class routings
 
-Eight BIBFRAME classes have `bffi-meta:broadMatch` (or for `bf:MusicAudio`, `closeMatch`) mappings to *both* a Work-axis and an Expression-axis BFFI counterpart. The routing picks **per subject** based on the subject's co-typed `rdf:type` assertions — `route_axis_default_classes` in `src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`:
+Eight BIBFRAME classes have `bffi-meta:broadMatch` (or for `bf:MusicAudio`, `closeMatch`) mappings to *both* a Work-axis and an Expression-axis BFFI counterpart. The routing picks **per subject** based on the subject's co-typed `rdf:type` assertions:
 
 - **Work-axis pick** when the subject carries any of `bffi:BibframeWork`, `bffi:Work`, `bffi:AggregatingWork`, or `bffi:Arrangement` as another `rdf:type`. This is the Work URI marc2bibframe2 emitted (typed `bf:Work` upstream, renamed to `bffi:BibframeWork` by the clean-rename pass) or a Hub URI that the Hub routing already retyped to `bffi:Work` / `bffi:Arrangement`.
 - **Expression-axis pick** otherwise — Instance URIs (marc2bibframe2 echoes the content-type class on the Instance side but doesn't co-type it `bf:Work`) and any subject without a clear axis signal. Matches Helmet's "one localised Expression per record" pattern.
@@ -753,7 +753,7 @@ The counter dict the routing returns is split into `axis_default_class_work` and
 
 ## Axis-default predicate routings
 
-`bf:instanceOf` and `bf:hasInstance` are per-statement-discriminated (the routing inspects the axis-signal side's `rdf:type` to pick Work vs Expression). `bf:issuance` is a flat rename — its `lkd.rdf` peer `bffi:extensionPlan` looks like an "alternative" only on first glance; deeper inspection (below) shows it's a separate concept entirely. Implementation in `route_axis_default_predicates` (`src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`):
+`bf:instanceOf` and `bf:hasInstance` are per-statement-discriminated (the routing inspects the axis-signal side's `rdf:type` to pick Work vs Expression). `bf:issuance` is a flat rename — its BFFI peer `bffi:extensionPlan` looks like an "alternative" only on first glance; deeper inspection (below) shows it's a separate concept entirely:
 
 | `bf:*` predicate | Routing | Discriminator side | Work-axis pick | Expression-axis pick |
 |---|---|---|---|---|
@@ -763,7 +763,7 @@ The counter dict the routing returns is split into `axis_default_class_work` and
 
 **Why the per-statement discriminator works.** `bf:instanceOf` is "Manifestation → Work/Expression" — its object is the entity being realized. If that object is typed `bffi:Expression` (or any descendant — `bffi:SeriesExpression`, `bffi:MonographExpression`, …), the statement is realizing-an-Expression and lands on `bffi:expressionManifested`. Same logic inverted for `bf:hasInstance`: the SUBJECT is the entity-having-instances, so its type drives the pick.
 
-**Why `bf:issuance` is a flat rename, not discriminated.** `lkd.rdf` declares two `bffi:*` terms with `bffi-meta:broadMatch bf:issuance` — `bffi:issuance` and `bffi:extensionPlan`. Surface-level that reads as "alternative renames," but the deeper picture says they're two **separate concepts** that both happen to be loosely related to BIBFRAME's issuance area:
+**Why `bf:issuance` is a flat rename, not discriminated.** The BFFI ontology declares two `bffi:*` terms with `bffi-meta:broadMatch bf:issuance` — `bffi:issuance` and `bffi:extensionPlan`. Surface-level that reads as "alternative renames," but the deeper picture says they're two **separate concepts** that both happen to be loosely related to BIBFRAME's issuance area:
 
 | BFFI term | Domain | Range | `bffi-meta:relatedValueVocabulary` | RDA term list |
 |---|---|---|---|---|
@@ -782,7 +782,7 @@ In the corpus (200-record sample): 197 `<…/mono>` + 3 `<…/serl>`, all on Man
 
 ## URI-fragment discriminator routing — `bf:provisionActivityStatement`
 
-`bf:provisionActivityStatement` is declared in BIBFRAME 3.0.1 as a `DatatypeProperty` on `bf:Instance` with range `Literal` — labelled "Provider statement" in the ontology, conceptually a generic free-text statement covering any provision-activity flavour (publication / production / manufacture / distribution / copyright). `lkd.rdf` has no `bffi:*` equivalent.
+`bf:provisionActivityStatement` is declared in BIBFRAME 3.0.1 as a `DatatypeProperty` on `bf:Instance` with range `Literal` — labelled "Provider statement" in the ontology, conceptually a generic free-text statement covering any provision-activity flavour (publication / production / manufacture / distribution / copyright). The BFFI ontology has no `bffi:*` equivalent.
 
 In the Helmet corpus, every observed instance (102 in the 20 k bench) is attached to a related-Instance hub from a MARC 76X-78X linking-entry field (780 preceding entry, 785 succeeding entry, 760 main series, 765 original language, 770 supplement, 773 host item, 775 other edition, 776 additional physical form, 777 issued with, 787 other relationship, …) and carries a **date range** (`"1980-1981"`, `"1909-1993"`, `"2003-"`, …) — not a publisher statement at all. The MARC tag is encoded in the Instance URI's fragment: `<…#Instance780-25>`.
 
@@ -807,7 +807,7 @@ BIBFRAME predicates with no direct `bffi:*` counterpart but a natural fit for th
 
 ## Inverse-direction triple-swap routings
 
-Five BIBFRAME inverse predicates have forward-direction `bffi:*` equivalents already declared in `lkd.rdf` (with `owl:equivalentProperty` to their `bf:*` counterparts). The routing flips each triple's direction and renames the predicate to the forward form:
+Five BIBFRAME inverse predicates have forward-direction `bffi:*` equivalents already declared in the BFFI ontology (with `owl:equivalentProperty` to their `bf:*` counterparts). The routing flips each triple's direction and renames the predicate to the forward form:
 
 | Inverse `bf:*` | Forward `bffi:*` | Source triple | Routed triple |
 |---|---|---|---|
@@ -826,21 +826,21 @@ Zero corpus prevalence in the 20 k bench — these are insurance routings agains
 Two predicates are dropped instead of routed:
 
 - **`bf:variantType`** (`?title bf:variantType "parallel"`) — redundant. The title-variant routing's `bffi:marcKey` discriminator already encodes the variant type via the first-3-char MARC tag (`246` parallel, `740` analytical added, etc.). Dropping it avoids closed-namespace residue without information loss.
-- **`bf:noteType`** (`?note bf:noteType "Summary"`) — no BFFI carrier. BFFI 1.0.0 deliberately didn't model literal note categorisation; `bffi:Note` has zero predicates declared with it as domain and only `bffi:TitleNote` as a subclass. Reaching for a foreign vocabulary (`dct:type`, `skos:notation`) would contradict the "DC Terms → BFFI alternatives" pattern below, which expects BFFI-native carriers wherever possible. The drop is registered as **L-14** in `docs/bffi_limitations.md` and is a candidate for a future BFFI extension via NLF conversation. Bounded loss: the note's text content (`rdfs:label`) typically encodes the categorisation implicitly ("Bibliography: …", "Summary: …").
+- **`bf:noteType`** (`?note bf:noteType "Summary"`) — no BFFI carrier. BFFI 1.0.0 deliberately didn't model literal note categorisation; `bffi:Note` has zero predicates declared with it as domain and only `bffi:TitleNote` as a subclass. Reaching for a foreign vocabulary (`dct:type`, `skos:notation`) would contradict the "DC Terms → BFFI alternatives" pattern below, which expects BFFI-native carriers wherever possible. Candidate for a future BFFI extension via NLF conversation. Bounded loss: the note's text content (`rdfs:label`) typically encodes the categorisation implicitly ("Bibliography: …", "Summary: …").
 
 ## Defensive guard — undeclared `bf:*` terms are dropped
 
-After every clean rename + discriminator routing has run, any `bf:*` URI remaining in the output graph is checked against the vendored `vocab/bibframe.rdf` ontology. If neither BIBFRAME's classes, object properties, nor datatype properties declare the term, the whole triple is removed and the drop count is reported as `dropped_undeclared_bf`.
+After every clean rename + discriminator routing has run, any `bf:*` URI remaining in the output graph is checked against the BIBFRAME ontology. If neither BIBFRAME's classes, object properties, nor datatype properties declare the term, the whole triple is removed and the drop count is reported as `dropped_undeclared_bf`.
 
 The pattern uses the BIBFRAME ontology as the authority for "is this a real `bf:*` term?" rather than maintaining a hand-curated allowlist. Concrete catches from the 20 k bench:
 
 - **`bf:Statement`** (4 occurrences) — marc2bibframe2 emits a freestanding `<bf:Statement>text</bf:Statement>` element with the publisher-statement transcribed text. The string content is identical to the sibling structured `bf:ProvisionActivity` block (`bflc:simplePlace` + `bflc:simpleAgent` + `bflc:simpleDate`) — dropping it loses no information. `bf:Statement` is **not declared** in BIBFRAME 3.0.1 (zero triples reference it), so the guard correctly identifies it as an upstream emit artifact and removes it.
 
-Drop counters surface in the observability `end` event so the operator can monitor the artifact rate per run. If BIBFRAME later adds a term that marc2bibframe2 already emits, the next `vocab/bibframe.rdf` refresh picks it up automatically and the drop count for that term falls to zero.
+Drop counters surface in the observability `end` event so the operator can monitor the artifact rate per run. If BIBFRAME later adds a term that marc2bibframe2 already emits, the next BIBFRAME refresh picks it up automatically and the drop count for that term falls to zero.
 
 ## DC Terms → BFFI alternatives
 
-Definitive mapping from DC Terms predicates to BFFI counterparts. BFFI's `lkd.rdf` does not declare formal `owl:equivalentProperty` / `rdfs:subPropertyOf` / `bffi-meta:*Match` links to the `dct:*` namespace (verified by rdflib scan of every BFFI predicate's link set). The mapping below is therefore by **semantic correspondence** — each BFFI term carries an `owl:equivalentProperty` to the BIBFRAME predicate of comparable meaning, and the BIBFRAME predicate has the same role as the DC Terms predicate.
+Definitive mapping from DC Terms predicates to BFFI counterparts. The BFFI ontology does not declare formal `owl:equivalentProperty` / `rdfs:subPropertyOf` / `bffi-meta:*Match` links to the `dct:*` namespace (verified by rdflib scan of every BFFI predicate's link set). The mapping below is therefore by **semantic correspondence** — each BFFI term carries an `owl:equivalentProperty` to the BIBFRAME predicate of comparable meaning, and the BIBFRAME predicate has the same role as the DC Terms predicate.
 
 | `dct:*` term | BFFI alternative | Shape | BFFI ↔ BIBFRAME link |
 |---|---|---|---|
@@ -859,14 +859,14 @@ Definitive mapping from DC Terms predicates to BFFI counterparts. BFFI's `lkd.rd
 
 One tree per `bffi:Anchor owl:equivalentClass bf:X` that has at least one BFFI subclass. Each tree shows every `bffi:Sub rdfs:subClassOf` descendant (transitive closure) with its own `bf:*` equivalent when available. Emitting any node in a tree makes every BIBFRAME ancestor satisfied by inference.
 
-The trees enumerate the complete BFFI re-anchor structure as declared in `lkd.rdf` — including classes a typical MARC-to-BFFI conversion does not encounter — so an NLF reviewer can verify the structure independently of conversion-scoped tables above.
+The trees enumerate the complete BFFI re-anchor structure as declared in the BFFI ontology — including classes a typical MARC-to-BFFI conversion does not encounter — so an NLF reviewer can verify the structure independently of conversion-scoped tables above.
 
 Marker legend:
 
 | Marker | Meaning |
 |---|---|
 | ✅ | `bffi:Sub owl:equivalentClass bf:*` is declared |
-| 🆕 | BFFI-native — no `bf:*` counterpart in `lkd.rdf` |
+| 🆕 | BFFI-native — no `bf:*` counterpart in the BFFI ontology |
 | ⤴ | `bffi-meta:broadMatch` / `closeMatch` only (no clean alias) |
 
 ### Standalone anchors (no BFFI subclasses, no BFFI parents)
@@ -1128,5 +1128,5 @@ $ bffi-pipeline diagnose-mappings --max-hops 5 # widen the BFS bound (saturates 
 $ bffi-pipeline regenerate-mapping-tables      # rebuild the auto-tables above
 ```
 
-Tests in `tests/unit/diagnostic/test_mapping_coverage.py` lock the bucket counts to a ±5 range; tests in `tests/unit/diagnostic/test_mapping_tables.py` lock the auto-tables against drift. An ontology refresh that shifts either signal fires the regression check.
+Automated regression tests lock the bucket counts to a ±5 range and lock the auto-tables against drift. An ontology refresh that shifts either signal fires the regression check.
 

@@ -200,10 +200,10 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
     registry[_r.BF.noteType] = _Routing(
         handler="drop_note_type",
         replacement=(
-            "no BFFI carrier — literal note categorisation isn't modelled in lkd.rdf "
-            "(registered as L-14 in `docs/bffi_limitations.md`)"
+            "no BFFI carrier — BFFI 1.0.0 doesn't model literal note categorisation; "
+            "candidate for a future BFFI extension via NLF"
         ),
-        link_kind="no BFFI carrier; documented limitation",
+        link_kind="no BFFI carrier; bounded data loss",
         is_drop=True,
     )
 
