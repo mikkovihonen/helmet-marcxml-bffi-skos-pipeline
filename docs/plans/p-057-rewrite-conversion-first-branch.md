@@ -87,9 +87,10 @@ The rewrite lives on its own branch. If it doesn't work out, the rewrite branch 
 ## Progress
 
 - ✅ **Step 1 — Scaffold** (commit `b242261`). Minimal repo layout in place: five-stage typer CLI with `NotImplementedError` stubs, observability sidecar emitter, closed-namespace machinery (`provenance/`), URI minting (`uris.py`), validation boundaries 1-3, BFFI ontology + LoC bridges under `vocab/`, marc2bibframe2 submodule, observability stack config (Caddyfile + grafana + prometheus.yml + SHACL shapes). 23 src .py files; 93 unit tests green; mypy --strict clean.
-- ⬜ **Step 2 — MARC → BIBFRAME wrapper.** Wire `stages/marc_to_bibframe/` to the marc2bibframe2 XSLT submodule; run end-to-end on the curated dev sample (≈20 k + problem records).
-- ⬜ Steps 3-8 to follow.
+- ✅ **Step 2 — MARC → BIBFRAME wrapper** (commit `d6dcab3`). `stages/marc_to_bibframe/` shipped: `xslt.py` (subprocess shim around `xsltproc` with `XsltPaths` / `XsltResult` / `XsltprocError`), `runner.py` (`ConversionOptions` / `ConversionSummary` + `convert_one` + `convert_corpus`; preprocess+convert two-pass; observability events `start` / `progress` / `failed` / `end`). CLI: `bffi-pipeline marc-to-bibframe --input-dir … --output-dir …`. 9 new tests using the vendored `marc.xml` fixture; 102 total tests green. Corpus-scale run on the curated dev sample is the next operator-side checkpoint.
+- ⬜ **Step 3 — BIBFRAME → BFFI v0.** Implement `stages/bibframe_to_bffi/` with p-56 Phase 1 (clean rename, every `owl:equivalentClass` / `equivalentProperty` row from the mapping doc) baked in. SPARQL CONSTRUCT files under `sparql/`. Emit BFFI-only canonical Turtle; no discriminator routings yet (those land in step 6).
+- ⬜ Steps 4-8 to follow.
 
 ## Suggested next step
 
-Start step 2 (MARC → BIBFRAME wrapper). The first observable milestone is end-to-end MARC → BFFI → MARC of the curated dev sample (≈20 k + problem records) with BFFI-only emit, the reverse converter reading only `bffi:*` predicates, and a round-trip diff showing the closed-namespace discipline holding in both directions.
+Run `bffi-pipeline marc-to-bibframe` against the curated dev sample (≈20 k + problem records) and verify the failure rate + throughput look healthy on the observability dashboard. Then start step 3 (BIBFRAME → BFFI v0).
