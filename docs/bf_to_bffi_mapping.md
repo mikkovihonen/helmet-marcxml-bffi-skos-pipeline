@@ -117,7 +117,7 @@ The same pattern applies to local-library identifiers — a BFFI emit typically 
 <manifestation> bffi:identifiedBy [
     a bffi:Local ;
     rdf:value "b21152068" ;
-    bf:source <http://example.org/bib:source/local-library>
+    bffi:source <http://example.org/bib:source/local-library>
 ] .
 ```
 
@@ -319,8 +319,8 @@ For medium-of-performance terms (`bf:mediumOfPerformance`, `bf:mediumComponent`,
 
 ```turtle
 <work>
-    bffi:musicMedium [               # subPropertyOf bf:musicMedium, range bffi:MusicMedium
-        a bffi:MusicMedium ;         # owl:equivalentClass bf:MusicMedium
+    bffi:musicMedium [
+        a bffi:MusicMedium ;
         bffi:readMarc382 "1\\b vn$nvc$na 015\\$2 marcmusperf"
     ] .
 ```
