@@ -25,6 +25,12 @@ from typing import Annotated
 import typer
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.stages.bffi_to_marc.runner import (
+    ConversionOptions as BffiToMarcOptions,
+)
+from bffi_pipeline.stages.bffi_to_marc.runner import (
+    convert_corpus as bffi_to_marc_convert_corpus,
+)
 from bffi_pipeline.stages.bibframe_to_bffi.runner import (
     ConversionOptions as BibframeToBffiOptions,
 )
@@ -175,16 +181,46 @@ def bibframe_to_bffi_command(
 
 
 @app.command("bffi-to-marc")
-def bffi_to_marc_command() -> None:
+def bffi_to_marc_command(
+    input_dir: Annotated[
+        Path,
+        typer.Option(
+            "--input-dir",
+            help="Directory of per-record BFFI Turtle files (`*.bffi.ttl`).",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Where to write per-record reconstructed MARCXML (`<stem>.marcxml`).",
+        ),
+    ],
+) -> None:
     """BFFI graph → reconstructed MARCXML (reverse direction).
 
     Reads BFFI predicates only (no `bf:*` typing as routing key; no
     `bffi-prov:` pipeline-internal provenance as a content source — see the
     cardinal rule in `docs/bffi_limitations.md`) and reconstructs MARCXML
-    record-by-record. Used for round-trip verification and downstream MARC
-    consumers.
+    record-by-record. Step 4 v0 emit covers the bare minimum (leader
+    placeholder, 001 = Helmet bib ID, 245 $a = main title); subsequent
+    commits add field families one at a time so the diff harness gives a
+    clean per-family verification signal.
     """
-    raise NotImplementedError("bffi-to-marc stage scaffolded; not yet implemented")
+    options = BffiToMarcOptions(input_dir=input_dir, output_dir=output_dir)
+    summary = bffi_to_marc_convert_corpus(options=options)
+    typer.echo(
+        f"bffi-to-marc: total={summary.total} "
+        f"converted={summary.converted} failed={summary.failed} "
+        f"no_manifestation={summary.no_manifestation}",
+        err=True,
+    )
+    if summary.failed > 0:
+        raise typer.Exit(code=1)
 
 
 @app.command("roundtrip-eval")
