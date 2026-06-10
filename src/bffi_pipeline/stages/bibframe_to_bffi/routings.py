@@ -49,10 +49,13 @@ follow-on:
 
 from __future__ import annotations
 
+import re
 from typing import Final
 
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF
+
+from bffi_pipeline.bibframe import BibframeOntology, load_ontology
 
 #: BIBFRAME namespace — the input side. Routings remove triples that
 #: still carry these URIs after the clean-rename pass.
@@ -65,30 +68,53 @@ BFLC: Final[Namespace] = Namespace("http://id.loc.gov/ontologies/bflc/")
 #: BFFI emit namespace.
 BFFI: Final[Namespace] = Namespace("http://urn.fi/URN:NBN:fi:schema:bffi:")
 
-#: Per the mapping doc's Identifier-scheme routing. The class slot becomes
-#: ``bffi:Identifier``; the scheme moves into ``bffi:source <…>`` as a
-#: LoC-namespaced URI. Keeping these in one closed map lets the same
-#: vocabulary file extend with new schemes without touching the loop.
-LOC_IDENTIFIER_SCHEMES: Final[dict[URIRef, URIRef]] = {
-    BF.Isbn: URIRef("http://id.loc.gov/vocabulary/identifiers/isbn"),
-    BF.Issn: URIRef("http://id.loc.gov/vocabulary/identifiers/issn"),
-    BF.IssnL: URIRef("http://id.loc.gov/vocabulary/identifiers/issn-l"),
-    BF.Ean: URIRef("http://id.loc.gov/vocabulary/identifiers/ean"),
-    BF.AudioIssueNumber: URIRef("http://id.loc.gov/vocabulary/identifiers/audio-issue-number"),
-    BF.Lccn: URIRef("http://id.loc.gov/vocabulary/identifiers/lccn"),
-    BF.Upc: URIRef("http://id.loc.gov/vocabulary/identifiers/upc"),
-    BF.Ismn: URIRef("http://id.loc.gov/vocabulary/identifiers/ismn"),
-    BF.Isrc: URIRef("http://id.loc.gov/vocabulary/identifiers/isrc"),
-    BF.Strn: URIRef("http://id.loc.gov/vocabulary/identifiers/strn"),
-    BF.Nbn: URIRef("http://id.loc.gov/vocabulary/identifiers/nbn"),
-    BF.MusicPlate: URIRef("http://id.loc.gov/vocabulary/identifiers/music-plate"),
-    BF.MatrixNumber: URIRef("http://id.loc.gov/vocabulary/identifiers/matrix-number"),
-    BF.PublisherNumber: URIRef("http://id.loc.gov/vocabulary/identifiers/publisher-number"),
-    BF.VideoRecordingNumber: URIRef(
-        "http://id.loc.gov/vocabulary/identifiers/videorecording-number"
-    ),
-    BF.OtherIdentifier: URIRef("http://id.loc.gov/vocabulary/identifiers/other"),
+#: LoC identifier-scheme vocabulary stem. Every BIBFRAME ``bf:Identifier``
+#: subclass routes to ``<stem><scheme-token>`` on ``bffi:source``.
+_LOC_IDENTIFIER_SCHEME_STEM: Final[str] = "http://id.loc.gov/vocabulary/identifiers/"
+
+#: BIBFRAME class local names whose LoC vocabulary token doesn't match the
+#: default CamelCase → kebab-case convention. Two cases:
+#:
+#: - ``OtherIdentifier`` collapses to just ``other`` (drops the redundant
+#:   "Identifier" suffix; LoC's vocab uses the bare adjective).
+#: - ``VideoRecordingNumber`` fuses ``video`` + ``recording`` into one
+#:   token; LoC's vocab is ``videorecording-number``, not
+#:   ``video-recording-number``.
+#:
+#: Everything else (``Isbn`` → ``isbn``, ``IssnL`` → ``issn-l``,
+#: ``AudioIssueNumber`` → ``audio-issue-number``, ``MusicPlate`` →
+#: ``music-plate``, the 36 less-common subclasses…) follows the
+#: convention deterministically.
+_IDENTIFIER_SCHEME_TOKEN_OVERRIDES: Final[dict[str, str]] = {
+    "OtherIdentifier": "other",
+    "VideoRecordingNumber": "videorecording-number",
 }
+
+_CAMEL_TO_KEBAB: Final[re.Pattern[str]] = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _identifier_scheme_token(local_name: str) -> str:
+    """LoC vocabulary token for the given BIBFRAME class local name.
+
+    Applies the documented override map first, falls back to the
+    CamelCase → kebab-case convention (insert hyphen between lowercase
+    or digit followed by uppercase; then lowercase everything).
+    """
+    if local_name in _IDENTIFIER_SCHEME_TOKEN_OVERRIDES:
+        return _IDENTIFIER_SCHEME_TOKEN_OVERRIDES[local_name]
+    return _CAMEL_TO_KEBAB.sub("-", local_name).lower()
+
+
+def loc_scheme_uri(bf_class: URIRef) -> URIRef:
+    """Public helper: the canonical LoC scheme URI for a BIBFRAME identifier class.
+
+    ``bf:Isbn`` → ``<…/identifiers/isbn>``,
+    ``bf:OclcNumber`` → ``<…/identifiers/oclc-number>``,
+    ``bf:OtherIdentifier`` → ``<…/identifiers/other>``, etc.
+    """
+    local_name = str(bf_class).rsplit("/", 1)[-1]
+    return URIRef(_LOC_IDENTIFIER_SCHEME_STEM + _identifier_scheme_token(local_name))
+
 
 #: Predicate-side gaps with no direct ``bffi:*`` equivalent in `lkd.rdf`
 #: but a natural routing through the structured ``bffi:relation`` chain
@@ -167,22 +193,38 @@ def rename_bflc_marckey(graph: Graph) -> int:
 # --- routing 1: Identifier-scheme ---------------------------------------
 
 
-def route_identifier_schemes(graph: Graph) -> int:
+def route_identifier_schemes(graph: Graph, ontology: BibframeOntology | None = None) -> int:
     """``bf:Isbn`` / ``bf:Issn`` / etc. → ``bffi:Identifier`` + ``bffi:source``.
 
-    The mapping doc's Identifier-scheme routing: the BIBFRAME identifier
-    subclass collapses into the ``bffi:Identifier`` anchor with the
-    scheme encoded as a LoC-vocabulary URI on ``bffi:source``. The
-    ``rdf:value`` carrying the actual identifier text is left untouched.
+    The mapping doc's Identifier-scheme routing: every BIBFRAME
+    subclass of ``bf:Identifier`` collapses into the ``bffi:Identifier``
+    anchor with the scheme encoded as a LoC-vocabulary URI on
+    ``bffi:source``. The ``rdf:value`` carrying the actual identifier
+    text is left untouched.
 
-    Returns the count of identifier blocks rewritten across all schemes.
+    Subclass discovery is ontology-driven via :func:`load_ontology`,
+    so the routing automatically picks up any ``bf:Identifier``
+    descendant declared in BIBFRAME 3.0.1 (currently 52 subclasses).
+    Subclasses that BFFI's ``lkd.rdf`` already covers via
+    ``owl:equivalentClass`` (``bf:Local`` → ``bffi:Local``,
+    ``bf:ShelfMark`` → ``bffi:ShelfMark``) get rewritten by the
+    upstream clean-rename pass and are no-ops here — the
+    ``graph.subjects()`` query returns zero matches for them.
+
+    Returns the count of identifier blocks rewritten across all
+    schemes. Pass ``ontology`` explicitly in tests using a fixture
+    snippet; production callers leave it ``None`` to use the cached
+    vendored vocab.
     """
+    if ontology is None:
+        ontology = load_ontology()
     rewritten = 0
-    for bf_class, loc_scheme in LOC_IDENTIFIER_SCHEMES.items():
+    for bf_class in ontology.class_descendants(BF.Identifier):
+        scheme_uri = loc_scheme_uri(bf_class)
         for subject in list(graph.subjects(RDF.type, bf_class)):
             graph.remove((subject, RDF.type, bf_class))
             graph.add((subject, RDF.type, BFFI.Identifier))
-            graph.add((subject, BFFI.source, loc_scheme))
+            graph.add((subject, BFFI.source, scheme_uri))
             rewritten += 1
     return rewritten
 

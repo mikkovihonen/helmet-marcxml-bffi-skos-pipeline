@@ -11,12 +11,13 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     BF,
     BFFI,
     BFLC,
-    LOC_IDENTIFIER_SCHEMES,
     RELATION_PREDICATE_ROUTINGS,
     SERIES_RELATIONSHIP,
     TITLE_VARIANT_CLASSES,
     _hub_target_type,
+    _identifier_scheme_token,
     apply_all_routings,
+    loc_scheme_uri,
     rename_bflc_marckey,
     route_audio,
     route_axis_default_classes,
@@ -60,8 +61,8 @@ def test_route_identifier_schemes_rewrites_each_loc_class() -> None:
     assert (issn_node, RDF.type, BFFI.Identifier) in g
 
     # And carry the LoC scheme URI via bffi:source.
-    assert (isbn_node, BFFI.source, LOC_IDENTIFIER_SCHEMES[BF.Isbn]) in g
-    assert (issn_node, BFFI.source, LOC_IDENTIFIER_SCHEMES[BF.Issn]) in g
+    assert (isbn_node, BFFI.source, loc_scheme_uri(BF.Isbn)) in g
+    assert (issn_node, BFFI.source, loc_scheme_uri(BF.Issn)) in g
 
     # rdf:value passes through untouched.
     assert (isbn_node, RDF.value, Literal("9780123456789")) in g
@@ -71,13 +72,66 @@ def test_route_identifier_schemes_rewrites_each_loc_class() -> None:
     assert (issn_node, RDF.type, BF.Issn) not in g
 
 
+def test_route_identifier_schemes_routes_classes_we_never_hardcoded() -> None:
+    """The ontology-driven routing picks up every bf:Identifier subclass
+    in BIBFRAME 3.0.1, not just the 16 we hard-coded originally. bf:Doi
+    and bf:OclcNumber were never in the old hard-coded table; they
+    should now route automatically via the subclass walk."""
+    g = Graph()
+    doi_node = URIRef("http://example.org/doi-1")
+    oclc_node = URIRef("http://example.org/oclc-1")
+    g.add((doi_node, RDF.type, BF.Doi))
+    g.add((oclc_node, RDF.type, BF.OclcNumber))
+
+    rewritten = route_identifier_schemes(g)
+    assert rewritten == 2
+
+    assert (doi_node, RDF.type, BFFI.Identifier) in g
+    assert (oclc_node, RDF.type, BFFI.Identifier) in g
+    assert (doi_node, BFFI.source, loc_scheme_uri(BF.Doi)) in g
+    assert (oclc_node, BFFI.source, loc_scheme_uri(BF.OclcNumber)) in g
+
+
 def test_route_identifier_schemes_skips_already_renamed_block() -> None:
     """A graph that already has only bffi:Identifier (no bf:Isbn) is a no-op."""
     g = Graph()
     s = URIRef("http://example.org/ident")
     g.add((s, RDF.type, BFFI.Identifier))
-    g.add((s, BFFI.source, LOC_IDENTIFIER_SCHEMES[BF.Isbn]))
+    g.add((s, BFFI.source, loc_scheme_uri(BF.Isbn)))
     assert route_identifier_schemes(g) == 0
+
+
+# --- scheme-token derivation --------------------------------------------
+
+
+def test_identifier_scheme_token_convention_handles_camelcase() -> None:
+    """The default CamelCase → kebab-case convention handles all the
+    standard cases from BIBFRAME 3.0.1's Identifier subclasses."""
+    assert _identifier_scheme_token("Isbn") == "isbn"
+    assert _identifier_scheme_token("Issn") == "issn"
+    assert _identifier_scheme_token("IssnL") == "issn-l"
+    assert _identifier_scheme_token("Ean") == "ean"
+    assert _identifier_scheme_token("AudioIssueNumber") == "audio-issue-number"
+    assert _identifier_scheme_token("MusicPlate") == "music-plate"
+    assert _identifier_scheme_token("OclcNumber") == "oclc-number"
+    assert _identifier_scheme_token("Doi") == "doi"
+
+
+def test_identifier_scheme_token_applies_overrides() -> None:
+    """Two BIBFRAME class names need explicit override tokens because
+    they don't match the convention."""
+    # "OtherIdentifier" drops the "Identifier" suffix.
+    assert _identifier_scheme_token("OtherIdentifier") == "other"
+    # "VideoRecordingNumber" fuses video+recording into one token.
+    assert _identifier_scheme_token("VideoRecordingNumber") == "videorecording-number"
+
+
+def test_loc_scheme_uri_builds_full_loc_vocabulary_path() -> None:
+    """The public helper composes the LoC vocabulary stem + the token."""
+    assert str(loc_scheme_uri(BF.Isbn)) == "http://id.loc.gov/vocabulary/identifiers/isbn"
+    assert (
+        str(loc_scheme_uri(BF.OtherIdentifier)) == "http://id.loc.gov/vocabulary/identifiers/other"
+    )
 
 
 # --- Title-variant routing ---------------------------------------------
