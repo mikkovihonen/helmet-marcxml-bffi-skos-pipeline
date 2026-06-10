@@ -76,7 +76,43 @@ LOC_IDENTIFIER_SCHEMES: Final[dict[URIRef, URIRef]] = {
     BF.Ean: URIRef("http://id.loc.gov/vocabulary/identifiers/ean"),
     BF.AudioIssueNumber: URIRef("http://id.loc.gov/vocabulary/identifiers/audio-issue-number"),
     BF.Lccn: URIRef("http://id.loc.gov/vocabulary/identifiers/lccn"),
+    BF.Upc: URIRef("http://id.loc.gov/vocabulary/identifiers/upc"),
+    BF.Ismn: URIRef("http://id.loc.gov/vocabulary/identifiers/ismn"),
+    BF.VideoRecordingNumber: URIRef(
+        "http://id.loc.gov/vocabulary/identifiers/videorecording-number"
+    ),
     BF.OtherIdentifier: URIRef("http://id.loc.gov/vocabulary/identifiers/other"),
+}
+
+#: P-56 Phase 3 axis-pick: BIBFRAME classes that BFFI splits into
+#: Work-axis and Expression-axis variants. The mapping doc recommends
+#: defaulting to the Expression axis when no per-record discriminator
+#: applies — that's Helmet's predominant case (each record is one
+#: localised Expression). v0 hard-codes the default; a follow-on can
+#: read content-typing evidence (e.g. ``bf:hasInstance`` direction)
+#: to flip individual records to the Work axis.
+AXIS_DEFAULT_CLASSES: Final[dict[URIRef, URIRef]] = {
+    BF.Monograph: BFFI.MonographExpression,
+    BF.Series: BFFI.SeriesExpression,
+    BF.Serial: BFFI.SerialExpression,
+    BF.MusicAudio: BFFI.MusicAudioExpression,
+    BF.MovingImage: BFFI.MovingImageExpression,
+    BF.Cartography: BFFI.CartographyExpression,
+    BF.NonMusicAudio: BFFI.NonMusicAudioExpression,
+}
+
+#: P-56 Phase 2 broadMatch predicates. Each maps to a single default
+#: ``bffi:*`` substitute when no per-instance discriminator applies.
+#: The mapping doc lists multiple candidates per ``bf:*`` here; we pick
+#: the one that lines up with Helmet's main-stream usage:
+#:
+#:   - ``bf:instanceOf`` → ``bffi:workManifested`` (Manifestation -> Work)
+#:   - ``bf:hasInstance`` → ``bffi:manifestationOfWork`` (Work -> Manifestation)
+#:   - ``bf:issuance`` → ``bffi:issuance`` (over ``bffi:extensionPlan``)
+AXIS_DEFAULT_PREDICATES: Final[dict[URIRef, URIRef]] = {
+    BF.instanceOf: BFFI.workManifested,
+    BF.hasInstance: BFFI.manifestationOfWork,
+    BF.issuance: BFFI.issuance,
 }
 
 #: BIBFRAME ``bf:Title`` subclasses that BFFI collapses into the
@@ -256,6 +292,52 @@ def route_hubs(graph: Graph) -> int:
     return rewritten
 
 
+# --- routing 6: axis-default class rewrites -----------------------------
+
+
+def route_axis_default_classes(graph: Graph) -> int:
+    """Rewrite the BIBFRAME axis-split classes to their Expression-axis BFFI
+    default per :data:`AXIS_DEFAULT_CLASSES`.
+
+    The mapping doc tags these as semantic-shift (``bffi-meta:broadMatch``);
+    Helmet's predominant pattern is "this bib record is a single localised
+    Expression," so the Expression-axis variant is the safe default.
+    A follow-on can read per-record content-typing evidence to flip the
+    pick to the Work axis where appropriate.
+    """
+    rewritten = 0
+    for bf_class, bffi_class in AXIS_DEFAULT_CLASSES.items():
+        for subject in list(graph.subjects(RDF.type, bf_class)):
+            graph.remove((subject, RDF.type, bf_class))
+            graph.add((subject, RDF.type, bffi_class))
+            rewritten += 1
+    return rewritten
+
+
+# --- routing 7: axis-default predicate rewrites -------------------------
+
+
+def route_axis_default_predicates(graph: Graph) -> int:
+    """Rewrite ``bf:instanceOf`` / ``bf:hasInstance`` / ``bf:issuance``
+    to the default ``bffi:*`` substitute per :data:`AXIS_DEFAULT_PREDICATES`.
+
+    These are ``bffi-meta:broadMatch`` predicates in `lkd.rdf` (Phase 2
+    of p-56). The defaults match Helmet's main-stream usage: the
+    Manifestation manifests a Work (``bffi:workManifested``); the Work
+    has Manifestations (``bffi:manifestationOfWork``); the issuance
+    pattern is the simple ``bffi:issuance`` (not the
+    ``bffi:extensionPlan`` sibling concept reserved for serials /
+    integrating resources).
+    """
+    rewritten = 0
+    for bf_pred, bffi_pred in AXIS_DEFAULT_PREDICATES.items():
+        for s, _, o in list(graph.triples((None, bf_pred, None))):
+            graph.remove((s, bf_pred, o))
+            graph.add((s, bffi_pred, o))
+            rewritten += 1
+    return rewritten
+
+
 # --- top-level entry point ----------------------------------------------
 
 
@@ -277,4 +359,6 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "audio": route_audio(graph),
         "series_link": route_series_links(graph),
         "hub": route_hubs(graph),
+        "axis_default_class": route_axis_default_classes(graph),
+        "axis_default_predicate": route_axis_default_predicates(graph),
     }

@@ -6,6 +6,8 @@ from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from bffi_pipeline.stages.bibframe_to_bffi.routings import (
+    AXIS_DEFAULT_CLASSES,
+    AXIS_DEFAULT_PREDICATES,
     BF,
     BFFI,
     BFLC,
@@ -16,6 +18,8 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     apply_all_routings,
     rename_bflc_marckey,
     route_audio,
+    route_axis_default_classes,
+    route_axis_default_predicates,
     route_hubs,
     route_identifier_schemes,
     route_series_links,
@@ -212,9 +216,57 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "audio": 1,
         "series_link": 1,
         "hub": 1,
+        "axis_default_class": 0,
+        "axis_default_predicate": 0,
     }
 
     # The Hub routing reads bffi:marcKey (after rename), so the rename
     # must have run first — Hub's chosen type is Work since the marcKey
     # is a plain 730 without Expression-level signals.
     assert (hub, RDF.type, BFFI.Work) in g
+
+
+# --- routing 6 (axis-default classes) -----------------------------------
+
+
+def test_route_axis_default_classes_picks_expression_variant_for_each() -> None:
+    """Each ``bf:Monograph`` / ``bf:Series`` / ``bf:MusicAudio`` / ``…`` is
+    rewritten to its Expression-axis BFFI counterpart per
+    :data:`AXIS_DEFAULT_CLASSES`."""
+    g = Graph()
+    for i, bf_class in enumerate(AXIS_DEFAULT_CLASSES):
+        node = URIRef(f"http://example.org/c-{i}")
+        g.add((node, RDF.type, bf_class))
+    rewritten = route_axis_default_classes(g)
+    assert rewritten == len(AXIS_DEFAULT_CLASSES)
+    for i, (bf_class, bffi_class) in enumerate(AXIS_DEFAULT_CLASSES.items()):
+        node = URIRef(f"http://example.org/c-{i}")
+        assert (node, RDF.type, bffi_class) in g
+        assert (node, RDF.type, bf_class) not in g
+
+
+def test_route_axis_default_classes_no_op_when_already_routed() -> None:
+    g = Graph()
+    s = URIRef("http://example.org/s")
+    g.add((s, RDF.type, BFFI.SeriesExpression))
+    assert route_axis_default_classes(g) == 0
+
+
+# --- routing 7 (axis-default predicates) --------------------------------
+
+
+def test_route_axis_default_predicates_rewrites_each_predicate() -> None:
+    """``bf:instanceOf`` / ``bf:hasInstance`` / ``bf:issuance`` rewrite to
+    their default ``bffi:*`` counterparts per :data:`AXIS_DEFAULT_PREDICATES`."""
+    g = Graph()
+    for i, bf_pred in enumerate(AXIS_DEFAULT_PREDICATES):
+        s = URIRef(f"http://example.org/s-{i}")
+        o = URIRef(f"http://example.org/o-{i}")
+        g.add((s, bf_pred, o))
+    rewritten = route_axis_default_predicates(g)
+    assert rewritten == len(AXIS_DEFAULT_PREDICATES)
+    for i, (bf_pred, bffi_pred) in enumerate(AXIS_DEFAULT_PREDICATES.items()):
+        s = URIRef(f"http://example.org/s-{i}")
+        o = URIRef(f"http://example.org/o-{i}")
+        assert (s, bffi_pred, o) in g
+        assert (s, bf_pred, o) not in g
