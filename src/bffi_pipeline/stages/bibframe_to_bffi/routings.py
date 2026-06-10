@@ -53,7 +53,7 @@ import re
 from typing import Final
 
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
-from rdflib.namespace import RDF
+from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.bibframe import BibframeOntology, load_ontology
 
@@ -441,6 +441,60 @@ def drop_undeclared_bf_terms(graph: Graph, ontology: BibframeOntology | None = N
     return dropped
 
 
+#: marc2bibframe2 attaches ``bf:provisionActivityStatement`` to related-Instance
+#: hubs from MARC 76X-78X linking-entry fields (760 main series, 762 has
+#: subseries, 765 original language, 767 translation, 770/772 supplements,
+#: 773 host-item, 774 constituent, 775 other edition, 776 additional
+#: physical form, 777 issued with, 780 preceding entry, 785 succeeding
+#: entry, 786 data source, 787 other relationship). The Instance URI's
+#: fragment carries the MARC tag (``…#Instance780-25``), giving us a
+#: structural discriminator analogous to Hub routing's marcKey check.
+_PROVISION_STATEMENT_SUCCESSION_LINK_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"#Instance(76[0-9]|77[0-9]|78[0-9])-"
+)
+
+
+def route_provision_activity_statement(graph: Graph) -> dict[str, int]:
+    """``bf:provisionActivityStatement`` → ``bffi:date`` (when on a 76X-78X
+    related-Instance hub) or wrapped in a ``bffi:Note`` bnode (otherwise).
+
+    BFFI has no ``bffi:provisionActivityStatement`` equivalent in
+    `lkd.rdf`. The corpus shape on Helmet (102 occurrences in the 20 k
+    bench, all on related-Instance hubs from MARC 78X succession
+    fields) is **date ranges** — ``"1980-1981"``, ``"1909-1993"``, etc.
+    The URI-fragment discriminator confirms the succession-link
+    context; in that case we route to ``bffi:date`` as a plain string
+    literal (no EDTF datatype claim — content isn't always
+    EDTF-conformant, e.g. ``"(1990-2013), ISSN"``).
+
+    If the Instance URI doesn't match the succession-link pattern, we
+    fall back to wrapping the literal in a ``bffi:Note`` bnode
+    (``?inst bffi:note [a bffi:Note ; rdfs:label "text"]``). This is
+    the generic carrier that preserves the text without asserting a
+    semantic interpretation.
+
+    Returns counts for both targets so the operator can see the
+    discriminator split in the observability summary.
+    """
+    routed_to_date = 0
+    routed_to_note = 0
+    for s, _, o in list(graph.triples((None, BF.provisionActivityStatement, None))):
+        graph.remove((s, BF.provisionActivityStatement, o))
+        if isinstance(s, URIRef) and _PROVISION_STATEMENT_SUCCESSION_LINK_PATTERN.search(str(s)):
+            graph.add((s, BFFI.date, o))
+            routed_to_date += 1
+        else:
+            note_bnode = BNode()
+            graph.add((s, BFFI.note, note_bnode))
+            graph.add((note_bnode, RDF.type, BFFI.Note))
+            graph.add((note_bnode, RDFS.label, o))
+            routed_to_note += 1
+    return {
+        "provision_statement_to_date": routed_to_date,
+        "provision_statement_to_note": routed_to_note,
+    }
+
+
 def route_axis_default_predicates(graph: Graph) -> int:
     """Rewrite ``bf:instanceOf`` / ``bf:hasInstance`` / ``bf:issuance``
     to the default ``bffi:*`` substitute per :data:`AXIS_DEFAULT_PREDICATES`.
@@ -476,7 +530,7 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
     Returns a per-routing counter dict suitable for inclusion in the
     observability ``end`` event.
     """
-    return {
+    counters: dict[str, int] = {
         "bflc_marckey_renamed": rename_bflc_marckey(graph),
         "identifier_scheme": route_identifier_schemes(graph),
         "title_variant": route_title_variants(graph),
@@ -486,10 +540,15 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "hub": route_hubs(graph),
         "axis_default_class": route_axis_default_classes(graph),
         "axis_default_predicate": route_axis_default_predicates(graph),
-        # Runs LAST. By the time we get here, every legitimate bf:* URI
-        # has either been renamed (clean-rename pass) or routed
-        # (Phase 4 / axis defaults). What survives is either undeclared
-        # in BIBFRAME (artifact — drop) or declared but unrouted
-        # (residue — leave for observability to surface).
-        "dropped_undeclared_bf": drop_undeclared_bf_terms(graph),
     }
+    # The provision-activity-statement routing splits its counter into
+    # two buckets (date vs note) so the discriminator decision is
+    # visible in the observability summary.
+    counters.update(route_provision_activity_statement(graph))
+    # Runs LAST. By the time we get here, every legitimate bf:* URI
+    # has either been renamed (clean-rename pass) or routed
+    # (Phase 4 / axis defaults / provision-statement). What survives
+    # is either undeclared in BIBFRAME (artifact — drop) or declared
+    # but unrouted (residue — leave for observability to surface).
+    counters["dropped_undeclared_bf"] = drop_undeclared_bf_terms(graph)
+    return counters

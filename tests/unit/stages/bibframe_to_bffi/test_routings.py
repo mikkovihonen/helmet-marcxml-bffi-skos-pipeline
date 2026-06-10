@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import RDF
+from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     AXIS_DEFAULT_CLASSES,
@@ -25,6 +25,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     route_axis_default_predicates,
     route_hubs,
     route_identifier_schemes,
+    route_provision_activity_statement,
     route_relation_predicates,
     route_series_links,
     route_title_variants,
@@ -276,6 +277,8 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "hub": 1,
         "axis_default_class": 0,
         "axis_default_predicate": 0,
+        "provision_statement_to_date": 0,
+        "provision_statement_to_note": 0,
         "dropped_undeclared_bf": 0,
     }
 
@@ -312,6 +315,77 @@ def test_route_axis_default_classes_no_op_when_already_routed() -> None:
 
 
 # --- routing 7 (axis-default predicates) --------------------------------
+
+
+# --- route_provision_activity_statement (URI-fragment discriminator) ----
+
+
+def test_route_provision_activity_statement_routes_succession_link_to_bffi_date() -> None:
+    """``bf:provisionActivityStatement`` on an Instance whose URI carries
+    a MARC 76X-78X tag in its fragment (the marc2bibframe2 shape for
+    related-Instance hubs from succession-link MARC fields) routes to
+    ``bffi:date`` — those statements are date ranges per the corpus.
+    """
+    g = Graph()
+    # Mimics the corpus shape: Instance URI fragment carries the MARC tag.
+    inst = URIRef("http://example.org/bib1#Instance780-25")
+    g.add((inst, BF.provisionActivityStatement, Literal("1980-1981")))
+
+    counters = route_provision_activity_statement(g)
+    assert counters == {"provision_statement_to_date": 1, "provision_statement_to_note": 0}
+    assert (inst, BFFI.date, Literal("1980-1981")) in g
+    assert (inst, BF.provisionActivityStatement, Literal("1980-1981")) not in g
+
+
+def test_route_provision_activity_statement_handles_succession_tag_range() -> None:
+    """The pattern matches all MARC 760-789 (linking-entry fields) —
+    main series (760), has subseries (762), original language (765),
+    translation (767), supplements (770/772), host item (773),
+    constituent (774), other edition (775), additional physical form
+    (776), issued with (777), preceding entry (780), succeeding (785),
+    data source (786), other relationship (787)."""
+    g = Graph()
+    for tag in ("760", "762", "765", "770", "775", "780", "785", "787"):
+        inst = URIRef(f"http://example.org/bib1#Instance{tag}-1")
+        g.add((inst, BF.provisionActivityStatement, Literal(f"date-range-{tag}")))
+
+    counters = route_provision_activity_statement(g)
+    assert counters["provision_statement_to_date"] == 8
+    assert counters["provision_statement_to_note"] == 0
+
+
+def test_route_provision_activity_statement_falls_back_to_note_for_non_succession_context() -> None:
+    """Instance URI without the 76X-78X fragment pattern falls back to
+    a ``bffi:Note`` bnode wrapper. The text is preserved without an
+    EDTF semantic claim."""
+    g = Graph()
+    inst = URIRef("http://example.org/bib1#Instance")  # no succession tag
+    g.add((inst, BF.provisionActivityStatement, Literal("(1990-2013), ISSN")))
+
+    counters = route_provision_activity_statement(g)
+    assert counters == {"provision_statement_to_date": 0, "provision_statement_to_note": 1}
+    # The original triple is gone.
+    assert (inst, BF.provisionActivityStatement, Literal("(1990-2013), ISSN")) not in g
+    # An object property points at a fresh Note bnode.
+    note_objects = list(g.objects(inst, BFFI.note))
+    assert len(note_objects) == 1
+    note = note_objects[0]
+    # The Note bnode is typed and carries the literal as rdfs:label.
+    assert (note, RDF.type, BFFI.Note) in g
+    assert (note, RDFS.label, Literal("(1990-2013), ISSN")) in g
+
+
+def test_route_provision_activity_statement_ignores_unrelated_triples() -> None:
+    """The routing only touches triples with ``bf:provisionActivityStatement``
+    as the predicate. Other triples on the same subject pass through."""
+    g = Graph()
+    inst = URIRef("http://example.org/bib1#Instance780-25")
+    g.add((inst, RDF.type, BF.Instance))
+    g.add((inst, BF.provisionActivityStatement, Literal("1980-1981")))
+
+    route_provision_activity_statement(g)
+    # bf:Instance typing triple still present.
+    assert (inst, RDF.type, BF.Instance) in g
 
 
 # --- drop_undeclared_bf_terms (BIBFRAME-ontology-guarded drop) ----------
