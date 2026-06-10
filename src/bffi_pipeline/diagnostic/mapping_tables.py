@@ -225,7 +225,52 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
             is_drop=True,
         )
 
+    _register_music_key_family(registry)
     return registry
+
+
+def _register_music_key_family(registry: dict[URIRef, _Routing]) -> None:
+    """Music-key family (PMO music). bf:keyMode is the active routing
+    (collapse structured bnode → bffi:musicKey literal); bf:KeyMode is
+    the bnode's rdf:type, removed implicitly when the bnode is dropped.
+    bf:mode / bf:Mode are defensive — never emitted by marc2bibframe2.
+    Extracted to a helper to keep :func:`_build_routing_registry`'s
+    branch count under ruff's threshold."""
+    registry[_r.BF.keyMode] = _Routing(
+        handler="route_music_key",
+        replacement=(
+            "`bffi:musicKey` literal — extracts `rdfs:label` from the `bf:KeyMode` "
+            "bnode and attaches as a flat literal on the Work; bnode subgraph "
+            "dropped"
+        ),
+        link_kind="structured-bnode → literal collapse",
+    )
+    registry[_r.BF.KeyMode] = _Routing(
+        handler="route_music_key",
+        replacement=(
+            "(class typing removed implicitly when the parent `bf:keyMode` "
+            "structured bnode is collapsed to a `bffi:musicKey` literal)"
+        ),
+        link_kind="bnode subgraph cleanup",
+    )
+    for bf_pred in _r._MUSIC_MODE_PREDICATES:
+        registry[bf_pred] = _Routing(
+            handler="drop_music_mode_residue",
+            replacement=(
+                "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
+                "(forward path: append mode value to the `bffi:musicKey` literal "
+                "if upstream begins emitting)"
+            ),
+            link_kind="defensive (upstream-stability)",
+            is_drop=True,
+        )
+    for bf_cls in _r._MUSIC_MODE_CLASSES:
+        registry[bf_cls] = _Routing(
+            handler="drop_music_mode_residue",
+            replacement=("not emitted by the LoC marc2bibframe2 XSLT — defensive drop"),
+            link_kind="defensive (upstream-stability)",
+            is_drop=True,
+        )
 
 
 # --- row computation ---------------------------------------------------------

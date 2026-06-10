@@ -139,7 +139,7 @@ The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-t
 | `bf:Iswc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/iswc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Item` | **clean** | `bffi:Item` | owl:equivalentClass | — | — |
 | `bf:Jurisdiction` | **clean** | `bffi:Jurisdiction` | owl:equivalentClass | `bf:Agent` | — |
-| `bf:KeyMode` | **GAP** | — | — | — | — |
+| `bf:KeyMode` | **routed** | (class typing removed implicitly when the parent `bf:keyMode` structured bnode is collapsed to a `bffi:musicKey` literal) | bnode subgraph cleanup | — | `route_music_key` |
 | `bf:KeyTitle` | **routed** | `bffi:Title` (anchor; subclass info preserved on `bffi:marcKey`) | discriminator: marcKey | — | `route_title_variants` |
 | `bf:Kit` | **clean** | `bffi:Kit` | owl:equivalentClass | `bf:MixedMaterial`, `bf:Work` | — |
 | `bf:Language` | **clean** | `bffi:Language` | owl:equivalentClass | — | — |
@@ -158,7 +158,7 @@ The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-t
 | `bf:Meeting` | **clean** | `bffi:Meeting` | owl:equivalentClass | `bf:Agent` | — |
 | `bf:Microform` | **clean** | `bffi:Microform` | owl:equivalentClass | `bf:Instance` | — |
 | `bf:MixedMaterial` | **clean** | `bffi:MixedMaterial` | owl:equivalentClass | `bf:Work` | — |
-| `bf:Mode` | **GAP** | — | — | — | — |
+| `bf:Mode` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop | defensive (upstream-stability) | — | `drop_music_mode_residue` |
 | `bf:Modification` | **clean** | `bffi:Modification` | owl:equivalentClass | `bf:ProvisionActivity` | — |
 | `bf:Monograph` | **routed** | `bffi:MonographWork` (Work-axis) / `bffi:MonographExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:Mount` | **clean** | `bffi:Mount` | owl:equivalentClass | — | — |
@@ -265,7 +265,7 @@ The table below is **auto-generated** by the `bffi-pipeline regenerate-mapping-t
 | `bf:VideogamePlatformId` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/videogame-platform-id>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Work` | **clean** | `bffi:BibframeWork` | owl:equivalentClass | — | — |
 
-_224 terms total: 144 clean, 64 routed, 12 GAP, 2 inherited, 2 semantic-shift._
+_224 terms total: 144 clean, 65 routed, 10 GAP, 2 inherited, 2 semantic-shift, 1 drop._
 
 <!-- END AUTO: classes -->
 
@@ -536,7 +536,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:issuance` | **routed** | `bffi:issuance` (flat rename) | flat rename (no per-statement axis alternative) | `route_axis_default_predicates` |
 | `bf:itemOf` | **clean** | `bffi:itemOf` | owl:equivalentProperty | — |
 | `bf:itemPortion` | **clean** | `bffi:itemPortion` | owl:equivalentProperty | — |
-| `bf:keyMode` | **GAP** | — | — | — |
+| `bf:keyMode` | **routed** | `bffi:musicKey` literal — extracts `rdfs:label` from the `bf:KeyMode` bnode and attaches as a flat literal on the Work; bnode subgraph dropped | structured-bnode → literal collapse | `route_music_key` |
 | `bf:language` | **clean** | `bffi:language` | owl:equivalentProperty | — |
 | `bf:lastIssue` | **clean** | `bffi:lastIssue` | owl:equivalentProperty | — |
 | `bf:layout` | **clean** | `bffi:layout` | owl:equivalentProperty | — |
@@ -551,7 +551,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:mediumOfPerformance` | **GAP** | — | — | — |
 | `bf:mergedToForm` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:mergerOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
-| `bf:mode` | **GAP** | — | — | — |
+| `bf:mode` | **drop** | not emitted by the LoC marc2bibframe2 XSLT — defensive drop (forward path: append mode value to the `bffi:musicKey` literal if upstream begins emitting) | defensive (upstream-stability) | `drop_music_mode_residue` |
 | `bf:mount` | **clean** | `bffi:mount` | owl:equivalentProperty | — |
 | `bf:musicFormat` | **clean** | `bffi:musicFormat` | owl:equivalentProperty | — |
 | `bf:musicKey` | **clean** | `bffi:musicKey` | owl:equivalentProperty | — |
@@ -647,7 +647,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:voice` | **GAP** | — | — | — |
 | `bf:voiceType` | **GAP** | — | — | — |
 
-_226 terms total: 134 clean, 54 inherited, 16 GAP, 13 routed, 5 semantic-shift, 4 drop._
+_226 terms total: 134 clean, 54 inherited, 14 routed, 14 GAP, 5 semantic-shift, 5 drop._
 
 <!-- END AUTO: predicates -->
 
@@ -701,14 +701,25 @@ What's lost:
 
 `bffi:readMarc382` (English label: *"read-only 382 field"*) is the only property the BFFI ontology declares with `bffi:MusicMedium` as its domain. It holds the verbatim MARC 382 string on the MusicMedium block, with the decomposition (individual instrument / voice / ensemble / part-count) encoded inside the literal as MARC text rather than separate RDF triples. `bffi:musicMedium`'s English label is literally **"music medium of performance"** — semantically the same role as `bf:mediumOfPerformance`.
 
-**Music-key routing**: collapse the BIBFRAME structured `bf:KeyMode` block (and the BIBFRAME 3.0 PMO siblings `bf:Mode` / `bf:Tempo`) into the existing `bffi:musicKey` Literal datatype property:
+**Music-key routing (shipped):** collapse the BIBFRAME structured `bf:keyMode → bf:KeyMode` bnode into the existing `bffi:musicKey` Literal datatype property. marc2bibframe2 emits:
+
+```turtle
+<work> bf:keyMode [
+    a bf:KeyMode ;
+    rdfs:label "B-flat major"
+] .
+```
+
+The routing extracts every `rdfs:label` from the inner KeyMode bnode, emits one `bffi:musicKey` literal per label on the parent Work (preserving language tags), then drops the entire bnode subgraph — the bnode's `rdf:type bf:KeyMode`, the `rdfs:label`, and any optional `bf:source` triples all disappear. Final shape:
 
 ```turtle
 <work> a bffi:MusicWork ;
        bffi:musicKey "B-flat major" .
 ```
 
-`bffi:musicKey` has `rdfs:domain bffi:MusicWork`, is a DatatypeProperty (range Literal), and `owl:equivalentProperty bf:musicKey` — corresponds to BIBFRAME's flat-literal `bf:musicKey`, not to the structured `bf:KeyMode` block.
+`bffi:musicKey` has `rdfs:domain bffi:MusicWork`, is a DatatypeProperty (range Literal), and `owl:equivalentProperty bf:musicKey` — corresponds to BIBFRAME's flat-literal `bf:musicKey`, not to the structured `bf:keyMode → bf:KeyMode` block. The collapse exploits this equivalence to land the structured PMO data on BFFI's pre-existing literal carrier.
+
+**`bf:mode` / `bf:Mode` defensive drop:** the BIBFRAME 3.0.1 PMO mode-only-without-key predicate/class. marc2bibframe2's XSLT doesn't emit them (verified: zero grep hits across the XSLT tree); they're dropped defensively. If upstream changes, the forward path is to append the mode value to the `bffi:musicKey` literal that the music-key routing already produces (combining `key="B♭"` + `mode="minor"` into `"B♭ minor"`).
 
 What survives the migration:
 

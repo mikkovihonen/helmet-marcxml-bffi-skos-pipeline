@@ -761,14 +761,99 @@ def drop_variant_type(graph: Graph) -> int:
     return dropped
 
 
-#: BIBFRAME predicates declared by the ontology that marc2bibframe2 does
-#: NOT emit in its XSLT — defensive drops for upstream-stability rather
-#: than hot-path routing decisions. Verified by ``grep -rn 'subseries…'``
-#: across ``third_party/marc2bibframe2/xsl/`` returning zero hits.
+#: BIBFRAME predicates declared by the ontology that the LoC marc2bibframe2
+#: XSLT does NOT emit — defensive drops for upstream-stability rather
+#: than hot-path routing decisions. Each entry is verified by grepping
+#: the marc2bibframe2 XSLT tree for zero hits.
 _SUBSERIES_PREDICATES: Final[tuple[URIRef, ...]] = (
     BF.subseriesStatement,
     BF.subseriesEnumeration,
 )
+
+#: BIBFRAME 3.0.1 PMO terms that marc2bibframe2 doesn't emit (bf:keyMode
+#: IS emitted — see :func:`route_music_key` — but bf:mode / bf:Mode are
+#: only-in-ontology PMO additions). If a future upstream begins emitting
+#: them, the routing should be expanded to read the mode value and
+#: append it to the bffi:musicKey literal.
+_MUSIC_MODE_PREDICATES: Final[tuple[URIRef, ...]] = (BF.mode,)
+_MUSIC_MODE_CLASSES: Final[tuple[URIRef, ...]] = (BF.Mode,)
+
+
+def route_music_key(graph: Graph) -> int:
+    """Collapse the BIBFRAME ``bf:keyMode`` structured bnode into a
+    ``bffi:musicKey`` literal on the parent Work.
+
+    marc2bibframe2 emits key/mode information as a structured bnode:
+
+    .. code-block:: turtle
+
+        <work> bf:keyMode [
+            a bf:KeyMode ;
+            rdfs:label "B♭ major"
+        ] .
+
+    BFFI's canonical shape for the same data is a flat literal:
+
+    .. code-block:: turtle
+
+        <work> bffi:musicKey "B♭ major" .
+
+    The routing extracts every ``rdfs:label`` value from the inner
+    KeyMode bnode, emits one ``bffi:musicKey`` literal per label, then
+    deletes the entire bnode subgraph (its ``rdf:type bf:KeyMode``,
+    ``rdfs:label``, and any optional ``bf:source`` triples). This
+    handles ``bf:KeyMode`` implicitly — the class disappears when its
+    bnode is removed.
+
+    Returns the count of ``bf:keyMode`` statements rewritten.
+
+    Edge cases handled:
+
+    - **No label**: if the bnode has no ``rdfs:label``, the routing
+      still removes the bnode (no ``bffi:musicKey`` is emitted). This
+      keeps the closed-namespace emit clean; the operator can spot
+      the drop via the gap between ``music_key_collapsed`` and the
+      record's source-MARC-384 count.
+    - **Multiple labels** (e.g. multilingual ``rdfs:label`` rows on
+      the bnode): each becomes its own ``bffi:musicKey`` literal,
+      preserving the language tags.
+    """
+    rewritten = 0
+    for work, _, keymode_node in list(graph.triples((None, BF.keyMode, None))):
+        for label in list(graph.objects(keymode_node, RDFS.label)):
+            graph.add((work, BFFI.musicKey, label))
+        graph.remove((work, BF.keyMode, keymode_node))
+        # Drop every triple anchored at the keymode bnode (its rdf:type,
+        # rdfs:label, optional bf:source, etc.). marc2bibframe2 mints a
+        # fresh bnode per bf:keyMode emit so no other references exist.
+        for s, p, o in list(graph.triples((keymode_node, None, None))):
+            graph.remove((s, p, o))
+        rewritten += 1
+    return rewritten
+
+
+def drop_music_mode_residue(graph: Graph) -> int:
+    """Drop ``bf:mode`` / ``bf:Mode`` triples — never emitted by the LoC
+    marc2bibframe2 XSLT.
+
+    BIBFRAME 3.0.1 declares both as part of the PMO absorption (Dec 2025),
+    but the LoC XSLT doesn't produce them. Defensive drop parallel to
+    :func:`drop_subseries_residue`. If upstream changes, the routing
+    should be expanded — the natural strategy is to append the mode
+    value to the ``bffi:musicKey`` literal that :func:`route_music_key`
+    already emits (e.g. combining ``key="B♭"`` and ``mode="minor"`` into
+    ``"B♭ minor"``).
+    """
+    dropped = 0
+    for predicate in _MUSIC_MODE_PREDICATES:
+        for s, _, o in list(graph.triples((None, predicate, None))):
+            graph.remove((s, predicate, o))
+            dropped += 1
+    for cls in _MUSIC_MODE_CLASSES:
+        for s in list(graph.subjects(RDF.type, cls)):
+            graph.remove((s, RDF.type, cls))
+            dropped += 1
+    return dropped
 
 
 def drop_subseries_residue(graph: Graph) -> int:
@@ -825,6 +910,8 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "note_type_dropped": drop_note_type(graph),
         "variant_type_dropped": drop_variant_type(graph),
         "subseries_dropped": drop_subseries_residue(graph),
+        "music_key_collapsed": route_music_key(graph),
+        "music_mode_dropped": drop_music_mode_residue(graph),
     }
     # The remaining three routings each split their counters into
     # per-discriminator buckets so the observability summary surfaces

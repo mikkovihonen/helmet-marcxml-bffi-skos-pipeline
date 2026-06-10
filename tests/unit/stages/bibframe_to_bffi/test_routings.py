@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDF, RDFS
 
 from bffi_pipeline.stages.bibframe_to_bffi.routings import (
@@ -17,6 +17,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     _hub_target_type,
     _identifier_scheme_token,
     apply_all_routings,
+    drop_music_mode_residue,
     drop_note_type,
     drop_subseries_residue,
     drop_undeclared_bf_terms,
@@ -28,6 +29,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     route_hubs,
     route_identifier_schemes,
     route_inverse_predicates,
+    route_music_key,
     route_note_for,
     route_provision_activity_statement,
     route_relation_predicates,
@@ -271,6 +273,8 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "note_type_dropped": 0,
         "variant_type_dropped": 0,
         "subseries_dropped": 0,
+        "music_key_collapsed": 0,
+        "music_mode_dropped": 0,
         "axis_default_class_work": 0,
         "axis_default_class_expression": 1,  # bf:Audio → NonMusicAudioExpression
         "instance_of_work": 0,
@@ -834,3 +838,107 @@ def test_drop_subseries_residue_no_op_when_predicates_absent() -> None:
     behaviour for the predominant corpus shape (zero prevalence in the
     500-file sample)."""
     assert drop_subseries_residue(Graph()) == 0
+
+
+# --- music-key collapse (bf:keyMode → bffi:musicKey) -------------------
+
+
+def test_route_music_key_collapses_structured_bnode_to_literal() -> None:
+    """marc2bibframe2 emits ``?work bf:keyMode [a bf:KeyMode;
+    rdfs:label "B♭ major"]``. The routing collapses the entire bnode
+    to a flat ``?work bffi:musicKey "B♭ major"`` literal and removes
+    the bnode subgraph completely."""
+
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    keymode = BNode()
+    g.add((work, BF.keyMode, keymode))
+    g.add((keymode, RDF.type, BF.KeyMode))
+    g.add((keymode, RDFS.label, Literal("B-flat major")))
+
+    rewritten = route_music_key(g)
+    assert rewritten == 1
+    # Flat literal landed on the Work.
+    assert (work, BFFI.musicKey, Literal("B-flat major")) in g
+    # Every triple anchored at the keymode bnode is gone.
+    assert (work, BF.keyMode, keymode) not in g
+    assert (keymode, RDF.type, BF.KeyMode) not in g
+    assert (keymode, RDFS.label, Literal("B-flat major")) not in g
+    # And the bnode is no longer a subject anywhere.
+    assert not list(g.triples((keymode, None, None)))
+
+
+def test_route_music_key_preserves_language_tag_on_label() -> None:
+    """A KeyMode bnode with a language-tagged rdfs:label produces a
+    matching language-tagged bffi:musicKey literal."""
+
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    keymode = BNode()
+    g.add((work, BF.keyMode, keymode))
+    g.add((keymode, RDFS.label, Literal("B-duuri", lang="fi")))
+
+    route_music_key(g)
+    assert (work, BFFI.musicKey, Literal("B-duuri", lang="fi")) in g
+
+
+def test_route_music_key_multiple_labels_emit_multiple_literals() -> None:
+    """Multilingual KeyMode bnodes (one rdfs:label per language) each
+    become their own ``bffi:musicKey`` literal — language tags
+    preserved end-to-end."""
+
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    keymode = BNode()
+    g.add((work, BF.keyMode, keymode))
+    g.add((keymode, RDFS.label, Literal("B-flat major", lang="en")))
+    g.add((keymode, RDFS.label, Literal("B-duuri", lang="fi")))
+
+    route_music_key(g)
+    assert (work, BFFI.musicKey, Literal("B-flat major", lang="en")) in g
+    assert (work, BFFI.musicKey, Literal("B-duuri", lang="fi")) in g
+
+
+def test_route_music_key_no_label_still_removes_bnode() -> None:
+    """A KeyMode bnode without an rdfs:label (defensive) still gets
+    its bf:keyMode link and its rdf:type triple removed — no
+    bffi:musicKey is emitted (no literal to carry), but the bf:* URIs
+    don't pollute the closed-namespace emit."""
+
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    keymode = BNode()
+    g.add((work, BF.keyMode, keymode))
+    g.add((keymode, RDF.type, BF.KeyMode))
+
+    rewritten = route_music_key(g)
+    assert rewritten == 1
+    assert (work, BF.keyMode, keymode) not in g
+    assert (keymode, RDF.type, BF.KeyMode) not in g
+    # No bffi:musicKey emitted.
+    assert not list(g.triples((work, BFFI.musicKey, None)))
+
+
+# --- bf:mode / bf:Mode defensive drop ----------------------------------
+
+
+def test_drop_music_mode_residue_removes_predicate_and_class_typing() -> None:
+    """marc2bibframe2 doesn't emit ``bf:mode`` or ``bf:Mode`` (PMO
+    additions to BIBFRAME 3.0.1). Defensive drop covers both
+    predicate triples and class-typing triples."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    mode_node = URIRef("http://example.org/mode-1")
+    g.add((work, BF.mode, mode_node))
+    g.add((mode_node, RDF.type, BF.Mode))
+
+    dropped = drop_music_mode_residue(g)
+    assert dropped == 2
+    assert (work, BF.mode, mode_node) not in g
+    assert (mode_node, RDF.type, BF.Mode) not in g
+
+
+def test_drop_music_mode_residue_no_op_when_absent() -> None:
+    """Empty graph: zero drops. Locks the no-op for the corpus-prevalent
+    case (zero occurrences in the 500-file sample)."""
+    assert drop_music_mode_residue(Graph()) == 0
