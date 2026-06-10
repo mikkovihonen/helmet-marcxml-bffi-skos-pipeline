@@ -730,7 +730,7 @@ Sources for the BIBFRAME 3.0 release information:
 
 This is the same pattern as the Identifier-scheme and Title-variant collapses elsewhere in this doc: BFFI consistently chooses **one canonical class + one literal-carrier property** over BIBFRAME's structured subclass tree.
 
-## Axis-default class routings (Phase 3 of the P-56 migration)
+## Axis-default class routings
 
 Eight BIBFRAME classes have `bffi-meta:broadMatch` (or for `bf:MusicAudio`, `closeMatch`) mappings to *both* a Work-axis and an Expression-axis BFFI counterpart. The routing picks **per subject** based on the subject's co-typed `rdf:type` assertions — `route_axis_default_classes` in `src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`:
 
@@ -750,7 +750,7 @@ Eight BIBFRAME classes have `bffi-meta:broadMatch` (or for `bf:MusicAudio`, `clo
 
 The counter dict the routing returns is split into `axis_default_class_work` and `axis_default_class_expression` so the observability summary surfaces the discriminator's effect per run. In the 20 k bench the split was ~50/50 — marc2bibframe2 echoes each content-type class on both the Work URI and the Instance URI, and the discriminator catches both correctly.
 
-## Axis-default predicate routings (Phase 2 of the P-56 migration)
+## Axis-default predicate routings
 
 Three `bf:*` predicates have multiple `bffi-meta:broadMatch` mappings in `lkd.rdf`. The implementation picks the one that lines up with Helmet's main-stream usage:
 
@@ -786,7 +786,7 @@ Two BIBFRAME predicates have no direct `bffi:*` counterpart but route naturally 
 
 ## Defensive guard — undeclared `bf:*` terms are dropped
 
-After every clean rename + Phase 4 routing has run, any `bf:*` URI remaining in the output graph is checked against the vendored `vocab/bibframe.rdf` ontology. If neither BIBFRAME's classes, object properties, nor datatype properties declare the term, the whole triple is removed and the drop count is reported as `dropped_undeclared_bf`.
+After every clean rename + discriminator routing has run, any `bf:*` URI remaining in the output graph is checked against the vendored `vocab/bibframe.rdf` ontology. If neither BIBFRAME's classes, object properties, nor datatype properties declare the term, the whole triple is removed and the drop count is reported as `dropped_undeclared_bf`.
 
 The pattern uses the BIBFRAME ontology as the authority for "is this a real `bf:*` term?" rather than maintaining a hand-curated allowlist. Concrete catches from the 20 k bench:
 
