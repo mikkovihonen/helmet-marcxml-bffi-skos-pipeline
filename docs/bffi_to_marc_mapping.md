@@ -22,11 +22,16 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 |---|---|---|---|---|
 | `leader` | `—` | — | static placeholder | See known limitations below. |
 | `001` | `—` | — | ?m bffi:identifiedBy [a bffi:Local ; rdf:value ?bib_id] (fallback: parse from the Manifestation URI fragment) | — |
+| `005` | `—` | — | ?m bffi:adminMetadata [a bffi:AdminMetadata ; bffi:changeDate ?date] | — |
 | `020` | `##` | `$a` — ISBN value | ?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <http://id.loc.gov/vocabulary/identifiers/isbn> ; rdf:value ?isbn] | — |
 | `022` | `##` | `$a` — ISSN value | ?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <http://id.loc.gov/vocabulary/identifiers/issn> ; rdf:value ?issn] | — |
 | `041` | `##` | `$a` — 3-letter language code (one per language) | ?m bffi:language <http://id.loc.gov/vocabulary/languages/{code}> — the last URI segment is the MARC code | — |
 | `245` | `00` | `$a` — main title<br>`$b` — subtitle<br>`$c` — statement of responsibility | ?m bffi:title / bffi:Title / bffi:mainTitle (mandatory) + bffi:subtitle (optional); responsibility comes from ?m bffi:responsibilityStatement | First bffi:title block wins. See known limitations below. |
+| `260` | `##` | `$a` — publication / distribution statement | ?m bffi:publicationStatement ?text — the transcribed pre-RDA statement | BFFI carries the publication statement as a single transcribed literal — the round-trip emit puts the whole string in $a. |
 | `300` | `##` | `$a` — extent<br>`$c` — dimensions | ?m bffi:extent / bffi:Extent / rdfs:label (for $a) and ?m bffi:dimensions literal (for $c) | First-extent-wins for multi-extent records (rare). |
+| `336` | `##` | `$a` — RDA content type code | ?m bffi:workManifested ?work . ?work bffi:content <http://id.loc.gov/vocabulary/contentTypes/{code}> | — |
+| `337` | `##` | `$a` — RDA media type code | ?m bffi:media <http://id.loc.gov/vocabulary/mediaTypes/{code}> | — |
+| `338` | `##` | `$a` — RDA carrier type code | ?m bffi:carrier <http://id.loc.gov/vocabulary/carriers/{code}> | — |
 | `600` | `##` | `$a` — personal name subject heading | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label — `?subject` is typed `bffi:Person` | — |
 | `610` | `##` | `$a` — corporate name subject heading | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label — `?subject` is typed `bffi:Organization` | — |
 | `611` | `##` | `$a` — meeting / conference subject heading | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label — `?subject` is typed `bffi:Meeting` | — |
@@ -36,7 +41,7 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `651` | `##` | `$a` — geographic name subject heading | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label — `?subject` is typed `bffi:Place` | — |
 | `655` | `##` | `$a` — genre / form term | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label — `?subject` is typed `bffi:GenreForm` | — |
 
-_15 MARC tags currently emitted._
+_20 MARC tags currently emitted._
 
 <!-- END AUTO: shipped -->
 

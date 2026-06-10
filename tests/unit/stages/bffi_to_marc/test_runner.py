@@ -369,6 +369,79 @@ def test_emit_marcxml_skips_subject_nodes_with_unrecognised_tags() -> None:
     assert root.find(f"{{{MARC21_NS}}}datafield[@tag='730']") is None
 
 
+def test_emit_marcxml_emits_005_change_date() -> None:
+    """``bffi:adminMetadata / bffi:changeDate`` → MARC 005 controlfield."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    admin = URIRef("http://example.org/b1#admin")
+    g.add((admin, RDF.type, BFFI.AdminMetadata))
+    g.add((admin, BFFI.changeDate, Literal("20260610154300.0")))
+    g.add((m, BFFI.adminMetadata, admin))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    cf005 = root.find(f"{{{MARC21_NS}}}controlfield[@tag='005']")
+    assert cf005 is not None
+    assert cf005.text == "20260610154300.0"
+
+
+def test_emit_marcxml_emits_260_publication_statement() -> None:
+    """``bffi:publicationStatement`` literal → MARC 260 \\$a (full statement)."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    g.add((m, BFFI.publicationStatement, Literal("Helsinki : WSOY, 2010")))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df260 = root.find(f"{{{MARC21_NS}}}datafield[@tag='260']")
+    assert df260 is not None
+    sf_a = df260.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    assert sf_a is not None
+    assert sf_a.text == "Helsinki : WSOY, 2010"
+
+
+def test_emit_marcxml_emits_336_337_338_rda_descriptors() -> None:
+    """bffi:content on the Work + bffi:media / bffi:carrier on the
+    Manifestation each render as MARC 336 / 337 / 338 with the
+    3-letter LoC code in \\$a."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+
+    g.add(
+        (
+            work,
+            BFFI.content,
+            URIRef("http://id.loc.gov/vocabulary/contentTypes/txt"),
+        )
+    )
+    g.add((m, BFFI.media, URIRef("http://id.loc.gov/vocabulary/mediaTypes/n")))
+    g.add((m, BFFI.carrier, URIRef("http://id.loc.gov/vocabulary/carriers/nc")))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df336 = root.find(f"{{{MARC21_NS}}}datafield[@tag='336']")
+    df337 = root.find(f"{{{MARC21_NS}}}datafield[@tag='337']")
+    df338 = root.find(f"{{{MARC21_NS}}}datafield[@tag='338']")
+    assert df336 is not None and df336.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "txt"  # type: ignore[union-attr]
+    assert df337 is not None and df337.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "n"  # type: ignore[union-attr]
+    assert df338 is not None and df338.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "nc"  # type: ignore[union-attr]
+
+
 def test_emit_marcxml_skips_unsupported_identifier_schemes() -> None:
     """Identifier blocks with a bffi:source URI not in the dispatch
     table are skipped — those land in their own follow-on commits.

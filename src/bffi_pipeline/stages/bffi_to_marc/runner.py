@@ -214,6 +214,111 @@ def _extract_bib_id_from_uri(manifestation: URIRef) -> str | None:
     return tail or None
 
 
+@marc_emit(
+    MarcEmitMeta(
+        tag="005",
+        indicators=(),
+        subfields=(),
+        source="?m bffi:adminMetadata [a bffi:AdminMetadata ; bffi:changeDate ?date]",
+    )
+)
+def _extract_change_date(graph: Graph, manifestation: URIRef) -> str | None:
+    """Return the ``bffi:changeDate`` literal from the Manifestation's
+    AdminMetadata block. Maps directly to MARC 005."""
+    for admin in graph.objects(manifestation, BFFI.adminMetadata):
+        date = next(graph.objects(admin, BFFI.changeDate), None)
+        if isinstance(date, Literal):
+            return str(date)
+    return None
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="260",
+        indicators=(" ", " "),
+        subfields=(("a", "publication / distribution statement"),),
+        source="?m bffi:publicationStatement ?text — the transcribed pre-RDA statement",
+        notes=(
+            "BFFI carries the publication statement as a single transcribed "
+            "literal — the round-trip emit puts the whole string in $a."
+        ),
+    )
+)
+def _extract_publication_statement(graph: Graph, manifestation: URIRef) -> str | None:
+    """Return the first ``bffi:publicationStatement`` literal on the
+    Manifestation. Maps to MARC 260 $a (the transcribed full
+    statement; structured $a/$b/$c split is not available from this
+    BFFI predicate alone)."""
+    value = next(graph.objects(manifestation, BFFI.publicationStatement), None)
+    return str(value) if isinstance(value, Literal) else None
+
+
+@dataclass(frozen=True)
+class _RdaDescriptors:
+    """RDA content/media/carrier codes for MARC 336/337/338 emit."""
+
+    content_codes: tuple[str, ...]
+    media_codes: tuple[str, ...]
+    carrier_codes: tuple[str, ...]
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="336",
+        indicators=(" ", " "),
+        subfields=(("a", "RDA content type code"),),
+        source=(
+            "?m bffi:workManifested ?work . "
+            "?work bffi:content <http://id.loc.gov/vocabulary/contentTypes/{code}>"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="337",
+        indicators=(" ", " "),
+        subfields=(("a", "RDA media type code"),),
+        source="?m bffi:media <http://id.loc.gov/vocabulary/mediaTypes/{code}>",
+    ),
+    MarcEmitMeta(
+        tag="338",
+        indicators=(" ", " "),
+        subfields=(("a", "RDA carrier type code"),),
+        source="?m bffi:carrier <http://id.loc.gov/vocabulary/carriers/{code}>",
+    ),
+)
+def _extract_rda_descriptors(graph: Graph, manifestation: URIRef) -> _RdaDescriptors:
+    """Walk the RDA content / media / carrier predicates and return
+    each as its 3-letter MARC code (the URI's local name, taken from
+    the LoC vocabulary URIs marc2bibframe2 emits).
+
+    Content lives on the Expression / Work (FRBR-axis: the work
+    *contains* text vs music vs cartographic material); media and
+    carrier live on the Manifestation (physical-format properties).
+    Multiple values per predicate produce multiple datafields, sorted
+    for determinism.
+    """
+    work = _find_work_for_manifestation(graph, manifestation)
+    content = sorted(
+        local_name(obj)
+        for obj in (graph.objects(work, BFFI.content) if work is not None else ())
+        if isinstance(obj, URIRef)
+    )
+    media = sorted(
+        local_name(obj)
+        for obj in graph.objects(manifestation, BFFI.media)
+        if isinstance(obj, URIRef)
+    )
+    carrier = sorted(
+        local_name(obj)
+        for obj in graph.objects(manifestation, BFFI.carrier)
+        if isinstance(obj, URIRef)
+    )
+    return _RdaDescriptors(
+        content_codes=tuple(content),
+        media_codes=tuple(media),
+        carrier_codes=tuple(carrier),
+    )
+
+
 @dataclass(frozen=True)
 class _TitleParts:
     """The 245-field-worth of content extracted from one bffi:Title block."""
@@ -533,14 +638,28 @@ def _extract_identifier_datafields(graph: Graph, manifestation: URIRef) -> list[
     return emits
 
 
+def _append_simple_a_datafields(record: etree._Element, tag: str, values: tuple[str, ...]) -> None:
+    """Append one MARC datafield per value, each with a single ``$a``
+    subfield carrying the value and blank indicators. Used for MARC
+    families whose entire emit shape is a list of bare ``$a`` rows
+    (336 / 337 / 338 RDA descriptors today; potentially others)."""
+    for value in values:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=tag, ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = value
+
+
 def _build_marc_record(
     *,
     bib_id: str,
+    change_date: str | None,
     title_parts: _TitleParts | None,
     responsibility: str | None,
+    publication_statement: str | None,
     identifiers: list[_IdentifierEmit],
     language_codes: list[str],
     physical: _PhysicalDescription | None,
+    rda: _RdaDescriptors,
     subjects: list[_SubjectEmit],
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
@@ -550,6 +669,10 @@ def _build_marc_record(
 
     cf001 = etree.SubElement(record, f"{_MARC}controlfield", tag="001")
     cf001.text = bib_id
+
+    if change_date is not None:
+        cf005 = etree.SubElement(record, f"{_MARC}controlfield", tag="005")
+        cf005.text = change_date
 
     # 020 ISBN / 022 ISSN come before 041 / 245 / 300 in MARC tag order.
     for ident in identifiers:
@@ -574,6 +697,11 @@ def _build_marc_record(
             sf_c = etree.SubElement(df245, f"{_MARC}subfield", code="c")
             sf_c.text = responsibility
 
+    if publication_statement is not None:
+        df260 = etree.SubElement(record, f"{_MARC}datafield", tag="260", ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df260, f"{_MARC}subfield", code="a")
+        sf_a.text = publication_statement
+
     if physical is not None:
         df300 = etree.SubElement(record, f"{_MARC}datafield", tag="300", ind1=" ", ind2=" ")
         if physical.extent is not None:
@@ -582,6 +710,12 @@ def _build_marc_record(
         if physical.dimensions is not None:
             sf_c = etree.SubElement(df300, f"{_MARC}subfield", code="c")
             sf_c.text = physical.dimensions
+
+    # 336/337/338 RDA descriptors. One datafield per code (multiple values
+    # on a single predicate produce repeated datafields per MARC convention).
+    _append_simple_a_datafields(record, "336", rda.content_codes)
+    _append_simple_a_datafields(record, "337", rda.media_codes)
+    _append_simple_a_datafields(record, "338", rda.carrier_codes)
 
     # 6XX subjects come after the bibliographic-description block.
     for subj in subjects:
@@ -604,19 +738,25 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     )
     if bib_id is None:
         raise BffiToMarcError(f"no bib ID found for manifestation {manifestation}")
+    change_date = _extract_change_date(graph, manifestation)
     title_parts = _extract_main_title_parts(graph, manifestation)
     responsibility = _extract_responsibility_statement(graph, manifestation)
+    publication_statement = _extract_publication_statement(graph, manifestation)
     identifiers = _extract_identifier_datafields(graph, manifestation)
     language_codes = _extract_language_codes(graph, manifestation)
     physical = _extract_physical_description(graph, manifestation)
+    rda = _extract_rda_descriptors(graph, manifestation)
     subjects = _extract_subject_datafields(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
+        change_date=change_date,
         title_parts=title_parts,
         responsibility=responsibility,
+        publication_statement=publication_statement,
         identifiers=identifiers,
         language_codes=language_codes,
         physical=physical,
+        rda=rda,
         subjects=subjects,
     )
     return etree.tostring(
