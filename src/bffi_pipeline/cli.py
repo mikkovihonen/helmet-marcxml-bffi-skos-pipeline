@@ -31,6 +31,7 @@ from bffi_pipeline.diagnostic.mapping_coverage import (
     format_path,
 )
 from bffi_pipeline.diagnostic.mapping_tables import regenerate_mapping_tables
+from bffi_pipeline.diagnostic.marc_coverage import analyse_corpus, format_report
 from bffi_pipeline.diagnostic.marc_mapping import regenerate_marc_mapping
 from bffi_pipeline.rdf_utils import local_name
 from bffi_pipeline.runs import (
@@ -222,6 +223,48 @@ def regenerate_marc_mapping_command(
     else:
         verb = "updated" if changed else "already up to date"
         typer.echo(f"docs/bffi_to_marc_mapping.md {verb}.")
+
+
+@app.command("diagnose-marc-coverage")
+def diagnose_marc_coverage_command(
+    input_dir: Annotated[
+        Path,
+        typer.Option(
+            "--input-dir",
+            help="Directory of source MARCXML files (`*.xml`) to analyse.",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ],
+    top_n: Annotated[
+        int,
+        typer.Option(
+            "--top-n",
+            help="How many tags to list in the per-tag breakdown.",
+            min=1,
+            max=200,
+        ),
+    ] = 20,
+) -> None:
+    """Quantify how much of the source MARC corpus the reverse converter covers.
+
+    Walks every ``<record>`` under ``--input-dir`` and tallies, against
+    the ``MARC_EMIT_REGISTRY``:
+
+      * **Field coverage** — fraction of source ``<leader>`` / control /
+        datafield rows whose tag is in the registry.
+      * **Subfield coverage** — fraction of source ``<subfield>``
+        occurrences whose ``(tag, code)`` pair is in the registry.
+
+    Plus a per-tag breakdown (top by occurrence count) and a top-10
+    uncovered-tags list — the highest-impact follow-on backlog.
+
+    The diagnostic does not consult the BFFI graph or run the converter;
+    it compares the source MARC against the registry declarations only.
+    """
+    report = analyse_corpus(input_dir)
+    typer.echo(format_report(report, top_n=top_n))
 
 
 @app.command("new-run")
