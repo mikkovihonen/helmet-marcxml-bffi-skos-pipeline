@@ -6,7 +6,7 @@ handles every ``bf:*`` term with a direct ``owl:equivalentClass`` /
 classes and predicates that don't have a single direct counterpart but
 *do* have a canonical routing in `docs/bf_to_bffi_mapping.md`.
 
-Five routings ship in this module, in the order documented in the
+Six routings ship in this module, in the order documented in the
 mapping doc:
 
 1. **Identifier-scheme** — ``bf:Isbn`` / ``bf:Issn`` / ``bf:Ean`` /
@@ -16,13 +16,19 @@ mapping doc:
    ``bf:KeyTitle`` / ``bf:CollectiveTitle`` → ``bffi:Title``. The
    ``bffi:marcKey`` discriminator is preserved by the
    ``bflc:marcKey`` → ``bffi:marcKey`` rename below.
-3. **Audio content-type** — ``bf:Audio`` → ``bffi:NonMusicAudioExpression``
-   (Expression-axis default per the doc).
-4. **Series-link** — ``bf:hasSeries`` → ``bffi:relation`` ⇒ structured
+3. **Series-link** — ``bf:hasSeries`` → ``bffi:relation`` ⇒ structured
    ``bffi:Relation`` bnode with ``bffi:relationship
    <vocabulary/relationship/series>`` + ``bffi:associatedResource``.
-5. **Hub** — ``bf:Hub`` → ``bffi:Work`` or ``bffi:Expression`` (or a leaf
+4. **Hub** — ``bf:Hub`` → ``bffi:Work`` or ``bffi:Expression`` (or a leaf
    subclass) based on the ``bflc:marcKey`` content.
+5. **Axis-default class** — ``bf:Monograph`` / ``bf:Series`` /
+   ``bf:Serial`` / ``bf:MusicAudio`` / ``bf:MovingImage`` /
+   ``bf:Cartography`` / ``bf:NonMusicAudio`` / ``bf:Audio`` →
+   per-subject pick between the Work-axis and Expression-axis BFFI
+   variants (discriminated by the subject's co-typed ``rdf:type``
+   assertions; see :data:`_WORK_AXIS_SIGNALS`).
+6. **Axis-default predicate** — ``bf:instanceOf`` / ``bf:hasInstance``
+   / ``bf:issuance`` → BFFI defaults per :data:`AXIS_DEFAULT_PREDICATES`.
 
 Plus one prerequisite rename:
 
@@ -30,9 +36,11 @@ Plus one prerequisite rename:
   ``lkd.rdf``; emit-side closes to ``bffi:`` for downstream consumers).
 
 Each routing is a single graph-mutation function returning the number
-of patterns it rewrote. :func:`apply_all_routings` runs them in order
-and returns the per-routing counter dict so the runner can surface them
-in the observability ``end`` event.
+of patterns it rewrote (or a per-discriminator counter dict for the
+two routings that split — axis-default class and
+provision-activity-statement). :func:`apply_all_routings` runs them in
+order and returns the merged counter dict for the observability
+``end`` event.
 
 Out of scope for v0 — flagged in the mapping doc but deferred to a
 follow-on:
@@ -42,9 +50,6 @@ follow-on:
   ``bffi:musicKey``, ``bffi:version``). Those are nice-to-have signal
   promotions; the type rewrite is what unblocks closed-namespace
   discipline.
-- Audio routing defaults to the Expression axis without per-record
-  content-type inspection. A follow-on can split by axis when the BFFI
-  graph already carries content-type evidence.
 """
 
 from __future__ import annotations
@@ -127,21 +132,52 @@ RELATION_PREDICATE_ROUTINGS: Final[dict[URIRef, URIRef]] = {
 }
 
 #: P-56 Phase 3 axis-pick: BIBFRAME classes that BFFI splits into
-#: Work-axis and Expression-axis variants. The mapping doc recommends
-#: defaulting to the Expression axis when no per-record discriminator
-#: applies — that's Helmet's predominant case (each record is one
-#: localised Expression). v0 hard-codes the default; a follow-on can
-#: read content-typing evidence (e.g. ``bf:hasInstance`` direction)
-#: to flip individual records to the Work axis.
-AXIS_DEFAULT_CLASSES: Final[dict[URIRef, URIRef]] = {
-    BF.Monograph: BFFI.MonographExpression,
-    BF.Series: BFFI.SeriesExpression,
-    BF.Serial: BFFI.SerialExpression,
-    BF.MusicAudio: BFFI.MusicAudioExpression,
-    BF.MovingImage: BFFI.MovingImageExpression,
-    BF.Cartography: BFFI.CartographyExpression,
-    BF.NonMusicAudio: BFFI.NonMusicAudioExpression,
+#: Work-axis and Expression-axis variants. Each entry maps a ``bf:*``
+#: class to a ``(work_axis_pick, expression_axis_pick)`` tuple.
+#:
+#: :func:`route_axis_default_classes` picks per subject: if the subject
+#: carries any of :data:`_WORK_AXIS_SIGNALS` as another ``rdf:type``
+#: (i.e. it's the Work URI marc2bibframe2 emitted), it routes to the
+#: Work-axis variant; otherwise to the Expression-axis variant. The
+#: Helmet corpus pattern is marc2bibframe2 emitting the same axis-split
+#: class on BOTH the Work URI (co-typed ``bf:Work``) and the Instance
+#: URI (typed ``bf:Instance`` only), so this discriminator catches the
+#: Work side cleanly while the Instance side defaults to Expression
+#: (the existing behaviour for Helmet's "one localised Expression
+#: per record" pattern).
+#:
+#: ``bf:MusicAudio`` has asymmetric naming in lkd.rdf: the Work-axis
+#: pick is ``bffi:MusicWork`` (no ``MusicAudioWork`` class exists);
+#: only the Expression-axis pick keeps the ``MusicAudio`` prefix.
+#:
+#: ``bf:Audio`` shares NonMusicAudio's targets — marc2bibframe2 emits
+#: ``bf:Audio`` only for non-music audio (music gets the more specific
+#: ``bf:MusicAudio`` directly), so both route to the same BFFI pair.
+AXIS_DEFAULT_CLASSES: Final[dict[URIRef, tuple[URIRef, URIRef]]] = {
+    BF.Monograph: (BFFI.MonographWork, BFFI.MonographExpression),
+    BF.Series: (BFFI.SeriesWork, BFFI.SeriesExpression),
+    BF.Serial: (BFFI.SerialWork, BFFI.SerialExpression),
+    BF.MusicAudio: (BFFI.MusicWork, BFFI.MusicAudioExpression),
+    BF.MovingImage: (BFFI.MovingImageWork, BFFI.MovingImageExpression),
+    BF.Cartography: (BFFI.CartographyWork, BFFI.CartographyExpression),
+    BF.NonMusicAudio: (BFFI.NonMusicAudioWork, BFFI.NonMusicAudioExpression),
+    BF.Audio: (BFFI.NonMusicAudioWork, BFFI.NonMusicAudioExpression),
 }
+
+#: ``rdf:type`` assertions that signal a subject is the Work-axis side.
+#: The set covers both clean-rename outcomes (``bffi:BibframeWork`` ←
+#: ``bf:Work``) and Hub-routing outcomes (``bffi:Work`` /
+#: ``bffi:AggregatingWork`` / ``bffi:Arrangement``). Any subject
+#: carrying one of these as a co-type is routed to the Work-axis
+#: variant by :func:`route_axis_default_classes`.
+_WORK_AXIS_SIGNALS: Final[frozenset[URIRef]] = frozenset(
+    {
+        BFFI.BibframeWork,
+        BFFI.Work,
+        BFFI.AggregatingWork,
+        BFFI.Arrangement,
+    }
+)
 
 #: P-56 Phase 2 broadMatch predicates. Each maps to a single default
 #: ``bffi:*`` substitute when no per-instance discriminator applies.
@@ -246,26 +282,6 @@ def route_title_variants(graph: Graph) -> int:
             graph.remove((subject, RDF.type, bf_class))
             graph.add((subject, RDF.type, BFFI.Title))
             rewritten += 1
-    return rewritten
-
-
-# --- routing 3: Audio content-type --------------------------------------
-
-
-def route_audio(graph: Graph) -> int:
-    """``bf:Audio`` → ``bffi:NonMusicAudioExpression``.
-
-    marc2bibframe2 emits ``bf:Audio`` only for non-music audio (music
-    gets the more specific ``bf:MusicAudio``); BFFI splits the result
-    into Work-axis vs Expression-axis variants. v0 defaults to the
-    Expression axis per the mapping doc's recommendation; per-record
-    axis discrimination is a follow-on.
-    """
-    rewritten = 0
-    for subject in list(graph.subjects(RDF.type, BF.Audio)):
-        graph.remove((subject, RDF.type, BF.Audio))
-        graph.add((subject, RDF.type, BFFI.NonMusicAudioExpression))
-        rewritten += 1
     return rewritten
 
 
@@ -380,23 +396,46 @@ def route_hubs(graph: Graph) -> int:
 # --- routing 6: axis-default class rewrites -----------------------------
 
 
-def route_axis_default_classes(graph: Graph) -> int:
-    """Rewrite the BIBFRAME axis-split classes to their Expression-axis BFFI
-    default per :data:`AXIS_DEFAULT_CLASSES`.
+def route_axis_default_classes(graph: Graph) -> dict[str, int]:
+    """Per-subject axis discriminator for axis-split BIBFRAME classes.
 
-    The mapping doc tags these as semantic-shift (``bffi-meta:broadMatch``);
-    Helmet's predominant pattern is "this bib record is a single localised
-    Expression," so the Expression-axis variant is the safe default.
-    A follow-on can read per-record content-typing evidence to flip the
-    pick to the Work axis where appropriate.
+    For each ``bf:*`` class in :data:`AXIS_DEFAULT_CLASSES`, inspects
+    every typed subject and routes to:
+
+      - the **Work-axis** variant if the subject also carries any of
+        :data:`_WORK_AXIS_SIGNALS` as another ``rdf:type`` — i.e. it's
+        the Work URI marc2bibframe2 emitted (typed ``bf:Work`` →
+        renamed to ``bffi:BibframeWork``), or a Hub URI that
+        :func:`route_hubs` already routed to ``bffi:Work`` /
+        ``bffi:AggregatingWork`` / ``bffi:Arrangement``.
+      - the **Expression-axis** variant otherwise — Instance URIs
+        (which marc2bibframe2 also tags with the content-type class
+        but doesn't co-type as ``bf:Work``) plus the fallback for any
+        subject without a clear axis signal.
+
+    Returns a counter dict split by axis so the observability summary
+    can show the discriminator's effect:
+
+        {"axis_default_class_work":       <n>,
+         "axis_default_class_expression": <n>}
     """
-    rewritten = 0
-    for bf_class, bffi_class in AXIS_DEFAULT_CLASSES.items():
+    work_count = 0
+    expr_count = 0
+    for bf_class, (work_pick, expr_pick) in AXIS_DEFAULT_CLASSES.items():
         for subject in list(graph.subjects(RDF.type, bf_class)):
+            co_types = set(graph.objects(subject, RDF.type)) - {bf_class}
+            if co_types & _WORK_AXIS_SIGNALS:
+                pick = work_pick
+                work_count += 1
+            else:
+                pick = expr_pick
+                expr_count += 1
             graph.remove((subject, RDF.type, bf_class))
-            graph.add((subject, RDF.type, bffi_class))
-            rewritten += 1
-    return rewritten
+            graph.add((subject, RDF.type, pick))
+    return {
+        "axis_default_class_work": work_count,
+        "axis_default_class_expression": expr_count,
+    }
 
 
 # --- routing 7: axis-default predicate rewrites -------------------------
@@ -534,16 +573,15 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "bflc_marckey_renamed": rename_bflc_marckey(graph),
         "identifier_scheme": route_identifier_schemes(graph),
         "title_variant": route_title_variants(graph),
-        "audio": route_audio(graph),
         "series_link": route_series_links(graph),
         "relation_predicate": route_relation_predicates(graph),
         "hub": route_hubs(graph),
-        "axis_default_class": route_axis_default_classes(graph),
         "axis_default_predicate": route_axis_default_predicates(graph),
     }
-    # The provision-activity-statement routing splits its counter into
-    # two buckets (date vs note) so the discriminator decision is
-    # visible in the observability summary.
+    # The axis-default class routing and the provision-activity-statement
+    # routing both split their counters into per-discriminator buckets so
+    # the observability summary surfaces the pick distribution.
+    counters.update(route_axis_default_classes(graph))
     counters.update(route_provision_activity_statement(graph))
     # Runs LAST. By the time we get here, every legitimate bf:* URI
     # has either been renamed (clean-rename pass) or routed

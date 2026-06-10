@@ -110,12 +110,6 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
             link_kind="discriminator: marcKey",
         )
 
-    registry[_r.BF.Audio] = _Routing(
-        handler="route_audio",
-        replacement="`bffi:NonMusicAudioExpression` (axis-default)",
-        link_kind="axis-pick (Expression default)",
-    )
-
     registry[_r.BF.Hub] = _Routing(
         handler="route_hubs",
         replacement=(
@@ -125,11 +119,14 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
         link_kind="discriminator: marcKey",
     )
 
-    for bf_cls, bffi_cls in _r.AXIS_DEFAULT_CLASSES.items():
+    for bf_cls, (work_pick, expr_pick) in _r.AXIS_DEFAULT_CLASSES.items():
         registry[bf_cls] = _Routing(
             handler="route_axis_default_classes",
-            replacement=f"`bffi:{local_name(bffi_cls)}` (axis-default)",
-            link_kind="axis-pick (Expression default)",
+            replacement=(
+                f"`bffi:{local_name(work_pick)}` (Work-axis) / "
+                f"`bffi:{local_name(expr_pick)}` (Expression-axis)"
+            ),
+            link_kind="discriminator: subject's Work-axis co-type signal",
         )
 
     registry[_r.BF.hasSeries] = _Routing(

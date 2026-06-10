@@ -50,7 +50,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:Archival` | **clean** | `bffi:Archival` | owl:equivalentClass | `bf:Instance` | — |
 | `bf:Arrangement` | **clean** | `bffi:Arrangement` | owl:equivalentClass | `bf:Work` | — |
 | `bf:AspectRatio` | **clean** | `bffi:AspectRatio` | owl:equivalentClass | — | — |
-| `bf:Audio` | **routed** | `bffi:NonMusicAudioExpression` (axis-default) | axis-pick (Expression default) | — | `route_audio` |
+| `bf:Audio` | **routed** | `bffi:NonMusicAudioWork` (Work-axis) / `bffi:NonMusicAudioExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:AudioIssueNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/audio-issue-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:AudioTake` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/audio-take>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Barcode` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/barcode>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
@@ -64,7 +64,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:Cartographic` | **clean** | `bffi:Cartographic` | owl:equivalentClass | — | — |
 | `bf:CartographicDataType` | **clean** | `bffi:CartographicDataType` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
 | `bf:CartographicObjectType` | **clean** | `bffi:CartographicObjectType` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
-| `bf:Cartography` | **routed** | `bffi:CartographyExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:Cartography` | **routed** | `bffi:CartographyWork` (Work-axis) / `bffi:CartographyExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:Chronology` | **clean** | `bffi:Chronology` | owl:equivalentClass | `bf:EnumerationAndChronology` | — |
 | `bf:Classification` | **clean** | `bffi:Classification` | owl:equivalentClass | — | — |
 | `bf:ClassificationDdc` | **clean** | `bffi:ClassificationDdc` | owl:equivalentClass | `bf:Classification` | — |
@@ -159,12 +159,12 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:MixedMaterial` | **clean** | `bffi:MixedMaterial` | owl:equivalentClass | `bf:Work` | — |
 | `bf:Mode` | **GAP** | — | — | — | — |
 | `bf:Modification` | **clean** | `bffi:Modification` | owl:equivalentClass | `bf:ProvisionActivity` | — |
-| `bf:Monograph` | **routed** | `bffi:MonographExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:Monograph` | **routed** | `bffi:MonographWork` (Work-axis) / `bffi:MonographExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:Mount` | **clean** | `bffi:Mount` | owl:equivalentClass | — | — |
 | `bf:MovementNotation` | **clean** | `bffi:MovementNotation` | owl:equivalentClass | `bf:Notation` | — |
-| `bf:MovingImage` | **routed** | `bffi:MovingImageExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:MovingImage` | **routed** | `bffi:MovingImageWork` (Work-axis) / `bffi:MovingImageExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:Multimedia` | **clean** | `bffi:Multimedia` | owl:equivalentClass | `bf:Work` | — |
-| `bf:MusicAudio` | **routed** | `bffi:MusicAudioExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:MusicAudio` | **routed** | `bffi:MusicWork` (Work-axis) / `bffi:MusicAudioExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:MusicDistributorNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/music-distributor-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:MusicEnsemble` | **GAP** | — | — | — | — |
 | `bf:MusicFormat` | **clean** | `bffi:MusicFormat` | owl:equivalentClass | — | — |
@@ -175,7 +175,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:MusicPublisherNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/music-publisher-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:MusicVoice` | **GAP** | — | — | — | — |
 | `bf:Nbn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/nbn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
-| `bf:NonMusicAudio` | **routed** | `bffi:NonMusicAudioExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:NonMusicAudio` | **routed** | `bffi:NonMusicAudioWork` (Work-axis) / `bffi:NonMusicAudioExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:NotatedMovement` | **clean** | `bffi:NotatedMovement` | owl:equivalentClass | `bf:Work` | — |
 | `bf:NotatedMusic` | **clean** | `bffi:NotatedMusic` | owl:equivalentClass | `bf:Work` | — |
 | `bf:Notation` | **clean** | `bffi:Notation` | owl:equivalentClass | — | — |
@@ -219,9 +219,9 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:Role` | **clean** | `bffi:Role` | owl:equivalentClass | — | — |
 | `bf:Scale` | **clean** | `bffi:Scale` | owl:equivalentClass | — | — |
 | `bf:Script` | **clean** | `bffi:Script` | owl:equivalentClass | `bf:Notation` | — |
-| `bf:Serial` | **routed** | `bffi:SerialExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:Serial` | **routed** | `bffi:SerialWork` (Work-axis) / `bffi:SerialExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:SerialNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/serial-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
-| `bf:Series` | **routed** | `bffi:SeriesExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:Series` | **routed** | `bffi:SeriesWork` (Work-axis) / `bffi:SeriesExpression` (Expression-axis) | discriminator: subject's Work-axis co-type signal | — | `route_axis_default_classes` |
 | `bf:ShelfMark` | **clean** | `bffi:ShelfMark` | owl:equivalentClass | `bf:Identifier` | — |
 | `bf:ShelfMarkDdc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/shelf-mark-ddc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:ShelfMarkLcc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/shelf-mark-lcc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
@@ -732,19 +732,23 @@ This is the same pattern as the Identifier-scheme and Title-variant collapses el
 
 ## Axis-default class routings (Phase 3 of the P-56 migration)
 
-Seven BIBFRAME classes have `bffi-meta:broadMatch` mappings to *both* a Work-axis and an Expression-axis BFFI counterpart. The mapping doc's individual routing callouts list them as **semantic-shift**; the implementation picks the Expression-axis variant as the corpus default (Helmet's predominant pattern is "this bib record is a single localised Expression"):
+Eight BIBFRAME classes have `bffi-meta:broadMatch` (or for `bf:MusicAudio`, `closeMatch`) mappings to *both* a Work-axis and an Expression-axis BFFI counterpart. The routing picks **per subject** based on the subject's co-typed `rdf:type` assertions — `route_axis_default_classes` in `src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`:
 
-| `bf:*` class | Default → `bffi:*` | Work-axis alternative (deferred) |
+- **Work-axis pick** when the subject carries any of `bffi:BibframeWork`, `bffi:Work`, `bffi:AggregatingWork`, or `bffi:Arrangement` as another `rdf:type`. This is the Work URI marc2bibframe2 emitted (typed `bf:Work` upstream, renamed to `bffi:BibframeWork` by the clean-rename pass) or a Hub URI that the Hub routing already retyped to `bffi:Work` / `bffi:Arrangement`.
+- **Expression-axis pick** otherwise — Instance URIs (marc2bibframe2 echoes the content-type class on the Instance side but doesn't co-type it `bf:Work`) and any subject without a clear axis signal. Matches Helmet's "one localised Expression per record" pattern.
+
+| `bf:*` class | Work-axis pick | Expression-axis pick |
 |---|---|---|
-| `bf:Monograph` | `bffi:MonographExpression` | `bffi:MonographWork` |
-| `bf:Series` | `bffi:SeriesExpression` | `bffi:SeriesWork` |
-| `bf:Serial` | `bffi:SerialExpression` | `bffi:SerialWork` |
-| `bf:MusicAudio` | `bffi:MusicAudioExpression` | `bffi:MusicWork` (closeMatch) |
-| `bf:MovingImage` | `bffi:MovingImageExpression` | `bffi:MovingImageWork` |
-| `bf:Cartography` | `bffi:CartographyExpression` | `bffi:CartographyWork` |
-| `bf:NonMusicAudio` | `bffi:NonMusicAudioExpression` | `bffi:NonMusicAudioWork` |
+| `bf:Monograph` | `bffi:MonographWork` | `bffi:MonographExpression` |
+| `bf:Series` | `bffi:SeriesWork` | `bffi:SeriesExpression` |
+| `bf:Serial` | `bffi:SerialWork` | `bffi:SerialExpression` |
+| `bf:MusicAudio` | `bffi:MusicWork` *(closeMatch; asymmetric — there is no `bffi:MusicAudioWork`)* | `bffi:MusicAudioExpression` |
+| `bf:MovingImage` | `bffi:MovingImageWork` | `bffi:MovingImageExpression` |
+| `bf:Cartography` | `bffi:CartographyWork` | `bffi:CartographyExpression` |
+| `bf:NonMusicAudio` | `bffi:NonMusicAudioWork` | `bffi:NonMusicAudioExpression` |
+| `bf:Audio` *(marc2bibframe2 emits this only for non-music audio)* | `bffi:NonMusicAudioWork` | `bffi:NonMusicAudioExpression` |
 
-A future follow-on can read per-record content-typing evidence (e.g. whether `bf:hasInstance` points downward from a Work) to flip individual records to the Work axis where appropriate; v0 hard-codes the default.
+The counter dict the routing returns is split into `axis_default_class_work` and `axis_default_class_expression` so the observability summary surfaces the discriminator's effect per run. In the 20 k bench the split was ~50/50 — marc2bibframe2 echoes each content-type class on both the Work URI and the Instance URI, and the discriminator catches both correctly.
 
 ## Axis-default predicate routings (Phase 2 of the P-56 migration)
 

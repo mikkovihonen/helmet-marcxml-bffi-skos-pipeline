@@ -20,7 +20,6 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     drop_undeclared_bf_terms,
     loc_scheme_uri,
     rename_bflc_marckey,
-    route_audio,
     route_axis_default_classes,
     route_axis_default_predicates,
     route_hubs,
@@ -154,19 +153,6 @@ def test_route_title_variants_collapses_subclasses_to_bffi_title() -> None:
         assert (node, RDF.type, bf_class) not in g
 
 
-# --- Audio routing ------------------------------------------------------
-
-
-def test_route_audio_rewrites_to_nonmusic_audio_expression() -> None:
-    g = Graph()
-    audio = URIRef("http://example.org/audio")
-    g.add((audio, RDF.type, BF.Audio))
-    rewritten = route_audio(g)
-    assert rewritten == 1
-    assert (audio, RDF.type, BFFI.NonMusicAudioExpression) in g
-    assert (audio, RDF.type, BF.Audio) not in g
-
-
 # --- Series-link routing -----------------------------------------------
 
 
@@ -253,7 +239,8 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
     # Title variant
     vt = URIRef("http://example.org/vt")
     g.add((vt, RDF.type, BF.VariantTitle))
-    # Audio
+    # bf:Audio — folded into axis-default class routing. Without a
+    # Work-axis co-type the discriminator picks the Expression variant.
     au = URIRef("http://example.org/audio")
     g.add((au, RDF.type, BF.Audio))
     # Series link
@@ -271,11 +258,11 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "bflc_marckey_renamed": 1,
         "identifier_scheme": 1,
         "title_variant": 1,
-        "audio": 1,
         "series_link": 1,
         "relation_predicate": 0,
         "hub": 1,
-        "axis_default_class": 0,
+        "axis_default_class_work": 0,
+        "axis_default_class_expression": 1,  # bf:Audio → NonMusicAudioExpression
         "axis_default_predicate": 0,
         "provision_statement_to_date": 0,
         "provision_statement_to_note": 0,
@@ -286,32 +273,114 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
     # must have run first — Hub's chosen type is Work since the marcKey
     # is a plain 730 without Expression-level signals.
     assert (hub, RDF.type, BFFI.Work) in g
+    # bf:Audio without a Work signal lands on the Expression-axis variant.
+    assert (au, RDF.type, BFFI.NonMusicAudioExpression) in g
 
 
 # --- routing 6 (axis-default classes) -----------------------------------
 
 
-def test_route_axis_default_classes_picks_expression_variant_for_each() -> None:
-    """Each ``bf:Monograph`` / ``bf:Series`` / ``bf:MusicAudio`` / ``…`` is
-    rewritten to its Expression-axis BFFI counterpart per
-    :data:`AXIS_DEFAULT_CLASSES`."""
+def test_route_axis_default_classes_picks_expression_when_no_work_signal() -> None:
+    """Default for subjects with no Work-axis co-type: every axis-split
+    ``bf:*`` class lands on the Expression-axis BFFI variant. This is
+    the Helmet "Instance URI" pattern — bf:Instance is the subject,
+    bf:Monograph is just the content-type echo, no Work signal."""
     g = Graph()
     for i, bf_class in enumerate(AXIS_DEFAULT_CLASSES):
         node = URIRef(f"http://example.org/c-{i}")
         g.add((node, RDF.type, bf_class))
-    rewritten = route_axis_default_classes(g)
-    assert rewritten == len(AXIS_DEFAULT_CLASSES)
-    for i, (bf_class, bffi_class) in enumerate(AXIS_DEFAULT_CLASSES.items()):
+    counters = route_axis_default_classes(g)
+    assert counters == {
+        "axis_default_class_work": 0,
+        "axis_default_class_expression": len(AXIS_DEFAULT_CLASSES),
+    }
+    for i, (bf_class, (_work_pick, expr_pick)) in enumerate(AXIS_DEFAULT_CLASSES.items()):
         node = URIRef(f"http://example.org/c-{i}")
-        assert (node, RDF.type, bffi_class) in g
+        assert (node, RDF.type, expr_pick) in g
         assert (node, RDF.type, bf_class) not in g
 
 
+def test_route_axis_default_classes_picks_work_when_subject_co_typed_bibframework() -> None:
+    """A Work URI emitted by marc2bibframe2 is typed ``bf:Work`` (renamed
+    to ``bffi:BibframeWork`` by the clean-rename pass that runs before
+    any routing) AND ``bf:Monograph`` / etc. The discriminator catches
+    the Work signal and routes to the Work-axis BFFI variant."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((work, RDF.type, BF.Monograph))
+
+    counters = route_axis_default_classes(g)
+    assert counters == {
+        "axis_default_class_work": 1,
+        "axis_default_class_expression": 0,
+    }
+    assert (work, RDF.type, BFFI.MonographWork) in g
+    assert (work, RDF.type, BF.Monograph) not in g
+    # The original Work signal is preserved on the subject.
+    assert (work, RDF.type, BFFI.BibframeWork) in g
+
+
+def test_route_axis_default_classes_music_audio_picks_bffi_music_work() -> None:
+    """``bf:MusicAudio`` has asymmetric naming in lkd.rdf — there is no
+    ``bffi:MusicAudioWork``; the Work-axis pick is ``bffi:MusicWork``."""
+    g = Graph()
+    work = URIRef("http://example.org/music-work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((work, RDF.type, BF.MusicAudio))
+
+    route_axis_default_classes(g)
+    assert (work, RDF.type, BFFI.MusicWork) in g
+    # Belt-and-braces: confirm we didn't mint the non-existent class.
+    assert (work, RDF.type, URIRef(str(BFFI) + "MusicAudioWork")) not in g
+
+
+def test_route_axis_default_classes_hub_routed_work_signal_picks_work() -> None:
+    """Hub routing (which runs before axis-default-class) may have re-typed
+    a subject as ``bffi:Work`` / ``bffi:Arrangement`` / etc. without the
+    ``bffi:BibframeWork`` co-type. The discriminator must still catch
+    those as Work-axis signals (since they're under bffi:BibframeWork
+    via the lkd.rdf class hierarchy)."""
+    g = Graph()
+    hub = URIRef("http://example.org/hub-as-work")
+    g.add((hub, RDF.type, BFFI.Work))  # Hub-routed; not BibframeWork
+    g.add((hub, RDF.type, BF.Serial))
+
+    route_axis_default_classes(g)
+    assert (hub, RDF.type, BFFI.SerialWork) in g
+    assert (hub, RDF.type, BF.Serial) not in g
+
+
+def test_route_axis_default_classes_audio_folded_into_routing() -> None:
+    """``bf:Audio`` is now handled by route_axis_default_classes (was a
+    separate route_audio function). marc2bibframe2 emits ``bf:Audio``
+    only for non-music audio, so the picks mirror NonMusicAudio's."""
+    g = Graph()
+    work_audio = URIRef("http://example.org/audio-work")
+    g.add((work_audio, RDF.type, BFFI.BibframeWork))
+    g.add((work_audio, RDF.type, BF.Audio))
+
+    inst_audio = URIRef("http://example.org/audio-instance")
+    g.add((inst_audio, RDF.type, BF.Audio))
+
+    route_axis_default_classes(g)
+    # Work URI → Work-axis pick.
+    assert (work_audio, RDF.type, BFFI.NonMusicAudioWork) in g
+    # Instance URI (no Work signal) → Expression-axis pick.
+    assert (inst_audio, RDF.type, BFFI.NonMusicAudioExpression) in g
+
+
 def test_route_axis_default_classes_no_op_when_already_routed() -> None:
+    """Subjects already typed with a BFFI axis variant aren't re-routed —
+    only ``bf:*`` axis-split subjects are touched."""
     g = Graph()
     s = URIRef("http://example.org/s")
     g.add((s, RDF.type, BFFI.SeriesExpression))
-    assert route_axis_default_classes(g) == 0
+    counters = route_axis_default_classes(g)
+    assert counters == {
+        "axis_default_class_work": 0,
+        "axis_default_class_expression": 0,
+    }
 
 
 # --- routing 7 (axis-default predicates) --------------------------------
