@@ -10,6 +10,7 @@ Conversion-first BFFI pipeline: MARCXML → BIBFRAME (LoC marc2bibframe2) → BF
 - `docs/bf_to_bffi_mapping.md` — generated reference (rdflib parse of `lkd.rdf`) for every `bf:*` class and predicate encountered in the conversion, with its `bffi:*` counterpart and routing notes. Source of truth for every conversion decision. Sent to NLF for review.
 - `docs/bffi_limitations.md` — registry of round-trip cases where source MARC data survives but lands in a different MARC field / shape / convention because BFFI 1.0.0 + marc2bibframe2 don't preserve the distinction (e.g. MARC 260 → 264, `$2 yso/fin` → `$2 yso`). Each entry pinpoints the BFFI ontology shortfall and documents the conclusion (acceptable / planned-fix / candidate-for-NLF-extension). Add a new entry whenever you find a similar case during a diff residue audit.
 - `docs/validation-strategy.md` — three validation boundaries on the conversion side (MARCXML input → BIBFRAME post-conversion → BFFI post-CONSTRUCT).
+- `docs/observability.md` — local Prometheus + Grafana stack wrapped by Caddy. Stage events → JSONL sidecar → tail-and-export → Prometheus scrape → Grafana panels, all reachable at `http://localhost:8080`. **Built in from the ground up — every stage emits structured events from its first commit.** See the observability constraint in Operating constraints.
 - `docs/plans/` — plans of record, one file per plan as `p-NNN-<slug>.md` (three-digit zero-padded; flat — no sub-folders). Status is tracked in `docs/plans/README.md` (not by sub-folder). Filenames stay stable across status transitions; the file's own `git log` is the lineage. **Consult `docs/plans/README.md` before recommending an architectural change** — the idea may already be on record.
 
 ## Operating constraints
@@ -17,7 +18,8 @@ Conversion-first BFFI pipeline: MARCXML → BIBFRAME (LoC marc2bibframe2) → BF
 - Pro bono. **No paid API services.**
 - Open-source tooling only.
 - License: code **Apache 2.0** (matching NLF tools); published RDF data **CC0** (matching Finto vocabularies).
-- No **outbound** telemetry / error reporting — no Datadog, Sentry, Honeycomb, or similar. Local-only observability is fine.
+- **Observability is built in from the ground up.** Every stage emits structured events to a `stage-events.jsonl` sidecar from its first commit. The local Prometheus + Grafana stack (wrapped by Caddy at `http://localhost:8080`) is the operator's single source of truth for "what's happening right now?" See `docs/observability.md`.
+- No **outbound** telemetry / error reporting — no Datadog, Sentry, Honeycomb, or similar. The Prometheus + Grafana + Caddy stack runs entirely on the operator's machine; no data leaves the box.
 
 ## Committed identifiers (do not change without surfacing)
 
