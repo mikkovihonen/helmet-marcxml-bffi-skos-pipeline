@@ -752,7 +752,7 @@ The counter dict the routing returns is split into `axis_default_class_work` and
 
 ## Axis-default predicate routings
 
-Three `bf:*` predicates have multiple `bffi-meta:broadMatch` mappings in `lkd.rdf`. Two are per-statement-discriminated (the routing inspects the axis-signal side's `rdf:type` to pick Work vs Expression); the third is a flat rename because the listed alternative has a different domain and range entirely. Implementation in `route_axis_default_predicates` (`src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`):
+`bf:instanceOf` and `bf:hasInstance` are per-statement-discriminated (the routing inspects the axis-signal side's `rdf:type` to pick Work vs Expression). `bf:issuance` is a flat rename — its `lkd.rdf` peer `bffi:extensionPlan` looks like an "alternative" only on first glance; deeper inspection (below) shows it's a separate concept entirely. Implementation in `route_axis_default_predicates` (`src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`):
 
 | `bf:*` predicate | Routing | Discriminator side | Work-axis pick | Expression-axis pick |
 |---|---|---|---|---|
@@ -760,16 +760,22 @@ Three `bf:*` predicates have multiple `bffi-meta:broadMatch` mappings in `lkd.rd
 | `bf:hasInstance` | per-statement | subject's `rdf:type` | `bffi:manifestationOfWork` | `bffi:manifestationOfExpression` |
 | `bf:issuance` | flat rename | — | `bffi:issuance` | `bffi:issuance` |
 
-**Why the discriminator works.** `bf:instanceOf` is "Manifestation → Work/Expression" — its object is the entity being realized. If that object is typed `bffi:Expression` (or any descendant — `bffi:SeriesExpression`, `bffi:MonographExpression`, …), the statement is realizing-an-Expression and lands on `bffi:expressionManifested`. Same logic inverted for `bf:hasInstance`: the SUBJECT is the entity-having-instances, so its type drives the pick.
+**Why the per-statement discriminator works.** `bf:instanceOf` is "Manifestation → Work/Expression" — its object is the entity being realized. If that object is typed `bffi:Expression` (or any descendant — `bffi:SeriesExpression`, `bffi:MonographExpression`, …), the statement is realizing-an-Expression and lands on `bffi:expressionManifested`. Same logic inverted for `bf:hasInstance`: the SUBJECT is the entity-having-instances, so its type drives the pick.
 
-**Why `bf:issuance` doesn't discriminate.** lkd.rdf gives both predicates as `bffi-meta:broadMatch bf:issuance`, but they have different domains AND different ranges:
+**Why `bf:issuance` is a flat rename, not discriminated.** `lkd.rdf` declares two `bffi:*` terms with `bffi-meta:broadMatch bf:issuance` — `bffi:issuance` and `bffi:extensionPlan`. Surface-level that reads as "alternative renames," but the deeper picture says they're two **separate concepts** that both happen to be loosely related to BIBFRAME's issuance area:
 
-| Term | Domain | Range |
-|---|---|---|
-| `bffi:issuance` | `bffi:Manifestation` | `bffi:Issuance` |
-| `bffi:extensionPlan` | `bffi:Work` | `bffi:ExtensionPlan` |
+| BFFI term | Domain | Range | `bffi-meta:relatedValueVocabulary` | RDA term list |
+|---|---|---|---|---|
+| `bffi:issuance` | `bffi:Manifestation` | `bffi:Issuance` | `…au:mts:m4372` | RDA `ModeIssue` — *Single unit, Serial, Multipart monograph, Integrating resource* |
+| `bffi:extensionPlan` | `bffi:Work` | `bffi:ExtensionPlan` | `…au:mts:m5119` | RDA `RDAExtensionPlan` — *Unknown, Will not be extended, Has no plan to be extended, …* |
 
-`bffi:extensionPlan` is a Work-side concept pointing at an `ExtensionPlan` instance — not a per-statement alternative for `bf:issuance` (which carries the LoC issuance vocabulary code as its object: `serl`, `mono`, `intg`, `mulu`). Routing a `bf:issuance` statement to `bffi:extensionPlan` would mis-type the object class. Helmet's corpus has zero records that would warrant the Work-side variant; if a future case needs it, that's a separate (corpus-derived) routing decision.
+`bffi:extensionPlan` describes a Work's projected expansion behaviour (an editorial/curatorial plan); `bffi:issuance` describes the issuance pattern at the Manifestation level. They link to different RDA term lists with disjoint value vocabularies. They are not interchangeable on a single triple.
+
+What this means for the per-statement signal: the object URI of `bf:issuance` (`<…/issuance/serl>`, `<…/issuance/mono>`, `<…/issuance/intg>`, `<…/issuance/mulu>`) IS a meaningful per-statement signal — but it discriminates between *codes inside `bffi:issuance`*, not between `bffi:issuance` and `bffi:extensionPlan`. All four codes are valid RDA `ModeIssue` values, so they all map cleanly to `bffi:issuance` without further routing. Routing the `<serl>`/`<intg>` ones to `bffi:extensionPlan` would mis-type the object — those URIs aren't RDA `RDAExtensionPlan` values.
+
+In the corpus (200-record sample): 197 `<…/mono>` + 3 `<…/serl>`, all on Manifestation subjects (`bf:Instance`). The flat rename to `bffi:issuance` covers every observed case correctly.
+
+**Forward-looking note (not implemented).** If the converter should *also* emit a `bffi:extensionPlan` triple on the Work side for serial / integrating resources — a synthesised addition rather than a routing alternative — that's a separate, additive feature. It would mint an `ExtensionPlan` instance (URI policy TBD), attach it to the Work via `bffi:extensionPlan`, and leave the existing `bffi:issuance` Manifestation triple untouched. Surface as a plan if Helmet's downstream consumers ask for the Work-level metadata.
 
 **Observability.** The routing returns a counter dict split per predicate-and-axis: `instance_of_work`, `instance_of_expression`, `has_instance_of_work`, `has_instance_of_expression`, `issuance`. The next 20 k bench surfaces the per-axis distribution per run.
 

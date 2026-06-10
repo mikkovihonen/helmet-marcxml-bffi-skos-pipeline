@@ -195,11 +195,14 @@ _WORK_AXIS_SIGNALS: Final[frozenset[URIRef]] = frozenset(
 #:     → ``bffi:manifestationOfExpression``; otherwise →
 #:     ``bffi:manifestationOfWork``.
 #:   - ``bf:issuance`` is a flat rename — both tuple slots are
-#:     ``bffi:issuance``. The mapping-doc-listed alternative
-#:     ``bffi:extensionPlan`` has a different domain (Work) AND a
-#:     different range class (bffi:ExtensionPlan vs bffi:Issuance), so
-#:     it's not a per-statement substitute — it's a separate concept
-#:     entirely, with zero corpus prevalence in the Helmet bench.
+#:     ``bffi:issuance``. The ``lkd.rdf`` peer ``bffi:extensionPlan``
+#:     is NOT an alternative for the same triple; it's a separate
+#:     concept linked to a different RDA term list
+#:     (``RDAExtensionPlan`` m5119, on the Work side) while
+#:     ``bffi:issuance`` links to ``ModeIssue`` (m4372, on the
+#:     Manifestation side). Both happen to carry
+#:     ``bffi-meta:broadMatch bf:issuance`` but they are not
+#:     interchangeable.
 AXIS_DEFAULT_PREDICATES: Final[dict[URIRef, tuple[URIRef, URIRef]]] = {
     BF.instanceOf: (BFFI.workManifested, BFFI.expressionManifested),
     BF.hasInstance: (BFFI.manifestationOfWork, BFFI.manifestationOfExpression),
@@ -586,10 +589,20 @@ def route_axis_default_predicates(graph: Graph) -> dict[str, int]:
         OBJECT carries the axis signal.
       - ``bf:hasInstance`` (Work/Expression → Manifestation): the
         SUBJECT carries the axis signal.
-      - ``bf:issuance``: the alternative ``bffi:extensionPlan`` has
-        different domain AND range (it's a Work-side concept with a
-        different range class entirely), so this is a flat rename to
-        ``bffi:issuance`` regardless of signal.
+      - ``bf:issuance``: flat rename to ``bffi:issuance``. The
+        ``lkd.rdf`` peer ``bffi:extensionPlan`` reads as an
+        "alternative" only on first glance — it's actually a
+        separate concept, linked to RDA's ``RDAExtensionPlan`` term
+        list (m5119: "Will not be extended" / "Has no plan to be
+        extended" / …) on the Work side, while ``bffi:issuance``
+        links to RDA's ``ModeIssue`` (m4372: serial / monograph /
+        integrating resource / multipart). Both happen to carry
+        ``bffi-meta:broadMatch bf:issuance`` but they are not
+        interchangeable on a single triple. The object URI of a
+        ``bf:issuance`` statement (``<…/issuance/{serl,mono,intg,mulu}>``)
+        is a meaningful signal — but it discriminates between codes
+        *inside* the ``ModeIssue`` vocabulary, all of which map
+        cleanly to ``bffi:issuance``.
 
     Returns a counter dict split per predicate-and-axis so the
     observability summary surfaces the discriminator's per-direction
