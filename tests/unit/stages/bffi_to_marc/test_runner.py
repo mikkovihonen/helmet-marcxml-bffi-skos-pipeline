@@ -307,6 +307,68 @@ def test_emit_marcxml_emits_041_language_codes() -> None:
     assert sf_a_values == ["eng", "fin", "swe"]  # sorted
 
 
+def test_emit_marcxml_emits_6xx_subject_datafields() -> None:
+    """bffi:subject from a Work (reached via bffi:workManifested) emits
+    MARC 6XX datafields. The subject node's URI fragment carries the
+    source MARC tag (#Topic650-N → 650, #Place651-N → 651, etc.).
+    rdfs:label on the subject becomes \\$a."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((manifestation, BFFI.workManifested, work))
+
+    topic = URIRef("http://example.org/b1#Topic650-1")
+    g.add((topic, RDF.type, BFFI.Topic))
+    g.add((topic, RDFS.label, Literal("Programming")))
+    g.add((work, BFFI.subject, topic))
+
+    place = URIRef("http://example.org/b1#Place651-2")
+    g.add((place, RDF.type, BFFI.Place))
+    g.add((place, RDFS.label, Literal("Finland")))
+    g.add((work, BFFI.subject, place))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df650 = root.find(f"{{{MARC21_NS}}}datafield[@tag='650']")
+    df651 = root.find(f"{{{MARC21_NS}}}datafield[@tag='651']")
+    assert df650 is not None
+    assert df651 is not None
+    assert df650.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "Programming"  # type: ignore[union-attr]
+    assert df651.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "Finland"  # type: ignore[union-attr]
+
+
+def test_emit_marcxml_skips_subject_nodes_with_unrecognised_tags() -> None:
+    """A subject node with a URI fragment outside the 6XX tag set
+    (e.g. #Work730 for uniform-title added entry) is skipped by the
+    subject routing — those land in their own follow-on commit."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((manifestation, BFFI.workManifested, work))
+
+    # An off-band node with a 7XX-style URI fragment.
+    other = URIRef("http://example.org/b1#Work730-1")
+    g.add((other, RDF.type, BFFI.Work))
+    g.add((other, RDFS.label, Literal("Other work")))
+    g.add((work, BFFI.subject, other))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    # No 730 emitted via the subject routing.
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='730']") is None
+
+
 def test_emit_marcxml_skips_unsupported_identifier_schemes() -> None:
     """Identifier blocks with a bffi:source URI not in the dispatch
     table are skipped — those land in their own follow-on commits.

@@ -29,6 +29,7 @@ Stage label for observability sidecar events: ``bffi2marc``.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -219,6 +220,76 @@ def _extract_language_codes(graph: Graph, manifestation: URIRef) -> list[str]:
     return sorted(codes)
 
 
+#: Matches ``#<Type><tag>-<n>`` in subject-node URI fragments emitted
+#: by marc2bibframe2 (e.g. ``#Agent600-28`` / ``#Topic650-12`` /
+#: ``#Place651-30`` / ``#Temporal648-29``). Capture group 1 is the
+#: 3-digit MARC tag the source subject came from.
+_SUBJECT_TAG_PATTERN: Final[re.Pattern[str]] = re.compile(r"#[A-Za-z]+(\d{3})-")
+
+#: MARC 6XX subject tags this routing recognises. Other tag values
+#: produced by marc2bibframe2 (e.g. 730 uniform titles via #Work730)
+#: are not subjects and get dispatched separately.
+_SUBJECT_MARC_TAGS: Final[frozenset[str]] = frozenset(
+    {"600", "610", "611", "630", "648", "650", "651", "655"}
+)
+
+
+@dataclass(frozen=True)
+class _SubjectEmit:
+    """One MARC 6XX subject datafield's worth of content."""
+
+    tag: str
+    label: str
+
+
+def _find_work_for_manifestation(graph: Graph, manifestation: URIRef) -> URIRef | None:
+    """Return the Work URI this Manifestation manifests, or ``None``.
+
+    Walks ``manifestation bffi:workManifested → Work``. The Work URI
+    is the anchor for subject / classification / contribution triples
+    (which are properties of the abstract Work in BFFI's FRBR-axis
+    split, not the Manifestation).
+    """
+    work = next(graph.objects(manifestation, BFFI.workManifested), None)
+    return work if isinstance(work, URIRef) else None
+
+
+def _extract_subject_datafields(graph: Graph, manifestation: URIRef) -> list[_SubjectEmit]:
+    """Walk ``?work bffi:subject ?subject_node`` for each subject anchor.
+
+    The subject node's URI fragment carries the source MARC tag
+    (``#Agent600-28`` → ``600``). Subject nodes are typed with one of
+    ``bffi:Person`` / ``bffi:Organization`` / ``bffi:Meeting`` /
+    ``bffi:Topic`` / ``bffi:Place`` / ``bffi:Temporal`` / ``bffi:GenreForm``
+    and carry an ``rdfs:label`` for the heading text.
+
+    Returns a list of (tag, label) emits — one per subject. Only
+    recognised 6XX tags (:data:`_SUBJECT_MARC_TAGS`) are emitted;
+    others are skipped (they get their own routing).
+
+    Deterministic ordering: sorted by (tag, label) so multi-subject
+    records round-trip predictably.
+    """
+    work = _find_work_for_manifestation(graph, manifestation)
+    if work is None:
+        return []
+    emits: list[_SubjectEmit] = []
+    for subj_node in graph.objects(work, BFFI.subject):
+        if not isinstance(subj_node, URIRef):
+            continue
+        match = _SUBJECT_TAG_PATTERN.search(str(subj_node))
+        if match is None:
+            continue
+        tag = match.group(1)
+        if tag not in _SUBJECT_MARC_TAGS:
+            continue
+        label = next(graph.objects(subj_node, RDFS.label), None)
+        if not isinstance(label, Literal):
+            continue
+        emits.append(_SubjectEmit(tag=tag, label=str(label)))
+    return sorted(emits, key=lambda e: (e.tag, e.label))
+
+
 def _extract_identifier_datafields(graph: Graph, manifestation: URIRef) -> list[_IdentifierEmit]:
     """Walk every ``bffi:identifiedBy`` block and convert to a MARC
     datafield emit when its ``bffi:source`` URI is in the dispatch table.
@@ -252,6 +323,7 @@ def _build_marc_record(
     identifiers: list[_IdentifierEmit],
     language_codes: list[str],
     physical: _PhysicalDescription | None,
+    subjects: list[_SubjectEmit],
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
     record = etree.Element(f"{_MARC}record")
@@ -293,6 +365,12 @@ def _build_marc_record(
             sf_c = etree.SubElement(df300, f"{_MARC}subfield", code="c")
             sf_c.text = physical.dimensions
 
+    # 6XX subjects come after the bibliographic-description block.
+    for subj in subjects:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=subj.tag, ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = subj.label
+
     return record
 
 
@@ -313,6 +391,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     identifiers = _extract_identifier_datafields(graph, manifestation)
     language_codes = _extract_language_codes(graph, manifestation)
     physical = _extract_physical_description(graph, manifestation)
+    subjects = _extract_subject_datafields(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
         title_parts=title_parts,
@@ -320,6 +399,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         identifiers=identifiers,
         language_codes=language_codes,
         physical=physical,
+        subjects=subjects,
     )
     return etree.tostring(
         record,
