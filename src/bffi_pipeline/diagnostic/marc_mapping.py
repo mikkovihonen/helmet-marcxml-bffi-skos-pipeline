@@ -1,11 +1,11 @@
-"""Auto-generate the BFFI → MARC mapping tables in
+"""Auto-generate the BFFI → MARC mapping table in
 `docs/bffi_to_marc_mapping.md`.
 
-Parallel to :mod:`bffi_pipeline.diagnostic.mapping_tables` (which
-generates the BIBFRAME ↔ BFFI mapping doc). This generator walks
+The generator walks
 :data:`bffi_pipeline.stages.bffi_to_marc.runner.MARC_EMIT_REGISTRY`
-(currently-shipped emits) and ``MARC_PENDING_REGISTRY`` (known
-unhandled tags from the 20 k bench) to produce the two auto-tables.
+(populated by ``@marc_emit``-decorated extract functions in the
+reverse converter) and renders the table between AUTO markers in the
+doc.
 
 Run via ``bffi-pipeline regenerate-marc-mapping`` or programmatically
 via :func:`regenerate_marc_mapping`. The CLI's ``--check`` flag is
@@ -20,18 +20,12 @@ from typing import Final
 
 from bffi_pipeline.stages.bffi_to_marc.runner import (
     MARC_EMIT_REGISTRY,
-    MARC_PENDING_REGISTRY,
     MarcEmitMeta,
-    MarcPendingMeta,
 )
 
-#: Markers framing the auto-generated "shipped" block.
+#: Markers framing the auto-generated MARC-mapping block.
 SHIPPED_BEGIN_MARKER: Final[str] = "<!-- BEGIN AUTO: shipped -->"
 SHIPPED_END_MARKER: Final[str] = "<!-- END AUTO: shipped -->"
-
-#: Markers framing the auto-generated "pending" block.
-PENDING_BEGIN_MARKER: Final[str] = "<!-- BEGIN AUTO: pending -->"
-PENDING_END_MARKER: Final[str] = "<!-- END AUTO: pending -->"
 
 #: Default doc location.
 DEFAULT_DOC_PATH: Final[Path] = (
@@ -40,11 +34,9 @@ DEFAULT_DOC_PATH: Final[Path] = (
 
 
 def _format_indicators(indicators: tuple[str, ...]) -> str:
-    """Render indicators for the table cell: ``"00"`` / ``"#  #"`` /
-    ``"—"`` (for tagged control fields and leader).
-
-    A literal space (the MARC "blank indicator") is rendered as ``#``
-    so it's visible in monospace; an empty tuple becomes ``—``.
+    """Render indicators for the table cell. A literal space (the MARC
+    "blank indicator") is rendered as ``#`` so it's visible in
+    monospace; an empty tuple becomes ``—`` for control fields / leader.
     """
     if not indicators:
         return "—"
@@ -52,12 +44,9 @@ def _format_indicators(indicators: tuple[str, ...]) -> str:
 
 
 def _format_subfields(subfields: tuple[tuple[str, str], ...]) -> str:
-    """Render subfields as a multi-line markdown bullet list.
-
-    The output is intended for the markdown table cell; we use a
-    ``<br>``-separated single-line format because grid tables don't
-    nest well in many markdown renderers.
-    """
+    """Render subfields as a ``<br>``-separated single-line list. Grid
+    tables don't nest well in many markdown renderers, so we keep the
+    cell content flat."""
     if not subfields:
         return "—"
     return "<br>".join(f"`${code}` — {desc}" for code, desc in subfields)
@@ -78,15 +67,9 @@ def _render_shipped_table(rows: Iterable[MarcEmitMeta]) -> str:
     return header + body
 
 
-def _render_pending_table(rows: Iterable[MarcPendingMeta]) -> str:
-    header = "| MARC tag | 20 k bench `lost` count | Notes |\n|---|---|---|\n"
-    body = "".join(f"| `{row.tag}` | {row.lost_count_20k:,} | {row.notes} |\n" for row in rows)
-    return header + body
-
-
 def _sort_key(tag: str) -> tuple[int, str]:
-    """Sort key for MARC tags: ``leader`` first, then numeric ascending,
-    then any string-tag aliases (like ``"600/610/.../655"``)."""
+    """Sort key: ``leader`` first, then numeric tags ascending, then
+    any string-tag aliases (like ``"600/610/.../655"``)."""
     if tag == "leader":
         return (0, "")
     if tag[:3].isdigit():
@@ -94,20 +77,12 @@ def _sort_key(tag: str) -> tuple[int, str]:
     return (2, tag)
 
 
-def build_blocks() -> tuple[str, str]:
-    """Return ``(shipped_table_md, pending_table_md)`` — the two
-    markdown blocks the generator emits."""
+def build_block() -> str:
+    """Return the markdown block the generator emits."""
     sorted_emit = sorted(MARC_EMIT_REGISTRY, key=lambda e: _sort_key(e.tag))
-    sorted_pending = sorted(MARC_PENDING_REGISTRY, key=lambda e: _sort_key(e.tag))
     shipped = _render_shipped_table(sorted_emit)
-    shipped_tally = f"\n_{len(MARC_EMIT_REGISTRY)} MARC tags currently emitted._\n"
-    pending = _render_pending_table(sorted_pending)
-    pending_tally_total = sum(e.lost_count_20k for e in MARC_PENDING_REGISTRY)
-    pending_tally = (
-        f"\n_{len(MARC_PENDING_REGISTRY)} MARC tags pending — "
-        f"{pending_tally_total:,} `lost` records in the 20 k bench combined._\n"
-    )
-    return shipped + shipped_tally, pending + pending_tally
+    tally = f"\n_{len(MARC_EMIT_REGISTRY)} MARC tags currently emitted._\n"
+    return shipped + tally
 
 
 def _replace_block(doc_text: str, begin_marker: str, end_marker: str, new_block: str) -> str:
@@ -127,7 +102,7 @@ def regenerate_marc_mapping(
     doc_path: Path | None = None,
     check: bool = False,
 ) -> tuple[str, bool]:
-    """Regenerate the BFFI → MARC mapping tables in the doc.
+    """Regenerate the BFFI → MARC mapping table in the doc.
 
     Returns ``(new_doc_text, changed)``. When ``check=True`` the file
     is not written — the caller compares the on-disk text against the
@@ -135,19 +110,13 @@ def regenerate_marc_mapping(
     """
     target = doc_path or DEFAULT_DOC_PATH
     original = target.read_text(encoding="utf-8")
-    shipped_block, pending_block = build_blocks()
+    block = build_block()
 
     new_text = _replace_block(
         original,
         SHIPPED_BEGIN_MARKER,
         SHIPPED_END_MARKER,
-        shipped_block,
-    )
-    new_text = _replace_block(
-        new_text,
-        PENDING_BEGIN_MARKER,
-        PENDING_END_MARKER,
-        pending_block,
+        block,
     )
 
     changed = new_text != original

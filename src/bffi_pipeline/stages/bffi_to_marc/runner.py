@@ -94,20 +94,6 @@ class MarcEmitMeta:
     notes: str = ""
 
 
-@dataclass(frozen=True)
-class MarcPendingMeta:
-    """A MARC tag we don't yet emit, but which appears in the corpus.
-
-    Populated from the 20 k bench's eval-harness lost-distribution.
-    Drives the "pending" table in the mapping doc so contributors can
-    see the priority backlog at a glance.
-    """
-
-    tag: str
-    lost_count_20k: int
-    notes: str
-
-
 #: MARC fields the BFFI → MARC reverse converter currently emits.
 #: Populated at import time by :func:`marc_emit`-decorated extract
 #: functions (plus the standalone ``leader`` entry below). The
@@ -152,118 +138,8 @@ MARC_EMIT_REGISTRY.append(
         indicators=(),
         subfields=(),
         source="static placeholder",
-        notes=(
-            "24-character placeholder ('00000nam a2200000 a 4500'). "
-            "Per-position population from BFFI state (record-type, "
-            "bibliographic-level, encoding-level, etc.) is a follow-on."
-        ),
+        notes="See known limitations below.",
     )
-)
-
-
-#: MARC fields the converter does NOT yet emit but appears in the
-#: source corpus. Counts come from the 20 k bench's eval-harness
-#: lost-distribution snapshot — see P-057's "20 k bench run" entry
-#: for the full numbers. Each entry below is a candidate for a new
-#: follow-on commit (extend the registry above + add the matching
-#: extract/emit code in the runner).
-MARC_PENDING_REGISTRY: Final[tuple[MarcPendingMeta, ...]] = (
-    MarcPendingMeta(
-        tag="700",
-        lost_count_20k=86000,
-        notes=(
-            "Added entries — personal-name contributors. Walks "
-            "bffi:contribution / bffi:Contribution / bffi:agent + bffi:role "
-            "on the Work; needs to discriminate primary (MARC 100) from "
-            "added entries (MARC 700) and emit relator codes ($4 / $e)."
-        ),
-    ),
-    MarcPendingMeta(
-        tag="730",
-        lost_count_20k=62000,
-        notes=(
-            "Added uniform titles. Walks bffi:title blocks whose "
-            "bffi:marcKey first 3 chars are 730 (variant titles "
-            "discriminator)."
-        ),
-    ),
-    MarcPendingMeta(
-        tag="091/092/094/095/097",
-        lost_count_20k=75000,
-        notes=(
-            "Helmet-local classifications (combined count). bf:Classification "
-            "blocks with Finnish source codes; reverse converter needs to "
-            "pick the right MARC 09X tag by classification source."
-        ),
-    ),
-    MarcPendingMeta(
-        tag="008",
-        lost_count_20k=19000,
-        notes=(
-            "Control field — fixed-position record metadata. Reads "
-            "adminMetadata (changeDate, descriptionLanguage) + language + "
-            "publicationStatement to populate the 40 character positions."
-        ),
-    ),
-    MarcPendingMeta(
-        tag="005",
-        lost_count_20k=14000,
-        notes=(
-            "Record modification date (control field). Reads bffi:adminMetadata / bffi:changeDate."
-        ),
-    ),
-    MarcPendingMeta(
-        tag="260",
-        lost_count_20k=19000,
-        notes=(
-            "Publication/distribution statement (pre-RDA). marc2bibframe2 "
-            "normalises 260 and 264 records into a single bf:ProvisionActivity; "
-            "the reverse converter chooses 260 vs 264 based on the activity "
-            "shape. See L-01 in the limitations registry for the round-trip "
-            "convention."
-        ),
-    ),
-    MarcPendingMeta(
-        tag="710",
-        lost_count_20k=17000,
-        notes="Corporate-name contributors (parallel to 700).",
-    ),
-    MarcPendingMeta(
-        tag="740",
-        lost_count_20k=15000,
-        notes="Added analytical titles (parallel to 730).",
-    ),
-    MarcPendingMeta(
-        tag="084",
-        lost_count_20k=21000,
-        notes="Other classification number (non-Helmet-local classification).",
-    ),
-    MarcPendingMeta(
-        tag="852",
-        lost_count_20k=21000,
-        notes=(
-            "Holdings location (bffi:Item / bffi:heldBy). On the rewrite "
-            "branch the Item class is intentionally deferred until a "
-            "concrete consumer asks for it (see project notes)."
-        ),
-    ),
-    MarcPendingMeta(
-        tag="336/337/338",
-        lost_count_20k=29000,
-        notes=(
-            "RDA content/media/carrier types (combined count). "
-            "Maps from bffi:content / bffi:media / bffi:carrier predicates "
-            "with LoC RDA vocabulary URIs."
-        ),
-    ),
-    MarcPendingMeta(
-        tag="500",
-        lost_count_20k=7000,
-        notes=(
-            "General notes. Walks bffi:note / bffi:Note / rdfs:label; "
-            "marcKey first 3 chars discriminate 500 / 504 / 505 / 520 / etc."
-        ),
-    ),
 )
 
 
@@ -360,12 +236,7 @@ class _TitleParts:
             "bffi:subtitle (optional); responsibility comes from "
             "?m bffi:responsibilityStatement"
         ),
-        notes=(
-            "First-title-block wins. Primary-vs-variant discrimination "
-            "(by bffi:marcKey first 3 chars) is a follow-on. The $c "
-            "responsibility statement is contributed by a separate "
-            "_extract_responsibility_statement helper."
-        ),
+        notes=("First bffi:title block wins. See known limitations below."),
     )
 )
 def _extract_main_title_parts(graph: Graph, manifestation: URIRef) -> _TitleParts | None:
@@ -465,7 +336,7 @@ def _extract_physical_description(
         subfields=(("a", "3-letter language code (one per language)"),),
         source=(
             "?m bffi:language <http://id.loc.gov/vocabulary/languages/{code}> "
-            "(local-name extraction; sorted for determinism)"
+            "— the last URI segment is the MARC code"
         ),
     )
 )
@@ -520,24 +391,64 @@ def _find_work_for_manifestation(graph: Graph, manifestation: URIRef) -> URIRef 
     return work if isinstance(work, URIRef) else None
 
 
+#: BFFI source description prefix shared by every 6XX subject row.
+#: Subjects live on the Work (FRBR-axis: subjects describe the
+#: abstract Work, not a particular Manifestation), so every row's
+#: source begins with the same walk.
+_SUBJECT_SOURCE_PREFIX: Final[str] = (
+    "?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label"
+)
+
+
 @marc_emit(
     MarcEmitMeta(
-        tag="600/610/611/630/648/650/651/655",
+        tag="600",
         indicators=(" ", " "),
-        subfields=(("a", "subject heading label"),),
-        source=(
-            "?m bffi:workManifested ?work . "
-            "?work bffi:subject ?subj_node . "
-            "?subj_node rdfs:label ?label . "
-            "MARC tag dispatched from the subject node's URI fragment "
-            "(e.g. #Topic650-N → 650, #Place651-N → 651)."
-        ),
-        notes=(
-            "Only the 6XX subject tag set is emitted by this routing; "
-            "URI fragments outside the set are skipped (handled by "
-            "other field-family routings)."
-        ),
-    )
+        subfields=(("a", "personal name subject heading"),),
+        source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Person`",
+    ),
+    MarcEmitMeta(
+        tag="610",
+        indicators=(" ", " "),
+        subfields=(("a", "corporate name subject heading"),),
+        source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Organization`",
+    ),
+    MarcEmitMeta(
+        tag="611",
+        indicators=(" ", " "),
+        subfields=(("a", "meeting / conference subject heading"),),
+        source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Meeting`",
+    ),
+    MarcEmitMeta(
+        tag="630",
+        indicators=(" ", " "),
+        subfields=(("a", "uniform title subject heading"),),
+        source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Title`",
+    ),
+    MarcEmitMeta(
+        tag="648",
+        indicators=(" ", " "),
+        subfields=(("a", "chronological term subject heading"),),
+        source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Temporal`",
+    ),
+    MarcEmitMeta(
+        tag="650",
+        indicators=(" ", " "),
+        subfields=(("a", "topical term subject heading"),),
+        source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Topic`",
+    ),
+    MarcEmitMeta(
+        tag="651",
+        indicators=(" ", " "),
+        subfields=(("a", "geographic name subject heading"),),
+        source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Place`",
+    ),
+    MarcEmitMeta(
+        tag="655",
+        indicators=(" ", " "),
+        subfields=(("a", "genre / form term"),),
+        source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:GenreForm`",
+    ),
 )
 def _extract_subject_datafields(graph: Graph, manifestation: URIRef) -> list[_SubjectEmit]:
     """Walk ``?work bffi:subject ?subject_node`` for each subject anchor.
