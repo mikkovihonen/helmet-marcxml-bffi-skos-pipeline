@@ -1050,54 +1050,35 @@ Fifty-six BFFI classes are `owl:equivalentClass bf:X` directly with no further B
   - `bffi:BroadcastStandard` ✅ ≡ `bf:BroadcastStandard`
   - `bffi:VideoFormat` ✅ ≡ `bf:VideoFormat`
 
-## BIBFRAME-declared terms not referenced by `lkd.rdf`
+## Gap clusters — context the auto-table can't carry
 
-The Classes and Predicates tables above already cover every BIBFRAME-declared `bf:*` term (the `Status` column tags terms with no direct `lkd.rdf` equivalence as `routed`, `inherited`, `semantic-shift`, or `GAP`). The sections below give a narrative view of the patterns: which families reach a `bffi:*` term via the ontology graph (and how), and which clusters remain genuine gaps. Run `bffi-pipeline diagnose-mappings` for an interactive cut.
+The Classes / Predicates tables above cover every BIBFRAME-declared `bf:*` term. The status flags (`clean`, `routed`, `inherited`, `semantic-shift`, `GAP`) and `Handler` column give per-row detail; the notes below add cluster-level context the table can't carry — *why* the GAP rows are gaps, and which deferred-routing candidates the project is aware of.
 
-### Reachable via the ontology graph (routed automatically)
+### PMO music — BFFI 1.1.0 candidate
 
-A bounded BFS over the combined edge set (lkd.rdf's `owl:equivalent*` / `rdfs:subPropertyOf` / `bffi-meta:*Match` + BIBFRAME's own `rdfs:subClassOf` / `subPropertyOf`) reaches a `bffi:*` equivalent within 3 hops. Highlights:
+BIBFRAME 3.0.1 (December 2025) absorbed the Performed Music Ontology (PMO), introducing `bf:KeyMode`, `bf:Ensemble`, `bf:MediumOfPerformance`, `bf:DramaticRole`, `bf:Tempo`, etc. and their predicate counterparts. BFFI 1.0.0 is based on BIBFRAME 2.4.0 and predates the absorption, so all PMO terms show as `GAP` in the auto-table. The interim routing collapses what marc2bibframe2 emits to literal carriers — `bffi:readMarc382` (Medium-of-Performance) and `bffi:musicKey` (KeyMode) — see the [Music-medium and music-key routing](#music-medium-and-music-key-routing--bfmediumofperformance--bfmediumcomponent--bfensemble--bfkeymode--collapse-to-literal) callout above. A future BFFI 1.1.0 is expected to land BFFI-namespace equivalents on the existing re-anchor pattern.
 
-| Family | Pattern | Example chain |
-|---|---|---|
-| Identifier subclasses (50) | `[bf:subClassOf] → [equivalentClass]` | `bf:Doi → bf:Identifier ≡ bffi:Identifier` |
-| Axis-split classes (7) | 1-hop `broadMatch` | `bf:Monograph broadMatch bffi:MonographExpression` |
-| Title-variant subclasses (6) | `[bf:subClassOf] → [bf:subClassOf] → [equivalentClass]` | `bf:AbbreviatedTitle → bf:VariantTitle → bf:Title ≡ bffi:Title` |
-| Succession-link object predicates | 1-hop `bf:subPropertyOf` to a forward predicate | `bf:absorbed bf:subPropertyOf bf:precededBy` (and so on) |
+### Inverse predicates — deferred (zero corpus prevalence)
 
-Depth saturates at 3 — running the diagnostic at higher `--max-hops` doesn't surface anything new.
+`bf:agentOf`, `bf:appliedMaterialOf`, `bf:baseMaterialOf`, `bf:contributionOf`, `bf:materialOf` — BFFI maps the forward direction but doesn't declare the inverses; BIBFRAME doesn't declare `owl:inverseOf` triples for them either. Zero corpus prevalence in the 20 k bench, so deferred. If a record carrying one surfaces, options are: declare the inverse under `bffi:` (NLF input) or route via `bffi:relation` to a LoC relationship URI.
 
-### Not reachable within any depth — true gaps
+### Deferred routing candidates
 
-These cluster into three families:
+Terms in `GAP` status with plausible routings that we haven't implemented because they had **zero corpus prevalence in the 20 k bench** (YAGNI):
 
-**PMO music (~28 terms)** — BIBFRAME 3.0.1's December-2025 PMO absorption added classes / predicates that BFFI 1.0.0 (based on BIBFRAME 2.4.0) predates. Per the [Music-medium and music-key routing](#music-medium-and-music-key-routing--bfmediumofperformance--bfmediumcomponent--bfensemble--bfkeymode--collapse-to-literal) callout above, BFFI 1.1.0 will land BFFI-namespace equivalents on the existing re-anchor pattern. Until then, the interim routing collapses these to `bffi:readMarc382` (Medium-of-Performance) and `bffi:musicKey` (KeyMode) literal carriers.
+- `bf:Review` / `bf:review` — natural fit for the catch-all `bffi:relation` chain (parallel to `bf:accompaniedBy`'s routing).
+- `bf:subseriesEnumeration` / `bf:subseriesStatement` — reuse `bffi:seriesEnumeration` / `bffi:seriesStatement` (subseries is a structural axis of the same concept).
+- `bf:variantType` — drop; the existing Title-variant routing's `bffi:marcKey` first-3-char check already discriminates by MARC tag.
+- `bf:noteFor` / `bf:noteType` — minor metadata; route into the existing `bffi:Note` bnode shape.
 
-Classes: `bf:DramaticRole`, `bf:Ensemble`, `bf:EnsembleSize`, `bf:KeyMode`, `bf:MediumComponent`, `bf:MediumComponentQualifier`, `bf:MediumOfPerformance`, `bf:Mode`, `bf:MusicEnsemble`, `bf:MusicInstrument`, `bf:MusicVoice`, `bf:Tempo`.
-
-Predicates: `bf:dramaticRole`, `bf:ensemble`, `bf:ensembleSize`, `bf:ensembleType`, `bf:instrument`, `bf:instrumentalType`, `bf:keyMode`, `bf:mediumComponent`, `bf:mediumComponentQualifier`, `bf:mediumOfPerformance`, `bf:mode`, `bf:numberOfHands`, `bf:tempo`, `bf:usesMediumOfPerformance`, `bf:voice`, `bf:voiceType`.
-
-**Inverse predicates (5 terms)** — BFFI maps the forward direction but doesn't declare the inverses; BIBFRAME doesn't declare `owl:inverseOf` triples for them either. Zero corpus prevalence in the 20 k bench, so deferred.
-
-`bf:agentOf`, `bf:appliedMaterialOf`, `bf:baseMaterialOf`, `bf:contributionOf`, `bf:materialOf`.
-
-**Misc / corpus-derived (~9 terms)**:
-
-| Term | Status |
-|---|---|
-| `bf:Hub` | **Handled by code** — `route_hubs` discriminator-routes on `bflc:marcKey` content (not via `lkd.rdf` relations, so the diagnostic still reports it as "unreachable"). 147 k occurrences in the 20 k bench. |
-| `bf:provisionActivityStatement` | **Handled by code** — URI-fragment discriminator routes to `bffi:date` (succession-link context) or `bffi:Note` bnode (otherwise). 102 occurrences in the 20 k bench. |
-| `bf:Review`, `bf:review`, `bf:noteFor`, `bf:noteType`, `bf:subseriesEnumeration`, `bf:subseriesStatement`, `bf:variantType` | **Not yet handled.** Zero corpus prevalence in the 20 k bench; YAGNI until corpus exercises them. Candidate routings (deferred): catch-all `bffi:relation` chain for Review/review (parallel to accompaniedBy), reuse `bffi:seriesEnumeration` / `bffi:seriesStatement` for the subseries variants, drop `variantType` (the existing Title-variant routing's `bffi:marcKey` first-3-char check already discriminates by MARC tag). |
-
-### Methodology
-
-The diagnostic is implemented in `src/bffi_pipeline/diagnostic/mapping_coverage.py`. Run:
+### Diagnostic — running the analysis live
 
 ```sh
-$ bffi-pipeline diagnose-mappings
-$ bffi-pipeline diagnose-mappings --show all      # also dumps the 130 indirect chains
-$ bffi-pipeline diagnose-mappings --max-hops 5    # widen the BFS bound
+$ bffi-pipeline diagnose-mappings              # summary + unreachable list
+$ bffi-pipeline diagnose-mappings --show all   # also dumps the indirect chains
+$ bffi-pipeline diagnose-mappings --max-hops 5 # widen the BFS bound (saturates at 3)
+$ bffi-pipeline regenerate-mapping-tables      # rebuild the auto-tables above
 ```
 
-Tests in `tests/unit/diagnostic/test_mapping_coverage.py` lock the bucket counts to a ±5 range so an ontology refresh that shifts them fires the regression signal — the unreachable count is the genuine-gap backlog, and should only shrink (BFFI adds something) or grow visibly (BIBFRAME adds a new gap).
+Tests in `tests/unit/diagnostic/test_mapping_coverage.py` lock the bucket counts to a ±5 range; tests in `tests/unit/diagnostic/test_mapping_tables.py` lock the auto-tables against drift. An ontology refresh that shifts either signal fires the regression check.
 
