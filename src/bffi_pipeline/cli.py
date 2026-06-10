@@ -31,6 +31,7 @@ from bffi_pipeline.diagnostic.mapping_coverage import (
     format_path,
 )
 from bffi_pipeline.diagnostic.mapping_tables import regenerate_mapping_tables
+from bffi_pipeline.diagnostic.marc_mapping import regenerate_marc_mapping
 from bffi_pipeline.rdf_utils import local_name
 from bffi_pipeline.runs import (
     InvalidRunDirError,
@@ -184,6 +185,43 @@ def regenerate_mapping_tables_command(
     else:
         verb = "updated" if changed else "already up to date"
         typer.echo(f"docs/bf_to_bffi_mapping.md {verb}.")
+
+
+@app.command("regenerate-marc-mapping")
+def regenerate_marc_mapping_command(
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help=(
+                "Don't write the doc — exit 1 if the on-disk tables differ "
+                "from what the generator would emit. Use in CI / pre-commit."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Regenerate the BFFI → MARC mapping tables in `docs/bffi_to_marc_mapping.md`.
+
+    The tables are derived from `@marc_emit`-decorated extract functions
+    in the reverse-converter source. Re-run after adding or modifying a
+    MARC field family.
+
+    With `--check` the command behaves as a CI guard: it computes the
+    expected doc text but writes nothing, exiting non-zero on drift.
+    """
+    _, changed = regenerate_marc_mapping(check=check)
+    if check:
+        if changed:
+            typer.echo(
+                "docs/bffi_to_marc_mapping.md is out of date — "
+                "run `bffi-pipeline regenerate-marc-mapping` to refresh.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        typer.echo("docs/bffi_to_marc_mapping.md is up to date.")
+    else:
+        verb = "updated" if changed else "already up to date"
+        typer.echo(f"docs/bffi_to_marc_mapping.md {verb}.")
 
 
 @app.command("new-run")
