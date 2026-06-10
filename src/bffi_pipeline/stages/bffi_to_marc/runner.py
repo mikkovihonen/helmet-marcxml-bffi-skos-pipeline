@@ -667,9 +667,20 @@ def _extract_added_titles(graph: Graph, manifestation: URIRef) -> list[_AddedTit
 #: on ``bf:Note`` bnodes when the source MARC came from a 5XX with a
 #: specific subtype. Map each known tail to its target MARC tag; notes
 #: without a recognised tail fall through to 500 (general note).
+_MNOTETYPE_PHYSICAL: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mnotetype/physical")
+_MNOTETYPE_ACCMAT: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mnotetype/accmat")
+
 _MNOTETYPE_TO_MARC_TAG: Final[dict[URIRef, str]] = {
     URIRef("http://id.loc.gov/vocabulary/mnotetype/lang"): "546",
 }
+
+#: Note types consumed by other emit families and therefore skipped by
+#: the generic 5XX note walk so they don't double-emit. accmat is the
+#: source for MARC 300 ``$e`` (accompanying material); physical is
+#: under the Extent bnode and feeds MARC 300 ``$b`` from there.
+_NOTE_TYPES_HANDLED_ELSEWHERE: Final[frozenset[URIRef]] = frozenset(
+    {_MNOTETYPE_ACCMAT, _MNOTETYPE_PHYSICAL}
+)
 
 
 @dataclass(frozen=True)
@@ -709,10 +720,14 @@ class _NoteEmit:
 def _extract_notes(graph: Graph, manifestation: URIRef) -> list[_NoteEmit]:
     """Walk every ``?m bffi:note ?n . ?n rdfs:label ?text`` and dispatch
     to a MARC tag based on the note's mnotetype rdf:type (or 500 by
-    default).
+    default). Notes consumed by other emit families
+    (:data:`_NOTE_TYPES_HANDLED_ELSEWHERE`) are skipped here so they
+    don't double-emit.
     """
     emits: list[_NoteEmit] = []
     for note in graph.objects(manifestation, BFFI.note):
+        if any((note, RDF.type, t) in graph for t in _NOTE_TYPES_HANDLED_ELSEWHERE):
+            continue
         label = next(graph.objects(note, RDFS.label), None)
         if not isinstance(label, Literal):
             continue
@@ -903,10 +918,13 @@ class _IdentifierEmit:
 
 @dataclass(frozen=True)
 class _PhysicalDescription:
-    """MARC 300 components: extent (\\$a) and dimensions (\\$c)."""
+    """MARC 300 components: extent (\\$a), other physical details (\\$b),
+    dimensions (\\$c), and accompanying material (\\$e)."""
 
     extent: str | None
+    other_physical: str | None
     dimensions: str | None
+    accompanying_material: str | None
 
 
 @marc_emit(
@@ -915,35 +933,76 @@ class _PhysicalDescription:
         indicators=(" ", " "),
         subfields=(
             ("a", "extent"),
+            ("b", "other physical details (illustrations, colour, etc.)"),
             ("c", "dimensions"),
+            ("e", "accompanying material"),
         ),
         source=(
-            "?m bffi:extent / bffi:Extent / rdfs:label (for $a) and "
-            "?m bffi:dimensions literal (for $c)"
+            "?m bffi:extent / bffi:Extent / rdfs:label (for $a); "
+            "the Extent's bffi:note typed <…/mnotetype/physical> (for $b); "
+            "?m bffi:dimensions literal (for $c); "
+            "?m bffi:note typed <…/mnotetype/accmat> (for $e)"
         ),
-        notes="First-extent-wins for multi-extent records (rare).",
+        notes=(
+            "First-extent-wins for multi-extent records (rare). ISBD "
+            'trailing punctuation (" :" before $b, " ;" before $c, '
+            '" +" before $e) is added at emit time.'
+        ),
     )
 )
 def _extract_physical_description(
     graph: Graph, manifestation: URIRef
 ) -> _PhysicalDescription | None:
-    """Walk ``?m bffi:extent / bffi:Extent / rdfs:label`` for the extent
-    literal and ``?m bffi:dimensions`` for the dimensions literal.
+    """Walk the Manifestation's physical-description signals.
 
-    Returns ``None`` when neither is present (no MARC 300 to emit).
-    First extent and first dimensions value win; multi-extent records
-    are a follow-on (rare in the corpus)."""
+    ``$a`` from ``bffi:extent / bffi:Extent / rdfs:label``; ``$b`` from
+    that Extent's inner ``bffi:note`` typed
+    ``<…/mnotetype/physical>``; ``$c`` from ``bffi:dimensions``; ``$e``
+    from the Manifestation's ``bffi:note`` typed
+    ``<…/mnotetype/accmat>``.
+
+    Returns ``None`` when no signals are present. First extent /
+    physical / accmat / dimensions wins; multi-extent records are a
+    follow-on (rare in the corpus).
+    """
     extent_label: str | None = None
+    other_physical: str | None = None
     for extent_block in graph.objects(manifestation, BFFI.extent):
         label = next(graph.objects(extent_block, RDFS.label), None)
         if isinstance(label, Literal):
             extent_label = str(label)
+        other_physical = _note_text_with_type(graph, extent_block, _MNOTETYPE_PHYSICAL)
+        if extent_label is not None or other_physical is not None:
             break
     dim_value = next(graph.objects(manifestation, BFFI.dimensions), None)
     dimensions = str(dim_value) if isinstance(dim_value, Literal) else None
-    if extent_label is None and dimensions is None:
+    accompanying = _note_text_with_type(graph, manifestation, _MNOTETYPE_ACCMAT)
+    if (
+        extent_label is None
+        and other_physical is None
+        and dimensions is None
+        and accompanying is None
+    ):
         return None
-    return _PhysicalDescription(extent=extent_label, dimensions=dimensions)
+    return _PhysicalDescription(
+        extent=extent_label,
+        other_physical=other_physical,
+        dimensions=dimensions,
+        accompanying_material=accompanying,
+    )
+
+
+def _note_text_with_type(graph: Graph, subject: Node, note_type: URIRef) -> str | None:
+    """Walk ``?subject bffi:note ?n`` and return the ``rdfs:label`` of
+    the first note co-typed ``?note_type``. ``None`` when no matching
+    note exists."""
+    for note in graph.objects(subject, BFFI.note):
+        if (note, RDF.type, note_type) not in graph:
+            continue
+        label = next(graph.objects(note, RDFS.label), None)
+        if isinstance(label, Literal):
+            return str(label)
+    return None
 
 
 @marc_emit(
@@ -1296,6 +1355,42 @@ def _append_contributor_datafields(
             sf_4.text = c.relator
 
 
+def _append_physical_description_datafield(
+    record: etree._Element, physical: _PhysicalDescription
+) -> None:
+    """Append the MARC 300 datafield with ``$a`` / ``$b`` / ``$c`` / ``$e``
+    subfields based on which signals are present, with ISBD trailing
+    punctuation (\" :\" before $b, \" ;\" before $c, \" +\" before $e)."""
+    df = etree.SubElement(record, f"{_MARC}datafield", tag="300", ind1=" ", ind2=" ")
+    if physical.extent is not None:
+        text = physical.extent
+        if physical.other_physical is not None:
+            text += " :"
+        elif physical.dimensions is not None:
+            text += " ;"
+        elif physical.accompanying_material is not None:
+            text += " +"
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = text
+    if physical.other_physical is not None:
+        text = physical.other_physical
+        if physical.dimensions is not None:
+            text += " ;"
+        elif physical.accompanying_material is not None:
+            text += " +"
+        sf_b = etree.SubElement(df, f"{_MARC}subfield", code="b")
+        sf_b.text = text
+    if physical.dimensions is not None:
+        text = physical.dimensions
+        if physical.accompanying_material is not None:
+            text += " +"
+        sf_c = etree.SubElement(df, f"{_MARC}subfield", code="c")
+        sf_c.text = text
+    if physical.accompanying_material is not None:
+        sf_e = etree.SubElement(df, f"{_MARC}subfield", code="e")
+        sf_e.text = physical.accompanying_material
+
+
 def _append_identifier_datafields(
     record: etree._Element, identifiers: list[_IdentifierEmit]
 ) -> None:
@@ -1486,13 +1581,7 @@ def _build_marc_record(
         _append_publication_datafield(record, publication)
 
     if physical is not None:
-        df300 = etree.SubElement(record, f"{_MARC}datafield", tag="300", ind1=" ", ind2=" ")
-        if physical.extent is not None:
-            sf_a = etree.SubElement(df300, f"{_MARC}subfield", code="a")
-            sf_a.text = physical.extent
-        if physical.dimensions is not None:
-            sf_c = etree.SubElement(df300, f"{_MARC}subfield", code="c")
-            sf_c.text = physical.dimensions
+        _append_physical_description_datafield(record, physical)
 
     # 336/337/338 RDA descriptors. One datafield per code (multiple values
     # on a single predicate produce repeated datafields per MARC convention).

@@ -242,7 +242,8 @@ def test_emit_marcxml_emits_022_issn_datafield() -> None:
 
 def test_emit_marcxml_emits_300_physical_description() -> None:
     """bffi:extent → bffi:Extent → rdfs:label produces MARC 300 \\$a;
-    bffi:dimensions on the Manifestation produces \\$c."""
+    bffi:dimensions on the Manifestation produces \\$c. ISBD trailing
+    punctuation (\" ;\") is added on $a when $c follows."""
     g = _build_minimal_bffi_graph(
         manifestation_uri="http://example.org/b123#Instance",
         bib_id="b123",
@@ -262,8 +263,84 @@ def test_emit_marcxml_emits_300_physical_description() -> None:
     assert df300 is not None
     sf_a = df300.find(f"{{{MARC21_NS}}}subfield[@code='a']")
     sf_c = df300.find(f"{{{MARC21_NS}}}subfield[@code='c']")
-    assert sf_a is not None and sf_a.text == "136 pages"
+    assert sf_a is not None and sf_a.text == "136 pages ;"
     assert sf_c is not None and sf_c.text == "24 cm"
+
+
+def test_emit_marcxml_emits_300_b_from_extent_physical_note() -> None:
+    """The Extent bnode's inner ``bffi:note`` typed
+    ``<…/mnotetype/physical>`` emits as MARC 300 \\$b (other physical
+    details — illustrations, colour, etc.). $a gets the ISBD trailing
+    \" :\" when $b follows."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    extent = URIRef("http://example.org/extent-1")
+    g.add((extent, RDF.type, BFFI.Extent))
+    g.add((extent, RDFS.label, Literal("[16 sivua]")))
+    physical_note = URIRef("http://example.org/extent-1-pnote")
+    g.add((physical_note, RDF.type, BFFI.Note))
+    g.add(
+        (
+            physical_note,
+            RDF.type,
+            URIRef("http://id.loc.gov/vocabulary/mnotetype/physical"),
+        )
+    )
+    g.add((physical_note, RDFS.label, Literal("nid.")))
+    g.add((extent, BFFI.note, physical_note))
+    g.add((m, BFFI.extent, extent))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df300 = root.find(f"{{{MARC21_NS}}}datafield[@tag='300']")
+    assert df300 is not None
+    sf_codes = [sf.get("code") for sf in df300.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df300.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "b"]
+    assert sf_values == ["[16 sivua] :", "nid."]
+
+
+def test_emit_marcxml_emits_300_e_from_manifestation_accmat_note() -> None:
+    """A Manifestation ``bffi:note`` typed ``<…/mnotetype/accmat>``
+    emits as MARC 300 \\$e (accompanying material) — NOT as a generic
+    500 (the generic note walk skips accmat-typed notes so they don't
+    double-emit)."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b123#Instance",
+        bib_id="b123",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    extent = URIRef("http://example.org/extent-1")
+    g.add((extent, RDF.type, BFFI.Extent))
+    g.add((extent, RDFS.label, Literal("1 CD-levy")))
+    g.add((m, BFFI.extent, extent))
+    accmat = URIRef("http://example.org/accmat-1")
+    g.add((accmat, RDF.type, BFFI.Note))
+    g.add(
+        (
+            accmat,
+            RDF.type,
+            URIRef("http://id.loc.gov/vocabulary/mnotetype/accmat"),
+        )
+    )
+    g.add((accmat, RDFS.label, Literal("esiteliite")))
+    g.add((m, BFFI.note, accmat))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df300 = root.find(f"{{{MARC21_NS}}}datafield[@tag='300']")
+    assert df300 is not None
+    sf_a = df300.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    sf_e = df300.find(f"{{{MARC21_NS}}}subfield[@code='e']")
+    assert sf_a is not None and sf_a.text == "1 CD-levy +"
+    assert sf_e is not None and sf_e.text == "esiteliite"
+    # No 500 for the accmat — it routes to 300 $e instead.
+    assert root.find(f"{{{MARC21_NS}}}datafield[@tag='500']") is None
 
 
 def test_emit_marcxml_omits_300_when_no_physical_data() -> None:
