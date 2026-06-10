@@ -1,8 +1,17 @@
 # CLAUDE.md (rewrite branch)
 
-Conversion-first BFFI pipeline: MARCXML → BIBFRAME (LoC marc2bibframe2) → BFFI canonical Turtle. Pro bono; will be contributed to the National Library of Finland. Target corpus: ~800,000 Helmet bibliographic records.
+Conversion-first BFFI pipeline: MARCXML ↔ BIBFRAME (LoC marc2bibframe2) ↔ BFFI canonical Turtle — both directions. Pro bono; will be contributed to the National Library of Finland. Target corpus: ~800,000 Helmet bibliographic records.
 
-**This branch's scope is conversion + evaluation only.** No clustering, no LLM judge, no reconciliation, no Skosmos load enrichment. Anything in those stages stays on `main` as the legacy reference; see `docs/plans/p-057-rewrite-conversion-first-branch.md` (import from main when ready) for the rewrite's framing.
+**This branch's scope is bidirectional conversion + evaluation only.** Four pillars:
+
+1. **MARCXML export** from the Helmet Sierra dump.
+2. **MARC → BIBFRAME** via the LoC marc2bibframe2 XSLT.
+3. **BIBFRAME → BFFI** via SPARQL CONSTRUCT (or equivalent RDF processing), emitting BFFI-only canonical Turtle.
+4. **BFFI → MARC** — the reverse direction, reconstructing MARCXML from the canonical BFFI graph for round-trip verification, downstream MARC consumers, and the diff residue registry in `docs/bffi_limitations.md`.
+
+Plus an evaluation harness wrapping the four — round-trip diff, cataloguer-review HTML, mapping-discipline tests.
+
+No clustering, no LLM judge, no reconciliation, no Skosmos load enrichment. Anything in those stages stays on `main` as the legacy reference; see `docs/plans/p-057-rewrite-conversion-first-branch.md` (import from main when ready) for the rewrite's framing.
 
 ## Project docs
 
@@ -67,3 +76,4 @@ Conversion-first BFFI pipeline: MARCXML → BIBFRAME (LoC marc2bibframe2) → BF
 - Don't merge silent failures into provenance. Log `uncertain` with the actual error.
 - Don't add features that aren't covered by a plan in `docs/plans/`. Surface new directions as a plan with status `proposed` first; only flip to `active` after the trade-off is on the record.
 - Don't add downstream-stage code (clustering, judge, reconciliation, Skosmos load) on this branch. Those stay on `main`.
+- Don't read `bffi-prov:` (pipeline-internal provenance) when reconstructing MARC in the BFFI → MARC direction. The whole point of the round-trip is to verify that the `bffi:` namespace alone can reconstruct the source. Pipeline-internal data is fair for UI / pairing machinery (e.g. lineage tokens used by the diff comparator), never for deciding what content emits. See `docs/bffi_limitations.md`'s cardinal-rule note.

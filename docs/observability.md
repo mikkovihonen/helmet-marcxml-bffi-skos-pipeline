@@ -53,7 +53,7 @@ The exporter publishes the canonical metric set below. Every metric maps one-to-
 
 ### Label cardinality
 
-- `stage` ∈ {`export`, `marc2bibframe`, `bibframe2bffi`, `roundtrip_eval`} — the rewrite branch's conversion-only stage set. Extend as new stages land.
+- `stage` ∈ {`export`, `marc2bibframe`, `bibframe2bffi`, `bffi2marc`, `roundtrip_eval`} — the rewrite branch's bidirectional-conversion stage set. `bffi2marc` is the reverse direction (BFFI graph → reconstructed MARCXML); `roundtrip_eval` is the diff harness that compares reconstructed MARC against the source. Extend as new stages land.
 - `phase` ∈ {`_`, `phase1`, …}. `_` is the sentinel for stages without internal phases.
 - `dep` — bounded set per stage. Typical entries on this branch: `xslt_runtime` (Saxon / xsltproc), `fuseki` (if used as staging store), nothing else by default. No `mlx-lm`, no `finto` — those belong to the legacy `main` line.
 - `outcome` is per-stage but bounded; the conversion stage's outcomes are the discriminator-routing buckets (one per row in the bf → bffi mapping doc's routing callouts) plus `validation_failed`.
@@ -97,19 +97,21 @@ Every Counter and Gauge carries an explicit `run_uuid` label. Dashboards filter 
 
 Auto-loaded from `config/grafana/dashboards/bffi-pipeline.json` at container start (via `config/grafana/provisioning/`). Read-only in the UI; operators clone-and-edit if they want a custom view.
 
-Initial panel set for the conversion-only scope:
+Initial panel set for the bidirectional-conversion scope:
 
 | Panel | Type | What it shows |
 |---|---|---|
-| Pipeline overview | Stat × 4 | One tile per stage (Export / marc2bibframe / BIBFRAME→BFFI / Round-trip eval). Coloured green if running, blue if done, grey if idle. Filtered to the active run. |
-| Conversion progress | Stat | Processed / total for the BIBFRAME → BFFI stage. |
-| Conversion ETA | Stat | Linear-extrapolation ETA. |
-| Conversion throughput | Stat | Records per minute over the last 5 progress events. |
-| Routing outcome distribution | Bar gauge | Per-outcome counts after conversion ends (hub_routed_work, hub_routed_expression, identifier_isbn, …). |
+| Pipeline overview | Stat × 5 | One tile per stage (Export / marc2bibframe / BIBFRAME→BFFI / BFFI→MARC / Round-trip eval). Coloured green if running, blue if done, grey if idle. Filtered to the active run. |
+| Forward-conversion progress | Stat | Processed / total for the BIBFRAME → BFFI stage. |
+| Forward-conversion ETA | Stat | Linear-extrapolation ETA. |
+| Forward-conversion throughput | Stat | Records per minute over the last 5 progress events. |
+| Routing outcome distribution | Bar gauge | Per-outcome counts after BIBFRAME → BFFI ends (hub_routed_work, hub_routed_expression, identifier_isbn, …). |
+| Reverse-conversion progress | Stat | Processed / total for the BFFI → MARC stage. |
+| Round-trip diff residue | Stat | After `roundtrip_eval`: counts of records by diff status (`identical` / `changed` / `lost` / `tag-changed` / `marckey-bypass`); clickable through to the cataloguer-review HTML via Caddy's `/files/` mount. |
 | Dependency health | State timeline | XSLT runtime / Fuseki (if used) verdict over time. |
 | Per-stage throughput | Time series | All stages — overlay view of who's currently moving. |
 | Watchdog event rate (5m) | Time series | Per-event-type rate; spikes here precede stuck records. |
-| Validation residue | Stat | Count of records with non-zero `_validation.jsonl` rows; clickable through to the cataloguer-review HTML via Caddy's `/files/` mount. |
+| Validation residue | Stat | Count of records with non-zero `_validation.jsonl` rows from the forward conversion. |
 
 ## Extending
 

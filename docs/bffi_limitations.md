@@ -1,10 +1,10 @@
 # BFFI ontology limitations as observed by the round-trip
 
-The pipeline's round-trip stage (`marc-roundtrip`) reconstructs
-MARCXML from the canonical BFFI graph and diffs it against the
-source MARC. The diff residue is the empirical ledger of where
-BFFI 1.0.0 + marc2bibframe2 + our pipeline collectively don't
-preserve source-MARC information.
+The pipeline's BFFI → MARC stage reconstructs MARCXML from the
+canonical BFFI graph; the round-trip eval stage diffs it against
+the source MARC. The diff residue is the empirical ledger of
+where BFFI 1.0.0 + marc2bibframe2 + our pipeline collectively
+don't preserve source-MARC information.
 
 Some of that residue is real data loss; some is **acceptable
 data movement** — the originating data survived the round-trip
