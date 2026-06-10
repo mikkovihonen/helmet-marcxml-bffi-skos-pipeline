@@ -108,7 +108,7 @@ WHERE {
   #
   # Phase A rows are ``owl:equivalentClass`` (semantically identical);
   # Phase B rows are ``bffi-meta:broadMatch`` (BFFI broadens or narrows
-  # the meaning per ``docs/lkd.rdf``).
+  # the meaning per ``vocab/lkd.rdf``).
   #
   # The existing BIBFRAME-class triple on the bffi:Work is retained
   # for tools expecting it (the work CONSTRUCT carries it).
@@ -210,7 +210,7 @@ WHERE {
   }
   # bf:tableOfContents is intentionally NOT routed here: BFFI's
   # bffi:tableOfContents has rdfs:domain bffi:Manifestation (per
-  # docs/lkd.rdf line 3995), not Expression. The pipeline currently
+  # vocab/lkd.rdf line 3995), not Expression. The pipeline currently
   # doesn't mint Manifestation blocks; preserve that scope by dropping
   # the predicate.
 

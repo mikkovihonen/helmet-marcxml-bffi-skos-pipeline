@@ -176,7 +176,7 @@ _LOC_VOCAB_URI_PREFIX: str = "http://id.loc.gov/vocabulary/"
 #: ``bffi:Topic`` → 650.
 #:
 #: The classes were ``bf:Topic`` / ``bf:Place`` / etc. before P-53
-#: Family 1 (the BFFI-aliased-terms migration). ``docs/lkd.rdf``
+#: Family 1 (the BFFI-aliased-terms migration). ``vocab/lkd.rdf``
 #: declares each as ``owl:equivalentClass`` of its BIBFRAME
 #: counterpart, so the rename is semantics-preserving; the project
 #: prefers ``bffi:*`` consistently because ``bffi:Role``'s

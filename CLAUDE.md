@@ -6,7 +6,7 @@ Conversion-first BFFI pipeline: MARCXML → BIBFRAME (LoC marc2bibframe2) → BF
 
 ## Project docs
 
-- `docs/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions, AND the closed set of terms we may emit under the `bffi:` namespace.** See the BFFI namespace discipline rule in Conventions.
+- `vocab/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions, AND the closed set of terms we may emit under the `bffi:` namespace.** See the BFFI namespace discipline rule in Conventions.
 - `docs/bf_to_bffi_mapping.md` — generated reference (rdflib parse of `lkd.rdf`) for every `bf:*` class and predicate encountered in the conversion, with its `bffi:*` counterpart and routing notes. Source of truth for every conversion decision. Sent to NLF for review.
 - `docs/bffi_limitations.md` — registry of round-trip cases where source MARC data survives but lands in a different MARC field / shape / convention because BFFI 1.0.0 + marc2bibframe2 don't preserve the distinction (e.g. MARC 260 → 264, `$2 yso/fin` → `$2 yso`). Each entry pinpoints the BFFI ontology shortfall and documents the conclusion (acceptable / planned-fix / candidate-for-NLF-extension). Add a new entry whenever you find a similar case during a diff residue audit.
 - `docs/validation-strategy.md` — three validation boundaries on the conversion side (MARCXML input → BIBFRAME post-conversion → BFFI post-CONSTRUCT).
@@ -35,7 +35,7 @@ Conversion-first BFFI pipeline: MARCXML → BIBFRAME (LoC marc2bibframe2) → BF
 ## Conventions
 
 - **URIs**: All minted through a single helper module; never concatenate URI strings elsewhere. Deterministic SHA-1 of canonical inputs; UUIDs only for `prov:Activity` records.
-- **BFFI namespace discipline**: The `bffi:` namespace (`http://urn.fi/URN:NBN:fi:schema:bffi:`) is **closed**. We may only emit classes and properties that exist in `docs/lkd.rdf`. When we need something not in `lkd.rdf`, pick in this order:
+- **BFFI namespace discipline**: The `bffi:` namespace (`http://urn.fi/URN:NBN:fi:schema:bffi:`) is **closed**. We may only emit classes and properties that exist in `vocab/lkd.rdf`. When we need something not in `lkd.rdf`, pick in this order:
     1. **Reuse an existing standard term.** RDF (`rdf:Statement` reification), RDFS, OWL, SKOS, PROV-O, DC Terms. Prefer this path.
     2. **Use the `bffi-prov:` namespace** for *pipeline-internal* metadata — Activity classes, decision audit predicates, synthetic-sentinel flags. This namespace is ours; extending it is fine.
     3. **Propose adding the term to BFFI through NLF.** Open a plan in `docs/plans/`. Until ratified, do not emit it under `bffi:`.
@@ -62,7 +62,7 @@ Conversion-first BFFI pipeline: MARCXML → BIBFRAME (LoC marc2bibframe2) → BF
 - Don't reach for async unless a stage genuinely benefits.
 - Don't modify `third_party/marc2bibframe2/` (git submodule). Wrap, don't fork.
 - Don't emit `bf:*` URIs from the BFFI conversion. The namespace boundary is hard-cut.
-- Don't mint local `bffi:` terms. The namespace is closed to what `docs/lkd.rdf` declares — see the **BFFI namespace discipline** rule in Conventions for the legitimate alternatives.
+- Don't mint local `bffi:` terms. The namespace is closed to what `vocab/lkd.rdf` declares — see the **BFFI namespace discipline** rule in Conventions for the legitimate alternatives.
 - Don't write private `graph.bind("foo", FOO)` lists when emitting Turtle. Every binding goes through the shared helper.
 - Don't merge silent failures into provenance. Log `uncertain` with the actual error.
 - Don't add features that aren't covered by a plan in `docs/plans/`. Surface new directions as a plan with status `proposed` first; only flip to `active` after the trade-off is on the record.

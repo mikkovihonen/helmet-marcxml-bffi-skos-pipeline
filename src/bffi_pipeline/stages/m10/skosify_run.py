@@ -45,7 +45,7 @@ DEFAULT_CONFIG_PATH: Final[Path] = _REPO_ROOT / "config" / "bffi.cfg"
 #: Vendored MTS dump used to enrich ``bffi:role`` blank-node-with-
 #: rdfs:label values with the MTS concept URI. BFFI 1.0.0 designates
 #: MTS as the value vocabulary for ``bffi:Role`` (see
-#: ``bffi-meta:relatedValueVocabulary`` on ``docs/lkd.rdf``'s
+#: ``bffi-meta:relatedValueVocabulary`` on ``vocab/lkd.rdf``'s
 #: ``bffi:Role`` class, pointing at the four axis-collections below).
 DEFAULT_MTS_DUMP_PATH: Final[Path] = _REPO_ROOT / "finto-dumps" / "mts-skos.ttl"
 

@@ -350,7 +350,7 @@ metadataLicensor: URIRef = BFFI.metadataLicensor
 recordingSource: URIRef = BFFI.recordingSource
 #: Source-record pointer on an AdminMetadata block. Was previously
 #: minted as ``bffi:sourceMetadata`` (a local extension absent from
-#: ``docs/lkd.rdf``); migrated to standard PROV-O
+#: ``vocab/lkd.rdf``); migrated to standard PROV-O
 #: ``prov:hadPrimarySource`` — semantically exact and avoids a private
 #: ``bffi:`` term. Python attribute name retained so existing call
 #: sites (``V.sourceMetadata``) keep working without a renaming pass.

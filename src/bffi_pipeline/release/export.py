@@ -58,7 +58,7 @@ _AUTO_INCLUDED_FILES: Final[tuple[str, ...]] = (
 )
 
 #: BFFI ontology version baked into the manifest. Hardcoded because the
-#: vendored ``docs/lkd.rdf`` doesn't carry a machine-readable
+#: vendored ``vocab/lkd.rdf`` doesn't carry a machine-readable
 #: ``owl:versionInfo`` we can read at runtime, and the version
 #: hasn't moved since project inception. Bump when the upstream
 #: vocabulary does.

@@ -80,7 +80,7 @@ bffi:Manifestation rdfs:label   "Manifestation"@en, "Manifestaatio"@fi, "Manifes
 # Property labels — Skosmos renders the rdfs:label of each outgoing
 # predicate as the property name on a concept page. Without these,
 # Skosmos shows the raw URI of the predicate, which is uninformative.
-# Labels mirror what lives in docs/lkd.rdf for the bffi:* predicates
+# Labels mirror what lives in vocab/lkd.rdf for the bffi:* predicates
 # (re-stated here so Skosmos doesn't need to parse the full ontology).
 #
 # Hoisted onto each canonical Work / Expression / Manifestation by
@@ -123,7 +123,7 @@ bffi:generationDate
 # AdminMetadata-shaped fields not in the flatten table above. Same
 # rationale — each appears on the canonical Work/Expression/Manifestation
 # but Skosmos would render the bare URI without these labels.
-# en/fi from docs/lkd.rdf; sv supplied by this project (not in lkd.rdf).
+# en/fi from vocab/lkd.rdf; sv supplied by this project (not in lkd.rdf).
 
 bffi:metadataLicensor
     rdfs:label "Metadata licensor"@en,
@@ -162,7 +162,7 @@ bffi:adminMetadataFor
 
 # FRBR axis links — Work ↔ Expression ↔ Manifestation. Skosmos
 # renders these as outgoing references; the property label gives
-# them a human-readable column header. en/fi from docs/lkd.rdf.
+# them a human-readable column header. en/fi from vocab/lkd.rdf.
 
 bffi:hasExpression
     rdfs:label "Has expression"@en,

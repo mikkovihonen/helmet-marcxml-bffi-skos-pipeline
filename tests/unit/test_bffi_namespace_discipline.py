@@ -1,7 +1,7 @@
 """Enforce the BFFI namespace discipline rule (CLAUDE.md § Conventions).
 
 The ``bffi:`` namespace is closed: we may only emit classes and
-properties that exist in ``docs/lkd.rdf`` (the vendored BFFI 1.0.0
+properties that exist in ``vocab/lkd.rdf`` (the vendored BFFI 1.0.0
 ontology). This test scans every place we could conceivably emit a
 ``bffi:`` URI — Python vocab constants and SPARQL CONSTRUCT files —
 and asserts each ``bffi:<name>`` reference appears as a declared
@@ -29,7 +29,7 @@ from typing import Final
 import pytest
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
-_LKD_RDF: Final[Path] = _REPO_ROOT / "docs" / "lkd.rdf"
+_LKD_RDF: Final[Path] = _REPO_ROOT / "vocab" / "lkd.rdf"
 _VOCAB_PY: Final[Path] = _REPO_ROOT / "src" / "bffi_pipeline" / "provenance" / "vocab.py"
 _SPARQL_DIR: Final[Path] = _REPO_ROOT / "sparql"
 
@@ -62,7 +62,7 @@ _PYTHON_BFFI_REF_EXCLUSIONS: Final[frozenset[str]] = frozenset()
 
 
 def _declared_bffi_terms() -> set[str]:
-    """Parse ``docs/lkd.rdf`` and return the set of ``bffi:<name>``
+    """Parse ``vocab/lkd.rdf`` and return the set of ``bffi:<name>``
     terms it declares (classes + properties)."""
     text = _LKD_RDF.read_text(encoding="utf-8")
     return set(_LKD_DECLARATION_RE.findall(text))
@@ -124,7 +124,7 @@ def _sparql_bffi_references() -> dict[str, set[str]]:
 
 def test_python_vocab_bffi_terms_all_declared_in_lkd_rdf() -> None:
     """Every ``BFFI.<name>`` reference in ``vocab.py`` must point at a
-    class or property that ``docs/lkd.rdf`` declares.
+    class or property that ``vocab/lkd.rdf`` declares.
 
     Failing names indicate a locally-minted ``bffi:`` term. Fix one of:
 
@@ -139,7 +139,7 @@ def test_python_vocab_bffi_terms_all_declared_in_lkd_rdf() -> None:
     referenced = _python_bffi_references()
     undeclared = referenced - declared
     assert not undeclared, (
-        f"Locally-minted bffi: terms in vocab.py (not in docs/lkd.rdf): "
+        f"Locally-minted bffi: terms in vocab.py (not in vocab/lkd.rdf): "
         f"{sorted(undeclared)}. See CLAUDE.md § Conventions § BFFI "
         f"namespace discipline."
     )
@@ -147,7 +147,7 @@ def test_python_vocab_bffi_terms_all_declared_in_lkd_rdf() -> None:
 
 def test_sparql_construct_bffi_terms_all_declared_in_lkd_rdf() -> None:
     """Every ``bffi:<name>`` reference in ``sparql/*.rq`` must point at
-    a class or property declared in ``docs/lkd.rdf``.
+    a class or property declared in ``vocab/lkd.rdf``.
 
     Failing names indicate a locally-minted ``bffi:`` term being
     emitted by an M3 CONSTRUCT or queried by a SPARQL pass. Same fix
@@ -161,14 +161,14 @@ def test_sparql_construct_bffi_terms_all_declared_in_lkd_rdf() -> None:
             violations[filename] = undeclared
     assert not violations, (
         f"Locally-minted bffi: terms in SPARQL files (not in "
-        f"docs/lkd.rdf): {violations}. See CLAUDE.md § Conventions § "
+        f"vocab/lkd.rdf): {violations}. See CLAUDE.md § Conventions § "
         f"BFFI namespace discipline."
     )
 
 
 def test_lkd_rdf_declaration_extractor_finds_known_terms() -> None:
     """Sanity check the extractor — at least one well-known BFFI term
-    should appear in ``docs/lkd.rdf``. Guards against an extractor
+    should appear in ``vocab/lkd.rdf``. Guards against an extractor
     regression that would silently render the two enforcement tests
     above as no-ops."""
     declared = _declared_bffi_terms()
@@ -188,7 +188,7 @@ def test_pipeline_internal_metadata_lives_under_bffi_prov_not_bffi(
     Documents the convention by example."""
     declared = _declared_bffi_terms()
     assert name not in declared, (
-        f"bffi-prov: term '{name}' has a collision in docs/lkd.rdf. "
+        f"bffi-prov: term '{name}' has a collision in vocab/lkd.rdf. "
         f"Either the bffi-prov namespace claim is wrong or "
         f"lkd.rdf was updated to ratify this term — review."
     )

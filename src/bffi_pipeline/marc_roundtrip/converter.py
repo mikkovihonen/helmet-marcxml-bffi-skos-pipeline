@@ -177,7 +177,7 @@ _URI_NAMESPACE_TO_MARC_SOURCE: Final[dict[str, str]] = {
 #: rdf:about`` typing is the discriminator).
 #:
 #: The classes are ``bffi:*`` after P-53 Family 1 (the
-#: BFFI-aliased-terms migration). ``docs/lkd.rdf`` declares each
+#: BFFI-aliased-terms migration). ``vocab/lkd.rdf`` declares each
 #: ``owl:equivalentClass`` of its BIBFRAME counterpart.
 _SUBJECT_TYPE_TO_MARC_6XX_TAG: Final[dict[URIRef, str]] = {
     V.BFFI.Person: "600",
@@ -1319,7 +1319,7 @@ class _Reconstructor:
 
         1. BFFI 1.0.0 designates MTS, not LoC, as the value
            vocabulary for ``bffi:Role`` (see
-           ``bffi-meta:relatedValueVocabulary`` on ``docs/lkd.rdf``'s
+           ``bffi-meta:relatedValueVocabulary`` on ``vocab/lkd.rdf``'s
            ``bffi:Role`` class). After enrichment moved from
            LoC-at-M3 to MTS-at-Skosify, most ``bffi:role`` URIs
            in the graph are MTS concepts (``mts:m552`` etc.) whose

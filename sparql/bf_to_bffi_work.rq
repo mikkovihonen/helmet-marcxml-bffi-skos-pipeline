@@ -160,7 +160,7 @@ WHERE {
   # rows are ``owl:equivalentClass`` (semantically identical to the
   # BIBFRAME source class); Phase B rows are ``bffi-meta:broadMatch``
   # (BFFI broadens or narrows the meaning, but the routing intent
-  # is clear from the ontology declarations in ``docs/lkd.rdf``).
+  # is clear from the ontology declarations in ``vocab/lkd.rdf``).
   #
   # Phase A — OWL-equivalent (mirror):
   #   - bf:Manuscript  → bffi:Manuscript      (handwritten / typescript content)
@@ -318,7 +318,7 @@ WHERE {
     # the CONSTRUCT ?subject a ?bffiSubjectMarcType emits the
     # ``bffi:*`` form on the canonical (P-53 Family 1; the BFFI
     # classes are ``owl:equivalentClass`` of their BIBFRAME
-    # counterparts per ``docs/lkd.rdf``). Everything outside this
+    # counterparts per ``vocab/lkd.rdf``). Everything outside this
     # mapping (``madsrdf:Topic`` / ``owl:Thing`` / etc.) is
     # uninteresting noise for the round-trip and stays unbound.
     OPTIONAL {

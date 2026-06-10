@@ -347,7 +347,7 @@ def post_process(
     # (``relator_term_enrichment.enrich_role_uris``). It was removed
     # in the role-redesign because BFFI 1.0.0 designates MTS — not
     # LoC relators — as the value vocabulary for ``bffi:Role`` (see
-    # ``bffi-meta:relatedValueVocabulary`` on ``docs/lkd.rdf``'s
+    # ``bffi-meta:relatedValueVocabulary`` on ``vocab/lkd.rdf``'s
     # ``bffi:Role`` class, pointing at MTS collections m34 / m153 /
     # m491 / m1157). Role-URI enrichment now happens at M10 / Skosify
     # time against MTS; ``canonical.ttl`` carries the cataloguer's

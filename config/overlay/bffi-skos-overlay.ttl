@@ -150,7 +150,7 @@ bffi:role rdfs:label "Role"@en, "Rooli"@fi, "Roll"@sv .
 # provenance attributes records to Helmet, not Sierra.
 #
 # The source is dual-typed bf:Source + bffi:Source per spec § 5 and
-# `docs/lkd.rdf` line 609 (`bffi:Source` is `owl:equivalentClass` of
+# `vocab/lkd.rdf` line 609 (`bffi:Source` is `owl:equivalentClass` of
 # `bf:Source`); BFFI-native consumers and BIBFRAME consumers both see
 # a typed entity.
 # ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ dct:identifier rdfs:label "Helmet bib ID"@en,
 # ---------------------------------------------------------------------------
 # P-52 BFFI subclass typing (Phase A–F): every subclass we emit needs an
 # rdfs:label so the Skosmos type sidebar surfaces it with a human-readable
-# name instead of the bare URI. Source labels come from ``docs/lkd.rdf``;
+# name instead of the bare URI. Source labels come from ``vocab/lkd.rdf``;
 # we re-state them here so the overlay stays self-contained.
 # ---------------------------------------------------------------------------
 

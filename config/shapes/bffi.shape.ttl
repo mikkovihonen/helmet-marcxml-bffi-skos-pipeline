@@ -8,7 +8,7 @@
 # that need triage, not a halt (see docs/BUILD_PLAN.md M3).
 #
 # Property routing here is the *pipeline's* allocation, not BFFI's broadest
-# permissible domain (spec § 3 "conservative" note in docs/lkd.rdf).
+# permissible domain (spec § 3 "conservative" note in vocab/lkd.rdf).
 
 @prefix sh:    <http://www.w3.org/ns/shacl#> .
 @prefix bf:    <http://id.loc.gov/ontologies/bibframe/> .

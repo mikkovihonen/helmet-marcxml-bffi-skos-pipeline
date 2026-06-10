@@ -294,7 +294,7 @@ removed only the *synthesised* ``$4`` for the 99 % of records.
 
 **Architectural reason for removal** BFFI 1.0.0 does not
 designate LoC relators as the value vocabulary for
-``bffi:Role``. ``docs/lkd.rdf`` records the binding explicitly:
+``bffi:Role``. ``vocab/lkd.rdf`` records the binding explicitly:
 
 ```xml
 <rdf:Description rdf:about="…/schema:bffi:Role">
@@ -359,7 +359,7 @@ bnode ``rdfs:label``. ``$4`` is intentionally not synthesised because:
 **Case** After P-53 (the BFFI-aliased-terms migration), the canonical
 graph uses `bffi:*` consistently for every term whose
 `owl:equivalentClass` or `owl:equivalentProperty` is declared in
-`docs/lkd.rdf`. ~26 terms migrated across five families
+`vocab/lkd.rdf`. ~26 terms migrated across five families
 (`bffi:role`, `bffi:Agent`, `bffi:Title`, `bffi:identifiedBy`,
 `bffi:Topic` / `bffi:Place` / `bffi:Person` / `bffi:Organization` /
 `bffi:Meeting` / `bffi:Temporal`, `bffi:mainTitle` /
@@ -452,7 +452,7 @@ route variant titles via `bf_to_bffi_expression.rq`). What it does
 **not** have is an explicit "this is the vernacular pair of that"
 predicate — no `bffi:vernacularOf`, `bffi:hasVariantForm`, or similar
 link between a Latin-transliterated structural form and its vernacular
-counterpart. `docs/lkd.rdf` declares no such property; the closest
+counterpart. `vocab/lkd.rdf` declares no such property; the closest
 neighbours are:
 
 - `madsrdf:variantLabel` — "any variant of this label", not
@@ -870,7 +870,7 @@ $a** — the b20122470 / b12191139 reproducers in
 
 **Why no structured BFFI predicate covers this**:
 
-1. **`docs/lkd.rdf` does not define name-component predicates**.
+1. **`vocab/lkd.rdf` does not define name-component predicates**.
    Spot-checked: no `bffi:nameDate`, `bffi:nameTitle`,
    `bffi:nameNumeration`, `bffi:nameFullerForm`, no equivalent
    `bffi:titleLanguage` on the Title node, no
@@ -879,7 +879,7 @@ $a** — the b20122470 / b12191139 reproducers in
 
 2. **The BFLC ontology *does* define them**
    (`bflc:date`, `bflc:title`, `bflc:numeration`, `bflc:fuller`),
-   but those terms are not aliased in `docs/lkd.rdf`. The project's
+   but those terms are not aliased in `vocab/lkd.rdf`. The project's
    BFFI namespace discipline allows direct BIBFRAME / BFLC use, so
    we COULD emit `bflc:date` / `bflc:title` / etc. on canonical
    agents — but only if marc2bibframe2 emits them in the first place.
@@ -960,5 +960,5 @@ any related plan in `docs/plans/` when one applies.
 
 When a `bffi:` extension would fix the case, flag it as a candidate
 for an NLF conversation rather than minting locally — the BFFI
-namespace stays closed to what `docs/lkd.rdf` declares (per the
+namespace stays closed to what `vocab/lkd.rdf` declares (per the
 **BFFI namespace discipline** rule in CLAUDE.md).

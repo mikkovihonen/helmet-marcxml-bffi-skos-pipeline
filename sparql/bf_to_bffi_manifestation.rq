@@ -250,7 +250,7 @@ WHERE {
   # ``id.loc.gov/vocabulary/carriers/``. Both URIs are already canonical
   # LoC RDA terms — no reconciliation needed; just forward them onto the
   # Manifestation under their BFFI parallels (which are ``bf:media`` /
-  # ``bf:carrier`` subproperties per ``docs/lkd.rdf``). Skosmos renders
+  # ``bf:carrier`` subproperties per ``vocab/lkd.rdf``). Skosmos renders
   # them as labelled clickable concepts on the Manifestation page once
   # the RDA-Media + RDA-Carrier graphs are loaded by ``load-finto``
   # (commit 3 of this chain).
@@ -393,7 +393,7 @@ WHERE {
   # blank node with ``rdfs:label`` carrying the full track listing /
   # chapter list / item enumeration. BFFI declares
   # ``bffi:tableOfContents`` with ``rdfs:domain bffi:Manifestation``
-  # (per docs/lkd.rdf line 3995-ish), so we hoist the predicate from
+  # (per vocab/lkd.rdf line 3995-ish), so we hoist the predicate from
   # the source bf:Work onto the canonical bffi:Manifestation here —
   # same Work→Manifestation hoist pattern bf_to_bffi_work.rq uses for
   # bf:originPlace. The single-string blob preserves whatever
@@ -484,7 +484,7 @@ WHERE {
   # MARC 022 (ISSN — serials). marc2bibframe2 emits
   # ``bf:identifiedBy → bf:Issn`` (or ``bf:IssnL`` for ind1=0).
   # Per L-08 (BFFI namespace closed set), ``bf:Issn`` has no
-  # ``bffi:*`` alias in ``docs/lkd.rdf`` so we re-emit it under
+  # ``bffi:*`` alias in ``vocab/lkd.rdf`` so we re-emit it under
   # ``bf:Issn``. P-54 Phase 2.
   OPTIONAL {
     ?bfInstance bf:identifiedBy ?issn .
@@ -554,7 +554,7 @@ WHERE {
   # BFFI 1.0.0's relation pattern (``bffi:relation →
   # bffi:Relation → bffi:relationship + bffi:associatedResource``),
   # which is ``owl:equivalentProperty``/``owl:equivalentClass`` to
-  # the BIBFRAME counterparts per ``docs/lkd.rdf``. The Hub itself
+  # the BIBFRAME counterparts per ``vocab/lkd.rdf``. The Hub itself
   # stays a ``bf:Hub`` because BFFI has no Hub equivalent — the
   # blank-node Title substructure is also passed through verbatim
   # (the round-trip converter reads ``bf:mainTitle`` + ``bflc:marcKey``

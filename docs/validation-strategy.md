@@ -50,7 +50,7 @@ Intentionally minimal — this validates "BIBFRAME the BFFI conversion can handl
 
 ### Boundary 3 — BFFI post-CONSTRUCT
 
-All shape constraints below derive from `docs/lkd.rdf`; that file is the single source of truth for BFFI domain/range checks. The shape file `config/shapes/bffi.shape.ttl` should carry a comment naming the schema commit it was generated against, so a future BFFI revision can be diffed against the shape.
+All shape constraints below derive from `vocab/lkd.rdf`; that file is the single source of truth for BFFI domain/range checks. The shape file `config/shapes/bffi.shape.ttl` should carry a comment naming the schema commit it was generated against, so a future BFFI revision can be diffed against the shape.
 
 This is where validation pays for itself. Required shapes:
 
