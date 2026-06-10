@@ -17,6 +17,7 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     _hub_target_type,
     _identifier_scheme_token,
     apply_all_routings,
+    drop_undeclared_bf_terms,
     loc_scheme_uri,
     rename_bflc_marckey,
     route_audio,
@@ -275,6 +276,7 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "hub": 1,
         "axis_default_class": 0,
         "axis_default_predicate": 0,
+        "dropped_undeclared_bf": 0,
     }
 
     # The Hub routing reads bffi:marcKey (after rename), so the rename
@@ -310,6 +312,72 @@ def test_route_axis_default_classes_no_op_when_already_routed() -> None:
 
 
 # --- routing 7 (axis-default predicates) --------------------------------
+
+
+# --- drop_undeclared_bf_terms (BIBFRAME-ontology-guarded drop) ----------
+
+
+def test_drop_undeclared_bf_terms_removes_bf_statement_artifact() -> None:
+    """``bf:Statement`` isn't declared in BIBFRAME 3.0.1 — marc2bibframe2
+    emits it as a flat-text duplicate of the structured ProvisionActivity
+    block. Dropping it leaves no information lost (the same content is
+    in the sibling structured block)."""
+    g = Graph()
+    instance = URIRef("http://example.org/instance")
+    # Add a known-good triple (bf:provisionActivity is declared).
+    g.add((instance, BF.provisionActivity, URIRef("http://example.org/pa")))
+    # Add the undeclared bf:Statement artifact predicate.
+    g.add((instance, BF.Statement, Literal("Helsinki: Publisher, 2001")))
+
+    dropped = drop_undeclared_bf_terms(g)
+    assert dropped == 1
+    # Known triple still there.
+    assert (instance, BF.provisionActivity, URIRef("http://example.org/pa")) in g
+    # Artifact triple gone.
+    assert (instance, BF.Statement, Literal("Helsinki: Publisher, 2001")) not in g
+
+
+def test_drop_undeclared_bf_terms_handles_undeclared_class_in_object_slot() -> None:
+    """The guard fires on any of (subject, predicate, object) slots —
+    an unknown bf:* in the rdf:type object also triggers a drop."""
+    g = Graph()
+    s = URIRef("http://example.org/s")
+    # bf:UnknownClass isn't in BIBFRAME 3.0.1.
+    g.add((s, RDF.type, URIRef("http://id.loc.gov/ontologies/bibframe/UnknownClass")))
+    assert drop_undeclared_bf_terms(g) == 1
+
+
+def test_drop_undeclared_bf_terms_keeps_known_bf_triples() -> None:
+    """The guard ONLY drops triples whose bf:* URIs aren't in BIBFRAME.
+    Triples using only declared bf:* terms (or no bf:* at all) pass
+    through unchanged."""
+    g = Graph()
+    s = URIRef("http://example.org/s")
+    # All three of these terms are declared in BIBFRAME 3.0.1.
+    g.add((s, RDF.type, BF.Work))
+    g.add((s, BF.mainTitle, Literal("A Title")))
+    g.add((s, BF.identifiedBy, URIRef("http://example.org/id")))
+    # And one triple with NO bf:* at all.
+    g.add((s, RDF.value, Literal("payload")))
+
+    assert drop_undeclared_bf_terms(g) == 0
+    assert len(list(g)) == 4
+
+
+def test_drop_undeclared_bf_terms_ignores_non_bf_namespace_uris() -> None:
+    """An unknown URI in a different namespace (rdf:, skos:, example.org)
+    is NOT a BIBFRAME artifact and should pass through. The guard fires
+    only on the ``bf:`` namespace."""
+    g = Graph()
+    s = URIRef("http://example.org/s")
+    # bf:notInOntology IS a bf:* artifact → drops
+    g.add((s, URIRef("http://id.loc.gov/ontologies/bibframe/notInOntology"), Literal("x")))
+    # http://example.org/whatever is NOT a bf:* artifact → keeps
+    g.add((s, URIRef("http://example.org/whatever"), Literal("y")))
+
+    assert drop_undeclared_bf_terms(g) == 1
+    # The non-bf: triple survives.
+    assert (s, URIRef("http://example.org/whatever"), Literal("y")) in g
 
 
 # --- routing 8 (catch-all relation-predicate routing) -------------------

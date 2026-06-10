@@ -402,6 +402,45 @@ def route_axis_default_classes(graph: Graph) -> int:
 # --- routing 7: axis-default predicate rewrites -------------------------
 
 
+def drop_undeclared_bf_terms(graph: Graph, ontology: BibframeOntology | None = None) -> int:
+    """Drop every triple referencing a ``bf:*`` URI not declared in the
+    vendored BIBFRAME ontology.
+
+    The guard set is the union of the ontology's classes, object
+    properties, and datatype properties — i.e. every URI BIBFRAME
+    formally declares. A ``bf:*`` URI appearing in the subject,
+    predicate, or object slot of a triple that isn't in that set is an
+    upstream artifact (typically marc2bibframe2 emitting a term
+    BIBFRAME itself doesn't recognise — e.g. ``bf:Statement`` carrying
+    a flat-text publisher statement redundant with a sibling
+    structured ``bf:ProvisionActivity`` block).
+
+    The whole triple is removed when any of its three slots references
+    an undeclared ``bf:*`` URI. Returns the count of triples dropped so
+    the observability sidecar can surface the artifact rate per run.
+
+    Pass ``ontology`` explicitly in tests; production callers leave it
+    ``None`` to use :func:`load_ontology`'s cached vendored vocab.
+
+    Runs LAST in :func:`apply_all_routings` so legitimate ``bf:*`` URIs
+    that earlier routings consumed are out of the graph before this
+    check. A non-zero count after this routing means a real
+    marc2bibframe2 artifact, not a routing oversight.
+    """
+    if ontology is None:
+        ontology = load_ontology()
+    known = ontology.classes | ontology.object_properties | ontology.datatype_properties
+
+    dropped = 0
+    for s, p, o in list(graph):
+        for node in (s, p, o):
+            if isinstance(node, URIRef) and str(node).startswith(str(BF)) and node not in known:
+                graph.remove((s, p, o))
+                dropped += 1
+                break
+    return dropped
+
+
 def route_axis_default_predicates(graph: Graph) -> int:
     """Rewrite ``bf:instanceOf`` / ``bf:hasInstance`` / ``bf:issuance``
     to the default ``bffi:*`` substitute per :data:`AXIS_DEFAULT_PREDICATES`.
@@ -447,4 +486,10 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "hub": route_hubs(graph),
         "axis_default_class": route_axis_default_classes(graph),
         "axis_default_predicate": route_axis_default_predicates(graph),
+        # Runs LAST. By the time we get here, every legitimate bf:* URI
+        # has either been renamed (clean-rename pass) or routed
+        # (Phase 4 / axis defaults). What survives is either undeclared
+        # in BIBFRAME (artifact — drop) or declared but unrouted
+        # (residue — leave for observability to surface).
+        "dropped_undeclared_bf": drop_undeclared_bf_terms(graph),
     }
