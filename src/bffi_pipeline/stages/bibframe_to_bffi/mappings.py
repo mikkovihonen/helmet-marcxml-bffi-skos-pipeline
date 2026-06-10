@@ -1,21 +1,29 @@
 """Clean-rename rules extracted from ``vocab/lkd.rdf``.
 
 Implements p-56 Phase 1: every ``bf:*`` term that has a ``bffi:*``
-counterpart via ``owl:equivalentClass`` or ``owl:equivalentProperty``
-becomes a clean rename. This module parses the BFFI ontology with
-rdflib (per CLAUDE.md's "never grep lkd.rdf" rule) and returns the
-substitution table the BIBFRAME → BFFI runner applies.
+counterpart via ``owl:equivalentClass`` / ``owl:equivalentProperty`` /
+``rdfs:subPropertyOf`` becomes a clean rename. This module parses the
+BFFI ontology with rdflib (per CLAUDE.md's "never grep lkd.rdf" rule)
+and returns the substitution table the BIBFRAME → BFFI runner applies.
 
-Out of scope for Phase 1 (revisited in step 6):
+The ``rdfs:subPropertyOf`` cases are BFFI's "tightened range" idiom:
+``bffi:X rdfs:subPropertyOf bf:Y`` with ``rdfs:range bffi:Z`` where
+``bffi:Z owl:equivalentClass bf:Z`` — the BFFI predicate strictly
+narrows the BIBFRAME range. Most are unambiguous (one ``bffi:X`` per
+``bf:Y``); a few have a representative-vs-not split
+(``bffi:date`` / ``bffi:dateOfRepresentativeExpression``). For the
+ambiguous cases we pick the lexicographically-first target, which
+happens to always be the non-``OfRepresentativeExpression`` variant
+— the right default for Helmet's main use case.
 
-- ``rdfs:subPropertyOf bf:X`` rows (BFFI's "tightened range" idiom).
-  Some have a single BFFI subproperty per ``bf:X``; others have
-  multiple, which needs a per-instance discriminator. Step 6 picks
-  these up via the property-discriminator routings.
-- ``bffi-meta:broadMatch`` / ``closeMatch`` rows (semantic shifts).
+Out of scope (revisited in step 7):
+
+- ``bffi-meta:broadMatch`` / ``closeMatch`` rows (genuine semantic
+  shifts; need per-case review).
 - Discriminator-routed terms (`bf:Hub`, `bf:VariantTitle`, the
   Identifier subclasses, `bf:Audio`, `bf:KeyMode`,
-  `bf:mediumOfPerformance`). Step 6 / step 7.
+  `bf:mediumOfPerformance`). Step 6 handles these via
+  :mod:`bffi_pipeline.stages.bibframe_to_bffi.routings`.
 """
 
 from __future__ import annotations
@@ -26,7 +34,7 @@ from pathlib import Path
 from typing import Final
 
 from rdflib import Graph, URIRef
-from rdflib.namespace import OWL
+from rdflib.namespace import OWL, RDFS
 
 from bffi_pipeline.config import get_settings
 
@@ -93,6 +101,28 @@ def _collect_directional_equivalences(g: Graph, predicate: URIRef) -> dict[URIRe
     return out
 
 
+def _collect_subproperty_of_renames(g: Graph) -> dict[URIRef, URIRef]:
+    """Walk ``bffi:* rdfs:subPropertyOf bf:*`` triples.
+
+    Unlike ``owl:equivalentProperty``, this relation is directional —
+    only ``bffi:X subPropertyOf bf:Y`` counts (the reverse direction
+    would mean BIBFRAME predicates are narrower than BFFI, which isn't
+    BFFI's design). Returns the ``bf -> bffi`` dict; lexicographic
+    tie-break for the (rare) multi-target cases consistently picks the
+    non-``OfRepresentativeExpression`` variant.
+    """
+    out: dict[URIRef, URIRef] = {}
+    candidates: dict[URIRef, list[URIRef]] = {}
+    for s, _, o in g.triples((None, RDFS.subPropertyOf, None)):
+        if not isinstance(s, URIRef) or not isinstance(o, URIRef):
+            continue
+        if _is_bffi(s) and _is_bf(o):
+            candidates.setdefault(o, []).append(s)
+    for bf_uri, bffi_uris in candidates.items():
+        out[bf_uri] = sorted(bffi_uris, key=str)[0]
+    return out
+
+
 @lru_cache(maxsize=1)
 def load_rules(lkd_rdf_path: Path | None = None) -> CleanRenameRules:
     """Parse ``vocab/lkd.rdf`` and return the substitution table.
@@ -100,13 +130,24 @@ def load_rules(lkd_rdf_path: Path | None = None) -> CleanRenameRules:
     Cached: first call pays the ~1s rdflib parse cost; subsequent calls
     return the same instance. Pass an explicit path to bypass the cache
     (e.g. in tests using a fixture ontology snippet).
+
+    The predicate table merges ``owl:equivalentProperty`` rules (the
+    bidirectional direct-equivalence cases) with
+    ``rdfs:subPropertyOf`` rules (BFFI's tightened-range idiom).
+    Equivalent-property mappings win on key collision since they're
+    the more general substitution.
     """
     if lkd_rdf_path is None:
         lkd_rdf_path = get_settings().vocab_dir / "lkd.rdf"
     g = Graph()
     g.parse(lkd_rdf_path, format="xml")
 
+    predicates = _collect_subproperty_of_renames(g)
+    # owl:equivalentProperty entries override any subPropertyOf entry on
+    # the same bf:X (the direct equivalence is the stronger relation).
+    predicates.update(_collect_directional_equivalences(g, OWL.equivalentProperty))
+
     return CleanRenameRules(
         classes=_collect_directional_equivalences(g, OWL.equivalentClass),
-        predicates=_collect_directional_equivalences(g, OWL.equivalentProperty),
+        predicates=predicates,
     )

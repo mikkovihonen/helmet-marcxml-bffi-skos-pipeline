@@ -72,3 +72,26 @@ def test_load_rules_yields_dozens_of_class_renames() -> None:
     rules = load_rules()
     assert len(rules.classes) > 50
     assert len(rules.predicates) > 50
+
+
+def test_load_rules_pulls_subpropertyof_bf_agent_to_bffi_agent() -> None:
+    """The `rdfs:subPropertyOf` cases are unambiguous Phase-1 renames:
+    bf:agent / bf:carrier / bf:note / bf:place / bf:source / bf:credits /
+    bf:duration / bf:usageAndAccessPolicy all have exactly one bffi:*
+    subproperty in lkd.rdf and should fall into the predicate table."""
+    rules = load_rules()
+    assert rules.predicates[_bf("agent")] == _bffi("agent")
+    assert rules.predicates[_bf("carrier")] == _bffi("carrier")
+    assert rules.predicates[_bf("note")] == _bffi("note")
+    assert rules.predicates[_bf("place")] == _bffi("place")
+    assert rules.predicates[_bf("source")] == _bffi("source")
+
+
+def test_load_rules_picks_non_representative_variant_on_ambiguous_subpropertyof() -> None:
+    """When a single `bf:X` has multiple `bffi:*` subproperties
+    (bf:content -> bffi:content / bffi:contentOfRepresentativeExpression),
+    lexicographic tie-break consistently picks the non-OfRepresentativeExpression
+    variant — Helmet's main-stream default."""
+    rules = load_rules()
+    assert rules.predicates[_bf("content")] == _bffi("content")
+    assert rules.predicates[_bf("date")] == _bffi("date")
