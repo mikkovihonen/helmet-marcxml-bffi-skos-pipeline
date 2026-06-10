@@ -42,6 +42,7 @@ from bffi_pipeline.stages.marc_to_bibframe.runner import (
     convert_corpus,
 )
 from bffi_pipeline.stages.marc_to_bibframe.xslt import XsltPaths
+from bffi_pipeline.stages.roundtrip_eval.runner import EvalOptions, run_eval
 
 app = typer.Typer(
     name="bffi-pipeline",
@@ -224,16 +225,63 @@ def bffi_to_marc_command(
 
 
 @app.command("roundtrip-eval")
-def roundtrip_eval_command() -> None:
+def roundtrip_eval_command(
+    source_dir: Annotated[
+        Path,
+        typer.Option(
+            "--source-dir",
+            help="Directory of original (source-of-truth) MARCXML files (`*.xml`).",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    reconstructed_dir: Annotated[
+        Path,
+        typer.Option(
+            "--reconstructed-dir",
+            help="Directory of reconstructed MARCXML files (`*.marcxml`, from `bffi-to-marc`).",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    html_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--html",
+            help="Where to write the cataloguer-review HTML report. Omit to skip the render.",
+        ),
+    ] = None,
+) -> None:
     """Diff source MARCXML vs reconstructed MARCXML; emit cataloguer-review HTML.
 
-    Walks both directories, pairs records by Helmet bib ID, and produces:
-      - per-record diff classification (`identical` / `changed` / `lost` /
-        `tag-changed` / `marckey-bypass`),
-      - aggregate counts for the observability dashboard,
-      - a cataloguer-review HTML with the full residue.
+    Walks both directories, pairs records by ``controlfield 001`` (Helmet
+    bib ID), and produces per-record diff classification (``identical`` /
+    ``changed`` / ``lost`` / ``added``), corpus aggregate counts, and an
+    optional cataloguer-review HTML with the full residue.
+
+    Tag-changed and marcKey-bypass classifications are deferred to a
+    follow-on commit — for v0 they show up as paired ``lost`` + ``added``
+    rows the operator reads alongside each other.
     """
-    raise NotImplementedError("roundtrip-eval stage scaffolded; not yet implemented")
+    options = EvalOptions(
+        source_dir=source_dir,
+        reconstructed_dir=reconstructed_dir,
+        html_path=html_path,
+    )
+    summary = run_eval(options=options)
+    dist = " ".join(f"{status}={count}" for status, count in sorted(summary.distribution.items()))
+    typer.echo(
+        f"roundtrip-eval: pairs={summary.total_pairs} diffed={summary.diffed} "
+        f"failed={summary.failed} source_only={summary.source_only} "
+        f"reconstructed_only={summary.reconstructed_only} | distribution: {dist}",
+        err=True,
+    )
+    if summary.failed > 0:
+        raise typer.Exit(code=1)
 
 
 @app.command("serve-metrics")
