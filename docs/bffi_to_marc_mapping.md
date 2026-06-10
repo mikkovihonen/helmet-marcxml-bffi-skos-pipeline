@@ -36,7 +36,9 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `336` | `##` | `$a` — RDA content type code | ?m bffi:workManifested ?work . ?work bffi:content <http://id.loc.gov/vocabulary/contentTypes/{code}> | — |
 | `337` | `##` | `$a` — RDA media type code | ?m bffi:media <http://id.loc.gov/vocabulary/mediaTypes/{code}> | — |
 | `338` | `##` | `$a` — RDA carrier type code | ?m bffi:carrier <http://id.loc.gov/vocabulary/carriers/{code}> | — |
-| `500` | `##` | `$a` — general note text | ?m bffi:note [a bffi:Note ; rdfs:label ?text] | All bffi:Note blocks emit as 500 today. Per-note-type dispatch (504 bibliography / 505 contents / 520 summary / 521 audience / etc.) is a follow-on — needs to read the additional `rdf:type` on the note bnode (e.g. <http://id.loc.gov/vocabulary/mnotetype/physical>). |
+| `500` | `##` | `$a` — general note text | ?m bffi:note [a bffi:Note ; rdfs:label ?text] — note bnode with NO mnotetype rdf:type (the catch-all 5XX). | Notes typed with a specific mnotetype dispatch to their own MARC tag (e.g. mnotetype/lang → 546). Others fall through to 500. Per-tail expansion (504 bibliography / 511 participants / 520 summary / etc.) is a follow-on. |
+| `505` | `0#` | `$a` — formatted contents note | ?m bffi:tableOfContents [a bffi:TableOfContents ; rdfs:label ?text] | — |
+| `546` | `##` | `$a` — language note text | ?m bffi:note [a bffi:Note, <…/mnotetype/lang> ; rdfs:label ?text] — note typed with the language tail. | — |
 | `600` | `##` | `$a` — subject heading / term<br>`$0` — authority URI for the subject heading<br>`$2` — source vocabulary code (e.g. 'yso', 'ysa', 'slm') | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label . $2 = local-name of ?subject's bffi:source URI when present; $0 = ?subject URI itself when it's not a bib-internal mint — `?subject` is typed `bffi:Person` | — |
 | `610` | `##` | `$a` — subject heading / term<br>`$0` — authority URI for the subject heading<br>`$2` — source vocabulary code (e.g. 'yso', 'ysa', 'slm') | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label . $2 = local-name of ?subject's bffi:source URI when present; $0 = ?subject URI itself when it's not a bib-internal mint — `?subject` is typed `bffi:Organization` | — |
 | `611` | `##` | `$a` — subject heading / term<br>`$0` — authority URI for the subject heading<br>`$2` — source vocabulary code (e.g. 'yso', 'ysa', 'slm') | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label . $2 = local-name of ?subject's bffi:source URI when present; $0 = ?subject URI itself when it's not a bib-internal mint — `?subject` is typed `bffi:Meeting` | — |
@@ -51,7 +53,7 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `730` | `0#` | `$a` — uniform title heading<br>`$g` — miscellaneous information<br>`$l` — language of a work<br>`$n` — number of part / section of a work<br>`$o` — arrangement statement for music<br>`$p` — name of part / section of a work | ?m bffi:relation [bffi:associatedResource ?target] . ?target bffi:marcKey ?key (where ?key begins with '730') . All subfields and indicators are read verbatim from ?key. | Indicators and every subfield are reconstructed from bffi:marcKey verbatim. The auto-table lists the common subfields seen in the corpus ($a $g $l $n $o $p); any additional subfield codes carried in bffi:marcKey are emitted in the order they appear. |
 | `740` | `0#` | `$a` — added analytical title<br>`$n` — number of part / section<br>`$p` — name of part / section | Same chain as 730 but with bffi:marcKey beginning with '740' | Indicators (including nonfiling-character counts in ind1) and every subfield are reconstructed from bffi:marcKey verbatim — same shape as 730. |
 
-_30 MARC tags currently emitted._
+_32 MARC tags currently emitted._
 
 <!-- END AUTO: shipped -->
 

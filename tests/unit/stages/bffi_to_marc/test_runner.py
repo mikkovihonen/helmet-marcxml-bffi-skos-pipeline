@@ -641,6 +641,64 @@ def test_emit_marcxml_emits_500_general_notes() -> None:
     assert texts == ["Bibliography: pp. 200-220.", "Includes index."]
 
 
+def test_emit_marcxml_dispatches_mnotetype_lang_to_546() -> None:
+    """A ``bffi:Note`` co-typed ``<…/mnotetype/lang>`` emits as MARC 546
+    (language note), not as a generic 500. The discriminator is the
+    note's mnotetype rdf:type — preserved by marc2bibframe2 from
+    source 546 records."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    note = URIRef("http://example.org/b1#note-1")
+    g.add((note, RDF.type, BFFI.Note))
+    g.add((note, RDF.type, URIRef("http://id.loc.gov/vocabulary/mnotetype/lang")))
+    g.add((note, RDFS.label, Literal("Tekstitys: suomi, svenska, englanti")))
+    g.add((m, BFFI.note, note))
+    # Plus a generic note that should still route to 500.
+    note_general = URIRef("http://example.org/b1#note-2")
+    g.add((note_general, RDF.type, BFFI.Note))
+    g.add((note_general, RDFS.label, Literal("Includes index.")))
+    g.add((m, BFFI.note, note_general))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df546 = root.find(f"{{{MARC21_NS}}}datafield[@tag='546']")
+    df500 = root.find(f"{{{MARC21_NS}}}datafield[@tag='500']")
+    assert df546 is not None
+    assert df500 is not None
+    assert df546.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == (  # type: ignore[union-attr]
+        "Tekstitys: suomi, svenska, englanti"
+    )
+    assert df500.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "Includes index."  # type: ignore[union-attr]
+
+
+def test_emit_marcxml_emits_505_from_table_of_contents() -> None:
+    """``bffi:tableOfContents [a bffi:TableOfContents ; rdfs:label ?text]``
+    emits as MARC 505 ind1=0 \\$a — the formatted contents note."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    toc = URIRef("http://example.org/b1#toc-1")
+    g.add((toc, RDF.type, BFFI.TableOfContents))
+    g.add((toc, RDFS.label, Literal("Chapter 1. — Chapter 2. — Chapter 3.")))
+    g.add((m, BFFI.tableOfContents, toc))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df505 = root.find(f"{{{MARC21_NS}}}datafield[@tag='505']")
+    assert df505 is not None
+    assert df505.get("ind1") == "0"
+    sf_a = df505.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    assert sf_a is not None
+    assert sf_a.text == "Chapter 1. — Chapter 2. — Chapter 3."
+
+
 def test_emit_marcxml_emits_084_classification() -> None:
     """``?work bffi:classification [bffi:classificationPortion ?num]``
     produces MARC 084 \\$a with the classification number."""

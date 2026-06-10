@@ -663,27 +663,89 @@ def _extract_added_titles(graph: Graph, manifestation: URIRef) -> list[_AddedTit
     return sorted(emits, key=lambda e: (e.tag, e.subfields))
 
 
+#: marc2bibframe2 attaches an ``rdf:type <mnotetype/<tail>>`` discriminator
+#: on ``bf:Note`` bnodes when the source MARC came from a 5XX with a
+#: specific subtype. Map each known tail to its target MARC tag; notes
+#: without a recognised tail fall through to 500 (general note).
+_MNOTETYPE_TO_MARC_TAG: Final[dict[URIRef, str]] = {
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/lang"): "546",
+}
+
+
+@dataclass(frozen=True)
+class _NoteEmit:
+    """One generic-note datafield (MARC 500 / 546 today)."""
+
+    tag: str
+    text: str
+
+
 @marc_emit(
     MarcEmitMeta(
         tag="500",
         indicators=(" ", " "),
         subfields=(("a", "general note text"),),
-        source="?m bffi:note [a bffi:Note ; rdfs:label ?text]",
-        notes=(
-            "All bffi:Note blocks emit as 500 today. Per-note-type "
-            "dispatch (504 bibliography / 505 contents / 520 summary / "
-            "521 audience / etc.) is a follow-on — needs to read the "
-            "additional `rdf:type` on the note bnode (e.g. "
-            "<http://id.loc.gov/vocabulary/mnotetype/physical>)."
+        source=(
+            "?m bffi:note [a bffi:Note ; rdfs:label ?text] — note bnode "
+            "with NO mnotetype rdf:type (the catch-all 5XX)."
         ),
-    )
+        notes=(
+            "Notes typed with a specific mnotetype dispatch to their own "
+            "MARC tag (e.g. mnotetype/lang → 546). Others fall through to "
+            "500. Per-tail expansion (504 bibliography / 511 participants "
+            "/ 520 summary / etc.) is a follow-on."
+        ),
+    ),
+    MarcEmitMeta(
+        tag="546",
+        indicators=(" ", " "),
+        subfields=(("a", "language note text"),),
+        source=(
+            "?m bffi:note [a bffi:Note, <…/mnotetype/lang> ; "
+            "rdfs:label ?text] — note typed with the language tail."
+        ),
+    ),
 )
-def _extract_general_notes(graph: Graph, manifestation: URIRef) -> list[str]:
-    """Walk every ``?m bffi:note ?n . ?n rdfs:label ?text`` and return
-    the note texts. Each becomes a MARC 500 datafield."""
-    texts = []
+def _extract_notes(graph: Graph, manifestation: URIRef) -> list[_NoteEmit]:
+    """Walk every ``?m bffi:note ?n . ?n rdfs:label ?text`` and dispatch
+    to a MARC tag based on the note's mnotetype rdf:type (or 500 by
+    default).
+    """
+    emits: list[_NoteEmit] = []
     for note in graph.objects(manifestation, BFFI.note):
         label = next(graph.objects(note, RDFS.label), None)
+        if not isinstance(label, Literal):
+            continue
+        tag = _note_marc_tag(graph, note)
+        emits.append(_NoteEmit(tag=tag, text=str(label)))
+    return sorted(emits, key=lambda e: (e.tag, e.text))
+
+
+def _note_marc_tag(graph: Graph, note: Node) -> str:
+    """Return the MARC tag for a ``bffi:Note`` bnode based on its
+    mnotetype rdf:type. Falls back to ``"500"`` (general note) when no
+    recognised tail is present."""
+    for note_type, tag in _MNOTETYPE_TO_MARC_TAG.items():
+        if (note, RDF.type, note_type) in graph:
+            return tag
+    return "500"
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="505",
+        indicators=("0", " "),
+        subfields=(("a", "formatted contents note"),),
+        source=("?m bffi:tableOfContents [a bffi:TableOfContents ; rdfs:label ?text]"),
+    )
+)
+def _extract_table_of_contents(graph: Graph, manifestation: URIRef) -> list[str]:
+    """Return every ``bffi:tableOfContents`` block's ``rdfs:label`` —
+    each emits as a MARC 505 datafield carrying the formatted contents
+    note text in ``$a``."""
+    texts: list[str] = []
+    for toc in graph.objects(manifestation, BFFI.tableOfContents):
+        label = next(graph.objects(toc, RDFS.label), None)
         if isinstance(label, Literal):
             texts.append(str(label))
     return sorted(texts)
@@ -1158,6 +1220,27 @@ def _append_contributor_datafields(
             sf_4.text = c.relator
 
 
+def _append_note_datafields(record: etree._Element, notes: list[_NoteEmit]) -> None:
+    """Append one MARC 5XX-style datafield per note emit (blank indicators)."""
+    for note in notes:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=note.tag, ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = note.text
+
+
+def _append_table_of_contents_datafields(
+    record: etree._Element, table_of_contents: list[str]
+) -> None:
+    """Append one MARC 505 datafield per table-of-contents text.
+
+    ind1=0 = "Contents" (the default per the MARC 21 spec).
+    """
+    for text in table_of_contents:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag="505", ind1="0", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = text
+
+
 def _append_publication_datafield(record: etree._Element, publication: _PublicationEmit) -> None:
     """Append the MARC 260 datafield with structured ``$a`` / ``$b`` / ``$c``
     when ``bffi:simplePlace`` / ``bffi:simpleAgent`` / ``bffi:simpleDate``
@@ -1259,7 +1342,8 @@ def _build_marc_record(
     classifications: list[_ClassificationEmit],
     contributors: list[_ContributorEmit],
     subjects: list[_SubjectEmit],
-    general_notes: list[str],
+    notes: list[_NoteEmit],
+    table_of_contents: list[str],
     added_titles: list[_AddedTitleEmit],
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
@@ -1321,9 +1405,10 @@ def _build_marc_record(
     _append_simple_a_datafields(record, "337", rda.media_codes)
     _append_simple_a_datafields(record, "338", rda.carrier_codes)
 
-    # 500 general notes — after the bibliographic-description block,
-    # before 6XX subjects per MARC tag order.
-    _append_simple_a_datafields(record, "500", tuple(general_notes))
+    # 500 / 546 notes come after the bibliographic-description block,
+    # before 505 (which precedes 6XX subjects per MARC tag order).
+    _append_note_datafields(record, notes)
+    _append_table_of_contents_datafields(record, table_of_contents)
 
     # 6XX subjects come after the bibliographic-description block.
     _append_subject_datafields(record, subjects)
@@ -1359,7 +1444,8 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     classifications = _extract_classifications(graph, manifestation)
     contributors = _extract_contributors(graph, manifestation)
     subjects = _extract_subject_datafields(graph, manifestation)
-    general_notes = _extract_general_notes(graph, manifestation)
+    notes = _extract_notes(graph, manifestation)
+    table_of_contents = _extract_table_of_contents(graph, manifestation)
     added_titles = _extract_added_titles(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
@@ -1374,7 +1460,8 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         classifications=classifications,
         contributors=contributors,
         subjects=subjects,
-        general_notes=general_notes,
+        notes=notes,
+        table_of_contents=table_of_contents,
         added_titles=added_titles,
     )
     return etree.tostring(
