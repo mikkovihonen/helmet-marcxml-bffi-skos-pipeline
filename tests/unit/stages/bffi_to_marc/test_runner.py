@@ -343,6 +343,105 @@ def test_emit_marcxml_emits_6xx_subject_datafields() -> None:
     assert df651.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "Finland"  # type: ignore[union-attr]
 
 
+def test_emit_marcxml_emits_subject_2_from_bffi_source_and_sets_ind2_7() -> None:
+    """A subject with ``bffi:source <…/subjectSchemes/yso>`` emits MARC
+    ``$2 yso`` and ind2=7 (the MARC convention for "source specified in
+    $2"). ind2 stays blank when no source signal is present."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((manifestation, BFFI.workManifested, work))
+
+    topic = URIRef("http://example.org/b1#Topic650-1")
+    g.add((topic, RDF.type, BFFI.Topic))
+    g.add((topic, RDFS.label, Literal("suomen kieli")))
+    g.add((topic, BFFI.source, URIRef("http://id.loc.gov/vocabulary/subjectSchemes/ysa")))
+    g.add((work, BFFI.subject, topic))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df650 = root.find(f"{{{MARC21_NS}}}datafield[@tag='650']")
+    assert df650 is not None
+    assert df650.get("ind2") == "7"
+    sf_a = df650.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    sf_2 = df650.find(f"{{{MARC21_NS}}}subfield[@code='2']")
+    assert sf_a is not None
+    assert sf_2 is not None
+    assert sf_a.text == "suomen kieli"
+    assert sf_2.text == "ysa"
+    # No $0 — the subject URI is a bib-internal mint, not an authority URI.
+    assert df650.find(f"{{{MARC21_NS}}}subfield[@code='0']") is None
+
+
+def test_emit_marcxml_emits_subject_0_from_external_authority_uri() -> None:
+    """When the subject is an external authority URI (e.g. YSO concept),
+    that URI emits as MARC ``$0``. The tag is derived from the
+    ``rdf:type`` (``bffi:Topic`` → 650) since there's no
+    bib-internal-fragment regex match to drive the tag."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((manifestation, BFFI.workManifested, work))
+
+    yso = URIRef("http://www.yso.fi/onto/yso/p12148")
+    g.add((yso, RDF.type, BFFI.Topic))
+    g.add((yso, RDFS.label, Literal("saksan kieli")))
+    g.add((yso, BFFI.source, URIRef("http://id.loc.gov/vocabulary/subjectSchemes/yso")))
+    g.add((work, BFFI.subject, yso))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df650 = root.find(f"{{{MARC21_NS}}}datafield[@tag='650']")
+    assert df650 is not None
+    assert df650.get("ind2") == "7"
+    sf_codes = [sf.get("code") for sf in df650.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df650.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "0", "2"]
+    assert sf_values == [
+        "saksan kieli",
+        "http://www.yso.fi/onto/yso/p12148",
+        "yso",
+    ]
+
+
+def test_emit_marcxml_subject_without_source_uses_blank_ind2() -> None:
+    """A subject with no ``bffi:source`` keeps ind2=" " (the existing
+    behaviour) — ind2=7 only kicks in when there's actually a $2 to
+    point at."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    manifestation = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((manifestation, BFFI.workManifested, work))
+
+    topic = URIRef("http://example.org/b1#Topic650-1")
+    g.add((topic, RDF.type, BFFI.Topic))
+    g.add((topic, RDFS.label, Literal("Programming")))
+    g.add((work, BFFI.subject, topic))
+
+    marcxml = emit_marcxml(g, manifestation=manifestation)
+    root = etree.fromstring(marcxml)
+    df650 = root.find(f"{{{MARC21_NS}}}datafield[@tag='650']")
+    assert df650 is not None
+    assert df650.get("ind2") == " "
+    assert df650.find(f"{{{MARC21_NS}}}subfield[@code='2']") is None
+    assert df650.find(f"{{{MARC21_NS}}}subfield[@code='0']") is None
+
+
 def test_emit_marcxml_skips_subject_nodes_with_unrecognised_tags() -> None:
     """A subject node with a URI fragment outside the 6XX tag set
     (e.g. #Work730 for uniform-title added entry) is skipped by the

@@ -836,13 +836,38 @@ _SUBJECT_MARC_TAGS: Final[frozenset[str]] = frozenset(
     {"600", "610", "611", "630", "648", "650", "651", "655"}
 )
 
+#: Fallback mapping from BFFI subject-node class to MARC tag, used when
+#: the subject is an external authority URI (e.g. ``yso/p12148``) and
+#: there's no ``#<Type>NNN-N`` URI fragment to extract the tag from.
+_SUBJECT_TYPE_TO_MARC_TAG: Final[dict[URIRef, str]] = {
+    BFFI.Person: "600",
+    BFFI.Organization: "610",
+    BFFI.Jurisdiction: "610",
+    BFFI.Meeting: "611",
+    BFFI.Title: "630",
+    BFFI.Temporal: "648",
+    BFFI.Topic: "650",
+    BFFI.Place: "651",
+    BFFI.GenreForm: "655",
+}
+
 
 @dataclass(frozen=True)
 class _SubjectEmit:
-    """One MARC 6XX subject datafield's worth of content."""
+    """One MARC 6XX subject datafield's worth of content.
+
+    ``vocab_code`` carries the ``$2`` source-vocabulary code (e.g. ``"yso"``,
+    ``"ysa"``, ``"slm"``); ``authority_uri`` carries the ``$0`` authority
+    URI when the subject in BFFI is anchored on an external concept (e.g.
+    ``http://www.yso.fi/onto/yso/p12148``). Either, both, or neither can be
+    present — local bib-mint subjects with no ``bffi:source`` will emit
+    just ``$a``.
+    """
 
     tag: str
     label: str
+    vocab_code: str | None
+    authority_uri: str | None
 
 
 def _find_work_for_manifestation(graph: Graph, manifestation: URIRef) -> URIRef | None:
@@ -862,7 +887,15 @@ def _find_work_for_manifestation(graph: Graph, manifestation: URIRef) -> URIRef 
 #: abstract Work, not a particular Manifestation), so every row's
 #: source begins with the same walk.
 _SUBJECT_SOURCE_PREFIX: Final[str] = (
-    "?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label"
+    "?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label . "
+    "$2 = local-name of ?subject's bffi:source URI when present; "
+    "$0 = ?subject URI itself when it's not a bib-internal mint"
+)
+
+_SUBJECT_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
+    ("a", "subject heading / term"),
+    ("0", "authority URI for the subject heading"),
+    ("2", "source vocabulary code (e.g. 'yso', 'ysa', 'slm')"),
 )
 
 
@@ -870,67 +903,73 @@ _SUBJECT_SOURCE_PREFIX: Final[str] = (
     MarcEmitMeta(
         tag="600",
         indicators=(" ", " "),
-        subfields=(("a", "personal name subject heading"),),
+        subfields=_SUBJECT_SUBFIELDS,
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Person`",
     ),
     MarcEmitMeta(
         tag="610",
         indicators=(" ", " "),
-        subfields=(("a", "corporate name subject heading"),),
+        subfields=_SUBJECT_SUBFIELDS,
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Organization`",
     ),
     MarcEmitMeta(
         tag="611",
         indicators=(" ", " "),
-        subfields=(("a", "meeting / conference subject heading"),),
+        subfields=_SUBJECT_SUBFIELDS,
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Meeting`",
     ),
     MarcEmitMeta(
         tag="630",
         indicators=(" ", " "),
-        subfields=(("a", "uniform title subject heading"),),
+        subfields=_SUBJECT_SUBFIELDS,
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Title`",
     ),
     MarcEmitMeta(
         tag="648",
         indicators=(" ", " "),
-        subfields=(("a", "chronological term subject heading"),),
+        subfields=_SUBJECT_SUBFIELDS,
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Temporal`",
     ),
     MarcEmitMeta(
         tag="650",
         indicators=(" ", " "),
-        subfields=(("a", "topical term subject heading"),),
+        subfields=_SUBJECT_SUBFIELDS,
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Topic`",
     ),
     MarcEmitMeta(
         tag="651",
         indicators=(" ", " "),
-        subfields=(("a", "geographic name subject heading"),),
+        subfields=_SUBJECT_SUBFIELDS,
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Place`",
     ),
     MarcEmitMeta(
         tag="655",
         indicators=(" ", " "),
-        subfields=(("a", "genre / form term"),),
+        subfields=_SUBJECT_SUBFIELDS,
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:GenreForm`",
     ),
 )
 def _extract_subject_datafields(graph: Graph, manifestation: URIRef) -> list[_SubjectEmit]:
-    """Walk ``?work bffi:subject ?subject_node`` for each subject anchor.
+    """Walk ``?work bffi:subject ?subject_node`` and emit one MARC 6XX
+    datafield per subject.
 
-    The subject node's URI fragment carries the source MARC tag
-    (``#Agent600-28`` → ``600``). Subject nodes are typed with one of
-    ``bffi:Person`` / ``bffi:Organization`` / ``bffi:Meeting`` /
-    ``bffi:Topic`` / ``bffi:Place`` / ``bffi:Temporal`` / ``bffi:GenreForm``
-    and carry an ``rdfs:label`` for the heading text.
+    Tag dispatch: when the subject URI is a bib-internal mint (e.g.
+    ``#Agent600-28`` / ``#Topic650-12`` / ``#Place651-30``), the URI
+    fragment carries the source MARC tag verbatim. When it's an external
+    authority URI (e.g. ``http://www.yso.fi/onto/yso/p12148``), the tag
+    is derived from the subject's ``rdf:type``: ``bffi:Topic`` → 650,
+    ``bffi:Place`` → 651, etc.
 
-    Returns a list of (tag, label) emits — one per subject. Only
-    recognised 6XX tags (:data:`_SUBJECT_MARC_TAGS`) are emitted;
-    others are skipped (they get their own routing).
+    Subfield emit:
+      * ``$a`` from ``rdfs:label`` (mandatory)
+      * ``$2`` from the local name of ``bffi:source`` (the LoC scheme URI;
+        e.g. ``vocabulary/subjectSchemes/yso`` → ``"yso"``)
+      * ``$0`` from the subject URI itself when it's an external authority
+        URI rather than a bib-internal mint
 
-    Deterministic ordering: sorted by (tag, label) so multi-subject
-    records round-trip predictably.
+    Returns a list of emits — one per subject. Only recognised 6XX tags
+    (:data:`_SUBJECT_MARC_TAGS`) are emitted; others are skipped (they
+    get their own routing).
     """
     work = _find_work_for_manifestation(graph, manifestation)
     if work is None:
@@ -939,17 +978,52 @@ def _extract_subject_datafields(graph: Graph, manifestation: URIRef) -> list[_Su
     for subj_node in graph.objects(work, BFFI.subject):
         if not isinstance(subj_node, URIRef):
             continue
-        match = _SUBJECT_TAG_PATTERN.search(str(subj_node))
-        if match is None:
-            continue
+        emit = _build_subject_emit(graph, subj_node)
+        if emit is not None:
+            emits.append(emit)
+    return sorted(emits, key=lambda e: (e.tag, e.label, e.vocab_code or "", e.authority_uri or ""))
+
+
+def _build_subject_emit(graph: Graph, subj_node: URIRef) -> _SubjectEmit | None:
+    """Return the ``_SubjectEmit`` for one ``bffi:subject`` URI, or ``None``
+    if it can't be mapped to a 6XX tag or lacks an ``rdfs:label``."""
+    tag = _subject_marc_tag(graph, subj_node)
+    if tag is None:
+        return None
+    label = next(graph.objects(subj_node, RDFS.label), None)
+    if not isinstance(label, Literal):
+        return None
+    vocab_code: str | None = None
+    source = next(graph.objects(subj_node, BFFI.source), None)
+    if isinstance(source, URIRef):
+        vocab_code = local_name(source)
+    authority_uri: str | None = (
+        str(subj_node) if _SUBJECT_TAG_PATTERN.search(str(subj_node)) is None else None
+    )
+    return _SubjectEmit(
+        tag=tag,
+        label=str(label),
+        vocab_code=vocab_code,
+        authority_uri=authority_uri,
+    )
+
+
+def _subject_marc_tag(graph: Graph, subj_node: URIRef) -> str | None:
+    """Pick the MARC 6XX tag for a subject URI.
+
+    Prefers the bib-internal URI fragment (``#Topic650-12``) — that's the
+    source-MARC tag preserved verbatim by marc2bibframe2. Falls back to
+    the subject's ``rdf:type`` when no fragment match exists (the
+    external-authority-URI case).
+    """
+    match = _SUBJECT_TAG_PATTERN.search(str(subj_node))
+    if match is not None:
         tag = match.group(1)
-        if tag not in _SUBJECT_MARC_TAGS:
-            continue
-        label = next(graph.objects(subj_node, RDFS.label), None)
-        if not isinstance(label, Literal):
-            continue
-        emits.append(_SubjectEmit(tag=tag, label=str(label)))
-    return sorted(emits, key=lambda e: (e.tag, e.label))
+        return tag if tag in _SUBJECT_MARC_TAGS else None
+    for type_uri, tag in _SUBJECT_TYPE_TO_MARC_TAG.items():
+        if (subj_node, RDF.type, type_uri) in graph:
+            return tag
+    return None
 
 
 @marc_emit(
@@ -1028,6 +1102,28 @@ def _append_contributor_datafields(
         if c.relator:
             sf_4 = etree.SubElement(df, f"{_MARC}subfield", code="4")
             sf_4.text = c.relator
+
+
+def _append_subject_datafields(record: etree._Element, subjects: list[_SubjectEmit]) -> None:
+    """Append one MARC 6XX datafield per subject emit.
+
+    ``$a`` carries the heading text. ``$0`` (authority URI) and ``$2``
+    (source-vocabulary code) emit when their respective signals are
+    present in BFFI. When ``$2`` is emitted, ``ind2`` is set to ``"7"``
+    per the MARC convention ("source specified in subfield $2");
+    otherwise ``ind2`` is blank.
+    """
+    for subj in subjects:
+        ind2 = "7" if subj.vocab_code else " "
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=subj.tag, ind1=" ", ind2=ind2)
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = subj.label
+        if subj.authority_uri:
+            sf_0 = etree.SubElement(df, f"{_MARC}subfield", code="0")
+            sf_0.text = subj.authority_uri
+        if subj.vocab_code:
+            sf_2 = etree.SubElement(df, f"{_MARC}subfield", code="2")
+            sf_2.text = subj.vocab_code
 
 
 def _append_classification_datafields(
@@ -1143,10 +1239,7 @@ def _build_marc_record(
     _append_simple_a_datafields(record, "500", tuple(general_notes))
 
     # 6XX subjects come after the bibliographic-description block.
-    for subj in subjects:
-        df = etree.SubElement(record, f"{_MARC}datafield", tag=subj.tag, ind1=" ", ind2=" ")
-        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
-        sf_a.text = subj.label
+    _append_subject_datafields(record, subjects)
 
     # Added contributors (MARC 700/710/711) come after 6XX subjects.
     _append_contributor_datafields(record, (c for c in contributors if c.tag.startswith("7")))
