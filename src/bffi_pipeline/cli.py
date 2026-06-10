@@ -25,6 +25,12 @@ from typing import Annotated
 import typer
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.diagnostic.mapping_coverage import (
+    DEFAULT_MAX_HOPS,
+    analyze_mapping_coverage,
+    format_path,
+    local_name,
+)
 from bffi_pipeline.runs import (
     InvalidRunDirError,
     mint_run_dir,
@@ -70,6 +76,65 @@ app = typer.Typer(
     no_args_is_help=True,
     help="MARCXML ↔ BIBFRAME ↔ BFFI conversion pipeline (rewrite branch).",
 )
+
+
+@app.command("diagnose-mappings")
+def diagnose_mappings_command(
+    max_hops: Annotated[
+        int,
+        typer.Option(
+            "--max-hops",
+            help="BFS depth bound when searching for bffi:* equivalents.",
+            min=1,
+            max=10,
+        ),
+    ] = DEFAULT_MAX_HOPS,
+    show: Annotated[
+        str,
+        typer.Option(
+            "--show",
+            help=(
+                "Which buckets to print in full: 'summary', 'unreachable', "
+                "'indirect', 'all'. Default lists summary + unreachable only."
+            ),
+        ),
+    ] = "default",
+) -> None:
+    """Cross-map every BIBFRAME-declared bf:* term against `lkd.rdf`.
+
+    Walks the combined edge set across `vocab/bibframe.rdf` and
+    `vocab/lkd.rdf` (owl:equivalentClass/Property, rdfs:subClassOf/
+    subPropertyOf in both, owl:sameAs, bffi-meta:*Match) via bounded
+    BFS, then categorises each bf:* URI as:
+
+      - direct      a 1-hop owl:equivalentClass/Property to a bffi:* URI.
+      - indirect    2+ hops via taxonomy / semantic-shift links.
+      - unreachable no bffi:* term reached within --max-hops.
+
+    Run periodically; the unreachable count is the "true gap" backlog —
+    it should only shrink (new BFFI versions adding terms) or grow
+    visibly (new BIBFRAME versions adding terms BFFI hasn't mapped).
+    """
+    report = analyze_mapping_coverage(max_hops=max_hops)
+    typer.echo(report.summary_text(), err=True)
+    typer.echo("", err=True)
+
+    if show in {"all", "indirect"}:
+        typer.echo("=== indirect ===", err=False)
+        for reach in report.indirect:
+            best = reach.best
+            assert best is not None
+            bffi_uri, path = best
+            typer.echo(
+                f"  bf:{local_name(reach.bf_term):38s} "
+                f"{format_path(path)}  bffi:{local_name(bffi_uri)}"
+            )
+        typer.echo("")
+
+    if show in {"default", "unreachable", "all"}:
+        typer.echo("=== unreachable (true gaps) ===", err=False)
+        for uri in report.unreachable:
+            typer.echo(f"  bf:{local_name(uri)}")
 
 
 @app.command("new-run")
