@@ -442,6 +442,62 @@ def test_emit_marcxml_emits_336_337_338_rda_descriptors() -> None:
     assert df338 is not None and df338.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "nc"  # type: ignore[union-attr]
 
 
+def test_emit_marcxml_emits_500_general_notes() -> None:
+    """Each ``bffi:note ?n . ?n rdfs:label ?text`` becomes a MARC 500 \\$a.
+    Multiple notes produce repeated 500 datafields, sorted for
+    determinism."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    note1 = URIRef("http://example.org/b1#note-1")
+    g.add((note1, RDF.type, BFFI.Note))
+    g.add((note1, RDFS.label, Literal("Includes index.")))
+    g.add((m, BFFI.note, note1))
+    note2 = URIRef("http://example.org/b1#note-2")
+    g.add((note2, RDF.type, BFFI.Note))
+    g.add((note2, RDFS.label, Literal("Bibliography: pp. 200-220.")))
+    g.add((m, BFFI.note, note2))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df500s = root.findall(f"{{{MARC21_NS}}}datafield[@tag='500']")
+    assert len(df500s) == 2
+    texts = sorted(
+        df.find(f"{{{MARC21_NS}}}subfield[@code='a']").text  # type: ignore[union-attr]
+        for df in df500s
+    )
+    assert texts == ["Bibliography: pp. 200-220.", "Includes index."]
+
+
+def test_emit_marcxml_emits_084_classification() -> None:
+    """``?work bffi:classification [bffi:classificationPortion ?num]``
+    produces MARC 084 \\$a with the classification number."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+    cls_block = URIRef("http://example.org/b1#cls-1")
+    g.add((cls_block, RDF.type, BFFI.Classification))
+    g.add((cls_block, BFFI.classificationPortion, Literal("82.3")))
+    g.add((work, BFFI.classification, cls_block))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df084 = root.find(f"{{{MARC21_NS}}}datafield[@tag='084']")
+    assert df084 is not None
+    sf_a = df084.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    assert sf_a is not None
+    assert sf_a.text == "82.3"
+
+
 def test_emit_marcxml_skips_unsupported_identifier_schemes() -> None:
     """Identifier blocks with a bffi:source URI not in the dispatch
     table are skipped — those land in their own follow-on commits.

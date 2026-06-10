@@ -329,6 +329,63 @@ class _TitleParts:
 
 @marc_emit(
     MarcEmitMeta(
+        tag="500",
+        indicators=(" ", " "),
+        subfields=(("a", "general note text"),),
+        source="?m bffi:note [a bffi:Note ; rdfs:label ?text]",
+        notes=(
+            "All bffi:Note blocks emit as 500 today. Per-note-type "
+            "dispatch (504 bibliography / 505 contents / 520 summary / "
+            "521 audience / etc.) is a follow-on — needs to read the "
+            "additional `rdf:type` on the note bnode (e.g. "
+            "<http://id.loc.gov/vocabulary/mnotetype/physical>)."
+        ),
+    )
+)
+def _extract_general_notes(graph: Graph, manifestation: URIRef) -> list[str]:
+    """Walk every ``?m bffi:note ?n . ?n rdfs:label ?text`` and return
+    the note texts. Each becomes a MARC 500 datafield."""
+    texts = []
+    for note in graph.objects(manifestation, BFFI.note):
+        label = next(graph.objects(note, RDFS.label), None)
+        if isinstance(label, Literal):
+            texts.append(str(label))
+    return sorted(texts)
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="084",
+        indicators=(" ", " "),
+        subfields=(("a", "classification number"),),
+        source=(
+            "?m bffi:workManifested ?work . "
+            "?work bffi:classification [a bffi:Classification ; "
+            "bffi:classificationPortion ?number]"
+        ),
+        notes=(
+            "Generic-scheme classification emit. Helmet-local 09X "
+            "(091/092/094/095/097) and standard 050/080/082 dispatching "
+            "by source is a follow-on."
+        ),
+    )
+)
+def _extract_classifications(graph: Graph, manifestation: URIRef) -> list[str]:
+    """Walk classification blocks on the Work and return each
+    ``bffi:classificationPortion`` literal. Used for MARC 084 emit."""
+    work = _find_work_for_manifestation(graph, manifestation)
+    if work is None:
+        return []
+    portions = []
+    for cls_block in graph.objects(work, BFFI.classification):
+        portion = next(graph.objects(cls_block, BFFI.classificationPortion), None)
+        if isinstance(portion, Literal):
+            portions.append(str(portion))
+    return sorted(portions)
+
+
+@marc_emit(
+    MarcEmitMeta(
         tag="245",
         indicators=("0", "0"),
         subfields=(
@@ -660,7 +717,9 @@ def _build_marc_record(
     language_codes: list[str],
     physical: _PhysicalDescription | None,
     rda: _RdaDescriptors,
+    classifications: list[str],
     subjects: list[_SubjectEmit],
+    general_notes: list[str],
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
     record = etree.Element(f"{_MARC}record")
@@ -679,6 +738,8 @@ def _build_marc_record(
         df = etree.SubElement(record, f"{_MARC}datafield", tag=ident.tag, ind1=" ", ind2=" ")
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
         sf_a.text = ident.value
+
+    _append_simple_a_datafields(record, "084", tuple(classifications))
 
     if language_codes:
         df041 = etree.SubElement(record, f"{_MARC}datafield", tag="041", ind1=" ", ind2=" ")
@@ -717,6 +778,10 @@ def _build_marc_record(
     _append_simple_a_datafields(record, "337", rda.media_codes)
     _append_simple_a_datafields(record, "338", rda.carrier_codes)
 
+    # 500 general notes — after the bibliographic-description block,
+    # before 6XX subjects per MARC tag order.
+    _append_simple_a_datafields(record, "500", tuple(general_notes))
+
     # 6XX subjects come after the bibliographic-description block.
     for subj in subjects:
         df = etree.SubElement(record, f"{_MARC}datafield", tag=subj.tag, ind1=" ", ind2=" ")
@@ -746,7 +811,9 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     language_codes = _extract_language_codes(graph, manifestation)
     physical = _extract_physical_description(graph, manifestation)
     rda = _extract_rda_descriptors(graph, manifestation)
+    classifications = _extract_classifications(graph, manifestation)
     subjects = _extract_subject_datafields(graph, manifestation)
+    general_notes = _extract_general_notes(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
         change_date=change_date,
@@ -757,7 +824,9 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         language_codes=language_codes,
         physical=physical,
         rda=rda,
+        classifications=classifications,
         subjects=subjects,
+        general_notes=general_notes,
     )
     return etree.tostring(
         record,
