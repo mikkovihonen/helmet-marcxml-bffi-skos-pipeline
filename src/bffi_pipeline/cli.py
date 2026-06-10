@@ -96,7 +96,8 @@ def diagnose_mappings_command(
             "--show",
             help=(
                 "Which buckets to print in full: 'summary', 'unreachable', "
-                "'indirect', 'all'. Default lists summary + unreachable only."
+                "'indirect', 'routed', 'all'. Default lists summary + "
+                "unreachable only."
             ),
         ),
     ] = "default",
@@ -132,8 +133,14 @@ def diagnose_mappings_command(
             )
         typer.echo("")
 
+    if show in {"all", "routed"}:
+        typer.echo("=== routed (handled by routing code) ===", err=False)
+        for uri in report.routed:
+            typer.echo(f"  bf:{local_name(uri)}")
+        typer.echo("")
+
     if show in {"default", "unreachable", "all"}:
-        typer.echo("=== unreachable (true gaps) ===", err=False)
+        typer.echo("=== unreachable (true GAPs) ===", err=False)
         for uri in report.unreachable:
             typer.echo(f"  bf:{local_name(uri)}")
 

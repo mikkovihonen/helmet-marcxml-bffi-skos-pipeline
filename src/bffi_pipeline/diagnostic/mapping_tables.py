@@ -325,7 +325,7 @@ def build_blocks(
     # All Reach objects across the three buckets, keyed by bf_term.
     reach_by_term: dict[URIRef, Reach] = {r.bf_term: r for r in report.direct}
     reach_by_term.update({r.bf_term: r for r in report.indirect})
-    for bf_term in report.unreachable:
+    for bf_term in (*report.routed, *report.unreachable):
         reach_by_term[bf_term] = Reach(bf_term=bf_term, bffi_paths={})
 
     class_rows: list[Row] = []

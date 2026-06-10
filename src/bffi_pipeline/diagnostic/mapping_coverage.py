@@ -3,7 +3,7 @@
 For each ``bf:*`` URI BIBFRAME 3.0.1 declares, walk the combined
 edge set across both vocabularies and report whether — and how — a
 ``bffi:*`` equivalent is reachable within a hop bound. The output
-gives the operator three buckets:
+gives the operator four buckets:
 
   - **Direct**: a 1-hop ``owl:equivalentClass`` / ``owl:equivalentProperty``
     link to a ``bffi:*`` term. The conversion pipeline's clean-rename
@@ -14,8 +14,14 @@ gives the operator three buckets:
     or ``owl:sameAs``. These are the rich "ancestor-mapped" patterns
     our ontology-driven routings exploit (e.g. ``bf:Isbn`` reaches
     ``bffi:Identifier`` via ``[bf:subClassOf] → [equivalentClass]``).
-  - **Unreachable**: no ``bffi:*`` term reached within the bound.
-    These are the genuine gaps — pending NLF input, a new routing,
+  - **Routed**: no ``bffi:*`` reach within the bound, but covered by
+    a discriminator routing in the pipeline (``ROUTING_REGISTRY``).
+    Includes both active rewrites (e.g. ``bf:Hub`` → ``bffi:Work`` via
+    marcKey discriminator) and defensive drops. Without this bucket
+    these would show up as ``unreachable`` even though the pipeline
+    handles them.
+  - **Unreachable**: no ``bffi:*`` term reached AND no routing handler.
+    The genuine ontology gaps — pending NLF input, a new routing,
     or a future BFFI release.
 
 Run via ``bffi-pipeline diagnose-mappings`` or programmatically via
@@ -34,6 +40,7 @@ from rdflib import Graph, URIRef
 from rdflib.namespace import OWL, RDF, RDFS
 
 from bffi_pipeline.config import get_settings
+from bffi_pipeline.stages.bibframe_to_bffi.routings import ROUTING_REGISTRY
 
 BF_NAMESPACE: Final[str] = "http://id.loc.gov/ontologies/bibframe/"
 BFFI_NAMESPACE: Final[str] = "http://urn.fi/URN:NBN:fi:schema:bffi:"
@@ -144,16 +151,28 @@ class Reach:
 
 @dataclass(frozen=True)
 class CoverageReport:
-    """Outcome of analysing every ``bf:*`` term in BIBFRAME against ``lkd.rdf``."""
+    """Outcome of analysing every ``bf:*`` term in BIBFRAME against ``lkd.rdf``.
+
+    Four buckets:
+
+      - **direct**: 1-hop ``owl:equivalent*`` to a ``bffi:*`` term.
+      - **indirect**: 2+ hops via taxonomy / ``bffi-meta:*Match``.
+      - **routed**: no ``lkd.rdf`` reach within the bound, but covered by
+        a discriminator routing in the pipeline (``ROUTING_REGISTRY``).
+        Includes drops as well as active rewrites.
+      - **unreachable**: no ``lkd.rdf`` reach AND no routing handler — the
+        true ontology gap, requires NLF input.
+    """
 
     direct: tuple[Reach, ...] = field(default_factory=tuple)
     indirect: tuple[Reach, ...] = field(default_factory=tuple)
+    routed: tuple[URIRef, ...] = field(default_factory=tuple)
     unreachable: tuple[URIRef, ...] = field(default_factory=tuple)
     max_hops: int = DEFAULT_MAX_HOPS
 
     @property
     def total(self) -> int:
-        return len(self.direct) + len(self.indirect) + len(self.unreachable)
+        return len(self.direct) + len(self.indirect) + len(self.routed) + len(self.unreachable)
 
     def summary_text(self) -> str:
         return (
@@ -161,7 +180,9 @@ class CoverageReport:
             f"  direct (1-hop equivalentClass/Property): {len(self.direct)}\n"
             f"  indirect (2-{self.max_hops} hops via taxonomy / meta): "
             f"{len(self.indirect)}\n"
-            f"  unreachable within {self.max_hops} hops:     "
+            f"  routed (no lkd.rdf reach, handled by routing code): "
+            f"{len(self.routed)}\n"
+            f"  unreachable (true GAPs — no path, no routing): "
             f"{len(self.unreachable)}"
         )
 
@@ -298,8 +319,13 @@ def analyze_mapping_coverage(
     edges = _build_edges(bibframe_g, lkd_g)
     bf_terms = sorted(_collect_bf_terms(bibframe_g), key=str)
 
+    routed_terms: set[URIRef] = set()
+    for meta in ROUTING_REGISTRY:
+        routed_terms.update(meta.resolve_terms())
+
     direct: list[Reach] = []
     indirect: list[Reach] = []
+    routed: list[URIRef] = []
     unreachable: list[URIRef] = []
 
     for bf_term in bf_terms:
@@ -309,12 +335,15 @@ def analyze_mapping_coverage(
             direct.append(reach)
         elif bucket == "indirect":
             indirect.append(reach)
+        elif bf_term in routed_terms:
+            routed.append(bf_term)
         else:
             unreachable.append(bf_term)
 
     return CoverageReport(
         direct=tuple(direct),
         indirect=tuple(indirect),
+        routed=tuple(routed),
         unreachable=tuple(unreachable),
         max_hops=max_hops,
     )

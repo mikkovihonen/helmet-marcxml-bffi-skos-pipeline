@@ -68,21 +68,33 @@ def test_indirect_bucket_includes_axis_split_classes_via_broadmatch() -> None:
     assert _bf("Monograph") in indirect_by_term
 
 
-def test_unreachable_bucket_includes_pmo_music_terms() -> None:
+def test_routed_bucket_includes_pmo_music_terms() -> None:
     """``bf:DramaticRole`` / ``bf:Ensemble`` / ``bf:KeyMode`` etc. are
     BIBFRAME 3.0.1's PMO additions — BFFI 1.0.0 predates them, so no
-    chain of any length reaches a ``bffi:*`` equivalent."""
+    chain of any length reaches a ``bffi:*`` equivalent. Each is now
+    handled by a routing in the pipeline (route_music_medium /
+    route_music_key / drop_music_residue), so they land in the
+    ``routed`` bucket — not ``unreachable`` (which is reserved for
+    true GAPs needing NLF input)."""
     report = analyze_mapping_coverage()
+    routed = set(report.routed)
     unreachable = set(report.unreachable)
     for name in ("DramaticRole", "Ensemble", "KeyMode", "MediumOfPerformance"):
-        assert _bf(name) in unreachable, f"bf:{name} should be unreachable in BFFI 1.0.0"
+        assert _bf(name) in routed, f"bf:{name} should be in the routed bucket"
+        assert _bf(name) not in unreachable, (
+            f"bf:{name} should NOT be in unreachable (it's routed in code)"
+        )
 
 
-def test_unreachable_bucket_includes_provision_activity_statement() -> None:
-    """The corpus-derived gap from the 20 k bench: bf:provisionActivityStatement
-    is declared by BIBFRAME but lkd.rdf has no mapping for it."""
+def test_routed_bucket_includes_provision_activity_statement() -> None:
+    """The corpus-derived gap from the 20 k bench:
+    ``bf:provisionActivityStatement`` is declared by BIBFRAME but
+    lkd.rdf has no mapping. The pipeline routes it via the
+    URI-fragment discriminator (``route_provision_activity_statement``),
+    so it appears in the ``routed`` bucket, not ``unreachable``."""
     report = analyze_mapping_coverage()
-    assert _bf("provisionActivityStatement") in set(report.unreachable)
+    assert _bf("provisionActivityStatement") in set(report.routed)
+    assert _bf("provisionActivityStatement") not in set(report.unreachable)
 
 
 # --- shape / formatting -------------------------------------------------
@@ -132,20 +144,29 @@ def test_indirect_count_in_expected_range() -> None:
     assert 120 <= len(report.indirect) <= 140
 
 
-def test_unreachable_count_in_expected_range() -> None:
-    """The unreachable-bucket count is the true-gap backlog. Locked to
-    the value observed at commit time (~42 ± 5); a shrink is good
-    (BFFI added something), a growth means BIBFRAME added a gap."""
+def test_unreachable_count_is_zero_at_milestone() -> None:
+    """The unreachable-bucket count is the true-GAP backlog: terms with
+    no ``lkd.rdf`` reach AND no routing handler. Current milestone:
+    zero true GAPs across BIBFRAME 3.0.1. If this test starts failing,
+    a future ontology refresh added a term we don't yet handle —
+    register a routing or defensive drop in ``routings.py``."""
     report = analyze_mapping_coverage()
-    assert 37 <= len(report.unreachable) <= 47
+    assert report.unreachable == (), f"unexpected true GAPs: {[str(u) for u in report.unreachable]}"
+
+
+def test_routed_count_in_expected_range() -> None:
+    """The routed-bucket count is "BIBFRAME terms with no ``lkd.rdf``
+    reach but a pipeline routing handler" — the work the pipeline does
+    that lkd.rdf alone wouldn't show. Locked to the value observed at
+    commit time (~40 ± 5)."""
+    report = analyze_mapping_coverage()
+    assert 35 <= len(report.routed) <= 50
 
 
 def test_bucket_counts_are_stable_past_depth_3() -> None:
     """The BFS walk over the combined ontology graph saturates at
     depth 3: increasing ``max_hops`` past that doesn't move terms
-    between buckets. Confirms the 42 unreachable terms aren't
-    depth-bound artifacts — they're in connected components that
-    don't touch any ``bffi:*`` node at all.
+    between buckets.
 
     If a future BIBFRAME / BFFI refresh changes this, the diagnostic
     output is no longer trustworthy at default depth and the routing
@@ -153,8 +174,5 @@ def test_bucket_counts_are_stable_past_depth_3() -> None:
     at_3 = analyze_mapping_coverage(max_hops=3)
     at_5 = analyze_mapping_coverage(max_hops=5)
     at_10 = analyze_mapping_coverage(max_hops=10)
-    assert (
-        (len(at_3.direct), len(at_3.indirect), len(at_3.unreachable))
-        == (len(at_5.direct), len(at_5.indirect), len(at_5.unreachable))
-        == (len(at_10.direct), len(at_10.indirect), len(at_10.unreachable))
-    )
+    shape = lambda r: (len(r.direct), len(r.indirect), len(r.routed), len(r.unreachable))  # noqa: E731
+    assert shape(at_3) == shape(at_5) == shape(at_10)
