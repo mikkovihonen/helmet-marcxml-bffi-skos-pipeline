@@ -16,7 +16,6 @@ from pathlib import Path
 from rdflib import URIRef
 
 from bffi_pipeline.bibframe import load_ontology
-from bffi_pipeline.diagnostic.mapping_coverage import local_name
 from bffi_pipeline.diagnostic.mapping_tables import (
     CLASSES_BEGIN_MARKER,
     CLASSES_END_MARKER,
@@ -26,6 +25,7 @@ from bffi_pipeline.diagnostic.mapping_tables import (
     build_blocks,
     regenerate_mapping_tables,
 )
+from bffi_pipeline.rdf_utils import local_name
 
 # --- coverage: every bf:* term in BIBFRAME 3.0.1 lands in exactly one table ---
 

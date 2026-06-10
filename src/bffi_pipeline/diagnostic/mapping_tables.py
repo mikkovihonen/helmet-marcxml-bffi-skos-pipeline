@@ -52,8 +52,8 @@ from bffi_pipeline.diagnostic.mapping_coverage import (
     PathStep,
     Reach,
     analyze_mapping_coverage,
-    local_name,
 )
+from bffi_pipeline.rdf_utils import local_name
 from bffi_pipeline.stages.bibframe_to_bffi import routings as _r
 
 #: Markers framing the auto-generated Classes block in the doc.
@@ -75,7 +75,8 @@ DEFAULT_DOC_PATH: Final[Path] = (
 
 @dataclass(frozen=True)
 class _Routing:
-    """One routing-callout entry from :mod:`...stages.bibframe_to_bffi.routings`.
+    """One row-of-the-auto-table per ``bf:*`` term, resolved from a
+    :class:`bffi_pipeline.stages.bibframe_to_bffi.routings.RoutingMeta`.
 
     Set ``is_drop=True`` for routings that delete the triple rather than
     rewrite it — the auto-table renders these with the distinct
@@ -88,248 +89,23 @@ class _Routing:
     is_drop: bool = False
 
 
-def _identifier_scheme_replacement(bf_class: URIRef) -> str:
-    token = _r._identifier_scheme_token(local_name(bf_class))
-    return f"`bffi:Identifier` + `bffi:source <…/identifiers/{token}>`"
-
-
 def _build_routing_registry() -> dict[URIRef, _Routing]:
-    """One :class:`_Routing` per ``bf:*`` term that ``routings.py`` handles.
+    """Flatten :data:`routings.ROUTING_REGISTRY` to a per-term lookup table.
 
-    The keys are URIRefs (not strings) so lookups against the diagnostic's
-    Reach objects work directly.
+    The single source of truth is the ``@routing`` decorator on each
+    routing function in ``routings.py``. This generator just walks the
+    registry and resolves any dynamic-term / per-term-callable fields.
     """
-    ontology = load_ontology()
     registry: dict[URIRef, _Routing] = {}
-
-    for bf_cls in ontology.class_descendants(_r.BF.Identifier):
-        registry[bf_cls] = _Routing(
-            handler="route_identifier_schemes",
-            replacement=_identifier_scheme_replacement(bf_cls),
-            link_kind="discriminator: BIBFRAME subclass → LoC scheme URI",
-        )
-
-    for bf_cls in _r.TITLE_VARIANT_CLASSES:
-        registry[bf_cls] = _Routing(
-            handler="route_title_variants",
-            replacement="`bffi:Title` (anchor; subclass info preserved on `bffi:marcKey`)",
-            link_kind="discriminator: marcKey",
-        )
-
-    registry[_r.BF.Hub] = _Routing(
-        handler="route_hubs",
-        replacement=(
-            "`bffi:Work` / `bffi:Expression` / `bffi:Arrangement` / "
-            "`bffi:SeriesExpression` (per marcKey)"
-        ),
-        link_kind="discriminator: marcKey",
-    )
-
-    for bf_cls, (work_pick, expr_pick) in _r.AXIS_DEFAULT_CLASSES.items():
-        if work_pick == expr_pick:
-            replacement = f"`bffi:{local_name(work_pick)}` (anchored — no axis split)"
-            link_kind = "anchor downgrade (no Work/Expression alternative)"
-        else:
-            replacement = (
-                f"`bffi:{local_name(work_pick)}` (Work-axis) / "
-                f"`bffi:{local_name(expr_pick)}` (Expression-axis)"
+    for meta in _r.ROUTING_REGISTRY:
+        for term in meta.resolve_terms():
+            registry[term] = _Routing(
+                handler=meta.handler,
+                replacement=meta.replacement_for(term),
+                link_kind=meta.link_kind_for(term),
+                is_drop=meta.is_drop,
             )
-            link_kind = "discriminator: subject's Work-axis co-type signal"
-        registry[bf_cls] = _Routing(
-            handler="route_axis_default_classes",
-            replacement=replacement,
-            link_kind=link_kind,
-        )
-
-    registry[_r.BF.hasSeries] = _Routing(
-        handler="route_series_links",
-        replacement=(
-            "`bffi:relation` → `bffi:Relation` bnode (`bffi:relationship <…/relationship/series>`)"
-        ),
-        link_kind="structured-relation chain",
-    )
-
-    for bf_pred, rel_uri in _r.RELATION_PREDICATE_ROUTINGS.items():
-        if bf_pred == _r.BF.hasSeries:
-            continue
-        token = str(rel_uri).rsplit("/", 1)[-1]
-        registry[bf_pred] = _Routing(
-            handler="route_relation_predicates",
-            replacement=(
-                "`bffi:relation` → `bffi:Relation` bnode "
-                f"(`bffi:relationship <…/relationship/{token}>`)"
-            ),
-            link_kind="structured-relation chain",
-        )
-
-    for bf_pred, (work_pick, expr_pick) in _r.AXIS_DEFAULT_PREDICATES.items():
-        if work_pick == expr_pick:
-            replacement = f"`bffi:{local_name(work_pick)}` (flat rename)"
-            link_kind = "flat rename (no per-statement axis alternative)"
-        else:
-            replacement = (
-                f"`bffi:{local_name(work_pick)}` (Work-axis) / "
-                f"`bffi:{local_name(expr_pick)}` (Expression-axis)"
-            )
-            link_kind = "discriminator: subject's/object's Expression-axis signal"
-        registry[bf_pred] = _Routing(
-            handler="route_axis_default_predicates",
-            replacement=replacement,
-            link_kind=link_kind,
-        )
-
-    registry[_r.BF.provisionActivityStatement] = _Routing(
-        handler="route_provision_activity_statement",
-        replacement=("`bffi:date` (76X-78X linking-entry hubs) / `bffi:Note` (otherwise)"),
-        link_kind="discriminator: URI fragment",
-    )
-
-    for bf_pred, bffi_forward in _r.INVERSE_PREDICATE_ROUTINGS.items():
-        registry[bf_pred] = _Routing(
-            handler="route_inverse_predicates",
-            replacement=f"`bffi:{local_name(bffi_forward)}` (triple-swap: ?s → ?o)",
-            link_kind="inverse-direction swap",
-        )
-
-    registry[_r.BF.noteFor] = _Routing(
-        handler="route_note_for",
-        replacement="`bffi:note` (triple-swap: ?note bf:noteFor ?subj → ?subj bffi:note ?note)",
-        link_kind="inverse-direction swap",
-    )
-
-    registry[_r.BF.noteType] = _Routing(
-        handler="drop_note_type",
-        replacement=(
-            "no BFFI carrier — BFFI 1.0.0 doesn't model literal note categorisation; "
-            "candidate for a future BFFI extension via NLF"
-        ),
-        link_kind="no BFFI carrier; bounded data loss",
-        is_drop=True,
-    )
-
-    registry[_r.BF.variantType] = _Routing(
-        handler="drop_variant_type",
-        replacement="redundant with the title-variant `bffi:marcKey` discriminator",
-        link_kind="redundant signal",
-        is_drop=True,
-    )
-
-    for bf_pred in _r._SUBSERIES_PREDICATES:
-        registry[bf_pred] = _Routing(
-            handler="drop_subseries_residue",
-            replacement=(
-                "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
-                "(see forward-looking note below the Predicates table)"
-            ),
-            link_kind="defensive (upstream-stability)",
-            is_drop=True,
-        )
-
-    _register_music_key_family(registry)
-    _register_music_medium_family(registry)
     return registry
-
-
-def _register_music_key_family(registry: dict[URIRef, _Routing]) -> None:
-    """Music-key family (PMO music). bf:keyMode is the active routing
-    (collapse structured bnode → bffi:musicKey literal); bf:KeyMode is
-    the bnode's rdf:type, removed implicitly when the bnode is dropped.
-    bf:mode / bf:Mode are defensive — never emitted by marc2bibframe2.
-    Extracted to a helper to keep :func:`_build_routing_registry`'s
-    branch count under ruff's threshold."""
-    registry[_r.BF.keyMode] = _Routing(
-        handler="route_music_key",
-        replacement=(
-            "`bffi:musicKey` literal — extracts `rdfs:label` from the `bf:KeyMode` "
-            "bnode and attaches as a flat literal on the Work; bnode subgraph "
-            "dropped"
-        ),
-        link_kind="structured-bnode → literal collapse",
-    )
-    registry[_r.BF.KeyMode] = _Routing(
-        handler="route_music_key",
-        replacement=(
-            "(class typing removed implicitly when the parent `bf:keyMode` "
-            "structured bnode is collapsed to a `bffi:musicKey` literal)"
-        ),
-        link_kind="bnode subgraph cleanup",
-    )
-    for bf_pred in _r._MUSIC_MODE_PREDICATES:
-        registry[bf_pred] = _Routing(
-            handler="drop_music_mode_residue",
-            replacement=(
-                "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
-                "(forward path: append mode value to the `bffi:musicKey` literal "
-                "if upstream begins emitting)"
-            ),
-            link_kind="defensive (upstream-stability)",
-            is_drop=True,
-        )
-    for bf_cls in _r._MUSIC_MODE_CLASSES:
-        registry[bf_cls] = _Routing(
-            handler="drop_music_mode_residue",
-            replacement=("not emitted by the LoC marc2bibframe2 XSLT — defensive drop"),
-            link_kind="defensive (upstream-stability)",
-            is_drop=True,
-        )
-
-
-def _register_music_medium_family(registry: dict[URIRef, _Routing]) -> None:
-    """Medium-of-performance family (PMO music). The active routing
-    (:func:`route_music_medium`) collapses the BIBFRAME bf:ensemble
-    structured tree into a single bffi:musicMedium block carrying a
-    synthesised bffi:readMarc382 literal. The 6 PMO terms marc2bibframe2
-    never emits get the defensive drop."""
-    _ACTIVE_PREDICATES = (
-        _r.BF.ensemble,
-        _r.BF.mediumComponent,
-        _r.BF.mediumOfPerformance,
-        _r.BF.mediumComponentQualifier,
-        _r.BF.ensembleSize,
-        _r.BF.ensembleType,
-        _r.BF.instrument,
-        _r.BF.instrumentalType,
-        _r.BF.voice,
-        _r.BF.voiceType,
-    )
-    _ACTIVE_CLASSES = (
-        _r.BF.Ensemble,
-        _r.BF.EnsembleSize,
-        _r.BF.MediumComponent,
-        _r.BF.MediumOfPerformance,
-        _r.BF.MediumComponentQualifier,
-        _r.BF.MusicEnsemble,
-        _r.BF.MusicInstrument,
-        _r.BF.MusicVoice,
-    )
-    for bf_term in (*_ACTIVE_PREDICATES, *_ACTIVE_CLASSES):
-        registry[bf_term] = _Routing(
-            handler="route_music_medium",
-            replacement=(
-                "`bffi:musicMedium` → `bffi:MusicMedium` bnode with a "
-                "synthesised `bffi:readMarc382` literal — labels from the "
-                "BIBFRAME tree collapsed into a semicolon-separated summary"
-            ),
-            link_kind="structured-tree → synth literal collapse",
-        )
-    for bf_pred in _r._MUSIC_RESIDUE_PREDICATES:
-        registry[bf_pred] = _Routing(
-            handler="drop_music_residue",
-            replacement=(
-                "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
-                "(forward path: append the value to the `bffi:readMarc382` "
-                "synth string if upstream begins emitting)"
-            ),
-            link_kind="defensive (upstream-stability)",
-            is_drop=True,
-        )
-    for bf_cls in _r._MUSIC_RESIDUE_CLASSES:
-        registry[bf_cls] = _Routing(
-            handler="drop_music_residue",
-            replacement=("not emitted by the LoC marc2bibframe2 XSLT — defensive drop"),
-            link_kind="defensive (upstream-stability)",
-            is_drop=True,
-        )
 
 
 # --- row computation ---------------------------------------------------------

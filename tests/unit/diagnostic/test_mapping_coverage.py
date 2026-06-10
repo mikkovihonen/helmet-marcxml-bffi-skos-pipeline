@@ -10,8 +10,8 @@ from bffi_pipeline.diagnostic.mapping_coverage import (
     PathStep,
     analyze_mapping_coverage,
     format_path,
-    local_name,
 )
+from bffi_pipeline.rdf_utils import local_name
 
 
 def _bf(name: str) -> URIRef:

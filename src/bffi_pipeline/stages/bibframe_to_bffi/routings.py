@@ -55,13 +55,16 @@ follow-on:
 from __future__ import annotations
 
 import re
-from typing import Final
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import Any, Final, TypeVar
 
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, RDFS
 from rdflib.term import Node
 
 from bffi_pipeline.bibframe import BibframeOntology, load_ontology
+from bffi_pipeline.rdf_utils import local_name
 
 #: BIBFRAME namespace — the input side. Routings remove triples that
 #: still carry these URIs after the clean-rename pass.
@@ -73,6 +76,97 @@ BFLC: Final[Namespace] = Namespace("http://id.loc.gov/ontologies/bflc/")
 
 #: BFFI emit namespace.
 BFFI: Final[Namespace] = Namespace("http://urn.fi/URN:NBN:fi:schema:bffi:")
+
+
+# --- routing registry (decorator-driven) --------------------------------
+
+
+@dataclass(frozen=True)
+class RoutingMeta:
+    """Metadata declared by a :func:`routing`-decorated function for the
+    auto-table generator. Each routing function in this module
+    declares the set of ``bf:*`` terms it handles and how the
+    auto-table should render those rows. The generator walks
+    :data:`ROUTING_REGISTRY` at table-generation time — no parallel
+    registry to keep in sync.
+
+    ``terms`` and ``replacement`` each accept a static or dynamic form:
+
+      - ``terms`` may be a static tuple, OR a zero-argument callable
+        that yields URIRefs at resolution time (used by
+        :func:`route_identifier_schemes` to walk the BIBFRAME
+        ontology's ``bf:Identifier`` descendants on demand).
+      - ``replacement`` may be a static string (every term renders the
+        same description) OR a per-term callable taking a URIRef and
+        returning the row's replacement-column text (used by
+        :func:`route_axis_default_classes` and similar routings whose
+        replacement text varies per term).
+    """
+
+    handler: str
+    terms: tuple[URIRef, ...] | Callable[[], Iterable[URIRef]]
+    replacement: str | Callable[[URIRef], str]
+    link_kind: str | Callable[[URIRef], str]
+    is_drop: bool = False
+
+    def resolve_terms(self) -> tuple[URIRef, ...]:
+        """Materialise dynamic-term callables to a static tuple."""
+        if callable(self.terms):
+            return tuple(self.terms())
+        return self.terms
+
+    def replacement_for(self, term: URIRef) -> str:
+        """Resolve the replacement string for a specific term."""
+        if callable(self.replacement):
+            return self.replacement(term)
+        return self.replacement
+
+    def link_kind_for(self, term: URIRef) -> str:
+        """Resolve the link-kind string for a specific term."""
+        if callable(self.link_kind):
+            return self.link_kind(term)
+        return self.link_kind
+
+
+#: Single source of truth for auto-table row data. Each decorated
+#: routing function appends its :class:`RoutingMeta` at import time.
+ROUTING_REGISTRY: list[RoutingMeta] = []
+
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def routing(
+    *,
+    terms: Iterable[URIRef] | Callable[[], Iterable[URIRef]],
+    replacement: str | Callable[[URIRef], str],
+    link_kind: str | Callable[[URIRef], str],
+    is_drop: bool = False,
+) -> Callable[[F], F]:
+    """Attach :class:`RoutingMeta` to a routing function and register it.
+
+    Adding a new routing now requires editing one place: this decorator
+    on the routing function in this module. The auto-table generator
+    discovers the entry via :data:`ROUTING_REGISTRY`; no parallel
+    registry lives elsewhere.
+    """
+
+    def decorator(func: F) -> F:
+        materialised: tuple[URIRef, ...] | Callable[[], Iterable[URIRef]]
+        materialised = terms if callable(terms) else tuple(terms)
+        meta = RoutingMeta(
+            handler=func.__name__,
+            terms=materialised,
+            replacement=replacement,
+            link_kind=link_kind,
+            is_drop=is_drop,
+        )
+        func._routing_meta = meta  # type: ignore[attr-defined]
+        ROUTING_REGISTRY.append(meta)
+        return func
+
+    return decorator
+
 
 #: LoC identifier-scheme vocabulary stem. Every BIBFRAME ``bf:Identifier``
 #: subclass routes to ``<stem><scheme-token>`` on ``bffi:source``.
@@ -286,6 +380,16 @@ def rename_bflc_marckey(graph: Graph) -> int:
 # --- routing 1: Identifier-scheme ---------------------------------------
 
 
+def _identifier_scheme_replacement(term: URIRef) -> str:
+    token = _identifier_scheme_token(local_name(term))
+    return f"`bffi:Identifier` + `bffi:source <…/identifiers/{token}>`"
+
+
+@routing(
+    terms=lambda: load_ontology().class_descendants(BF.Identifier),
+    replacement=_identifier_scheme_replacement,
+    link_kind="discriminator: BIBFRAME subclass → LoC scheme URI",
+)
 def route_identifier_schemes(graph: Graph, ontology: BibframeOntology | None = None) -> int:
     """``bf:Isbn`` / ``bf:Issn`` / etc. → ``bffi:Identifier`` + ``bffi:source``.
 
@@ -325,6 +429,11 @@ def route_identifier_schemes(graph: Graph, ontology: BibframeOntology | None = N
 # --- routing 2: Title-variant -------------------------------------------
 
 
+@routing(
+    terms=TITLE_VARIANT_CLASSES,
+    replacement="`bffi:Title` (anchor; subclass info preserved on `bffi:marcKey`)",
+    link_kind="discriminator: marcKey",
+)
 def route_title_variants(graph: Graph) -> int:
     """``bf:VariantTitle`` / ``bf:ParallelTitle`` / ``bf:KeyTitle`` /
     ``bf:CollectiveTitle`` → ``bffi:Title``.
@@ -364,6 +473,13 @@ def _route_predicate_via_relation(graph: Graph, bf_pred: URIRef, relationship_ur
     return rewritten
 
 
+@routing(
+    terms=(BF.hasSeries,),
+    replacement=(
+        "`bffi:relation` → `bffi:Relation` bnode (`bffi:relationship <…/relationship/series>`)"
+    ),
+    link_kind="structured-relation chain",
+)
 def route_series_links(graph: Graph) -> int:
     """``?m bf:hasSeries ?s`` → structured ``bffi:relation`` chain.
 
@@ -375,6 +491,16 @@ def route_series_links(graph: Graph) -> int:
     return _route_predicate_via_relation(graph, BF.hasSeries, SERIES_RELATIONSHIP)
 
 
+def _relation_predicate_replacement(term: URIRef) -> str:
+    token = str(RELATION_PREDICATE_ROUTINGS[term]).rsplit("/", 1)[-1]
+    return f"`bffi:relation` → `bffi:Relation` bnode (`bffi:relationship <…/relationship/{token}>`)"
+
+
+@routing(
+    terms=lambda: tuple(p for p in RELATION_PREDICATE_ROUTINGS if p != BF.hasSeries),
+    replacement=_relation_predicate_replacement,
+    link_kind="structured-relation chain",
+)
 def route_relation_predicates(graph: Graph) -> int:
     """Catch-all for predicates with no direct ``bffi:*`` equivalent but a
     natural routing through ``bffi:relation`` (see
@@ -432,6 +558,14 @@ def _hub_target_type(marc_key: str) -> URIRef:  # noqa: PLR0911 — the routing 
     return BFFI.Work
 
 
+@routing(
+    terms=(BF.Hub,),
+    replacement=(
+        "`bffi:Work` / `bffi:Expression` / `bffi:Arrangement` / "
+        "`bffi:SeriesExpression` (per marcKey)"
+    ),
+    link_kind="discriminator: marcKey",
+)
 def route_hubs(graph: Graph) -> int:
     """``bf:Hub`` → ``bffi:Work`` / ``bffi:Expression`` / leaf subclass.
 
@@ -453,6 +587,28 @@ def route_hubs(graph: Graph) -> int:
 # --- routing 6: axis-default class rewrites -----------------------------
 
 
+def _axis_class_replacement(term: URIRef) -> str:
+    work_pick, expr_pick = AXIS_DEFAULT_CLASSES[term]
+    if work_pick == expr_pick:
+        return f"`bffi:{local_name(work_pick)}` (anchored — no axis split)"
+    return (
+        f"`bffi:{local_name(work_pick)}` (Work-axis) / "
+        f"`bffi:{local_name(expr_pick)}` (Expression-axis)"
+    )
+
+
+def _axis_class_link_kind(term: URIRef) -> str:
+    work_pick, expr_pick = AXIS_DEFAULT_CLASSES[term]
+    if work_pick == expr_pick:
+        return "anchor downgrade (no Work/Expression alternative)"
+    return "discriminator: subject's Work-axis co-type signal"
+
+
+@routing(
+    terms=tuple(AXIS_DEFAULT_CLASSES),
+    replacement=_axis_class_replacement,
+    link_kind=_axis_class_link_kind,
+)
 def route_axis_default_classes(graph: Graph) -> dict[str, int]:
     """Per-subject axis discriminator for axis-split BIBFRAME classes.
 
@@ -550,6 +706,11 @@ _PROVISION_STATEMENT_SUCCESSION_LINK_PATTERN: Final[re.Pattern[str]] = re.compil
 )
 
 
+@routing(
+    terms=(BF.provisionActivityStatement,),
+    replacement="`bffi:date` (76X-78X linking-entry hubs) / `bffi:Note` (otherwise)",
+    link_kind="discriminator: URI fragment",
+)
 def route_provision_activity_statement(graph: Graph) -> dict[str, int]:
     """``bf:provisionActivityStatement`` → ``bffi:date`` (when on a 76X-78X
     related-Instance hub) or wrapped in a ``bffi:Note`` bnode (otherwise).
@@ -596,6 +757,28 @@ def _expression_axis(types: set[Node]) -> bool:
     return any(t in _EXPRESSION_AXIS_SIGNALS for t in types)
 
 
+def _axis_predicate_replacement(term: URIRef) -> str:
+    work_pick, expr_pick = AXIS_DEFAULT_PREDICATES[term]
+    if work_pick == expr_pick:
+        return f"`bffi:{local_name(work_pick)}` (flat rename)"
+    return (
+        f"`bffi:{local_name(work_pick)}` (Work-axis) / "
+        f"`bffi:{local_name(expr_pick)}` (Expression-axis)"
+    )
+
+
+def _axis_predicate_link_kind(term: URIRef) -> str:
+    work_pick, expr_pick = AXIS_DEFAULT_PREDICATES[term]
+    if work_pick == expr_pick:
+        return "flat rename (no per-statement axis alternative)"
+    return "discriminator: subject's/object's Expression-axis signal"
+
+
+@routing(
+    terms=tuple(AXIS_DEFAULT_PREDICATES),
+    replacement=_axis_predicate_replacement,
+    link_kind=_axis_predicate_link_kind,
+)
 def route_axis_default_predicates(graph: Graph) -> dict[str, int]:
     """Per-statement axis discriminator for the broadMatch predicates
     ``bf:instanceOf`` / ``bf:hasInstance`` / ``bf:issuance``.
@@ -673,6 +856,13 @@ def route_axis_default_predicates(graph: Graph) -> dict[str, int]:
 # --- inverse-predicate triple-swap --------------------------------------
 
 
+@routing(
+    terms=lambda: tuple(INVERSE_PREDICATE_ROUTINGS),
+    replacement=lambda t: (
+        f"`bffi:{local_name(INVERSE_PREDICATE_ROUTINGS[t])}` (triple-swap: ?s → ?o)"
+    ),
+    link_kind="inverse-direction swap",
+)
 def route_inverse_predicates(graph: Graph) -> int:
     """Rewrite each ``?s bf:Xof ?o`` triple as ``?o bffi:X ?s``.
 
@@ -700,6 +890,11 @@ def route_inverse_predicates(graph: Graph) -> int:
 # --- note-shape routings ------------------------------------------------
 
 
+@routing(
+    terms=(BF.noteFor,),
+    replacement="`bffi:note` (triple-swap: ?note bf:noteFor ?subj → ?subj bffi:note ?note)",
+    link_kind="inverse-direction swap",
+)
 def route_note_for(graph: Graph) -> int:
     """Rewrite ``?note bf:noteFor ?subject`` as ``?subject bffi:note ?note``.
 
@@ -715,6 +910,15 @@ def route_note_for(graph: Graph) -> int:
     return rewritten
 
 
+@routing(
+    terms=(BF.noteType,),
+    replacement=(
+        "no BFFI carrier — BFFI 1.0.0 doesn't model literal note categorisation; "
+        "candidate for a future BFFI extension via NLF"
+    ),
+    link_kind="no BFFI carrier; bounded data loss",
+    is_drop=True,
+)
 def drop_note_type(graph: Graph) -> int:
     """Drop every ``?note bf:noteType ?type`` triple.
 
@@ -744,6 +948,12 @@ def drop_note_type(graph: Graph) -> int:
 # --- bf:variantType drop (redundant with marcKey discriminator) ---------
 
 
+@routing(
+    terms=(BF.variantType,),
+    replacement="redundant with the title-variant `bffi:marcKey` discriminator",
+    link_kind="redundant signal",
+    is_drop=True,
+)
 def drop_variant_type(graph: Graph) -> int:
     """Drop every ``?title bf:variantType ?type`` triple.
 
@@ -798,6 +1008,28 @@ _MUSIC_RESIDUE_CLASSES: Final[tuple[URIRef, ...]] = (
 )
 
 
+def _music_key_replacement(term: URIRef) -> str:
+    if term == BF.keyMode:
+        return (
+            "`bffi:musicKey` literal — extracts `rdfs:label` from the `bf:KeyMode` "
+            "bnode and attaches as a flat literal on the Work; bnode subgraph "
+            "dropped"
+        )
+    return (
+        "(class typing removed implicitly when the parent `bf:keyMode` "
+        "structured bnode is collapsed to a `bffi:musicKey` literal)"
+    )
+
+
+def _music_key_link_kind(term: URIRef) -> str:
+    return "structured-bnode → literal collapse" if term == BF.keyMode else "bnode subgraph cleanup"
+
+
+@routing(
+    terms=(BF.keyMode, BF.KeyMode),
+    replacement=_music_key_replacement,
+    link_kind=_music_key_link_kind,
+)
 def route_music_key(graph: Graph) -> int:
     """Collapse the BIBFRAME ``bf:keyMode`` structured bnode into a
     ``bffi:musicKey`` literal on the parent Work.
@@ -956,6 +1188,41 @@ def _emit_music_medium(graph: Graph, work: Node, literal: str | None) -> None:
         graph.add((mm, BFFI.readMarc382, Literal(literal)))
 
 
+#: Active MoP terms that :func:`route_music_medium` handles. Each contributes
+#: a row to the auto-table with the same replacement/link-kind text.
+_MUSIC_MEDIUM_ACTIVE_TERMS: Final[tuple[URIRef, ...]] = (
+    # Predicates
+    BF.ensemble,
+    BF.mediumComponent,
+    BF.mediumOfPerformance,
+    BF.mediumComponentQualifier,
+    BF.ensembleSize,
+    BF.ensembleType,
+    BF.instrument,
+    BF.instrumentalType,
+    BF.voice,
+    BF.voiceType,
+    # Classes
+    BF.Ensemble,
+    BF.EnsembleSize,
+    BF.MediumComponent,
+    BF.MediumOfPerformance,
+    BF.MediumComponentQualifier,
+    BF.MusicEnsemble,
+    BF.MusicInstrument,
+    BF.MusicVoice,
+)
+
+
+@routing(
+    terms=_MUSIC_MEDIUM_ACTIVE_TERMS,
+    replacement=(
+        "`bffi:musicMedium` → `bffi:MusicMedium` bnode with a "
+        "synthesised `bffi:readMarc382` literal — labels from the "
+        "BIBFRAME tree collapsed into a semicolon-separated summary"
+    ),
+    link_kind="structured-tree → synth literal collapse",
+)
 def route_music_medium(graph: Graph) -> int:
     """Collapse the BIBFRAME medium-of-performance structured tree into
     ``bffi:musicMedium → bffi:MusicMedium`` bnodes carrying a synthesised
@@ -1036,6 +1303,22 @@ def route_music_medium(graph: Graph) -> int:
     return rewritten
 
 
+def _music_residue_replacement(term: URIRef) -> str:
+    if term in _MUSIC_RESIDUE_PREDICATES:
+        return (
+            "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
+            "(forward path: append the value to the `bffi:readMarc382` "
+            "synth string if upstream begins emitting)"
+        )
+    return "not emitted by the LoC marc2bibframe2 XSLT — defensive drop"
+
+
+@routing(
+    terms=_MUSIC_RESIDUE_PREDICATES + _MUSIC_RESIDUE_CLASSES,
+    replacement=_music_residue_replacement,
+    link_kind="defensive (upstream-stability)",
+    is_drop=True,
+)
 def drop_music_residue(graph: Graph) -> int:
     """Drop the BIBFRAME 3.0.1 PMO medium-of-performance terms the LoC
     marc2bibframe2 XSLT never emits: ``bf:tempo``, ``bf:dramaticRole``,
@@ -1058,6 +1341,22 @@ def drop_music_residue(graph: Graph) -> int:
     return dropped
 
 
+def _music_mode_replacement(term: URIRef) -> str:
+    if term in _MUSIC_MODE_PREDICATES:
+        return (
+            "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
+            "(forward path: append mode value to the `bffi:musicKey` literal "
+            "if upstream begins emitting)"
+        )
+    return "not emitted by the LoC marc2bibframe2 XSLT — defensive drop"
+
+
+@routing(
+    terms=_MUSIC_MODE_PREDICATES + _MUSIC_MODE_CLASSES,
+    replacement=_music_mode_replacement,
+    link_kind="defensive (upstream-stability)",
+    is_drop=True,
+)
 def drop_music_mode_residue(graph: Graph) -> int:
     """Drop ``bf:mode`` / ``bf:Mode`` triples — never emitted by the LoC
     marc2bibframe2 XSLT.
@@ -1082,6 +1381,15 @@ def drop_music_mode_residue(graph: Graph) -> int:
     return dropped
 
 
+@routing(
+    terms=_SUBSERIES_PREDICATES,
+    replacement=(
+        "not emitted by the LoC marc2bibframe2 XSLT — defensive drop "
+        "(see forward-looking note below the Predicates table)"
+    ),
+    link_kind="defensive (upstream-stability)",
+    is_drop=True,
+)
 def drop_subseries_residue(graph: Graph) -> int:
     """Drop every ``bf:subseriesStatement`` / ``bf:subseriesEnumeration`` triple.
 

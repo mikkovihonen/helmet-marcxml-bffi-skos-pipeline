@@ -323,12 +323,3 @@ def analyze_mapping_coverage(
 def format_path(path: Iterable[PathStep]) -> str:
     """Pretty-print a chain like ``[bf:subClassOf] → [equivalentClass]``."""
     return " → ".join(f"[{step.relation}]" for step in path)
-
-
-def local_name(uri: URIRef) -> str:
-    """Last path / fragment component of ``uri``, useful for printing."""
-    text = str(uri)
-    for sep in ("#", "/", ":"):
-        if sep in text:
-            text = text.rsplit(sep, 1)[-1]
-    return text

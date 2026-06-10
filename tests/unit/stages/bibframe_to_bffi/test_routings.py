@@ -12,8 +12,10 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     BFLC,
     INVERSE_PREDICATE_ROUTINGS,
     RELATION_PREDICATE_ROUTINGS,
+    ROUTING_REGISTRY,
     SERIES_RELATIONSHIP,
     TITLE_VARIANT_CLASSES,
+    RoutingMeta,
     _hub_target_type,
     _identifier_scheme_token,
     apply_all_routings,
@@ -38,6 +40,86 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     route_series_links,
     route_title_variants,
 )
+
+# --- @routing decorator registry --------------------------------------
+
+
+def test_routing_registry_attaches_metadata_to_decorated_functions() -> None:
+    """Every routing function decorated with ``@routing`` exposes its
+    metadata via ``func._routing_meta`` and shows up exactly once in
+    ``ROUTING_REGISTRY``. Locks the decorator's contract."""
+    expected_handlers = {
+        "route_identifier_schemes",
+        "route_title_variants",
+        "route_series_links",
+        "route_relation_predicates",
+        "route_hubs",
+        "route_axis_default_classes",
+        "route_axis_default_predicates",
+        "route_provision_activity_statement",
+        "route_inverse_predicates",
+        "route_note_for",
+        "drop_note_type",
+        "drop_variant_type",
+        "route_music_key",
+        "route_music_medium",
+        "drop_music_residue",
+        "drop_music_mode_residue",
+        "drop_subseries_residue",
+    }
+    registered = {meta.handler for meta in ROUTING_REGISTRY}
+    assert registered == expected_handlers
+
+
+def test_routing_registry_resolves_dynamic_terms_to_static_tuples() -> None:
+    """Routings declared with a callable ``terms=`` (currently
+    :func:`route_identifier_schemes` walking the BIBFRAME ontology
+    and :func:`route_relation_predicates` filtering hasSeries) flatten
+    to a static tuple via ``resolve_terms``."""
+    by_handler = {meta.handler: meta for meta in ROUTING_REGISTRY}
+    ident_terms = by_handler["route_identifier_schemes"].resolve_terms()
+    assert len(ident_terms) >= 40  # ~52 in BIBFRAME 3.0.1
+    assert BF.Isbn in ident_terms
+    # route_relation_predicates excludes bf:hasSeries (handled by
+    # its dedicated route_series_links).
+    rel_terms = by_handler["route_relation_predicates"].resolve_terms()
+    assert BF.hasSeries not in rel_terms
+    assert BF.accompaniedBy in rel_terms
+
+
+def test_routing_registry_per_term_callables_resolve_per_term() -> None:
+    """``replacement`` and ``link_kind`` declared as callables produce
+    distinct strings for different terms within the same routing."""
+    by_handler = {meta.handler: meta for meta in ROUTING_REGISTRY}
+    music_key = by_handler["route_music_key"]
+    repl_predicate = music_key.replacement_for(BF.keyMode)
+    repl_class = music_key.replacement_for(BF.KeyMode)
+    assert repl_predicate != repl_class
+    assert "extracts" in repl_predicate  # the active routing's wording
+    assert "removed implicitly" in repl_class  # the bnode-cleanup wording
+
+
+def test_routing_meta_is_drop_flag_drives_drop_status() -> None:
+    """The ``is_drop=True`` flag distinguishes drops from rewrites. The
+    auto-table generator renders drops with the **drop** status."""
+    by_handler = {meta.handler: meta for meta in ROUTING_REGISTRY}
+    assert by_handler["drop_variant_type"].is_drop is True
+    assert by_handler["drop_note_type"].is_drop is True
+    assert by_handler["route_music_key"].is_drop is False
+    assert by_handler["route_identifier_schemes"].is_drop is False
+
+
+def test_routing_meta_is_hashable_dataclass() -> None:
+    """``RoutingMeta`` is a frozen dataclass so it can be put in sets /
+    used as dict keys if a future consumer wants to."""
+    meta = RoutingMeta(
+        handler="x",
+        terms=(BF.Isbn,),
+        replacement="r",
+        link_kind="k",
+    )
+    {meta}  # noqa: B018 — just checking the type is hashable
+
 
 # --- bflc:marcKey rename ------------------------------------------------
 

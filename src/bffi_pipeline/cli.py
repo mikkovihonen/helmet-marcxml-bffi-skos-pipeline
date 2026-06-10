@@ -29,9 +29,9 @@ from bffi_pipeline.diagnostic.mapping_coverage import (
     DEFAULT_MAX_HOPS,
     analyze_mapping_coverage,
     format_path,
-    local_name,
 )
 from bffi_pipeline.diagnostic.mapping_tables import regenerate_mapping_tables
+from bffi_pipeline.rdf_utils import local_name
 from bffi_pipeline.runs import (
     InvalidRunDirError,
     mint_run_dir,
