@@ -31,6 +31,7 @@ from bffi_pipeline.diagnostic.mapping_coverage import (
     format_path,
     local_name,
 )
+from bffi_pipeline.diagnostic.mapping_tables import regenerate_mapping_tables
 from bffi_pipeline.runs import (
     InvalidRunDirError,
     mint_run_dir,
@@ -135,6 +136,47 @@ def diagnose_mappings_command(
         typer.echo("=== unreachable (true gaps) ===", err=False)
         for uri in report.unreachable:
             typer.echo(f"  bf:{local_name(uri)}")
+
+
+@app.command("regenerate-mapping-tables")
+def regenerate_mapping_tables_command(
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help=(
+                "Don't write the doc — exit 1 if the on-disk tables differ "
+                "from what the generator would emit. Use in CI / pre-commit."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Regenerate the Classes + Predicates tables in `docs/bf_to_bffi_mapping.md`.
+
+    The tables are derived from `vocab/bibframe.rdf` + `vocab/lkd.rdf` +
+    the routing registry in `src/bffi_pipeline/stages/bibframe_to_bffi/
+    routings.py`. Re-run after any of:
+
+      - a BIBFRAME ontology refresh (`vocab/bibframe.rdf` updated)
+      - a `lkd.rdf` refresh (new BFFI version)
+      - a new routing function in `routings.py`
+
+    With `--check` the command behaves as a CI guard: it computes the
+    expected doc text but writes nothing, exiting non-zero on drift.
+    """
+    _, changed = regenerate_mapping_tables(check=check)
+    if check:
+        if changed:
+            typer.echo(
+                "docs/bf_to_bffi_mapping.md is out of date — "
+                "run `bffi-pipeline regenerate-mapping-tables` to refresh.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        typer.echo("docs/bf_to_bffi_mapping.md is up to date.")
+    else:
+        verb = "updated" if changed else "already up to date"
+        typer.echo(f"docs/bf_to_bffi_mapping.md {verb}.")
 
 
 @app.command("new-run")

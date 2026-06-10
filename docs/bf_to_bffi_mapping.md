@@ -6,18 +6,23 @@ This document maps every `bf:*` (BIBFRAME) term encountered when converting MARC
 
 BFFI's namespace is closed — emit-side BFFI graphs should not carry `bf:*` terms — so every `bf:*` token in the BIBFRAME intermediate needs either a direct BFFI replacement, a routing rule when no direct counterpart exists, or NLF input when no working substitute is yet defined. The mapping below enumerates each case.
 
-It is generated programmatically by parsing BFFI's `lkd.rdf` ontology source (`owl:versionInfo` 1.0.0, based on BIBFRAME 2.4.0) with rdflib, walking BFFI ↔ BIBFRAME relations (`owl:equivalentClass`, `owl:equivalentProperty`, `rdfs:subPropertyOf`, the re-anchor `subClassOf` pattern, and the `bffi-meta:*Match` links) in both directions.
+The Classes and Predicates tables below are **auto-generated** by `bffi-pipeline regenerate-mapping-tables` (source: `src/bffi_pipeline/diagnostic/mapping_tables.py`). The generator covers every `bf:*` term BIBFRAME 3.0.1 declares (450 in total — 224 classes + 226 properties) and consults three sources:
 
-The LoC BIBFRAME ontology itself is also vendored (`vocab/bibframe.rdf`, currently version 3.0.1 dated 2025-12-03). The two ontologies together let the conversion derive routings the doc's tables don't enumerate — e.g. the ontology-driven Identifier-scheme routing walks `bf:Identifier`'s 50 subclasses in BIBFRAME and routes each to `bffi:Identifier + bffi:source <…/identifiers/{scheme}>`. The "BIBFRAME-declared terms not referenced by `lkd.rdf`" section near the end of this doc inventories the gaps the diagnostic surfaces (run via `bffi-pipeline diagnose-mappings`).
+- **`vocab/bibframe.rdf`** — the LoC BIBFRAME ontology (3.0.1, 2025-12-03), vendored. Provides the universe of `bf:*` terms.
+- **`vocab/lkd.rdf`** — BFFI's ontology (1.0.0, based on BIBFRAME 2.4.0), vendored. Provides `bf:*` ↔ `bffi:*` mapping relations (`owl:equivalentClass`, `owl:equivalentProperty`, `rdfs:subPropertyOf`, `bffi-meta:{broadMatch,closeMatch,exactMatch,narrowMatch}`).
+- **`src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`** — the discriminator-routed terms (`bf:Hub`, `bf:Isbn` and other `bf:Identifier` descendants, `bf:VariantTitle` and the other Title subclasses, axis-default classes/predicates, `bf:hasSeries`, `bf:accompaniedBy`, `bf:provisionActivityStatement`). These have no direct `lkd.rdf` mapping but a per-instance handler at conversion time.
+
+The two ontologies together let the conversion derive routings the bare `lkd.rdf` walks miss — e.g. the ontology-driven Identifier-scheme routing walks `bf:Identifier`'s 50+ subclasses in BIBFRAME and routes each to `bffi:Identifier + bffi:source <…/identifiers/{scheme}>`. Run `bffi-pipeline diagnose-mappings` for an interactive view of the BIBFRAME ↔ `lkd.rdf` reachability classification.
 
 ### Status legend
 
 | Status | Meaning |
 |---|---|
-| **clean** | Direct rename or re-anchor (`owl:equivalentClass` / `owl:equivalentProperty` / `rdfs:subPropertyOf`). |
-| ***semantic-shift*** | `bffi-meta:broadMatch` / `closeMatch` only. |
-| **routed** | No single BFFI replacement; the per-instance data determines which existing `bffi:*` class applies (see the routing callouts below the relevant table). |
-| **GAP** | No link of any kind; requires NLF input. |
+| **clean** | Direct 1-hop `owl:equivalentClass` / `owl:equivalentProperty` to a `bffi:*` term. The clean-rename pass handles it; nothing else needed. |
+| **routed** | No direct equivalence; the per-instance data determines which existing `bffi:*` class applies (see the routing callouts below each table). The `Handler` column names the routing function. |
+| ***semantic-shift*** | Best reach uses `bffi-meta:broadMatch` / `closeMatch` / `narrowMatch` / `exactMatch`. The BFFI side carries a related but not identical concept. |
+| ***inherited*** | Best reach is a taxonomy walk through `rdfs:subClassOf` / `rdfs:subPropertyOf` chains; an ancestor's clean rename covers the term transitively (e.g. `bf:AbbreviatedTitle` reaches `bffi:Title` via the BIBFRAME class hierarchy + the `bffi:Title ≡ bf:Title` equivalence). |
+| **GAP** | No path of any length and no routing handler — requires NLF input, a new routing, or a future BFFI release. |
 
 ### Document conventions
 
@@ -28,51 +33,240 @@ The LoC BIBFRAME ontology itself is also vendored (`vocab/bibframe.rdf`, current
 
 ## Classes (sorted alphabetically)
 
-| `bf:` class | Status | `bffi:*` replacement(s) | Link kind | Also satisfies (via inference) | Used in |
+The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-tables` (source: `src/bffi_pipeline/diagnostic/mapping_tables.py`) from `vocab/bibframe.rdf` + `vocab/lkd.rdf` + the routing registry in `src/bffi_pipeline/stages/bibframe_to_bffi/routings.py`. Do not edit between the markers — your changes will be lost on the next regeneration.
+
+<!-- BEGIN AUTO: classes -->
+
+| `bf:` class | Status | `bffi:*` replacement | Link kind | Also satisfies (via inference) | Handler |
 |---|---|---|---|---|---|
-| `bf:Archival` | **clean** | `bffi:Archival` | owl:equivalentClass | `bf:Instance` | manifestation |
-| `bf:Arrangement` | **clean** | `bffi:Arrangement` | owl:equivalentClass | `bf:Work` | expression, manifestation |
-| `bf:Audio` | **routed** | `bffi:NonMusicAudioWork` (Work-axis) / `bffi:NonMusicAudioExpression` (Expression-axis) — see note below | Emit-time convention: marc2bibframe2 emits `bf:Audio` only for non-music audio (music gets `bf:MusicAudio` directly); the BFFI emit routes `bf:Audio` → `bffi:NonMusicAudio*` per that convention | `bf:Audio` (via BIBFRAME `bf:NonMusicAudio rdfs:subClassOf bf:Audio` chain + `bffi:NonMusicAudio* bffi-meta:broadMatch bf:NonMusicAudio`) | expression, work |
-| `bf:AudioIssueNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/audioIssueNumber>` (see [Identifier-scheme routing](#identifier-scheme-routing-bfisbn--bfissn--bfean--bfaudioissuenumber--bfotheridentifier--bffiidentifier--bffisource) below) | n/a — no direct `bffi:AudioIssueNumber`; route by `bffi:source` URI | `bf:Identifier` (via `bffi:Identifier ≡ bf:Identifier`) | manifestation |
-| `bf:Cartography` | *semantic-shift* | `bffi:CartographyExpression, bffi:CartographyWork` | bffi-meta:broadMatch | `bf:Work` | expression, work |
-| `bf:Dataset` | **clean** | `bffi:Dataset` | owl:equivalentClass | `bf:Work` | expression, work |
-| `bf:Ean` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/ean>` (see [Identifier-scheme routing](#identifier-scheme-routing-bfisbn--bfissn--bfean--bfaudioissuenumber--bfotheridentifier--bffiidentifier--bffisource) below) | n/a — no direct `bffi:Ean`; route by `bffi:source` URI | `bf:Identifier` | manifestation |
-| `bf:Electronic` | **clean** | `bffi:Electronic` | owl:equivalentClass | `bf:Instance` | manifestation |
-| `bf:Hub` | **routed** | `bffi:Work` *or* `bffi:Expression` (per-instance — see [Hub routing](#hub-routing-bfhub--bffiexpression-vs-bffiwork) below) | n/a — no direct `bffi:Hub`; route by FRBR axis signal | `bf:Work` (via `bffi:Work ⊑ bffi:BibframeWork ≡ bf:Work` either way) | aggregation, expression, manifestation, work |
-| `bf:Instance` | **clean** | `bffi:Manifestation`<br>`bffi:Archival, bffi:CollectionManifestation, bffi:Electronic, bffi:Microform, bffi:Print, bffi:Tactile`<br>`bffi:CollectionManifestation` | bffi-meta:broadMatch<br>owl:equivalentClass<br>re-anchor (subClassOf Manifestation) | — | manifestation |
-| `bf:Integrating` | **clean** | `bffi:Integrating` | owl:equivalentClass | `bf:Work` | work |
-| `bf:Isbn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/isbn>` (see [Identifier-scheme routing](#identifier-scheme-routing-bfisbn--bfissn--bfean--bfaudioissuenumber--bfotheridentifier--bffiidentifier--bffisource) below) | n/a — no direct `bffi:Isbn`; route by `bffi:source` URI | `bf:Identifier` | manifestation |
-| `bf:Issn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/issn>` (see [Identifier-scheme routing](#identifier-scheme-routing-bfisbn--bfissn--bfean--bfaudioissuenumber--bfotheridentifier--bffiidentifier--bffisource) below) | n/a — no direct `bffi:Issn`; route by `bffi:source` URI | `bf:Identifier` | manifestation |
-| `bf:KeyMode` | **routed** | `bffi:musicKey` (Literal datatype property; carries the key as a string like `"B-flat major"`) — BFFI collapses the structured Key block into a literal (see [Music-medium and music-key routing](#music-medium-and-music-key-routing--bfmediumofperformance--bfmediumcomponent--bfensemble--bfkeymode--collapse-to-literal) below) | n/a — no class for structured Key in BFFI; collapse to literal | `bf:KeyMode` is alive in BIBFRAME 2.5 but BFFI chose the literal-only shape | expression, manifestation |
-| `bf:Language` | **clean** | `bffi:Language` | owl:equivalentClass | — | expression, manifestation |
-| `bf:Local` | **clean** | `bffi:Local` | owl:equivalentClass | `bf:Identifier` | manifestation |
-| `bf:Manuscript` | **clean** | `bffi:Manuscript` | owl:equivalentClass | `bf:Work` | work |
-| `bf:Meeting` | **clean** | `bffi:Meeting` | owl:equivalentClass | `bf:Agent` | work |
-| `bf:Microform` | **clean** | `bffi:Microform` | owl:equivalentClass | `bf:Instance` | manifestation |
-| `bf:MixedMaterial` | **clean** | `bffi:MixedMaterial`<br>`bffi:Kit` | owl:equivalentClass<br>re-anchor (subClassOf MixedMaterial) | `bf:Work` | expression, work |
-| `bf:MovingImage` | *semantic-shift* | `bffi:MovingImageExpression, bffi:MovingImageWork` | bffi-meta:broadMatch | `bf:Work` | expression, work |
-| `bf:Multimedia` | **clean** | `bffi:Multimedia` | owl:equivalentClass | `bf:Work` | expression, work |
-| `bf:MusicAudio` | *semantic-shift* | `bffi:MusicAudioExpression`<br>`bffi:MusicWork` | bffi-meta:broadMatch<br>bffi-meta:closeMatch | `bf:Work` | expression, work |
-| `bf:MusicMedium` | **clean** | `bffi:MusicMedium`<br>`bffi:ChoreographicMedium` | bffi-meta:closeMatch<br>owl:equivalentClass | — | expression, manifestation |
-| `bf:NotatedMovement` | **clean** | `bffi:NotatedMovement` | owl:equivalentClass | `bf:Work` | expression, work |
-| `bf:NotatedMusic` | **clean** | `bffi:NotatedMusic`<br>`bffi:MusicWork` | bffi-meta:closeMatch<br>owl:equivalentClass | `bf:Work` | expression, work |
-| `bf:Note` | **clean** | `bffi:Note`<br>`bffi:TitleNote`<br>`bffi:TitleNote` | bffi-meta:broadMatch<br>owl:equivalentClass<br>re-anchor (subClassOf Note) | — | expression, manifestation |
-| `bf:Object` | **clean** | `bffi:Object` | owl:equivalentClass | `bf:Work` | expression, work |
-| `bf:Organization` | **clean** | `bffi:Organization` | owl:equivalentClass | `bf:Agent` | work |
-| `bf:OtherIdentifier` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/<scheme>>` (see [Identifier-scheme routing](#identifier-scheme-routing-bfisbn--bfissn--bfean--bfaudioissuenumber--bfotheridentifier--bffiidentifier--bffisource) below) | n/a — catch-all for non-standard 024 ind1≠3 identifiers | `bf:Identifier` | manifestation |
-| `bf:Person` | **clean** | `bffi:Person` | owl:equivalentClass | `bf:Agent` | work |
-| `bf:Place` | **clean** | `bffi:Place` | owl:equivalentClass | — | work |
-| `bf:PrimaryContribution` | **clean** | `bffi:PrimaryContribution` | owl:equivalentClass | `bf:Contribution` | expression, work |
-| `bf:Print` | **clean** | `bffi:Print` | owl:equivalentClass | `bf:Instance` | manifestation |
-| `bf:Series` | *semantic-shift* | `bffi:SeriesExpression, bffi:SeriesWork` | bffi-meta:broadMatch | `bf:Work` | manifestation |
-| `bf:StillImage` | **clean** | `bffi:StillImage` | owl:equivalentClass | `bf:Work` | expression, work |
-| `bf:Tactile` | **clean** | `bffi:Tactile` | owl:equivalentClass | `bf:Instance` | manifestation, work |
-| `bf:Temporal` | **clean** | `bffi:Temporal` | owl:equivalentClass | — | work |
-| `bf:Text` | **clean** | `bffi:Text` | owl:equivalentClass | `bf:Work` | expression, work |
-| `bf:Title` | **clean** | `bffi:Title` | owl:equivalentClass | — | expression, manifestation |
-| `bf:Topic` | **clean** | `bffi:Topic` | owl:equivalentClass | — | work |
-| `bf:VariantTitle` | **routed** | `bffi:Title` (the anchor — covers transcribed-title shapes per its `skos:definition`) + `bffi:marcKey` discriminator (see [Title-variant routing](#title-variant-routing-bfvarianttitle--bffititle--bffimarckey) below) | n/a — no direct `bffi:VariantTitle`; route by the MARC tag in `bffi:marcKey` | `bf:Title` (via `bffi:Title ≡ bf:Title`) | expression |
-| `bf:Work` | **clean** | `bffi:BibframeWork`<br>`bffi:Expression, bffi:Work`<br>`bffi:AggregatingExpression, bffi:AggregatingWork, bffi:Expression, bffi:Work` | bffi-meta:broadMatch<br>owl:equivalentClass<br>re-anchor (subClassOf BibframeWork) | — | aggregation, expression, manifestation, work |
+| `bf:AbbreviatedTitle` | *inherited* | `bffi:Title` | bf:subClassOf → bf:subClassOf → owl:equivalentClass | — | — |
+| `bf:AccessPolicy` | **clean** | `bffi:AccessPolicy` | owl:equivalentClass | `bf:UsageAndAccessPolicy` | — |
+| `bf:AccessionNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/accession-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:AcquisitionSource` | **clean** | `bffi:AcquisitionSource` | owl:equivalentClass | — | — |
+| `bf:AdminMetadata` | **clean** | `bffi:AdminMetadata` | owl:equivalentClass | — | — |
+| `bf:Agent` | **clean** | `bffi:Agent` | owl:equivalentClass | — | — |
+| `bf:Ansi` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/ansi>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:AppliedMaterial` | **clean** | `bffi:AppliedMaterial` | owl:equivalentClass | `bf:Material` | — |
+| `bf:Archival` | **clean** | `bffi:Archival` | owl:equivalentClass | `bf:Instance` | — |
+| `bf:Arrangement` | **clean** | `bffi:Arrangement` | owl:equivalentClass | `bf:Work` | — |
+| `bf:AspectRatio` | **clean** | `bffi:AspectRatio` | owl:equivalentClass | — | — |
+| `bf:Audio` | **routed** | `bffi:NonMusicAudioExpression` (axis-default) | axis-pick (Expression default) | — | `route_audio` |
+| `bf:AudioIssueNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/audio-issue-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:AudioTake` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/audio-take>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Barcode` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/barcode>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:BaseMaterial` | **clean** | `bffi:BaseMaterial` | owl:equivalentClass | `bf:Material` | — |
+| `bf:Binding` | **clean** | `bffi:Binding` | owl:equivalentClass | — | — |
+| `bf:BookFormat` | **clean** | `bffi:BookFormat` | owl:equivalentClass | — | — |
+| `bf:BroadcastStandard` | **clean** | `bffi:BroadcastStandard` | owl:equivalentClass | `bf:VideoCharacteristic` | — |
+| `bf:Capture` | **clean** | `bffi:Capture` | owl:equivalentClass | — | — |
+| `bf:CaptureStorage` | **clean** | `bffi:CaptureStorage` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
+| `bf:Carrier` | **clean** | `bffi:Carrier` | owl:equivalentClass | — | — |
+| `bf:Cartographic` | **clean** | `bffi:Cartographic` | owl:equivalentClass | — | — |
+| `bf:CartographicDataType` | **clean** | `bffi:CartographicDataType` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:CartographicObjectType` | **clean** | `bffi:CartographicObjectType` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:Cartography` | **routed** | `bffi:CartographyExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:Chronology` | **clean** | `bffi:Chronology` | owl:equivalentClass | `bf:EnumerationAndChronology` | — |
+| `bf:Classification` | **clean** | `bffi:Classification` | owl:equivalentClass | — | — |
+| `bf:ClassificationDdc` | **clean** | `bffi:ClassificationDdc` | owl:equivalentClass | `bf:Classification` | — |
+| `bf:ClassificationLcc` | **clean** | `bffi:ClassificationLcc` | owl:equivalentClass | `bf:Classification` | — |
+| `bf:ClassificationNal` | **clean** | `bffi:ClassificationNal` | owl:equivalentClass | `bf:Classification` | — |
+| `bf:ClassificationNlm` | **clean** | `bffi:ClassificationNlm` | owl:equivalentClass | `bf:Classification` | — |
+| `bf:ClassificationUdc` | **clean** | `bffi:ClassificationUdc` | owl:equivalentClass | `bf:Classification` | — |
+| `bf:Coden` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/coden>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Collection` | *semantic-shift* | `bffi:CollectionExpression` | bffi-meta:broadMatch | `bf:Work` | — |
+| `bf:CollectionArrangement` | **clean** | `bffi:CollectionArrangement` | owl:equivalentClass | — | — |
+| `bf:CollectiveTitle` | **routed** | `bffi:Title` (anchor; subclass info preserved on `bffi:marcKey`) | discriminator: marcKey | — | `route_title_variants` |
+| `bf:ColorContent` | **clean** | `bffi:ColorContent` | owl:equivalentClass | — | — |
+| `bf:Content` | **clean** | `bffi:Content` | owl:equivalentClass | — | — |
+| `bf:ContentAccessibility` | **clean** | `bffi:ContentAccessibility` | owl:equivalentClass | — | — |
+| `bf:Contribution` | **clean** | `bffi:Contribution` | owl:equivalentClass | — | — |
+| `bf:CopyrightNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/copyright-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:CopyrightRegistration` | **clean** | `bffi:CopyrightRegistration` | owl:equivalentClass | — | — |
+| `bf:CoverArt` | **clean** | `bffi:CoverArt` | owl:equivalentClass | — | — |
+| `bf:Dataset` | **clean** | `bffi:Dataset` | owl:equivalentClass | `bf:Work` | — |
+| `bf:DescriptionAuthentication` | **clean** | `bffi:DescriptionAuthentication` | owl:equivalentClass | — | — |
+| `bf:DescriptionConventions` | **clean** | `bffi:DescriptionConventions` | owl:equivalentClass | — | — |
+| `bf:DescriptionLevel` | **clean** | `bffi:DescriptionLevel` | owl:equivalentClass | — | — |
+| `bf:DigitalCharacteristic` | **clean** | `bffi:DigitalCharacteristic` | owl:equivalentClass | — | — |
+| `bf:Dissertation` | **clean** | `bffi:Dissertation` | owl:equivalentClass | — | — |
+| `bf:DissertationIdentifier` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/dissertation-identifier>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Distribution` | **clean** | `bffi:Distribution` | owl:equivalentClass | `bf:ProvisionActivity` | — |
+| `bf:Doi` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/doi>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:DramaticRole` | **GAP** | — | — | — | — |
+| `bf:Ean` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/ean>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Eidr` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/eidr>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Electronic` | **clean** | `bffi:Electronic` | owl:equivalentClass | `bf:Instance` | — |
+| `bf:Emulsion` | **clean** | `bffi:Emulsion` | owl:equivalentClass | — | — |
+| `bf:EncodedBitrate` | **clean** | `bffi:EncodedBitrate` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:EncodingFormat` | **clean** | `bffi:EncodingFormat` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:Ensemble` | **GAP** | — | — | — | — |
+| `bf:EnsembleSize` | **GAP** | — | — | — | — |
+| `bf:Enumeration` | **clean** | `bffi:Enumeration` | owl:equivalentClass | `bf:EnumerationAndChronology` | — |
+| `bf:EnumerationAndChronology` | **clean** | `bffi:EnumerationAndChronology` | owl:equivalentClass | — | — |
+| `bf:Event` | **clean** | `bffi:Event` | owl:equivalentClass | — | — |
+| `bf:Extent` | **clean** | `bffi:Extent` | owl:equivalentClass | — | — |
+| `bf:Family` | **clean** | `bffi:Family` | owl:equivalentClass | `bf:Agent` | — |
+| `bf:FileSize` | **clean** | `bffi:FileSize` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:FileType` | **clean** | `bffi:FileType` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:Fingerprint` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/fingerprint>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:FontSize` | **clean** | `bffi:FontSize` | owl:equivalentClass | — | — |
+| `bf:Frequency` | **clean** | `bffi:Frequency` | owl:equivalentClass | — | — |
+| `bf:Generation` | **clean** | `bffi:Generation` | owl:equivalentClass | — | — |
+| `bf:GenerationProcess` | **clean** | `bffi:GenerationProcess` | owl:equivalentClass | — | — |
+| `bf:GenreForm` | **clean** | `bffi:GenreForm` | owl:equivalentClass | — | — |
+| `bf:GeographicCoverage` | **clean** | `bffi:GeographicCoverage` | owl:equivalentClass | — | — |
+| `bf:GrooveCharacteristic` | **clean** | `bffi:GrooveCharacteristic` | owl:equivalentProperty | `bf:SoundCharacteristic` | — |
+| `bf:Gtin14Number` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/gtin14-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Hdl` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/hdl>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Hub` | **routed** | `bffi:Work` / `bffi:Expression` / `bffi:Arrangement` / `bffi:SeriesExpression` (per marcKey) | discriminator: marcKey | — | `route_hubs` |
+| `bf:Identifier` | **clean** | `bffi:Identifier` | owl:equivalentClass | — | — |
+| `bf:Illustration` | **clean** | `bffi:Illustration` | owl:equivalentClass | — | — |
+| `bf:ImmediateAcquisition` | **clean** | `bffi:ImmediateAcquisition` | owl:equivalentClass | — | — |
+| `bf:Instance` | **clean** | `bffi:Manifestation` | owl:equivalentClass | — | — |
+| `bf:Integrating` | **clean** | `bffi:Integrating` | owl:equivalentClass | `bf:Work` | — |
+| `bf:IntendedAudience` | **clean** | `bffi:IntendedAudience` | owl:equivalentClass | — | — |
+| `bf:Isan` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/isan>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Isbn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/isbn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Ismn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/ismn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Isni` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/isni>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Iso` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/iso>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Isrc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/isrc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Issn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/issn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:IssnL` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/issn-l>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Issuance` | *semantic-shift* | `bffi:ExtensionPlan` | bffi-meta:broadMatch | — | — |
+| `bf:Istc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/istc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Iswc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/iswc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Item` | **clean** | `bffi:Item` | owl:equivalentClass | — | — |
+| `bf:Jurisdiction` | **clean** | `bffi:Jurisdiction` | owl:equivalentClass | `bf:Agent` | — |
+| `bf:KeyMode` | **GAP** | — | — | — | — |
+| `bf:KeyTitle` | **routed** | `bffi:Title` (anchor; subclass info preserved on `bffi:marcKey`) | discriminator: marcKey | — | `route_title_variants` |
+| `bf:Kit` | **clean** | `bffi:Kit` | owl:equivalentClass | `bf:MixedMaterial`, `bf:Work` | — |
+| `bf:Language` | **clean** | `bffi:Language` | owl:equivalentClass | — | — |
+| `bf:Layout` | **clean** | `bffi:Layout` | owl:equivalentClass | — | — |
+| `bf:LcOverseasAcq` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/lc-overseas-acq>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Lccn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/lccn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Local` | **clean** | `bffi:Local` | owl:equivalentClass | `bf:Identifier` | — |
+| `bf:Manufacture` | **clean** | `bffi:Manufacture` | owl:equivalentClass | `bf:ProvisionActivity` | — |
+| `bf:Manuscript` | **clean** | `bffi:Manuscript` | owl:equivalentClass | `bf:Work` | — |
+| `bf:Material` | **clean** | `bffi:Material` | owl:equivalentClass | — | — |
+| `bf:MatrixNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/matrix-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Media` | **clean** | `bffi:Media` | owl:equivalentClass | — | — |
+| `bf:MediumComponent` | **GAP** | — | — | — | — |
+| `bf:MediumComponentQualifier` | **GAP** | — | — | — | — |
+| `bf:MediumOfPerformance` | **GAP** | — | — | — | — |
+| `bf:Meeting` | **clean** | `bffi:Meeting` | owl:equivalentClass | `bf:Agent` | — |
+| `bf:Microform` | **clean** | `bffi:Microform` | owl:equivalentClass | `bf:Instance` | — |
+| `bf:MixedMaterial` | **clean** | `bffi:MixedMaterial` | owl:equivalentClass | `bf:Work` | — |
+| `bf:Mode` | **GAP** | — | — | — | — |
+| `bf:Modification` | **clean** | `bffi:Modification` | owl:equivalentClass | `bf:ProvisionActivity` | — |
+| `bf:Monograph` | **routed** | `bffi:MonographExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:Mount` | **clean** | `bffi:Mount` | owl:equivalentClass | — | — |
+| `bf:MovementNotation` | **clean** | `bffi:MovementNotation` | owl:equivalentClass | `bf:Notation` | — |
+| `bf:MovingImage` | **routed** | `bffi:MovingImageExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:Multimedia` | **clean** | `bffi:Multimedia` | owl:equivalentClass | `bf:Work` | — |
+| `bf:MusicAudio` | **routed** | `bffi:MusicAudioExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:MusicDistributorNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/music-distributor-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:MusicEnsemble` | **GAP** | — | — | — | — |
+| `bf:MusicFormat` | **clean** | `bffi:MusicFormat` | owl:equivalentClass | — | — |
+| `bf:MusicInstrument` | **GAP** | — | — | — | — |
+| `bf:MusicMedium` | **clean** | `bffi:MusicMedium` | owl:equivalentClass | — | — |
+| `bf:MusicNotation` | **clean** | `bffi:MusicNotation` | owl:equivalentClass | `bf:Notation` | — |
+| `bf:MusicPlate` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/music-plate>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:MusicPublisherNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/music-publisher-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:MusicVoice` | **GAP** | — | — | — | — |
+| `bf:Nbn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/nbn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:NonMusicAudio` | **routed** | `bffi:NonMusicAudioExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:NotatedMovement` | **clean** | `bffi:NotatedMovement` | owl:equivalentClass | `bf:Work` | — |
+| `bf:NotatedMusic` | **clean** | `bffi:NotatedMusic` | owl:equivalentClass | `bf:Work` | — |
+| `bf:Notation` | **clean** | `bffi:Notation` | owl:equivalentClass | — | — |
+| `bf:Note` | **clean** | `bffi:Note` | owl:equivalentClass | — | — |
+| `bf:Object` | **clean** | `bffi:Object` | owl:equivalentClass | `bf:Work` | — |
+| `bf:ObjectCount` | **clean** | `bffi:ObjectCount` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:OclcNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/oclc-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:OpusNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/opus-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Organization` | **clean** | `bffi:Organization` | owl:equivalentClass | `bf:Agent` | — |
+| `bf:ParallelTitle` | **routed** | `bffi:Title` (anchor; subclass info preserved on `bffi:marcKey`) | discriminator: marcKey | — | `route_title_variants` |
+| `bf:Person` | **clean** | `bffi:Person` | owl:equivalentClass | `bf:Agent` | — |
+| `bf:Place` | **clean** | `bffi:Place` | owl:equivalentClass | — | — |
+| `bf:PlaybackChannels` | **clean** | `bffi:PlaybackChannels` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
+| `bf:PlaybackCharacteristic` | **clean** | `bffi:PlaybackCharacteristic` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
+| `bf:PlayingSpeed` | **clean** | `bffi:PlayingSpeed` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
+| `bf:Polarity` | **clean** | `bffi:Polarity` | owl:equivalentClass | — | — |
+| `bf:PostalRegistration` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/postal-registration>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:PresentationFormat` | **clean** | `bffi:PresentationFormat` | owl:equivalentClass | `bf:ProjectionCharacteristic` | — |
+| `bf:PrimaryContribution` | **clean** | `bffi:PrimaryContribution` | owl:equivalentClass | `bf:Contribution` | — |
+| `bf:Print` | **clean** | `bffi:Print` | owl:equivalentClass | `bf:Instance` | — |
+| `bf:Production` | **clean** | `bffi:Production` | owl:equivalentClass | `bf:ProvisionActivity` | — |
+| `bf:ProductionMethod` | **clean** | `bffi:ProductionMethod` | owl:equivalentClass | — | — |
+| `bf:Projection` | **clean** | `bffi:Projection` | owl:equivalentClass | — | — |
+| `bf:ProjectionCharacteristic` | **clean** | `bffi:ProjectionCharacteristic` | owl:equivalentClass | — | — |
+| `bf:ProjectionSpeed` | **clean** | `bffi:ProjectionSpeed` | owl:equivalentClass | `bf:ProjectionCharacteristic` | — |
+| `bf:ProvisionActivity` | **clean** | `bffi:ProvisionActivity` | owl:equivalentClass | — | — |
+| `bf:PubFrequency` | **clean** | `bffi:PubFrequency` | owl:equivalentClass | — | — |
+| `bf:Publication` | **clean** | `bffi:Publication` | owl:equivalentClass | `bf:ProvisionActivity` | — |
+| `bf:PublisherNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/publisher-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:RecordingMedium` | **clean** | `bffi:RecordingMedium` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
+| `bf:RecordingMethod` | **clean** | `bffi:RecordingMethod` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
+| `bf:ReductionRatio` | **clean** | `bffi:ReductionRatio` | owl:equivalentClass | — | — |
+| `bf:RegionalEncoding` | **clean** | `bffi:RegionalEncoding` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:Relation` | **clean** | `bffi:Relation` | owl:equivalentClass | — | — |
+| `bf:Relationship` | **clean** | `bffi:Relationship` | owl:equivalentClass | — | — |
+| `bf:Relief` | **clean** | `bffi:Relief` | owl:equivalentClass | — | — |
+| `bf:ReportNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/report-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Resolution` | **clean** | `bffi:Resolution` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
+| `bf:RetentionPolicy` | **clean** | `bffi:RetentionPolicy` | owl:equivalentClass | `bf:UsageAndAccessPolicy` | — |
+| `bf:Review` | **GAP** | — | — | — | — |
+| `bf:Role` | **clean** | `bffi:Role` | owl:equivalentClass | — | — |
+| `bf:Scale` | **clean** | `bffi:Scale` | owl:equivalentClass | — | — |
+| `bf:Script` | **clean** | `bffi:Script` | owl:equivalentClass | `bf:Notation` | — |
+| `bf:Serial` | **routed** | `bffi:SerialExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:SerialNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/serial-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Series` | **routed** | `bffi:SeriesExpression` (axis-default) | axis-pick (Expression default) | — | `route_axis_default_classes` |
+| `bf:ShelfMark` | **clean** | `bffi:ShelfMark` | owl:equivalentClass | `bf:Identifier` | — |
+| `bf:ShelfMarkDdc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/shelf-mark-ddc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:ShelfMarkLcc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/shelf-mark-lcc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:ShelfMarkNlm` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/shelf-mark-nlm>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:ShelfMarkUdc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/shelf-mark-udc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Sici` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/sici>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:SoundCharacteristic` | **clean** | `bffi:SoundCharacteristic` | owl:equivalentClass | — | — |
+| `bf:SoundContent` | **clean** | `bffi:SoundContent` | owl:equivalentClass | — | — |
+| `bf:Source` | **clean** | `bffi:Source` | owl:equivalentClass | — | — |
+| `bf:Status` | **clean** | `bffi:Status` | owl:equivalentClass | — | — |
+| `bf:StillImage` | **clean** | `bffi:StillImage` | owl:equivalentClass | `bf:Work` | — |
+| `bf:StockNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/stock-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Strn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/strn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:StudyNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/study-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Sublocation` | **clean** | `bffi:Sublocation` | owl:equivalentClass | — | — |
+| `bf:Summary` | **clean** | `bffi:Summary` | owl:equivalentClass | — | — |
+| `bf:SupplementaryContent` | **clean** | `bffi:SupplementaryContent` | owl:equivalentClass | — | — |
+| `bf:SystemRequirement` | **clean** | `bffi:SystemRequirement` | owl:equivalentClass | — | — |
+| `bf:TableOfContents` | **clean** | `bffi:TableOfContents` | owl:equivalentClass | — | — |
+| `bf:Tactile` | **clean** | `bffi:Tactile` | owl:equivalentClass | `bf:Instance` | — |
+| `bf:TactileNotation` | **clean** | `bffi:TactileNotation` | owl:equivalentClass | `bf:Notation` | — |
+| `bf:TapeConfig` | **clean** | `bffi:TapeConfig` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
+| `bf:Tempo` | **GAP** | — | — | — | — |
+| `bf:Temporal` | **clean** | `bffi:Temporal` | owl:equivalentClass | — | — |
+| `bf:Text` | **clean** | `bffi:Text` | owl:equivalentClass | `bf:Work` | — |
+| `bf:ThematicCatalogNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/thematic-catalog-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Title` | **clean** | `bffi:Title` | owl:equivalentClass | — | — |
+| `bf:Topic` | **clean** | `bffi:Topic` | owl:equivalentClass | — | — |
+| `bf:TrackConfig` | **clean** | `bffi:TrackConfig` | owl:equivalentClass | `bf:SoundCharacteristic` | — |
+| `bf:TransliteratedTitle` | *inherited* | `bffi:Title` | bf:subClassOf → bf:subClassOf → owl:equivalentClass | — | — |
+| `bf:Unit` | **clean** | `bffi:Unit` | owl:equivalentClass | — | — |
+| `bf:Upc` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/upc>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Urn` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/urn>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:UsageAndAccessPolicy` | **clean** | `bffi:UsageAndAccessPolicy` | owl:equivalentClass | — | — |
+| `bf:UsePolicy` | **clean** | `bffi:UsePolicy` | owl:equivalentClass | `bf:UsageAndAccessPolicy` | — |
+| `bf:VariantTitle` | **routed** | `bffi:Title` (anchor; subclass info preserved on `bffi:marcKey`) | discriminator: marcKey | — | `route_title_variants` |
+| `bf:VideoCharacteristic` | **clean** | `bffi:VideoCharacteristic` | owl:equivalentClass | — | — |
+| `bf:VideoFormat` | **clean** | `bffi:VideoFormat` | owl:equivalentClass | `bf:VideoCharacteristic` | — |
+| `bf:VideoRecordingNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/videorecording-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:VideogamePlatformId` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/videogame-platform-id>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
+| `bf:Work` | **clean** | `bffi:BibframeWork` | owl:equivalentClass | — | — |
+
+_224 terms total: 144 clean, 63 routed, 13 GAP, 2 inherited, 2 semantic-shift._
+
+<!-- END AUTO: classes -->
 
 ### Hub routing — `bf:Hub` → `bffi:Expression` vs `bffi:Work`
 
@@ -219,63 +413,242 @@ What's lost:
 
 ## Predicates (sorted alphabetically)
 
-| `bf:` predicate | Status | `bffi:*` replacement(s) | Link kind | Used in |
+The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-tables` from the same three sources as the Classes table above. Do not edit between the markers.
+
+<!-- BEGIN AUTO: predicates -->
+
+| `bf:` predicate | Status | `bffi:*` replacement | Link kind | Handler |
 |---|---|---|---|---|
-| `bf:adminMetadata` | **clean** | `bffi:adminMetadata` | owl:equivalentProperty | manifestation |
-| `bf:agent` | **clean** | `bffi:agent` | rdfs:subPropertyOf | expression, manifestation, work |
-| `bf:assigner` | **clean** | `bffi:assigner` | owl:equivalentProperty | manifestation |
-| `bf:associatedResource` | **clean** | `bffi:associatedResource` | owl:equivalentProperty | aggregation, expression, manifestation, work |
-| `bf:carrier` | **clean** | `bffi:carrier` | rdfs:subPropertyOf | manifestation |
-| `bf:classification` | **clean** | `bffi:classification` | owl:equivalentProperty | work |
-| `bf:classificationPortion` | **clean** | `bffi:classificationPortion` | owl:equivalentProperty | work |
-| `bf:code` | **clean** | `bffi:code` | owl:equivalentProperty | expression, manifestation, work |
-| `bf:colorContent` | **clean** | `bffi:colorContent` | owl:equivalentProperty | manifestation |
-| `bf:content` | **clean** | `bffi:content, bffi:contentOfRepresentativeExpression` | rdfs:subPropertyOf | expression |
-| `bf:contribution` | **clean** | `bffi:contribution` | owl:equivalentProperty | expression, work |
-| `bf:date` | **clean** | `bffi:date, bffi:dateOfRepresentativeExpression` | rdfs:subPropertyOf | manifestation |
-| `bf:descriptionConventions` | **clean** | `bffi:descriptionConventions` | owl:equivalentProperty | manifestation |
-| `bf:descriptionLanguage` | **clean** | `bffi:descriptionLanguage` | owl:equivalentProperty | manifestation |
-| `bf:digitalCharacteristic` | **clean** | `bffi:digitalCharacteristic` | owl:equivalentProperty | manifestation |
-| `bf:dimensions` | **clean** | `bffi:dimensions` | owl:equivalentProperty | manifestation |
-| `bf:editionStatement` | **clean** | `bffi:editionStatement` | owl:equivalentProperty | manifestation |
-| `bf:ensemble` | **routed** | folds into `bffi:musicMedium` → `bffi:MusicMedium` → `bffi:readMarc382` (literal MARC 382 string) — see [Music-medium and music-key routing](#music-medium-and-music-key-routing--bfmediumofperformance--bfmediumcomponent--bfensemble--bfkeymode--collapse-to-literal) below | n/a — BFFI doesn't decompose ensemble structurally | work |
-| `bf:expressionOf` | **clean** | `bffi:expressionOf`<br>`bffi:representativeExpressionOf` | bffi-meta:broadMatch<br>owl:equivalentProperty | expression |
-| `bf:extent` | **clean** | `bffi:extent`<br>`bffi:extentOfRepresentativeExpression` | bffi-meta:closeMatch<br>owl:equivalentProperty | manifestation |
-| `bf:genreForm` | **clean** | `bffi:genreForm` | owl:equivalentProperty | work |
-| `bf:hasSeries` | **routed** | `bffi:relation` → `bffi:Relation` bnode with `bffi:relationship <…/relationship/series>` + `bffi:associatedResource <series>` (Series target typed `bffi:SeriesWork` / `bffi:SeriesExpression`) (see [Series-link routing](#series-link-routing-bfhasseries--bffirelation--bffiserieswork--bffiseriesexpression) below) | n/a — no direct `bffi:hasSeries`; use BFFI's structured-relation pattern | manifestation |
-| `bf:identifiedBy` | **clean** | `bffi:identifiedBy` | owl:equivalentProperty | expression, manifestation, work |
-| `bf:instanceOf` | *semantic-shift* | `bffi:expressionManifested, bffi:workManifested` | bffi-meta:broadMatch | expression, manifestation, work |
-| `bf:intendedAudience` | **clean** | `bffi:intendedAudience`<br>`bffi:intendedAudienceOfRepresentativeExpression` | bffi-meta:closeMatch<br>owl:equivalentProperty | work |
-| `bf:issuance` | *semantic-shift* | `bffi:extensionPlan, bffi:issuance` | bffi-meta:broadMatch | expression, manifestation, work |
-| `bf:keyMode` | **routed** | `bffi:musicKey` (Literal datatype, `owl:equivalentProperty bf:musicKey`) — collapses the predicate-to-Key-block chain into a literal — see [Music-medium and music-key routing](#music-medium-and-music-key-routing--bfmediumofperformance--bfmediumcomponent--bfensemble--bfkeymode--collapse-to-literal) below | n/a — BFFI has no structured-Key predicate | expression, manifestation |
-| `bf:language` | **clean** | `bffi:language`<br>`bffi:languageOfExpression`<br>`bffi:languageOfRepresentativeExpression` | bffi-meta:broadMatch<br>bffi-meta:closeMatch<br>owl:equivalentProperty | expression, manifestation |
-| `bf:mainTitle` | **clean** | `bffi:mainTitle` | owl:equivalentProperty | expression, manifestation, work |
-| `bf:media` | **clean** | `bffi:media` | owl:equivalentProperty | manifestation |
-| `bf:mediumComponent` | **routed** | folds into `bffi:musicMedium` → `bffi:MusicMedium` → `bffi:readMarc382` (literal MARC 382 string) — see [Music-medium and music-key routing](#music-medium-and-music-key-routing--bfmediumofperformance--bfmediumcomponent--bfensemble--bfkeymode--collapse-to-literal) below | n/a — BFFI doesn't decompose medium structurally | work |
-| `bf:mediumOfPerformance` | **routed** | `bffi:musicMedium` (`rdfs:subPropertyOf bf:musicMedium`, range `bffi:MusicMedium`; the English label is literally *"music medium of performance"*) — see [Music-medium and music-key routing](#music-medium-and-music-key-routing--bfmediumofperformance--bfmediumcomponent--bfensemble--bfkeymode--collapse-to-literal) below | predicate-name shift (BFFI side renames to `bffi:musicMedium`) | work |
-| `bf:musicMedium` | **clean** | `bffi:musicMedium, bffi:musicMediumOfRepresentativeExpression`<br>`bffi:mediumOfChoreographicContent, bffi:mediumOfChoreographicContentOfRepresentativeExpression` | bffi-meta:closeMatch<br>rdfs:subPropertyOf | expression, manifestation |
-| `bf:note` | **clean** | `bffi:note` | rdfs:subPropertyOf | expression, manifestation |
-| `bf:originDate` | **clean** | `bffi:originDate`<br>`bffi:timePeriodOfCreation` | bffi-meta:closeMatch<br>owl:equivalentProperty | work |
-| `bf:originPlace` | **clean** | `bffi:originPlace` | owl:equivalentProperty | work |
-| `bf:partName` | **clean** | `bffi:partName` | owl:equivalentProperty | expression, manifestation, work |
-| `bf:partNumber` | **clean** | `bffi:partNumber` | owl:equivalentProperty | expression, manifestation, work |
-| `bf:place` | **clean** | `bffi:place`<br>`bffi:locationOfCollection` | bffi-meta:broadMatch<br>rdfs:subPropertyOf | manifestation |
-| `bf:provisionActivity` | **clean** | `bffi:provisionActivity` | owl:equivalentProperty | manifestation |
-| `bf:publicationStatement` | **clean** | `bffi:publicationStatement` | owl:equivalentProperty | manifestation |
-| `bf:qualifier` | **clean** | `bffi:qualifier` | owl:equivalentProperty | manifestation |
-| `bf:relation` | **clean** | `bffi:relation` | owl:equivalentProperty | aggregation, expression, manifestation, work |
-| `bf:relationship` | **clean** | `bffi:relationship` | owl:equivalentProperty | manifestation |
-| `bf:responsibilityStatement` | **clean** | `bffi:responsibilityStatement` | owl:equivalentProperty | manifestation |
-| `bf:role` | **clean** | `bffi:role` | owl:equivalentProperty | expression, work |
-| `bf:soundCharacteristic` | **clean** | `bffi:soundCharacteristic` | owl:equivalentProperty | manifestation |
-| `bf:source` | **clean** | `bffi:source`<br>`bffi:sourceConsulted` | bffi-meta:broadMatch<br>rdfs:subPropertyOf | expression, manifestation, work |
-| `bf:status` | **clean** | `bffi:status` | owl:equivalentProperty | manifestation |
-| `bf:subject` | **clean** | `bffi:subject` | owl:equivalentProperty | work |
-| `bf:subtitle` | **clean** | `bffi:subtitle` | owl:equivalentProperty | manifestation |
-| `bf:summary` | **clean** | `bffi:summary` | owl:equivalentProperty | expression |
-| `bf:tableOfContents` | **clean** | `bffi:tableOfContents` | owl:equivalentProperty | manifestation |
-| `bf:title` | **clean** | `bffi:title` | owl:equivalentProperty | expression, manifestation, work |
-| `bf:version` | **clean** | `bffi:version` | owl:equivalentProperty | expression, manifestation |
+| `bf:absorbed` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:absorbedBy` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:accompaniedBy` | **routed** | `bffi:relation` → `bffi:Relation` bnode (`bffi:relationship <…/relationship/accompaniedby>`) | structured-relation chain | `route_relation_predicates` |
+| `bf:accompanies` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:acquisitionSource` | **clean** | `bffi:acquisitionSource` | owl:equivalentProperty | — |
+| `bf:acquisitionTerms` | **clean** | `bffi:acquisitionTerms` | owl:equivalentProperty | — |
+| `bf:adminMetadata` | **clean** | `bffi:adminMetadata` | owl:equivalentProperty | — |
+| `bf:adminMetadataFor` | **clean** | `bffi:adminMetadataFor` | owl:equivalentProperty | — |
+| `bf:agent` | *inherited* | `bffi:agent` | rdfs:subPropertyOf | — |
+| `bf:agentOf` | **GAP** | — | — | — |
+| `bf:appliedMaterial` | **clean** | `bffi:appliedMaterial` | owl:equivalentProperty | — |
+| `bf:appliedMaterialOf` | **GAP** | — | — | — |
+| `bf:arrangement` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:arrangementOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:ascensionAndDeclination` | **clean** | `bffi:ascensionAndDeclination` | owl:equivalentProperty | — |
+| `bf:aspectRatio` | *inherited* | `bffi:aspectRatio` | rdfs:subPropertyOf | — |
+| `bf:assigner` | **clean** | `bffi:assigner` | owl:equivalentProperty | — |
+| `bf:associatedResource` | **clean** | `bffi:associatedResource` | owl:equivalentProperty | — |
+| `bf:awards` | **clean** | `bffi:awards` | owl:equivalentProperty | — |
+| `bf:baseMaterial` | **clean** | `bffi:baseMaterial` | owl:equivalentProperty | — |
+| `bf:baseMaterialOf` | **GAP** | — | — | — |
+| `bf:binding` | **clean** | `bffi:binding` | owl:equivalentProperty | — |
+| `bf:bookFormat` | **clean** | `bffi:bookFormat` | owl:equivalentProperty | — |
+| `bf:capture` | *inherited* | `bffi:capture` | rdfs:subPropertyOf | — |
+| `bf:carrier` | *inherited* | `bffi:carrier` | rdfs:subPropertyOf | — |
+| `bf:cartographicAttributes` | **clean** | `bffi:cartographicAttributes` | owl:equivalentProperty | — |
+| `bf:changeDate` | **clean** | `bffi:changeDate` | owl:equivalentProperty | — |
+| `bf:classification` | **clean** | `bffi:classification` | owl:equivalentProperty | — |
+| `bf:classificationPortion` | **clean** | `bffi:classificationPortion` | owl:equivalentProperty | — |
+| `bf:code` | **clean** | `bffi:code` | owl:equivalentProperty | — |
+| `bf:collectionArrangement` | **clean** | `bffi:collectionArrangement` | owl:equivalentProperty | — |
+| `bf:collectionArrangementOf` | **clean** | `bffi:collectionArrangementOf` | owl:equivalentProperty | — |
+| `bf:collectionOrganization` | **clean** | `bffi:collectionOrganization` | owl:equivalentProperty | — |
+| `bf:colorContent` | **clean** | `bffi:colorContent` | owl:equivalentProperty | — |
+| `bf:content` | *inherited* | `bffi:content` | rdfs:subPropertyOf | — |
+| `bf:contentAccessibility` | **clean** | `bffi:contentAccessibility` | owl:equivalentProperty | — |
+| `bf:continuedBy` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:continuedInPartBy` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:continues` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:continuesInPart` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:contribution` | **clean** | `bffi:contribution` | owl:equivalentProperty | — |
+| `bf:contributionOf` | **GAP** | — | — | — |
+| `bf:coordinates` | **clean** | `bffi:coordinates` | owl:equivalentProperty | — |
+| `bf:copyrightDate` | **clean** | `bffi:copyrightDate` | owl:equivalentProperty | — |
+| `bf:copyrightRegistration` | **clean** | `bffi:copyrightRegistration` | owl:equivalentProperty | — |
+| `bf:count` | **clean** | `bffi:count` | owl:equivalentProperty | — |
+| `bf:coverArt` | **clean** | `bffi:coverArt` | owl:equivalentProperty | — |
+| `bf:creationDate` | **clean** | `bffi:creationDate` | owl:equivalentProperty | — |
+| `bf:credits` | *inherited* | `bffi:credits` | rdfs:subPropertyOf | — |
+| `bf:custodialHistory` | **clean** | `bffi:custodialHistory` | owl:equivalentProperty | — |
+| `bf:dataSource` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:date` | *inherited* | `bffi:date` | rdfs:subPropertyOf | — |
+| `bf:degree` | *semantic-shift* | `bffi:degree` | bffi-meta:closeMatch | — |
+| `bf:derivativeOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:derivedFrom` | **clean** | `bffi:derivedFrom` | owl:equivalentProperty | — |
+| `bf:descriptionAuthentication` | **clean** | `bffi:descriptionAuthentication` | owl:equivalentProperty | — |
+| `bf:descriptionConventions` | **clean** | `bffi:descriptionConventions` | owl:equivalentProperty | — |
+| `bf:descriptionLanguage` | **clean** | `bffi:descriptionLanguage` | owl:equivalentProperty | — |
+| `bf:descriptionLevel` | **clean** | `bffi:descriptionLevel` | owl:equivalentProperty | — |
+| `bf:descriptionModifier` | **clean** | `bffi:descriptionModifier` | owl:equivalentProperty | — |
+| `bf:digitalCharacteristic` | **clean** | `bffi:digitalCharacteristic` | owl:equivalentProperty | — |
+| `bf:dimensions` | **clean** | `bffi:dimensions` | owl:equivalentProperty | — |
+| `bf:dissertation` | **clean** | `bffi:dissertation` | owl:equivalentProperty | — |
+| `bf:distributionStatement` | **clean** | `bffi:distributionStatement` | owl:equivalentProperty | — |
+| `bf:dramaticRole` | **GAP** | — | — | — |
+| `bf:duration` | *semantic-shift* | `bffi:durationOfRepresentativeExpression` | bffi-meta:closeMatch | — |
+| `bf:edition` | **clean** | `bffi:edition` | owl:equivalentProperty | — |
+| `bf:editionEnumeration` | **clean** | `bffi:editionEnumeration` | owl:equivalentProperty | — |
+| `bf:editionStatement` | **clean** | `bffi:editionStatement` | owl:equivalentProperty | — |
+| `bf:electronicLocator` | **clean** | `bffi:electronicLocator` | owl:equivalentProperty | — |
+| `bf:emulsion` | **clean** | `bffi:emulsion` | owl:equivalentProperty | — |
+| `bf:ensemble` | **GAP** | — | — | — |
+| `bf:ensembleSize` | **GAP** | — | — | — |
+| `bf:ensembleType` | **GAP** | — | — | — |
+| `bf:enumerationAndChronology` | **clean** | `bffi:enumerationAndChronology` | owl:equivalentProperty | — |
+| `bf:equinox` | **clean** | `bffi:equinox` | owl:equivalentProperty | — |
+| `bf:eventContent` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:eventContentOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:exclusionGRing` | **clean** | `bffi:exclusionGRing` | owl:equivalentProperty | — |
+| `bf:expressionOf` | **clean** | `bffi:expressionOf` | owl:equivalentProperty | — |
+| `bf:extent` | **clean** | `bffi:extent` | owl:equivalentProperty | — |
+| `bf:findingAid` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:findingAidOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:firstIssue` | **clean** | `bffi:firstIssue` | owl:equivalentProperty | — |
+| `bf:fontSize` | **clean** | `bffi:fontSize` | owl:equivalentProperty | — |
+| `bf:frequency` | **clean** | `bffi:frequency` | owl:equivalentProperty | — |
+| `bf:generation` | **clean** | `bffi:generation` | owl:equivalentProperty | — |
+| `bf:generationDate` | **clean** | `bffi:generationDate` | owl:equivalentProperty | — |
+| `bf:generationProcess` | **clean** | `bffi:generationProcess` | owl:equivalentProperty | — |
+| `bf:genreForm` | **clean** | `bffi:genreForm` | owl:equivalentProperty | — |
+| `bf:geographicCoverage` | **clean** | `bffi:geographicCoverage` | owl:equivalentProperty | — |
+| `bf:grantingInstitution` | *semantic-shift* | `bffi:grantingInstitution` | bffi-meta:closeMatch | — |
+| `bf:hasDerivative` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:hasExpression` | *semantic-shift* | `bffi:hasExpression` | bffi-meta:closeMatch | — |
+| `bf:hasInstance` | **routed** | `bffi:manifestationOfWork` (axis-default) | axis-pick (Expression default) | `route_axis_default_predicates` |
+| `bf:hasItem` | **clean** | `bffi:hasItem` | owl:equivalentProperty | — |
+| `bf:hasPart` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:hasReproduction` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:hasSeries` | **routed** | `bffi:relation` → `bffi:Relation` bnode (`bffi:relationship <…/relationship/series>`) | structured-relation chain | `route_series_links` |
+| `bf:hasSubseries` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:heldBy` | **clean** | `bffi:heldBy` | owl:equivalentProperty | — |
+| `bf:hierarchicalLevel` | **clean** | `bffi:hierarchicalLevel` | owl:equivalentProperty | — |
+| `bf:historyOfWork` | **clean** | `bffi:historyOfWork` | owl:equivalentProperty | — |
+| `bf:identifiedBy` | **clean** | `bffi:identifiedBy` | owl:equivalentProperty | — |
+| `bf:identifies` | **clean** | `bffi:identifies` | owl:equivalentProperty | — |
+| `bf:illustrativeContent` | **clean** | `bffi:illustrativeContent` | owl:equivalentProperty | — |
+| `bf:immediateAcquisition` | **clean** | `bffi:immediateAcquisition` | owl:equivalentProperty | — |
+| `bf:index` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:indexOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:instanceOf` | **routed** | `bffi:workManifested` (axis-default) | axis-pick (Expression default) | `route_axis_default_predicates` |
+| `bf:instrument` | **GAP** | — | — | — |
+| `bf:instrumentalType` | **GAP** | — | — | — |
+| `bf:intendedAudience` | **clean** | `bffi:intendedAudience` | owl:equivalentProperty | — |
+| `bf:issuance` | **routed** | `bffi:issuance` (axis-default) | axis-pick (Expression default) | `route_axis_default_predicates` |
+| `bf:itemOf` | **clean** | `bffi:itemOf` | owl:equivalentProperty | — |
+| `bf:itemPortion` | **clean** | `bffi:itemPortion` | owl:equivalentProperty | — |
+| `bf:keyMode` | **GAP** | — | — | — |
+| `bf:language` | **clean** | `bffi:language` | owl:equivalentProperty | — |
+| `bf:lastIssue` | **clean** | `bffi:lastIssue` | owl:equivalentProperty | — |
+| `bf:layout` | **clean** | `bffi:layout` | owl:equivalentProperty | — |
+| `bf:legalDate` | **clean** | `bffi:legalDate` | owl:equivalentProperty | — |
+| `bf:mainTitle` | **clean** | `bffi:mainTitle` | owl:equivalentProperty | — |
+| `bf:manufactureStatement` | **clean** | `bffi:manufactureStatement` | owl:equivalentProperty | — |
+| `bf:material` | **clean** | `bffi:material` | owl:equivalentProperty | — |
+| `bf:materialOf` | **GAP** | — | — | — |
+| `bf:media` | **clean** | `bffi:media` | owl:equivalentProperty | — |
+| `bf:mediumComponent` | **GAP** | — | — | — |
+| `bf:mediumComponentQualifier` | **GAP** | — | — | — |
+| `bf:mediumOfPerformance` | **GAP** | — | — | — |
+| `bf:mergedToForm` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:mergerOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:mode` | **GAP** | — | — | — |
+| `bf:mount` | **clean** | `bffi:mount` | owl:equivalentProperty | — |
+| `bf:musicFormat` | **clean** | `bffi:musicFormat` | owl:equivalentProperty | — |
+| `bf:musicKey` | **clean** | `bffi:musicKey` | owl:equivalentProperty | — |
+| `bf:musicMedium` | *semantic-shift* | `bffi:mediumOfChoreographicContent` | bffi-meta:closeMatch | — |
+| `bf:musicOpusNumber` | **clean** | `bffi:musicOpusNumber` | owl:equivalentProperty | — |
+| `bf:musicSerialNumber` | **clean** | `bffi:musicSerialNumber` | owl:equivalentProperty | — |
+| `bf:musicThematicNumber` | **clean** | `bffi:musicThematicNumber` | owl:equivalentProperty | — |
+| `bf:natureOfContent` | **clean** | `bffi:natureOfContent` | owl:equivalentProperty | — |
+| `bf:notation` | **clean** | `bffi:notation` | owl:equivalentProperty | — |
+| `bf:note` | *inherited* | `bffi:note` | rdfs:subPropertyOf | — |
+| `bf:noteFor` | **GAP** | — | — | — |
+| `bf:noteType` | **GAP** | — | — | — |
+| `bf:numberOfHands` | **GAP** | — | — | — |
+| `bf:originDate` | **clean** | `bffi:originDate` | owl:equivalentProperty | — |
+| `bf:originPlace` | **clean** | `bffi:originPlace` | owl:equivalentProperty | — |
+| `bf:originalVersion` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:originalVersionOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:outerGRing` | **clean** | `bffi:outerGRing` | owl:equivalentProperty | — |
+| `bf:part` | **clean** | `bffi:part` | owl:equivalentProperty | — |
+| `bf:partName` | **clean** | `bffi:partName` | owl:equivalentProperty | — |
+| `bf:partNumber` | **clean** | `bffi:partNumber` | owl:equivalentProperty | — |
+| `bf:partOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:pattern` | **clean** | `bffi:pattern` | owl:equivalentProperty | — |
+| `bf:phonogramDate` | *inherited* | `bffi:date` | bf:subPropertyOf → rdfs:subPropertyOf | — |
+| `bf:physicalLocation` | **clean** | `bffi:physicalLocation` | owl:equivalentProperty | — |
+| `bf:place` | *inherited* | `bffi:place` | rdfs:subPropertyOf | — |
+| `bf:polarity` | **clean** | `bffi:polarity` | owl:equivalentProperty | — |
+| `bf:precededBy` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:preferredCitation` | **clean** | `bffi:preferredCitation` | owl:equivalentProperty | — |
+| `bf:productionMethod` | **clean** | `bffi:productionMethod` | owl:equivalentProperty | — |
+| `bf:productionStatement` | **clean** | `bffi:productionStatement` | owl:equivalentProperty | — |
+| `bf:projection` | *inherited* | `bffi:cartographicProjection` | rdfs:subPropertyOf | — |
+| `bf:projectionCharacteristic` | **clean** | `bffi:projectionCharacteristic` | owl:equivalentProperty | — |
+| `bf:provisionActivity` | **clean** | `bffi:provisionActivity` | owl:equivalentProperty | — |
+| `bf:provisionActivityStatement` | **routed** | `bffi:date` (76X-78X linking-entry hubs) / `bffi:Note` (otherwise) | discriminator: URI fragment | `route_provision_activity_statement` |
+| `bf:pubFrequency` | **clean** | `bffi:pubFrequency` | owl:equivalentProperty | — |
+| `bf:publicationStatement` | **clean** | `bffi:publicationStatement` | owl:equivalentProperty | — |
+| `bf:qualifier` | **clean** | `bffi:qualifier` | owl:equivalentProperty | — |
+| `bf:reductionRatio` | **clean** | `bffi:reductionRatio` | owl:equivalentProperty | — |
+| `bf:referencedBy` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:references` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:relation` | **clean** | `bffi:relation` | owl:equivalentProperty | — |
+| `bf:relationship` | **clean** | `bffi:relationship` | owl:equivalentProperty | — |
+| `bf:relief` | **clean** | `bffi:relief` | owl:equivalentProperty | — |
+| `bf:replacedBy` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:replacementOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:reproductionOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:responsibilityStatement` | **clean** | `bffi:responsibilityStatement` | owl:equivalentProperty | — |
+| `bf:review` | **GAP** | — | — | — |
+| `bf:role` | **clean** | `bffi:role` | owl:equivalentProperty | — |
+| `bf:scale` | **clean** | `bffi:scale` | owl:equivalentProperty | — |
+| `bf:schedulePart` | **clean** | `bffi:schedulePart` | owl:equivalentProperty | — |
+| `bf:separatedFrom` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:seriesEnumeration` | **clean** | `bffi:seriesEnumeration` | owl:equivalentProperty | — |
+| `bf:seriesOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:seriesStatement` | **clean** | `bffi:seriesStatement` | owl:equivalentProperty | — |
+| `bf:shelfMark` | **clean** | `bffi:shelfMark` | owl:equivalentProperty | — |
+| `bf:soundCharacteristic` | **clean** | `bffi:soundCharacteristic` | owl:equivalentProperty | — |
+| `bf:soundContent` | **clean** | `bffi:soundContent` | owl:equivalentProperty | — |
+| `bf:source` | *inherited* | `bffi:source` | rdfs:subPropertyOf | — |
+| `bf:spanEnd` | **clean** | `bffi:spanEnd` | owl:equivalentProperty | — |
+| `bf:splitInto` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:status` | **clean** | `bffi:status` | owl:equivalentProperty | — |
+| `bf:subject` | **clean** | `bffi:subject` | owl:equivalentProperty | — |
+| `bf:subjectOf` | **clean** | `bffi:subjectOf` | owl:equivalentProperty | — |
+| `bf:sublocation` | **clean** | `bffi:sublocation` | owl:equivalentProperty | — |
+| `bf:subseriesEnumeration` | **GAP** | — | — | — |
+| `bf:subseriesOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:subseriesStatement` | **GAP** | — | — | — |
+| `bf:subtitle` | **clean** | `bffi:subtitle` | owl:equivalentProperty | — |
+| `bf:succeededBy` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:summary` | **clean** | `bffi:summary` | owl:equivalentProperty | — |
+| `bf:supplement` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:supplementTo` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:supplementaryContent` | **clean** | `bffi:supplementaryContent` | owl:equivalentProperty | — |
+| `bf:systemRequirement` | **clean** | `bffi:systemRequirement` | owl:equivalentProperty | — |
+| `bf:table` | **clean** | `bffi:table` | owl:equivalentProperty | — |
+| `bf:tableOfContents` | **clean** | `bffi:tableOfContents` | owl:equivalentProperty | — |
+| `bf:tableSeq` | **clean** | `bffi:tableSeq` | owl:equivalentProperty | — |
+| `bf:tempo` | **GAP** | — | — | — |
+| `bf:temporalCoverage` | **clean** | `bffi:temporalCoverage` | owl:equivalentProperty | — |
+| `bf:title` | **clean** | `bffi:title` | owl:equivalentProperty | — |
+| `bf:titleOf` | **clean** | `bffi:titleOf` | owl:equivalentProperty | — |
+| `bf:translation` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:translationOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
+| `bf:unit` | **clean** | `bffi:unit` | owl:equivalentProperty | — |
+| `bf:usageAndAccessPolicy` | *inherited* | `bffi:usageAndAccessPolicy` | rdfs:subPropertyOf | — |
+| `bf:usesMediumOfPerformance` | **GAP** | — | — | — |
+| `bf:validDate` | **clean** | `bffi:validDate` | owl:equivalentProperty | — |
+| `bf:variantType` | **GAP** | — | — | — |
+| `bf:version` | **clean** | `bffi:version` | owl:equivalentProperty | — |
+| `bf:videoCharacteristic` | **clean** | `bffi:videoCharacteristic` | owl:equivalentProperty | — |
+| `bf:voice` | **GAP** | — | — | — |
+| `bf:voiceType` | **GAP** | — | — | — |
+
+_226 terms total: 134 clean, 54 inherited, 27 GAP, 6 routed, 5 semantic-shift._
+
+<!-- END AUTO: predicates -->
 
 ### Series-link routing — `bf:hasSeries` → `bffi:relation` + `bffi:SeriesWork` / `bffi:SeriesExpression`
 
@@ -679,11 +1052,9 @@ Fifty-six BFFI classes are `owl:equivalentClass bf:X` directly with no further B
 
 ## BIBFRAME-declared terms not referenced by `lkd.rdf`
 
-The mapping tables above are generated by walking `lkd.rdf`'s declared relations — so they only enumerate `bf:*` terms BFFI explicitly references. Cross-checking against the vendored `vocab/bibframe.rdf` (BIBFRAME 3.0.1) via `bffi-pipeline diagnose-mappings` surfaces 143 `bf:*` terms BIBFRAME declares that `lkd.rdf` makes no link to in any direction.
+The Classes and Predicates tables above already cover every BIBFRAME-declared `bf:*` term (the `Status` column tags terms with no direct `lkd.rdf` equivalence as `routed`, `inherited`, `semantic-shift`, or `GAP`). The sections below give a narrative view of the patterns: which families reach a `bffi:*` term via the ontology graph (and how), and which clusters remain genuine gaps. Run `bffi-pipeline diagnose-mappings` for an interactive cut.
 
-Run `bffi-pipeline diagnose-mappings` for the live count; the inventory below is the snapshot at commit time, with each term tagged by how the conversion handles it today.
-
-### Reachable via the ontology graph (130 terms — routed automatically)
+### Reachable via the ontology graph (routed automatically)
 
 A bounded BFS over the combined edge set (lkd.rdf's `owl:equivalent*` / `rdfs:subPropertyOf` / `bffi-meta:*Match` + BIBFRAME's own `rdfs:subClassOf` / `subPropertyOf`) reaches a `bffi:*` equivalent within 3 hops. Highlights:
 
@@ -696,7 +1067,7 @@ A bounded BFS over the combined edge set (lkd.rdf's `owl:equivalent*` / `rdfs:su
 
 Depth saturates at 3 — running the diagnostic at higher `--max-hops` doesn't surface anything new.
 
-### Not reachable within any depth — true gaps (42 terms)
+### Not reachable within any depth — true gaps
 
 These cluster into three families:
 
