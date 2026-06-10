@@ -598,8 +598,9 @@ def test_emit_marcxml_emits_710_for_added_corporate_contributor() -> None:
 
 def test_emit_marcxml_emits_730_from_relation_chain() -> None:
     """A bffi:relation chain pointing at a Hub-routed Work whose
-    bffi:marcKey begins with '730' produces a MARC 730 \\$a with the
-    main title. The discriminator is the marcKey tag prefix."""
+    bffi:marcKey begins with '730' produces a MARC 730 datafield with
+    every subfield carried by the marcKey, in order. The discriminator
+    is the marcKey tag prefix."""
     g = _build_minimal_bffi_graph(
         manifestation_uri="http://example.org/b1#Instance",
         bib_id="b1",
@@ -616,18 +617,96 @@ def test_emit_marcxml_emits_730_from_relation_chain() -> None:
     g.add((hub, BFFI.marcKey, Literal("7300 $aAngel /$gChild, Desmond")))
     g.add((rel, BFFI.associatedResource, hub))
 
-    title_block = URIRef("http://example.org/b1#title-hub-730")
-    g.add((title_block, RDF.type, BFFI.Title))
-    g.add((title_block, BFFI.mainTitle, Literal("Angel")))
-    g.add((hub, BFFI.title, title_block))
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df730 = root.find(f"{{{MARC21_NS}}}datafield[@tag='730']")
+    assert df730 is not None
+    assert df730.get("ind1") == "0"
+    assert df730.get("ind2") == " "
+    sf_a = df730.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    sf_g = df730.find(f"{{{MARC21_NS}}}subfield[@code='g']")
+    assert sf_a is not None
+    assert sf_g is not None
+    assert sf_a.text == "Angel /"
+    assert sf_g.text == "Child, Desmond"
+
+
+def test_emit_marcxml_preserves_730_indicators_and_extra_subfields() -> None:
+    """Indicators (especially the nonfiling-character count in ind1) and
+    every subfield in marcKey survive verbatim into the emitted 730 —
+    not just $a. This is the marcKey-driven recovery path: BFFI has no
+    structured predicate for $g/$l/$n/$o/$p, so we parse them from the
+    preserved marcKey literal."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    rel = URIRef("http://example.org/b1#rel-1")
+    g.add((rel, RDF.type, BFFI.Relation))
+    g.add((m, BFFI.relation, rel))
+
+    hub = URIRef("http://example.org/b1#Hub730-1")
+    g.add((hub, RDF.type, BFFI.Work))
+    g.add(
+        (
+            hub,
+            BFFI.marcKey,
+            Literal("7304 $aThe symphony,$nno. 5,$lEnglish$osel.$gop. 67"),
+        )
+    )
+    g.add((rel, BFFI.associatedResource, hub))
 
     marcxml = emit_marcxml(g, manifestation=m)
     root = etree.fromstring(marcxml)
     df730 = root.find(f"{{{MARC21_NS}}}datafield[@tag='730']")
     assert df730 is not None
-    sf_a = df730.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    # ind1=4 → "The " is 4 nonfiling characters in source MARC.
+    assert df730.get("ind1") == "4"
+    assert df730.get("ind2") == " "
+
+    sf_codes = [sf.get("code") for sf in df730.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df730.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "n", "l", "o", "g"]
+    assert sf_values == [
+        "The symphony,",
+        "no. 5,",
+        "English",
+        "sel.",
+        "op. 67",
+    ]
+
+
+def test_emit_marcxml_preserves_740_nonfiling_indicator() -> None:
+    """MARC 740 records with leading articles ("The making of Goldfinger")
+    have ind1 set to the nonfiling-character count. The marcKey-driven
+    parser preserves it; hard-coding ind1="0" would corrupt round-trip."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    rel = URIRef("http://example.org/b1#rel-1")
+    g.add((rel, RDF.type, BFFI.Relation))
+    g.add((m, BFFI.relation, rel))
+
+    work = URIRef("http://example.org/b1#Hub740-1")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((work, BFFI.marcKey, Literal("7404 $aThe making of Goldfinger")))
+    g.add((rel, BFFI.associatedResource, work))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df740 = root.find(f"{{{MARC21_NS}}}datafield[@tag='740']")
+    assert df740 is not None
+    assert df740.get("ind1") == "4"
+    sf_a = df740.find(f"{{{MARC21_NS}}}subfield[@code='a']")
     assert sf_a is not None
-    assert sf_a.text == "Angel"
+    assert sf_a.text == "The making of Goldfinger"
 
 
 def test_emit_marcxml_ignores_relation_targets_without_730_or_740_marckey() -> None:

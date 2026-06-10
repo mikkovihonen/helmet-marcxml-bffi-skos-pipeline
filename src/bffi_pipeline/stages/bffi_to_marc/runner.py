@@ -440,60 +440,120 @@ def _extract_contributors(graph: Graph, manifestation: URIRef) -> list[_Contribu
 
 @dataclass(frozen=True)
 class _AddedTitleEmit:
-    """One MARC 730/740 added-title datafield (tag + heading text)."""
+    """One MARC 730/740 added-title datafield, parsed verbatim from
+    ``bffi:marcKey``: tag, indicators, and the ordered subfield list."""
 
     tag: str
-    title: str
+    ind1: str
+    ind2: str
+    subfields: tuple[tuple[str, str], ...]
+
+
+def _parse_marc_key(key: str) -> tuple[str, str, str, tuple[tuple[str, str], ...]] | None:
+    """Parse a BFLC ``marcKey`` literal.
+
+    Format is ``<tag-3-chars><ind1-1-char><ind2-1-char><subfields>`` where
+    ``<subfields>`` is ``$<code><value>$<code><value>...`` — no separator
+    between the indicators and the first ``$``. Blank indicators render
+    as ASCII space.
+
+    Returns ``(tag, ind1, ind2, subfields)`` or ``None`` if the key is
+    too short or malformed (no leading ``$`` at position 5).
+    """
+    min_len_for_subfields = 6
+    sf_start = 5
+    if len(key) < min_len_for_subfields or key[sf_start] != "$":
+        return None
+    tag = key[:3]
+    ind1 = key[3]
+    ind2 = key[4]
+    subfields: list[tuple[str, str]] = []
+    # key[5:] starts with "$"; split on "$" yields ["", "<code><val>", ...].
+    for part in key[sf_start:].split("$")[1:]:
+        if not part:
+            continue
+        subfields.append((part[0], part[1:]))
+    return tag, ind1, ind2, tuple(subfields)
 
 
 @marc_emit(
     MarcEmitMeta(
         tag="730",
         indicators=("0", " "),
-        subfields=(("a", "uniform title heading"),),
+        subfields=(
+            ("a", "uniform title heading"),
+            ("g", "miscellaneous information"),
+            ("l", "language of a work"),
+            ("n", "number of part / section of a work"),
+            ("o", "arrangement statement for music"),
+            ("p", "name of part / section of a work"),
+        ),
         source=(
             "?m bffi:relation [bffi:associatedResource ?target] . "
             "?target bffi:marcKey ?key (where ?key begins with '730') . "
-            "?target bffi:title / bffi:Title / bffi:mainTitle ?heading"
+            "All subfields and indicators are read verbatim from ?key."
         ),
         notes=(
-            "Added-entry uniform titles. Subfields beyond $a (e.g. $g "
-            "miscellaneous info, $l language, $n part number) are "
-            "preserved on bffi:marcKey but not reconstructed in the "
-            "emit yet."
+            "Indicators and every subfield are reconstructed from "
+            "bffi:marcKey verbatim. The auto-table lists the common "
+            "subfields seen in the corpus ($a $g $l $n $o $p); any "
+            "additional subfield codes carried in bffi:marcKey are "
+            "emitted in the order they appear."
         ),
     ),
     MarcEmitMeta(
         tag="740",
         indicators=("0", " "),
-        subfields=(("a", "added analytical title"),),
+        subfields=(
+            ("a", "added analytical title"),
+            ("n", "number of part / section"),
+            ("p", "name of part / section"),
+        ),
         source=("Same chain as 730 but with bffi:marcKey beginning with '740'"),
+        notes=(
+            "Indicators (including nonfiling-character counts in ind1) "
+            "and every subfield are reconstructed from bffi:marcKey "
+            "verbatim — same shape as 730."
+        ),
     ),
 )
 def _extract_added_titles(graph: Graph, manifestation: URIRef) -> list[_AddedTitleEmit]:
-    """Walk the Manifestation's relation chain and find every related
-    resource whose ``bffi:marcKey`` begins with ``"730"`` or ``"740"``
-    (the source-MARC-tag discriminator preserved by the title-variant
-    routing). For each, extract the title from
-    ``bffi:title / bffi:Title / bffi:mainTitle`` and emit a MARC
-    datafield."""
+    """Walk the ``bffi:relation`` chain on both the Manifestation and
+    its Work, finding every related resource whose ``bffi:marcKey``
+    begins with ``"730"`` or ``"740"``. Parse marcKey verbatim for
+    indicators and subfields — the structural BFFI walk on
+    ``bffi:title / bffi:mainTitle`` would only recover ``$a`` and lose
+    ``$g`` / ``$o`` / ``$l`` / ``$n`` / ``$p``, which BFFI has no
+    structured predicate for.
+
+    The BFFI ontology declares ``bffi:relation`` over a union of
+    {Work, Expression, Manifestation, Item}; marc2bibframe2 attaches
+    the related-work links to the Work in practice, so the walk has
+    to traverse both sides."""
+    anchors: list[URIRef] = [manifestation]
+    work = _find_work_for_manifestation(graph, manifestation)
+    if work is not None:
+        anchors.append(work)
+
     emits: list[_AddedTitleEmit] = []
-    for rel in graph.objects(manifestation, BFFI.relation):
-        for target in graph.objects(rel, BFFI.associatedResource):
-            if not isinstance(target, URIRef):
-                continue
-            marc_key = next(graph.objects(target, BFFI.marcKey), None)
-            if not isinstance(marc_key, Literal):
-                continue
-            tag = str(marc_key)[:3]
-            if tag not in ("730", "740"):
-                continue
-            for title_block in graph.objects(target, BFFI.title):
-                main = next(graph.objects(title_block, BFFI.mainTitle), None)
-                if isinstance(main, Literal):
-                    emits.append(_AddedTitleEmit(tag=tag, title=str(main)))
-                    break
-    return sorted(emits, key=lambda e: (e.tag, e.title))
+    for anchor in anchors:
+        for rel in graph.objects(anchor, BFFI.relation):
+            for target in graph.objects(rel, BFFI.associatedResource):
+                if not isinstance(target, URIRef):
+                    continue
+                marc_key = next(graph.objects(target, BFFI.marcKey), None)
+                if not isinstance(marc_key, Literal):
+                    continue
+                parsed = _parse_marc_key(str(marc_key))
+                if parsed is None:
+                    continue
+                tag, ind1, ind2, subfields = parsed
+                if tag not in ("730", "740"):
+                    continue
+                if not subfields:
+                    continue
+                emits.append(_AddedTitleEmit(tag=tag, ind1=ind1, ind2=ind2, subfields=subfields))
+    return sorted(emits, key=lambda e: (e.tag, e.subfields))
 
 
 @marc_emit(
@@ -548,7 +608,7 @@ class _ClassificationEmit:
             "$2 emitted when bffi:source / bffi:code is present (e.g. 'ykl'); "
             "omitted otherwise. Helmet-local 09X (091/092/094/095/097) "
             "classifications are lost upstream of BFFI (marc2bibframe2 "
-            "drops them) — see the BFFI ontology-limitations registry. "
+            "drops them) — see the Known limitations section below. "
             "Standard 050/080/082 dispatching by source is a follow-on."
         ),
     )
@@ -929,11 +989,18 @@ def _append_classification_datafields(
 def _append_added_title_datafields(
     record: etree._Element, added_titles: list[_AddedTitleEmit]
 ) -> None:
-    """Append 730 / 740 added-title datafields after the 7XX contributor block."""
+    """Append 730 / 740 added-title datafields after the 7XX contributor block.
+
+    Indicators and every subfield are taken verbatim from the parsed
+    ``bffi:marcKey`` — preserves nonfiling-character ind1 plus $a/$g/$l/$n/$o/$p
+    and any other code the source carried."""
     for added in added_titles:
-        df = etree.SubElement(record, f"{_MARC}datafield", tag=added.tag, ind1="0", ind2=" ")
-        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
-        sf_a.text = added.title
+        df = etree.SubElement(
+            record, f"{_MARC}datafield", tag=added.tag, ind1=added.ind1, ind2=added.ind2
+        )
+        for code, value in added.subfields:
+            sf = etree.SubElement(df, f"{_MARC}subfield", code=code)
+            sf.text = value
 
 
 def _build_marc_record(
