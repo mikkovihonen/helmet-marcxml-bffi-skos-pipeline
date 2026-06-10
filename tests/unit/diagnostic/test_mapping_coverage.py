@@ -138,3 +138,23 @@ def test_unreachable_count_in_expected_range() -> None:
     (BFFI added something), a growth means BIBFRAME added a gap."""
     report = analyze_mapping_coverage()
     assert 37 <= len(report.unreachable) <= 47
+
+
+def test_bucket_counts_are_stable_past_depth_3() -> None:
+    """The BFS walk over the combined ontology graph saturates at
+    depth 3: increasing ``max_hops`` past that doesn't move terms
+    between buckets. Confirms the 42 unreachable terms aren't
+    depth-bound artifacts — they're in connected components that
+    don't touch any ``bffi:*`` node at all.
+
+    If a future BIBFRAME / BFFI refresh changes this, the diagnostic
+    output is no longer trustworthy at default depth and the routing
+    logic needs re-examination."""
+    at_3 = analyze_mapping_coverage(max_hops=3)
+    at_5 = analyze_mapping_coverage(max_hops=5)
+    at_10 = analyze_mapping_coverage(max_hops=10)
+    assert (
+        (len(at_3.direct), len(at_3.indirect), len(at_3.unreachable))
+        == (len(at_5.direct), len(at_5.indirect), len(at_5.unreachable))
+        == (len(at_10.direct), len(at_10.indirect), len(at_10.unreachable))
+    )
