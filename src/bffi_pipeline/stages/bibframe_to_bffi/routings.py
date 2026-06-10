@@ -74,6 +74,10 @@ BFLC: Final[Namespace] = Namespace("http://id.loc.gov/ontologies/bflc/")
 #: BFFI emit namespace.
 BFFI: Final[Namespace] = Namespace("http://urn.fi/URN:NBN:fi:schema:bffi:")
 
+#: DC Terms — used by the ``bf:noteType`` routing. Standard vocab,
+#: allowed under the BFFI namespace discipline rule (CLAUDE.md).
+DCT: Final[Namespace] = Namespace("http://purl.org/dc/terms/")
+
 #: LoC identifier-scheme vocabulary stem. Every BIBFRAME ``bf:Identifier``
 #: subclass routes to ``<stem><scheme-token>`` on ``bffi:source``.
 _LOC_IDENTIFIER_SCHEME_STEM: Final[str] = "http://id.loc.gov/vocabulary/identifiers/"
@@ -130,6 +134,21 @@ def loc_scheme_uri(bf_class: URIRef) -> URIRef:
 RELATION_PREDICATE_ROUTINGS: Final[dict[URIRef, URIRef]] = {
     BF.hasSeries: URIRef("http://id.loc.gov/vocabulary/relationship/series"),
     BF.accompaniedBy: URIRef("http://id.loc.gov/vocabulary/relationship/accompaniedby"),
+    BF.review: URIRef("http://id.loc.gov/vocabulary/relationship/review"),
+}
+
+#: Inverse predicates whose forward-direction equivalent exists in BFFI.
+#: ``?subject bf:Xof ?object`` rewrites as ``?object bffi:X ?subject``
+#: (swap subject and object, rename the predicate to the forward form).
+#: All five forward predicates have ``owl:equivalentProperty`` links to
+#: their ``bf:*`` counterparts in lkd.rdf, so the swap lands on a
+#: canonical forward triple.
+INVERSE_PREDICATE_ROUTINGS: Final[dict[URIRef, URIRef]] = {
+    BF.agentOf: BFFI.agent,
+    BF.contributionOf: BFFI.contribution,
+    BF.materialOf: BFFI.material,
+    BF.appliedMaterialOf: BFFI.appliedMaterial,
+    BF.baseMaterialOf: BFFI.baseMaterial,
 }
 
 #: P-56 Phase 3 axis-pick: BIBFRAME classes that BFFI splits into
@@ -163,6 +182,11 @@ AXIS_DEFAULT_CLASSES: Final[dict[URIRef, tuple[URIRef, URIRef]]] = {
     BF.Cartography: (BFFI.CartographyWork, BFFI.CartographyExpression),
     BF.NonMusicAudio: (BFFI.NonMusicAudioWork, BFFI.NonMusicAudioExpression),
     BF.Audio: (BFFI.NonMusicAudioWork, BFFI.NonMusicAudioExpression),
+    # bf:Review has no rdfs:subClassOf in BIBFRAME — it's a top-level
+    # class. Anchor at bffi:BibframeWork (a review IS a Work per
+    # BIBFRAME's definition). Both axis slots collapse since there's
+    # no axis distinction at the anchor level.
+    BF.Review: (BFFI.BibframeWork, BFFI.BibframeWork),
 }
 
 #: ``rdf:type`` assertions that signal a subject is the Work-axis side.
@@ -650,6 +674,89 @@ def route_axis_default_predicates(graph: Graph) -> dict[str, int]:
     return counters
 
 
+# --- inverse-predicate triple-swap --------------------------------------
+
+
+def route_inverse_predicates(graph: Graph) -> int:
+    """Rewrite each ``?s bf:Xof ?o`` triple as ``?o bffi:X ?s``.
+
+    Five BIBFRAME inverse predicates (``bf:agentOf``, ``bf:contributionOf``,
+    ``bf:materialOf``, ``bf:appliedMaterialOf``, ``bf:baseMaterialOf``)
+    have direct forward-direction equivalents in BFFI
+    (``bffi:agent``, ``bffi:contribution``, …, each ``owl:equivalentProperty``
+    to its ``bf:*`` counterpart in lkd.rdf). The clean-rename pass
+    doesn't touch them because ``bf:Xof`` and ``bf:X`` are separate
+    predicates — but the swap-and-rename produces the canonical
+    forward-direction triple BFFI already supports.
+
+    Returns the count of inverse triples rewritten across all five
+    predicates.
+    """
+    rewritten = 0
+    for bf_pred, bffi_forward in INVERSE_PREDICATE_ROUTINGS.items():
+        for s, _, o in list(graph.triples((None, bf_pred, None))):
+            graph.remove((s, bf_pred, o))
+            graph.add((o, bffi_forward, s))
+            rewritten += 1
+    return rewritten
+
+
+# --- note-shape routings ------------------------------------------------
+
+
+def route_note_for(graph: Graph) -> int:
+    """Rewrite ``?note bf:noteFor ?subject`` as ``?subject bffi:note ?note``.
+
+    ``bf:noteFor`` is the BIBFRAME inverse of ``bf:note`` (which has a
+    clean ``owl:equivalentProperty bffi:note`` rename). Swap the
+    direction and route through the forward predicate.
+    """
+    rewritten = 0
+    for s, _, o in list(graph.triples((None, BF.noteFor, None))):
+        graph.remove((s, BF.noteFor, o))
+        graph.add((o, BFFI.note, s))
+        rewritten += 1
+    return rewritten
+
+
+def route_note_type(graph: Graph) -> int:
+    """Rewrite ``?note bf:noteType ?type`` as ``?note dct:type ?type``.
+
+    ``bf:noteType`` carries a Literal categorisation of a Note (e.g.
+    "Summary", "Biography"). lkd.rdf has no ``bffi:noteType`` and no
+    way to type a Note bnode with a literal-flavoured category. DC
+    Terms' ``dct:type`` is the standard predicate for resource
+    categorisation and is allowed under the BFFI namespace discipline
+    rule (CLAUDE.md: "Reuse an existing standard term").
+    """
+    rewritten = 0
+    for s, _, o in list(graph.triples((None, BF.noteType, None))):
+        graph.remove((s, BF.noteType, o))
+        graph.add((s, DCT.type, o))
+        rewritten += 1
+    return rewritten
+
+
+# --- bf:variantType drop (redundant with marcKey discriminator) ---------
+
+
+def drop_variant_type(graph: Graph) -> int:
+    """Drop every ``?title bf:variantType ?type`` triple.
+
+    The title-variant routing's ``bffi:marcKey`` discriminator already
+    encodes the variant type via the first-3-char MARC tag
+    (``246`` parallel title, ``740`` analytical-added title, etc.).
+    The standalone ``bf:variantType`` predicate is redundant — its
+    information is recoverable from the marcKey on the same Title
+    subject. Drop to avoid the closed-namespace residue.
+    """
+    dropped = 0
+    for s, _, o in list(graph.triples((None, BF.variantType, None))):
+        graph.remove((s, BF.variantType, o))
+        dropped += 1
+    return dropped
+
+
 # --- top-level entry point ----------------------------------------------
 
 
@@ -671,6 +778,10 @@ def apply_all_routings(graph: Graph) -> dict[str, int]:
         "series_link": route_series_links(graph),
         "relation_predicate": route_relation_predicates(graph),
         "hub": route_hubs(graph),
+        "inverse_predicate": route_inverse_predicates(graph),
+        "note_for": route_note_for(graph),
+        "note_type": route_note_type(graph),
+        "variant_type_dropped": drop_variant_type(graph),
     }
     # The remaining three routings each split their counters into
     # per-discriminator buckets so the observability summary surfaces

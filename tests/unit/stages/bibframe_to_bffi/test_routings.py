@@ -10,6 +10,8 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     BF,
     BFFI,
     BFLC,
+    DCT,
+    INVERSE_PREDICATE_ROUTINGS,
     RELATION_PREDICATE_ROUTINGS,
     SERIES_RELATIONSHIP,
     TITLE_VARIANT_CLASSES,
@@ -17,12 +19,16 @@ from bffi_pipeline.stages.bibframe_to_bffi.routings import (
     _identifier_scheme_token,
     apply_all_routings,
     drop_undeclared_bf_terms,
+    drop_variant_type,
     loc_scheme_uri,
     rename_bflc_marckey,
     route_axis_default_classes,
     route_axis_default_predicates,
     route_hubs,
     route_identifier_schemes,
+    route_inverse_predicates,
+    route_note_for,
+    route_note_type,
     route_provision_activity_statement,
     route_relation_predicates,
     route_series_links,
@@ -260,6 +266,10 @@ def test_apply_all_routings_returns_per_routing_counts() -> None:
         "series_link": 1,
         "relation_predicate": 0,
         "hub": 1,
+        "inverse_predicate": 0,
+        "note_for": 0,
+        "note_type": 0,
+        "variant_type_dropped": 0,
         "axis_default_class_work": 0,
         "axis_default_class_expression": 1,  # bf:Audio → NonMusicAudioExpression
         "instance_of_work": 0,
@@ -657,3 +667,133 @@ def test_route_axis_default_predicates_counter_dict_shape() -> None:
         "has_instance_of_expression": 0,
         "issuance": 0,
     }
+
+
+# --- inverse-predicate triple-swap --------------------------------------
+
+
+def test_route_inverse_predicates_swaps_subject_and_object() -> None:
+    """``?s bf:agentOf ?o`` rewrites as ``?o bffi:agent ?s`` — the
+    triple direction flips, the predicate switches to the forward
+    form. Same shape for the four other inverse predicates."""
+    g = Graph()
+    agent = URIRef("http://example.org/agent")
+    contrib = URIRef("http://example.org/contribution")
+    g.add((agent, BF.agentOf, contrib))
+
+    rewritten = route_inverse_predicates(g)
+    assert rewritten == 1
+    # Original direction gone; canonical forward direction present.
+    assert (agent, BF.agentOf, contrib) not in g
+    assert (contrib, BFFI.agent, agent) in g
+
+
+def test_route_inverse_predicates_covers_all_five_pairs() -> None:
+    """Smoke-test the entire INVERSE_PREDICATE_ROUTINGS registry —
+    each (bf:Xof → bffi:X) pair fires once on a representative triple."""
+    g = Graph()
+    for i, bf_pred in enumerate(INVERSE_PREDICATE_ROUTINGS):
+        s = URIRef(f"http://example.org/s-{i}")
+        o = URIRef(f"http://example.org/o-{i}")
+        g.add((s, bf_pred, o))
+
+    rewritten = route_inverse_predicates(g)
+    assert rewritten == len(INVERSE_PREDICATE_ROUTINGS)
+    for i, (bf_pred, bffi_forward) in enumerate(INVERSE_PREDICATE_ROUTINGS.items()):
+        s = URIRef(f"http://example.org/s-{i}")
+        o = URIRef(f"http://example.org/o-{i}")
+        assert (o, bffi_forward, s) in g
+        assert (s, bf_pred, o) not in g
+
+
+# --- note-shape routings ------------------------------------------------
+
+
+def test_route_note_for_swaps_to_forward_bffi_note() -> None:
+    """``?note bf:noteFor ?subject`` becomes ``?subject bffi:note ?note`` —
+    same swap pattern as the inverse predicates, but bf:noteFor isn't
+    in the INVERSE_PREDICATE_ROUTINGS registry (it has its own routing
+    because its semantic — *anchoring a Note to its subject* — is
+    note-specific rather than a generic inverse-relation pattern)."""
+    g = Graph()
+    note = URIRef("http://example.org/note")
+    subject = URIRef("http://example.org/subject")
+    g.add((note, BF.noteFor, subject))
+
+    rewritten = route_note_for(g)
+    assert rewritten == 1
+    assert (subject, BFFI.note, note) in g
+    assert (note, BF.noteFor, subject) not in g
+
+
+def test_route_note_type_renames_to_dct_type() -> None:
+    """``?note bf:noteType "Summary"`` becomes ``?note dct:type "Summary"`` —
+    DC Terms' standard categorisation predicate stands in for the
+    missing ``bffi:noteType`` (allowed by BFFI namespace discipline:
+    reuse a standard term)."""
+    g = Graph()
+    note = URIRef("http://example.org/note")
+    g.add((note, BF.noteType, Literal("Summary")))
+
+    rewritten = route_note_type(g)
+    assert rewritten == 1
+    assert (note, DCT.type, Literal("Summary")) in g
+    assert (note, BF.noteType, Literal("Summary")) not in g
+
+
+# --- bf:Review (class) + bf:review (predicate) -------------------------
+
+
+def test_route_review_class_via_axis_default_anchored_at_bibframework() -> None:
+    """``bf:Review`` has no parent in BIBFRAME — both AXIS_DEFAULT_CLASSES
+    slots collapse to ``bffi:BibframeWork`` so the routing picks that
+    anchor regardless of co-type signal."""
+    g = Graph()
+    review = URIRef("http://example.org/review-work")
+    g.add((review, RDF.type, BF.Review))
+
+    route_axis_default_classes(g)
+    assert (review, RDF.type, BFFI.BibframeWork) in g
+    assert (review, RDF.type, BF.Review) not in g
+
+
+def test_route_review_predicate_via_relation_chain() -> None:
+    """``?w bf:review ?r`` rewrites to the structured ``bffi:relation`` chain
+    with ``…/relationship/review`` (parallel to bf:accompaniedBy)."""
+    g = Graph()
+    work = URIRef("http://example.org/work")
+    target = URIRef("http://example.org/reviewed")
+    g.add((work, BF.review, target))
+
+    rewritten = route_relation_predicates(g)
+    assert rewritten == 1
+    rel_objs = list(g.objects(work, BFFI.relation))
+    assert len(rel_objs) == 1
+    rel = rel_objs[0]
+    assert (rel, RDF.type, BFFI.Relation) in g
+    assert (
+        rel,
+        BFFI.relationship,
+        URIRef("http://id.loc.gov/vocabulary/relationship/review"),
+    ) in g
+    assert (rel, BFFI.associatedResource, target) in g
+
+
+# --- bf:variantType drop -----------------------------------------------
+
+
+def test_drop_variant_type_removes_redundant_triple() -> None:
+    """``bf:variantType`` info is already encoded in the marcKey first-3-
+    char MARC tag (246 parallel / 740 added-entry / etc.). The predicate
+    is redundant signal; drop it so it doesn't pollute the closed-namespace
+    emit graph."""
+    g = Graph()
+    title = URIRef("http://example.org/title")
+    g.add((title, BF.variantType, Literal("parallel")))
+    # An unrelated triple should survive.
+    g.add((title, BFFI.marcKey, Literal("24631$aParallel form")))
+
+    dropped = drop_variant_type(g)
+    assert dropped == 1
+    assert (title, BF.variantType, Literal("parallel")) not in g
+    assert (title, BFFI.marcKey, Literal("24631$aParallel form")) in g

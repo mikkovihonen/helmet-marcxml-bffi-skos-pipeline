@@ -215,7 +215,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:ReportNumber` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/report-number>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Resolution` | **clean** | `bffi:Resolution` | owl:equivalentClass | `bf:DigitalCharacteristic` | — |
 | `bf:RetentionPolicy` | **clean** | `bffi:RetentionPolicy` | owl:equivalentClass | `bf:UsageAndAccessPolicy` | — |
-| `bf:Review` | **GAP** | — | — | — | — |
+| `bf:Review` | **routed** | `bffi:BibframeWork` (anchored — no axis split) | anchor downgrade (no Work/Expression alternative) | — | `route_axis_default_classes` |
 | `bf:Role` | **clean** | `bffi:Role` | owl:equivalentClass | — | — |
 | `bf:Scale` | **clean** | `bffi:Scale` | owl:equivalentClass | — | — |
 | `bf:Script` | **clean** | `bffi:Script` | owl:equivalentClass | `bf:Notation` | — |
@@ -264,7 +264,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:VideogamePlatformId` | **routed** | `bffi:Identifier` + `bffi:source <…/identifiers/videogame-platform-id>` | discriminator: BIBFRAME subclass → LoC scheme URI | — | `route_identifier_schemes` |
 | `bf:Work` | **clean** | `bffi:BibframeWork` | owl:equivalentClass | — | — |
 
-_224 terms total: 144 clean, 63 routed, 13 GAP, 2 inherited, 2 semantic-shift._
+_224 terms total: 144 clean, 64 routed, 12 GAP, 2 inherited, 2 semantic-shift._
 
 <!-- END AUTO: classes -->
 
@@ -428,9 +428,9 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:adminMetadata` | **clean** | `bffi:adminMetadata` | owl:equivalentProperty | — |
 | `bf:adminMetadataFor` | **clean** | `bffi:adminMetadataFor` | owl:equivalentProperty | — |
 | `bf:agent` | *inherited* | `bffi:agent` | rdfs:subPropertyOf | — |
-| `bf:agentOf` | **GAP** | — | — | — |
+| `bf:agentOf` | **routed** | `bffi:agent` (triple-swap: ?s → ?o) | inverse-direction swap | `route_inverse_predicates` |
 | `bf:appliedMaterial` | **clean** | `bffi:appliedMaterial` | owl:equivalentProperty | — |
-| `bf:appliedMaterialOf` | **GAP** | — | — | — |
+| `bf:appliedMaterialOf` | **routed** | `bffi:appliedMaterial` (triple-swap: ?s → ?o) | inverse-direction swap | `route_inverse_predicates` |
 | `bf:arrangement` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:arrangementOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:ascensionAndDeclination` | **clean** | `bffi:ascensionAndDeclination` | owl:equivalentProperty | — |
@@ -439,7 +439,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:associatedResource` | **clean** | `bffi:associatedResource` | owl:equivalentProperty | — |
 | `bf:awards` | **clean** | `bffi:awards` | owl:equivalentProperty | — |
 | `bf:baseMaterial` | **clean** | `bffi:baseMaterial` | owl:equivalentProperty | — |
-| `bf:baseMaterialOf` | **GAP** | — | — | — |
+| `bf:baseMaterialOf` | **routed** | `bffi:baseMaterial` (triple-swap: ?s → ?o) | inverse-direction swap | `route_inverse_predicates` |
 | `bf:binding` | **clean** | `bffi:binding` | owl:equivalentProperty | — |
 | `bf:bookFormat` | **clean** | `bffi:bookFormat` | owl:equivalentProperty | — |
 | `bf:capture` | *inherited* | `bffi:capture` | rdfs:subPropertyOf | — |
@@ -460,7 +460,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:continues` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:continuesInPart` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:contribution` | **clean** | `bffi:contribution` | owl:equivalentProperty | — |
-| `bf:contributionOf` | **GAP** | — | — | — |
+| `bf:contributionOf` | **routed** | `bffi:contribution` (triple-swap: ?s → ?o) | inverse-direction swap | `route_inverse_predicates` |
 | `bf:coordinates` | **clean** | `bffi:coordinates` | owl:equivalentProperty | — |
 | `bf:copyrightDate` | **clean** | `bffi:copyrightDate` | owl:equivalentProperty | — |
 | `bf:copyrightRegistration` | **clean** | `bffi:copyrightRegistration` | owl:equivalentProperty | — |
@@ -543,7 +543,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:mainTitle` | **clean** | `bffi:mainTitle` | owl:equivalentProperty | — |
 | `bf:manufactureStatement` | **clean** | `bffi:manufactureStatement` | owl:equivalentProperty | — |
 | `bf:material` | **clean** | `bffi:material` | owl:equivalentProperty | — |
-| `bf:materialOf` | **GAP** | — | — | — |
+| `bf:materialOf` | **routed** | `bffi:material` (triple-swap: ?s → ?o) | inverse-direction swap | `route_inverse_predicates` |
 | `bf:media` | **clean** | `bffi:media` | owl:equivalentProperty | — |
 | `bf:mediumComponent` | **GAP** | — | — | — |
 | `bf:mediumComponentQualifier` | **GAP** | — | — | — |
@@ -561,8 +561,8 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:natureOfContent` | **clean** | `bffi:natureOfContent` | owl:equivalentProperty | — |
 | `bf:notation` | **clean** | `bffi:notation` | owl:equivalentProperty | — |
 | `bf:note` | *inherited* | `bffi:note` | rdfs:subPropertyOf | — |
-| `bf:noteFor` | **GAP** | — | — | — |
-| `bf:noteType` | **GAP** | — | — | — |
+| `bf:noteFor` | **routed** | `bffi:note` (triple-swap: ?note bf:noteFor ?subj → ?subj bffi:note ?note) | inverse-direction swap | `route_note_for` |
+| `bf:noteType` | **routed** | `dct:type` (DC Terms standard-vocab substitute) | standard-vocab substitute | `route_note_type` |
 | `bf:numberOfHands` | **GAP** | — | — | — |
 | `bf:originDate` | **clean** | `bffi:originDate` | owl:equivalentProperty | — |
 | `bf:originPlace` | **clean** | `bffi:originPlace` | owl:equivalentProperty | — |
@@ -599,7 +599,7 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:replacementOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:reproductionOf` | *inherited* | `bffi:relatedTo` | bf:subPropertyOf → bf:subPropertyOf → owl:equivalentProperty | — |
 | `bf:responsibilityStatement` | **clean** | `bffi:responsibilityStatement` | owl:equivalentProperty | — |
-| `bf:review` | **GAP** | — | — | — |
+| `bf:review` | **routed** | `bffi:relation` → `bffi:Relation` bnode (`bffi:relationship <…/relationship/review>`) | structured-relation chain | `route_relation_predicates` |
 | `bf:role` | **clean** | `bffi:role` | owl:equivalentProperty | — |
 | `bf:scale` | **clean** | `bffi:scale` | owl:equivalentProperty | — |
 | `bf:schedulePart` | **clean** | `bffi:schedulePart` | owl:equivalentProperty | — |
@@ -640,13 +640,13 @@ The table below is **auto-generated** by `bffi-pipeline regenerate-mapping-table
 | `bf:usageAndAccessPolicy` | *inherited* | `bffi:usageAndAccessPolicy` | rdfs:subPropertyOf | — |
 | `bf:usesMediumOfPerformance` | **GAP** | — | — | — |
 | `bf:validDate` | **clean** | `bffi:validDate` | owl:equivalentProperty | — |
-| `bf:variantType` | **GAP** | — | — | — |
+| `bf:variantType` | **routed** | *(dropped)* — redundant with the title-variant `bffi:marcKey` discriminator | drop (redundant signal) | `drop_variant_type` |
 | `bf:version` | **clean** | `bffi:version` | owl:equivalentProperty | — |
 | `bf:videoCharacteristic` | **clean** | `bffi:videoCharacteristic` | owl:equivalentProperty | — |
 | `bf:voice` | **GAP** | — | — | — |
 | `bf:voiceType` | **GAP** | — | — | — |
 
-_226 terms total: 134 clean, 54 inherited, 27 GAP, 6 routed, 5 semantic-shift._
+_226 terms total: 134 clean, 54 inherited, 18 GAP, 15 routed, 5 semantic-shift._
 
 <!-- END AUTO: predicates -->
 
@@ -794,14 +794,43 @@ Two observability counters split the destination (`provision_statement_to_date` 
 
 ## Catch-all relation predicates via `bffi:relation`
 
-Two BIBFRAME predicates have no direct `bffi:*` counterpart but route naturally through the structured `bffi:relation → bffi:Relation` chain documented in Series-link routing above — with a different LoC `vocabulary/relationship/<term>` URI on the Relation bnode:
+BIBFRAME predicates with no direct `bffi:*` counterpart but a natural fit for the structured `bffi:relation → bffi:Relation` chain documented in Series-link routing above — same shape, different LoC `vocabulary/relationship/<term>` URI on the Relation bnode:
 
 | `bf:*` predicate | LoC relationship URI |
 |---|---|
 | `bf:hasSeries` | `<http://id.loc.gov/vocabulary/relationship/series>` |
 | `bf:accompaniedBy` | `<http://id.loc.gov/vocabulary/relationship/accompaniedby>` |
+| `bf:review` | `<http://id.loc.gov/vocabulary/relationship/review>` |
 
-`bf:hasSeries` has its own dedicated routing function (separate counter for observability visibility); other relation predicates extend the catch-all map.
+`bf:hasSeries` has its own dedicated routing function (separate counter for observability visibility); the others extend the catch-all map.
+
+## Inverse-direction triple-swap routings
+
+Five BIBFRAME inverse predicates have forward-direction `bffi:*` equivalents already declared in `lkd.rdf` (with `owl:equivalentProperty` to their `bf:*` counterparts). The routing flips each triple's direction and renames the predicate to the forward form:
+
+| Inverse `bf:*` | Forward `bffi:*` | Source triple | Routed triple |
+|---|---|---|---|
+| `bf:agentOf` | `bffi:agent` | `?agent bf:agentOf ?contribution` | `?contribution bffi:agent ?agent` |
+| `bf:contributionOf` | `bffi:contribution` | `?contrib bf:contributionOf ?work` | `?work bffi:contribution ?contrib` |
+| `bf:materialOf` | `bffi:material` | `?material bf:materialOf ?manifestation` | `?manifestation bffi:material ?material` |
+| `bf:appliedMaterialOf` | `bffi:appliedMaterial` | `?material bf:appliedMaterialOf ?m` | `?m bffi:appliedMaterial ?material` |
+| `bf:baseMaterialOf` | `bffi:baseMaterial` | `?material bf:baseMaterialOf ?m` | `?m bffi:baseMaterial ?material` |
+
+Zero corpus prevalence in the 20 k bench — these are insurance routings against future records that might use the inverse direction. `bf:noteFor` follows the same pattern with its own dedicated routing (kept separate because its semantic — anchoring a Note to its subject — is note-specific rather than a generic inverse-relation pattern):
+
+- `?note bf:noteFor ?subject` → `?subject bffi:note ?note`
+
+## Standard-vocab substitutes — DC Terms
+
+When `lkd.rdf` has no equivalent and minting a `bffi:*` term isn't an option (the BFFI namespace is closed), the BFFI namespace-discipline rule (CLAUDE.md) says to reuse a standard term. One case ships today:
+
+- `?note bf:noteType "Summary"` → `?note dct:type "Summary"`
+
+`bf:noteType` is a `DatatypeProperty` with `rdfs:Literal` range; `dct:type` is the DC Terms standard predicate for resource categorisation and accepts both literal and URI values. No `bffi:*` term needed.
+
+## Redundant-signal drops
+
+`bf:variantType` (`?title bf:variantType "parallel"`) is removed entirely. The title-variant routing's `bffi:marcKey` discriminator already encodes the variant type via the first-3-char MARC tag (`246` parallel, `740` analytical added, etc.), so the predicate is redundant. Dropping it avoids the closed-namespace residue without information loss.
 
 ## Defensive guard — undeclared `bf:*` terms are dropped
 

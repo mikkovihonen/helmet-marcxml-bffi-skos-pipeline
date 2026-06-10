@@ -120,13 +120,19 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
     )
 
     for bf_cls, (work_pick, expr_pick) in _r.AXIS_DEFAULT_CLASSES.items():
-        registry[bf_cls] = _Routing(
-            handler="route_axis_default_classes",
-            replacement=(
+        if work_pick == expr_pick:
+            replacement = f"`bffi:{local_name(work_pick)}` (anchored — no axis split)"
+            link_kind = "anchor downgrade (no Work/Expression alternative)"
+        else:
+            replacement = (
                 f"`bffi:{local_name(work_pick)}` (Work-axis) / "
                 f"`bffi:{local_name(expr_pick)}` (Expression-axis)"
-            ),
-            link_kind="discriminator: subject's Work-axis co-type signal",
+            )
+            link_kind = "discriminator: subject's Work-axis co-type signal"
+        registry[bf_cls] = _Routing(
+            handler="route_axis_default_classes",
+            replacement=replacement,
+            link_kind=link_kind,
         )
 
     registry[_r.BF.hasSeries] = _Routing(
@@ -170,6 +176,31 @@ def _build_routing_registry() -> dict[URIRef, _Routing]:
         handler="route_provision_activity_statement",
         replacement=("`bffi:date` (76X-78X linking-entry hubs) / `bffi:Note` (otherwise)"),
         link_kind="discriminator: URI fragment",
+    )
+
+    for bf_pred, bffi_forward in _r.INVERSE_PREDICATE_ROUTINGS.items():
+        registry[bf_pred] = _Routing(
+            handler="route_inverse_predicates",
+            replacement=f"`bffi:{local_name(bffi_forward)}` (triple-swap: ?s → ?o)",
+            link_kind="inverse-direction swap",
+        )
+
+    registry[_r.BF.noteFor] = _Routing(
+        handler="route_note_for",
+        replacement="`bffi:note` (triple-swap: ?note bf:noteFor ?subj → ?subj bffi:note ?note)",
+        link_kind="inverse-direction swap",
+    )
+
+    registry[_r.BF.noteType] = _Routing(
+        handler="route_note_type",
+        replacement="`dct:type` (DC Terms standard-vocab substitute)",
+        link_kind="standard-vocab substitute",
+    )
+
+    registry[_r.BF.variantType] = _Routing(
+        handler="drop_variant_type",
+        replacement="*(dropped)* — redundant with the title-variant `bffi:marcKey` discriminator",
+        link_kind="drop (redundant signal)",
     )
 
     return registry
