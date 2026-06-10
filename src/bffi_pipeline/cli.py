@@ -19,7 +19,17 @@ them.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Annotated
+
 import typer
+
+from bffi_pipeline.config import get_settings
+from bffi_pipeline.stages.marc_to_bibframe.runner import (
+    ConversionOptions,
+    convert_corpus,
+)
+from bffi_pipeline.stages.marc_to_bibframe.xslt import XsltPaths
 
 app = typer.Typer(
     name="bffi-pipeline",
@@ -42,14 +52,77 @@ def export_command() -> None:
 
 
 @app.command("marc-to-bibframe")
-def marc_to_bibframe_command() -> None:
+def marc_to_bibframe_command(
+    input_dir: Annotated[
+        Path,
+        typer.Option(
+            "--input-dir",
+            help="Directory of per-record MARCXML files (`*.xml`).",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Where to write per-record BIBFRAME RDF/XML (`<stem>.bibframe.xml`).",
+        ),
+    ],
+    baseuri: Annotated[
+        str,
+        typer.Option(
+            "--baseuri",
+            help="URI stem the marc2bibframe2 XSLT uses for minted entities.",
+        ),
+    ] = "http://urn.fi/URN:NBN:fi:bib:",
+    idsource: Annotated[
+        str | None,
+        typer.Option(
+            "--idsource",
+            help="Optional source URI for the Local identifier minted from the ID field.",
+        ),
+    ] = None,
+    no_preprocess: Annotated[
+        bool,
+        typer.Option(
+            "--no-preprocess",
+            help="Skip the LoC preprocessing splitter step (defaults to on).",
+        ),
+    ] = False,
+    timeout: Annotated[
+        float,
+        typer.Option("--timeout", help="Per-record xsltproc timeout in seconds."),
+    ] = 60.0,
+) -> None:
     """MARCXML → BIBFRAME via the LoC marc2bibframe2 XSLT.
 
-    Reads MARCXML records from the configured input directory and runs them
-    through the marc2bibframe2 XSLT (vendored in `third_party/`), emitting
-    BIBFRAME RDF/XML per record.
+    Reads ``input_dir/*.xml`` MARCXML records, runs each through the
+    vendored marc2bibframe2 XSLT (optional preprocess + main convert),
+    and writes ``output_dir/<stem>.bibframe.xml`` per record. Failures
+    are logged via the observability sidecar and counted in the summary;
+    the run continues past per-record failures.
     """
-    raise NotImplementedError("marc-to-bibframe stage scaffolded; not yet implemented")
+    settings = get_settings()
+    options = ConversionOptions(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        xslt_paths=XsltPaths.from_repo_root(settings.repo_root),
+        baseuri=baseuri,
+        idsource=idsource,
+        preprocess=not no_preprocess,
+        timeout_per_record=timeout,
+    )
+    summary = convert_corpus(options=options)
+    typer.echo(
+        f"marc-to-bibframe: total={summary.total} "
+        f"converted={summary.converted} failed={summary.failed}",
+        err=True,
+    )
+    if summary.failed > 0:
+        raise typer.Exit(code=1)
 
 
 @app.command("bibframe-to-bffi")
