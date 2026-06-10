@@ -566,6 +566,88 @@ def test_emit_marcxml_emits_100_for_primary_personal_contributor() -> None:
     assert df100.find(f"{{{MARC21_NS}}}subfield[@code='4']").text == "aut"  # type: ignore[union-attr]
 
 
+def test_emit_marcxml_emits_700_with_relator_term_in_subfield_e() -> None:
+    """When ``bffi:role`` is a bnode with ``rdfs:label``, the cataloguer's
+    free-text relator term (e.g. Finnish ``"näyttelijä"``) emits as MARC
+    ``$e``. This is the high-volume Helmet shape: most 700 contributors
+    carry ``$e`` from the source but no ``$4`` URI."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+
+    contrib = URIRef("http://example.org/b1#contrib-1")
+    g.add((contrib, RDF.type, BFFI.Contribution))
+    g.add((work, BFFI.contribution, contrib))
+    agent = URIRef("http://example.org/b1#agent-1")
+    g.add((agent, RDF.type, BFFI.Person))
+    g.add((agent, RDFS.label, Literal("Connery, Sean,")))
+    g.add((contrib, BFFI.agent, agent))
+    role = URIRef("http://example.org/b1#role-1")
+    g.add((role, RDF.type, BFFI.Role))
+    g.add((role, RDFS.label, Literal("näyttelijä")))
+    g.add((contrib, BFFI.role, role))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df700 = root.find(f"{{{MARC21_NS}}}datafield[@tag='700']")
+    assert df700 is not None
+    sf_a = df700.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+    sf_e = df700.find(f"{{{MARC21_NS}}}subfield[@code='e']")
+    assert sf_a is not None
+    assert sf_e is not None
+    assert sf_a.text == "Connery, Sean,"
+    assert sf_e.text == "näyttelijä"
+    # No $4 (no LoC relator URI in this shape).
+    assert df700.find(f"{{{MARC21_NS}}}subfield[@code='4']") is None
+    # Order: $a then $e (MARC X00 subfield convention).
+    sf_codes = [sf.get("code") for sf in df700.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "e"]
+
+
+def test_emit_marcxml_emits_700_with_both_e_and_4_when_both_signals_present() -> None:
+    """A contribution carrying both a bnode-with-label role AND a LoC
+    relator URI on ``bffi:role`` emits ``$a $e $4`` in MARC order — the
+    free-text term and the relator code coexist when source MARC had
+    both ``$e`` and ``$4``."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+
+    contrib = URIRef("http://example.org/b1#contrib-1")
+    g.add((contrib, RDF.type, BFFI.Contribution))
+    g.add((work, BFFI.contribution, contrib))
+    agent = URIRef("http://example.org/b1#agent-1")
+    g.add((agent, RDF.type, BFFI.Person))
+    g.add((agent, RDFS.label, Literal("Hamilton, Guy,")))
+    g.add((contrib, BFFI.agent, agent))
+    role_bnode = URIRef("http://example.org/b1#role-1")
+    g.add((role_bnode, RDF.type, BFFI.Role))
+    g.add((role_bnode, RDFS.label, Literal("ohjaaja")))
+    g.add((contrib, BFFI.role, role_bnode))
+    g.add((contrib, BFFI.role, URIRef("http://id.loc.gov/vocabulary/relators/drt")))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df700 = root.find(f"{{{MARC21_NS}}}datafield[@tag='700']")
+    assert df700 is not None
+    sf_codes = [sf.get("code") for sf in df700.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df700.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "e", "4"]
+    assert sf_values == ["Hamilton, Guy,", "ohjaaja", "drt"]
+
+
 def test_emit_marcxml_emits_710_for_added_corporate_contributor() -> None:
     """A non-primary ``bffi:Contribution`` with a ``bffi:Organization``
     agent emits MARC 710 \\$a — the added corporate entry."""

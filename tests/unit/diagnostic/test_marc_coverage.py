@@ -61,8 +61,9 @@ def test_analyse_counts_leader_controlfield_datafield_as_field_rows(tmp_path: Pa
 
 def test_analyse_counts_subfields_per_tag_pair(tmp_path: Path) -> None:
     """Subfield-level coverage is keyed on ``(tag, code)``. ``245 $a $b``
-    are both covered; ``100 $a $4`` are covered, ``100 $e`` is not;
-    ``099 $a`` is wholly uncovered."""
+    are covered (245 emits both); ``100 $a $4 $e`` are all covered;
+    ``245 $x`` is a covered tag with an uncovered code; ``099`` is a
+    wholly uncovered tag."""
     _write_marcxml(
         tmp_path / "r1.xml",
         """
@@ -71,6 +72,7 @@ def test_analyse_counts_subfields_per_tag_pair(tmp_path: Path) -> None:
           <datafield tag="245" ind1="0" ind2="0">
             <subfield code="a">Title</subfield>
             <subfield code="b">subtitle</subfield>
+            <subfield code="x">unsupported</subfield>
           </datafield>
           <datafield tag="099" ind1=" " ind2=" ">
             <subfield code="a">local class</subfield>
@@ -86,15 +88,15 @@ def test_analyse_counts_subfields_per_tag_pair(tmp_path: Path) -> None:
 
     report = analyse_corpus(tmp_path)
 
-    # Subfields in source: 245 $a, 245 $b, 099 $a, 100 $a, 100 $4, 100 $e = 6
-    assert report.total_subfields == 6
-    # Covered: 245 $a, 245 $b, 100 $a, 100 $4 = 4
-    assert report.covered_subfields == 4
+    # Subfields in source: 245 $a $b $x, 099 $a, 100 $a $4 $e = 7
+    assert report.total_subfields == 7
+    # Covered: 245 $a, 245 $b, 100 $a, 100 $4, 100 $e = 5
+    assert report.covered_subfields == 5
 
-    stat_100 = report.per_tag["100"]
-    assert stat_100.subfield_total == 3
-    assert stat_100.subfield_covered == 2
-    assert stat_100.uncovered_subfield_codes == {"e": 1}
+    stat_245 = report.per_tag["245"]
+    assert stat_245.subfield_total == 3
+    assert stat_245.subfield_covered == 2
+    assert stat_245.uncovered_subfield_codes == {"x": 1}
 
     stat_099 = report.per_tag["099"]
     assert stat_099.covered is False

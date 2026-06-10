@@ -38,6 +38,7 @@ from typing import Any, Final, TypeVar
 from lxml import etree
 from rdflib import RDF, Graph, Literal, URIRef
 from rdflib.namespace import RDFS
+from rdflib.term import Node
 
 from bffi_pipeline.observability.events import emit_if_active
 from bffi_pipeline.provenance.vocab import BFFI
@@ -59,6 +60,10 @@ PROGRESS_CADENCE: Final[int] = 100
 #: a placeholder; populating each position from BFFI state lands in a
 #: follow-on commit alongside the rest of the field families.
 _LEADER_PLACEHOLDER: Final[str] = "00000nam a2200000 a 4500"
+
+#: LoC relator URI prefix — the namespace for ``$4`` relator-code URIs
+#: that marc2bibframe2 emits when source MARC carried ``$4 <code>``.
+_LOC_RELATOR_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/relators/"
 
 
 # --- BFFI → MARC mapping registry (doc-generation metadata) ---------------
@@ -341,11 +346,18 @@ _AGENT_TYPE_TO_MARC_TAG_PAIR: Final[dict[URIRef, tuple[str, str]]] = {
 
 @dataclass(frozen=True)
 class _ContributorEmit:
-    """One MARC contributor datafield (100/110/111/700/710/711)."""
+    """One MARC contributor datafield (100/110/111/700/710/711).
+
+    ``relator`` is the LoC relator code (the URI's last segment, e.g.
+    ``"aut"``) used for ``$4``; ``relator_term`` is the cataloguer's
+    free-text term (e.g. Finnish ``"näyttelijä"``) used for ``$e``.
+    Either, both, or neither may be present depending on what the
+    source MARC carried."""
 
     tag: str
     label: str
     relator: str | None
+    relator_term: str | None
 
 
 def _agent_marc_tag(graph: Graph, agent: URIRef, *, is_primary: bool) -> str | None:
@@ -357,23 +369,31 @@ def _agent_marc_tag(graph: Graph, agent: URIRef, *, is_primary: bool) -> str | N
     return None
 
 
+_CONTRIBUTOR_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
+    ("a", "personal / corporate / meeting name"),
+    ("e", "relator term (cataloguer's free-text role, e.g. 'näyttelijä')"),
+    ("4", "LoC relator code (e.g. 'aut')"),
+)
+
+
 @marc_emit(
     MarcEmitMeta(
         tag="100",
         indicators=(" ", " "),
-        subfields=(("a", "personal name"), ("4", "LoC relator code")),
+        subfields=_CONTRIBUTOR_SUBFIELDS,
         source=(
             "?m bffi:workManifested ?work . "
             "?work bffi:contribution [a bffi:PrimaryContribution ; "
             "bffi:agent ?agent ; bffi:role ?role] . "
             "?agent a bffi:Person ; rdfs:label ?name . "
-            "$4 = local-name of ?role (the LoC relator URI)"
+            "$4 = local-name of ?role when ?role is a LoC relator URI; "
+            "$e = rdfs:label of ?role when ?role is a bnode with a label."
         ),
     ),
     MarcEmitMeta(
         tag="110",
         indicators=(" ", " "),
-        subfields=(("a", "corporate / jurisdiction name"), ("4", "LoC relator code")),
+        subfields=_CONTRIBUTOR_SUBFIELDS,
         source=(
             "Same as 100, but with ?agent a bffi:Organization "
             "(or bffi:Jurisdiction) on a primary contribution"
@@ -382,13 +402,13 @@ def _agent_marc_tag(graph: Graph, agent: URIRef, *, is_primary: bool) -> str | N
     MarcEmitMeta(
         tag="111",
         indicators=(" ", " "),
-        subfields=(("a", "meeting / conference name"), ("4", "LoC relator code")),
+        subfields=_CONTRIBUTOR_SUBFIELDS,
         source="Same as 100, but with ?agent a bffi:Meeting on a primary contribution",
     ),
     MarcEmitMeta(
         tag="700",
         indicators=(" ", " "),
-        subfields=(("a", "personal name"), ("4", "LoC relator code")),
+        subfields=_CONTRIBUTOR_SUBFIELDS,
         source=(
             "Same chain as 100, but the contribution is NOT typed "
             "bffi:PrimaryContribution — added-entry contributors land in 7XX"
@@ -397,13 +417,13 @@ def _agent_marc_tag(graph: Graph, agent: URIRef, *, is_primary: bool) -> str | N
     MarcEmitMeta(
         tag="710",
         indicators=(" ", " "),
-        subfields=(("a", "corporate / jurisdiction name"), ("4", "LoC relator code")),
+        subfields=_CONTRIBUTOR_SUBFIELDS,
         source="Same as 700, but with ?agent a bffi:Organization or bffi:Jurisdiction",
     ),
     MarcEmitMeta(
         tag="711",
         indicators=(" ", " "),
-        subfields=(("a", "meeting / conference name"), ("4", "LoC relator code")),
+        subfields=_CONTRIBUTOR_SUBFIELDS,
         source="Same as 700, but with ?agent a bffi:Meeting",
     ),
 )
@@ -413,9 +433,12 @@ def _extract_contributors(graph: Graph, manifestation: URIRef) -> list[_Contribu
     the digit-pair from the agent's class type (Person → X00, Corporate
     / Jurisdiction → X10, Meeting → X11).
 
-    Emits ``$a`` from ``rdfs:label`` on the agent and ``$4`` (LoC
-    relator code) from the local-name of ``bffi:role``. Multiple
-    contributors produce multiple datafields, sorted for determinism.
+    Emits ``$a`` from ``rdfs:label`` on the agent, ``$e`` (relator term)
+    from the ``rdfs:label`` of the role bnode, and ``$4`` (LoC relator
+    code) from the local-name of ``bffi:role`` when it's a URI. The
+    Helmet corpus uses free-text ``$e`` heavily (~10x more often than
+    ``$4``); both shapes are emitted when their respective signals are
+    present in BFFI.
     """
     work = _find_work_for_manifestation(graph, manifestation)
     if work is None:
@@ -432,10 +455,40 @@ def _extract_contributors(graph: Graph, manifestation: URIRef) -> list[_Contribu
         tag = _agent_marc_tag(graph, agent, is_primary=is_primary)
         if tag is None:
             continue
-        role = next(graph.objects(contrib, BFFI.role), None)
-        relator = local_name(role) if isinstance(role, URIRef) else None
-        emits.append(_ContributorEmit(tag=tag, label=str(label), relator=relator))
-    return sorted(emits, key=lambda e: (e.tag, e.label))
+        relator, relator_term = _extract_role_codes(graph, contrib)
+        emits.append(
+            _ContributorEmit(
+                tag=tag,
+                label=str(label),
+                relator=relator,
+                relator_term=relator_term,
+            )
+        )
+    return sorted(emits, key=lambda e: (e.tag, e.label, e.relator_term or "", e.relator or ""))
+
+
+def _extract_role_codes(graph: Graph, contrib: Node) -> tuple[str | None, str | None]:
+    """Return ``(relator_code, relator_term)`` for one ``bffi:contribution``.
+
+    A contribution can carry ``bffi:role`` as either a LoC relator URI
+    (drives ``$4``) or as a node with ``rdfs:label`` (drives ``$e``).
+    The two signals are independent — both can be present on the same
+    contribution if marc2bibframe2 emitted both shapes for a source with
+    ``$e <term> $4 <code>``.
+    """
+    relator: str | None = None
+    relator_term: str | None = None
+    for role in graph.objects(contrib, BFFI.role):
+        if (
+            isinstance(role, URIRef)
+            and str(role).startswith(_LOC_RELATOR_PREFIX)
+            and relator is None
+        ):
+            relator = local_name(role)
+        label = next(graph.objects(role, RDFS.label), None)
+        if isinstance(label, Literal) and relator_term is None:
+            relator_term = str(label)
+    return relator, relator_term
 
 
 @dataclass(frozen=True)
@@ -960,14 +1013,18 @@ def _append_simple_a_datafields(record: etree._Element, tag: str, values: tuple[
 def _append_contributor_datafields(
     record: etree._Element, contributors: Iterable[_ContributorEmit]
 ) -> None:
-    """Append one MARC contributor datafield per emit: ``$a`` carries the
-    agent label, ``$4`` (if present) carries the LoC relator code.
+    """Append one MARC contributor datafield per emit. Subfield order
+    follows the MARC spec: ``$a`` (name) → ``$e`` (relator term, free
+    text) → ``$4`` (LoC relator code). Each is optional except ``$a``.
     Indicators are blank — the smart name-type / role indicator
     population is a follow-on."""
     for c in contributors:
         df = etree.SubElement(record, f"{_MARC}datafield", tag=c.tag, ind1=" ", ind2=" ")
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
         sf_a.text = c.label
+        if c.relator_term:
+            sf_e = etree.SubElement(df, f"{_MARC}subfield", code="e")
+            sf_e.text = c.relator_term
         if c.relator:
             sf_4 = etree.SubElement(df, f"{_MARC}subfield", code="4")
             sf_4.text = c.relator
