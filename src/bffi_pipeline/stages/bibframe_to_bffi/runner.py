@@ -140,10 +140,22 @@ def convert_one(
     output_graph = rename_graph(input_graph, rules)
     residual = len(_residual_bf_uris(output_graph))
 
-    output_path.write_text(
-        output_graph.serialize(format="turtle"),
-        encoding="utf-8",
-    )
+    # rdflib's RDF/XML parser is permissive and accepts URIs containing
+    # spaces / control characters that the stricter Turtle serializer
+    # then refuses ("does not look like a valid URI"). These appear in
+    # the Helmet corpus when a cataloguer typed free text into a field
+    # marc2bibframe2 then concatenates onto a LoC URI base. Catch the
+    # serialize-side failure per-record so one bad URI in record N
+    # doesn't abort the corpus run; the closed-namespace test still
+    # catches any bffi:* drift.
+    try:
+        turtle = output_graph.serialize(format="turtle")
+    except Exception as exc:
+        raise BibframeToBffiError(
+            f"rdflib turtle serialize failed for {bibframe_path}: {exc}"
+        ) from exc
+
+    output_path.write_text(turtle, encoding="utf-8")
     return output_path, residual
 
 
