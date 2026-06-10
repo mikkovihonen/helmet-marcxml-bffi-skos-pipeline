@@ -1,8 +1,8 @@
 """Closed-namespace discipline for the BFFI -> MARC reverse converter.
 
-Cardinal rule (`docs/bffi_limitations.md`): the reverse converter MUST
-NOT consult the pipeline-internal provenance vocabulary when deciding
-what content to emit. Pipeline-internal data is fair for UI / pairing
+Cardinal rule (stated in `CLAUDE.md`): the reverse converter MUST NOT
+consult the pipeline-internal provenance vocabulary when deciding what
+content to emit. Pipeline-internal data is fair for UI / pairing
 machinery (diff comparator lineage tokens, etc.) but never for
 bibliographic content reconstruction.
 
@@ -119,7 +119,7 @@ def _collect_violations(path: Path) -> list[Violation]:
 def test_bffi_to_marc_source_does_not_reference_bffi_prov() -> None:
     """The reverse converter is content-only. Any executable reference to
     the pipeline-internal provenance vocab is a contract violation per
-    the cardinal rule in ``docs/bffi_limitations.md``."""
+    the cardinal rule stated in ``CLAUDE.md``."""
     all_violations: list[Violation] = []
     for path in sorted(_STAGE_DIR.rglob("*.py")):
         all_violations.extend(_collect_violations(path))

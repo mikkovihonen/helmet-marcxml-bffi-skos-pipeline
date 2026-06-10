@@ -1143,6 +1143,14 @@ BIBFRAME 3.0.1 (December 2025) absorbed the Performed Music Ontology (PMO), intr
 
 `bf:agentOf`, `bf:appliedMaterialOf`, `bf:baseMaterialOf`, `bf:contributionOf`, `bf:materialOf` — BFFI maps the forward direction but doesn't declare the inverses; BIBFRAME doesn't declare `owl:inverseOf` triples for them either. Zero corpus prevalence in the 20 k bench, so deferred. If a record carrying one surfaces, options are: declare the inverse under `bffi:` (NLF input) or route via `bffi:relation` to a LoC relationship URI.
 
+### `bf:noteType` literal categorisation — dropped, no BFFI carrier
+
+`bf:noteType` is a `DatatypeProperty` (range `rdfs:Literal`) that BIBFRAME uses to categorise a `bf:Note` block with a vocabulary label ("Summary", "Bibliography", "Performer", "Language", etc.). BFFI 1.0.0 deliberately doesn't model literal note typing: `bffi:Note` has zero predicates with it as domain, and the only subclass is `bffi:TitleNote`. Reaching for `dct:type` / `skos:notation` would violate the "DC Terms → BFFI alternatives" pattern below. The routing is implemented as a drop (see `drop_note_type` in the routings module; the `note_type_dropped` counter is emitted at run-end). The note's text content in `rdfs:label` usually carries the categorisation implicitly ("Bibliography: …", "Summary: …"). A future `bffi:noteType` predicate (or a richer `bffi:Note` subclass hierarchy) is the natural NLF-extension fix.
+
+### Country labels — LoC vs YSO upstream gap
+
+`bf:place <http://id.loc.gov/vocabulary/countries/{code}>` is what marc2bibframe2 mints from MARC 008 positions 15-17, and what the canonical graph correctly preserves. The LoC countries vocabulary publishes only English `rdfs:label` literals for these URIs; the Finnish-cataloguing audience needs multilingual `skos:prefLabel @fi/@sv/@en`. YSO main has the multilingual labels for every modern country (e.g. `yso:p94426` "Suomi"@fi / "Finland"@sv / "Finland"@en), but neither LoC nor Finto publishes a `skos:exactMatch` between the two URI spaces — only a Wikidata-mediated crosswalk via P3866 + P2347 exists, and it isn't built into either authority feed. Project workaround: vendor a CC0 bridge TTL at `vocab/loc-countries-bridge.ttl` carrying `skos:exactMatch` to YSO main plus inlined fi/sv/en prefLabels; a Skosify pass copies the prefLabels onto the LoC URI before write-out. The fix is local — the bibliographic data round-trips correctly regardless of label coverage, only the display surface improves. Upstream resolution path: propose to NLF/Finto that YSO-paikat publish `skos:exactMatch` triples to the LoC countries URIs.
+
 ### Deferred routing candidates
 
 Terms in `GAP` status with plausible routings that we haven't implemented because they had **zero corpus prevalence in the 20 k bench** (YAGNI):
@@ -1150,7 +1158,7 @@ Terms in `GAP` status with plausible routings that we haven't implemented becaus
 - `bf:Review` / `bf:review` — natural fit for the catch-all `bffi:relation` chain (parallel to `bf:accompaniedBy`'s routing).
 - `bf:subseriesEnumeration` / `bf:subseriesStatement` — reuse `bffi:seriesEnumeration` / `bffi:seriesStatement` (subseries is a structural axis of the same concept).
 - `bf:variantType` — drop; the existing Title-variant routing's `bffi:marcKey` first-3-char check already discriminates by MARC tag.
-- `bf:noteFor` / `bf:noteType` — minor metadata; route into the existing `bffi:Note` bnode shape.
+- `bf:noteFor` — minor metadata; route into the existing `bffi:Note` bnode shape.
 
 ### Diagnostic — running the analysis live
 

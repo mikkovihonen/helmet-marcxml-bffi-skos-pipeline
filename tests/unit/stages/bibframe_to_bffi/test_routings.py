@@ -823,7 +823,8 @@ def test_drop_note_type_removes_uncarried_categorisation() -> None:
     ``bffi:Note`` subclass for arbitrary values. Reaching for a foreign
     vocabulary (``dct:type``, ``skos:notation``) would violate the
     "DC Terms → BFFI alternatives" pattern, so the routing drops the
-    triple and registers the loss in ``docs/bffi_limitations.md``."""
+    triple — see the ``bf:noteType`` subsection in
+    ``docs/bf_to_bffi_mapping.md``."""
     g = Graph()
     note = URIRef("http://example.org/note")
     g.add((note, BF.noteType, Literal("Summary")))

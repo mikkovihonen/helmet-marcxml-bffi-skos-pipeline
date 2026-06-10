@@ -1,13 +1,13 @@
 """Pillar 4 orchestrator: BFFI canonical Turtle -> reconstructed MARCXML.
 
 Step 4 of P-057 — v0 emit. Reads a BFFI graph and emits a MARCXML record
-per Manifestation. Cardinal rule (see ``docs/bffi_limitations.md``): the
-reverse converter MUST NOT consult ``bffi-prov:`` (pipeline-internal
-provenance) for bibliographic content. Pipeline-internal data is fair
-for UI / pairing machinery, never for emit content. The closed-namespace
-discipline test (``tests/unit/stages/bffi_to_marc/test_bffi_prov_discipline.py``)
-parses this module's source and fails the build if a ``bffi-prov:``
-reference creeps in.
+per Manifestation. Cardinal rule: the reverse converter MUST NOT consult
+``bffi-prov:`` (pipeline-internal provenance) for bibliographic content.
+Pipeline-internal data is fair for UI / pairing machinery, never for emit
+content. The closed-namespace discipline test
+(``tests/unit/stages/bffi_to_marc/test_bffi_prov_discipline.py``) parses
+this module's source and fails the build if a ``bffi-prov:`` reference
+creeps in.
 
 v0 scope: emit the minimum-viable MARCXML that lets the round-trip diff
 harness (step 5) compare against the source. Concretely:

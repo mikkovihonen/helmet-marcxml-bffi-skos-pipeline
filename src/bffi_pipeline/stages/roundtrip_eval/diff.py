@@ -15,9 +15,11 @@ v0 statuses:
 Deferred to a follow-on:
 
   - ``tag-changed`` — same content under a different tag (e.g. MARC 260
-    → 264 per ``docs/bffi_limitations.md`` L-01). Needs cross-tag content
-    similarity; for v0 the operator reads paired ``lost`` + ``added``
-    rows as a hint instead.
+    → 264; marc2bibframe2 collapses both source forms into the same
+    ``bf:ProvisionActivity`` shape, so the reverse converter emits the
+    RDA-modern 264 ind2=1 form for either source). Needs cross-tag
+    content similarity; for v0 the operator reads paired ``lost`` +
+    ``added`` rows as a hint instead.
   - ``marckey-bypass`` — concept lifted from P-49 on main; doesn't apply
     until the reverse converter starts reading ``bflc:marcKey``.
 

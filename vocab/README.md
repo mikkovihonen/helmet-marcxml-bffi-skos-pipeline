@@ -15,7 +15,7 @@ Distinct from:
 |---|---|
 | `lkd.rdf` | Vendored BFFI 1.0.0 ontology (RDF/XML, ~4600 lines). The canonical reference for class and property definitions, AND the closed set of terms we may emit under the `bffi:` namespace. Vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. |
 | `bibframe.rdf` | Vendored BIBFRAME 3.0.1 ontology (RDF/XML, ~3200 lines, dated 2025-12-03 — the PMO-absorption release per `docs/bf_to_bffi_mapping.md`). Fetched from `https://id.loc.gov/ontologies/bibframe.rdf`. Used to cross-check what `bf:*` URIs marc2bibframe2 emits against the official BIBFRAME vocabulary — particularly important for surfacing terms BIBFRAME declares but `lkd.rdf` (BFFI) doesn't acknowledge (e.g. `bf:provisionActivityStatement`, `bf:accompaniedBy`). |
-| `loc-countries-bridge.ttl` | LoC MARC country code → YSO bridge with cached fi/sv/en prefLabels. See `docs/bffi_limitations.md` L-12. |
+| `loc-countries-bridge.ttl` | LoC MARC country code → YSO bridge with cached fi/sv/en prefLabels. See the "Country labels — LoC vs YSO upstream gap" subsection of `docs/bf_to_bffi_mapping.md`. |
 | `loc-issuance-bridge.ttl` | LoC issuance code bridge. |
 | `loc-languages-bridge.ttl` | LoC MARC language code bridge. |
 

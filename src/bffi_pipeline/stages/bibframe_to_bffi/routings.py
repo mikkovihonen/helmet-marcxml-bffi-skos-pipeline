@@ -931,12 +931,13 @@ def drop_note_type(graph: Graph) -> int:
     alternatives" pattern documented in the mapping doc, which expects
     BFFI-native carriers wherever possible.
 
-    The drop is documented in ``docs/bffi_limitations.md`` as L-14 —
-    a candidate for a future ``bffi:noteType`` extension via NLF
-    conversation. The note's text content (in ``rdfs:label`` /
+    The drop is a candidate for a future ``bffi:noteType`` extension
+    via NLF conversation. The note's text content (in ``rdfs:label`` /
     ``bffi:note``) typically carries the categorisation implicitly
     ("Bibliography: …", "Summary: …"), so this is bounded data loss
-    pending the ontology extension.
+    pending the ontology extension. See the "bf:noteType literal
+    categorisation — dropped, no BFFI carrier" subsection in
+    ``docs/bf_to_bffi_mapping.md`` for context.
     """
     dropped = 0
     for s, _, o in list(graph.triples((None, BF.noteType, None))):

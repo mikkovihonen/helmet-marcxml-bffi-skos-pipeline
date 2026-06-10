@@ -7,7 +7,7 @@ Conversion-first BFFI pipeline: MARCXML ↔ BIBFRAME (LoC marc2bibframe2) ↔ BF
 1. **MARCXML export** from the Helmet Sierra dump.
 2. **MARC → BIBFRAME** via the LoC marc2bibframe2 XSLT.
 3. **BIBFRAME → BFFI** via SPARQL CONSTRUCT (or equivalent RDF processing), emitting BFFI-only canonical Turtle.
-4. **BFFI → MARC** — the reverse direction, reconstructing MARCXML from the canonical BFFI graph for round-trip verification, downstream MARC consumers, and the diff residue registry in `docs/bffi_limitations.md`.
+4. **BFFI → MARC** — the reverse direction, reconstructing MARCXML from the canonical BFFI graph for round-trip verification and downstream MARC consumers. Known limitations live in the "Known limitations" section of `docs/bffi_to_marc_mapping.md`.
 
 Plus an evaluation harness wrapping the four — round-trip diff, cataloguer-review HTML, mapping-discipline tests.
 
@@ -16,8 +16,8 @@ No clustering, no LLM judge, no reconciliation, no Skosmos load enrichment. Anyt
 ## Project docs
 
 - `vocab/lkd.rdf` — full BFFI 1.0.0 ontology (RDF/XML, ~4600 lines), vendored because `https://schema.finto.fi/bffi/` returns HTTP 403 outside the Finto network. **The canonical reference for class and property definitions, AND the closed set of terms we may emit under the `bffi:` namespace.** See the BFFI namespace discipline rule in Conventions.
-- `docs/bf_to_bffi_mapping.md` — generated reference (rdflib parse of `lkd.rdf`) for every `bf:*` class and predicate encountered in the conversion, with its `bffi:*` counterpart and routing notes. Source of truth for every conversion decision. Sent to NLF for review.
-- `docs/bffi_limitations.md` — registry of round-trip cases where source MARC data survives but lands in a different MARC field / shape / convention because BFFI 1.0.0 + marc2bibframe2 don't preserve the distinction (e.g. MARC 260 → 264, `$2 yso/fin` → `$2 yso`). Each entry pinpoints the BFFI ontology shortfall and documents the conclusion (acceptable / planned-fix / candidate-for-NLF-extension). Add a new entry whenever you find a similar case during a diff residue audit.
+- `docs/bf_to_bffi_mapping.md` — generated reference (rdflib parse of `lkd.rdf`) for every `bf:*` class and predicate encountered in the conversion, with its `bffi:*` counterpart and routing notes. Source of truth for every forward-direction decision; "Gap clusters" subsections carry the ontology-shortfall caveats (PMO music, inverse predicates, `bf:noteType` drop, country labels). Sent to NLF for review.
+- `docs/bffi_to_marc_mapping.md` — generated reference for every MARC field the reverse converter emits. Its "Known limitations" section enumerates the cases where the round-trip can't reconstruct source MARC byte-identical (placeholder leader, first-extent-wins for 300, Helmet-local 09X loss, etc.).
 - `docs/validation-strategy.md` — three validation boundaries on the conversion side (MARCXML input → BIBFRAME post-conversion → BFFI post-CONSTRUCT).
 - `docs/observability.md` — local Prometheus + Grafana stack wrapped by Caddy. Stage events → JSONL sidecar → tail-and-export → Prometheus scrape → Grafana panels, all reachable at `http://localhost:8080`. **Built in from the ground up — every stage emits structured events from its first commit.** See the observability constraint in Operating constraints.
 - `docs/plans/` — plans of record, one file per plan as `p-NNN-<slug>.md` (three-digit zero-padded; flat — no sub-folders). Status is tracked in `docs/plans/README.md` (not by sub-folder). Filenames stay stable across status transitions; the file's own `git log` is the lineage. **Consult `docs/plans/README.md` before recommending an architectural change** — the idea may already be on record.
@@ -77,4 +77,4 @@ No clustering, no LLM judge, no reconciliation, no Skosmos load enrichment. Anyt
 - Don't merge silent failures into provenance. Log `uncertain` with the actual error.
 - Don't add features that aren't covered by a plan in `docs/plans/`. Surface new directions as a plan with status `proposed` first; only flip to `active` after the trade-off is on the record.
 - Don't add downstream-stage code (clustering, judge, reconciliation, Skosmos load) on this branch. Those stay on `main`.
-- Don't read `bffi-prov:` (pipeline-internal provenance) when reconstructing MARC in the BFFI → MARC direction. The whole point of the round-trip is to verify that the `bffi:` namespace alone can reconstruct the source. Pipeline-internal data is fair for UI / pairing machinery (e.g. lineage tokens used by the diff comparator), never for deciding what content emits. See `docs/bffi_limitations.md`'s cardinal-rule note.
+- Don't read `bffi-prov:` (pipeline-internal provenance) when reconstructing MARC in the BFFI → MARC direction. The whole point of the round-trip is to verify that the `bffi:` namespace alone can reconstruct the source. Pipeline-internal data is fair for UI / pairing machinery (e.g. lineage tokens used by the diff comparator), never for deciding what content emits.

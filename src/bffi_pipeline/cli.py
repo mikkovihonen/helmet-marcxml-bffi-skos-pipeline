@@ -406,12 +406,11 @@ def bffi_to_marc_command(
     """BFFI graph → reconstructed MARCXML (reverse direction).
 
     Reads BFFI predicates only (no `bf:*` typing as routing key; no
-    `bffi-prov:` pipeline-internal provenance as a content source — see the
-    cardinal rule in `docs/bffi_limitations.md`) and reconstructs MARCXML
-    record-by-record. Step 4 v0 emit covers the bare minimum (leader
-    placeholder, 001 = Helmet bib ID, 245 $a = main title); subsequent
-    commits add field families one at a time so the diff harness gives a
-    clean per-family verification signal.
+    `bffi-prov:` pipeline-internal provenance as a content source) and
+    reconstructs MARCXML record-by-record. Step 4 v0 emit covers the bare
+    minimum (leader placeholder, 001 = Helmet bib ID, 245 $a = main title);
+    subsequent commits add field families one at a time so the diff harness
+    gives a clean per-family verification signal.
     """
     _require_run_dir(output_dir, option_label="--output-dir")
     options = BffiToMarcOptions(input_dir=input_dir, output_dir=output_dir)
