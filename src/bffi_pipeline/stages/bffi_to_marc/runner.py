@@ -1448,12 +1448,18 @@ class _SubjectEmit:
     ``http://www.yso.fi/onto/yso/p12148``). Either, both, or neither can be
     present — local bib-mint subjects with no ``bffi:source`` will emit
     just ``$a``.
+
+    ``extra_subfields`` carries marcKey-driven extras the source MARC
+    had beyond ``$a`` (e.g. ``$t`` analytical title on a name-title
+    subject 600 1 4 \\$a Bond, James \\$t Casino Royale). Parsed
+    verbatim from the subject node's ``bffi:marcKey`` when present.
     """
 
     tag: str
     label: str
     vocab_code: str | None
     authority_uri: str | None
+    extra_subfields: tuple[tuple[str, str], ...]
 
 
 def _find_work_for_manifestation(graph: Graph, manifestation: URIRef) -> URIRef | None:
@@ -1480,6 +1486,9 @@ _SUBJECT_SOURCE_PREFIX: Final[str] = (
 
 _SUBJECT_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
     ("a", "subject heading / term"),
+    ("c", "qualifier (marcKey-driven)"),
+    ("d", "dates (marcKey-driven)"),
+    ("t", "title within name-title subject (marcKey-driven, e.g. 600 ind2=4)"),
     ("0", "authority URI for the subject heading"),
     ("2", "source vocabulary code (e.g. 'yso', 'ysa', 'slm')"),
 )
@@ -1570,14 +1579,18 @@ def _extract_subject_datafields(graph: Graph, manifestation: URIRef) -> list[_Su
     return sorted(emits, key=lambda e: (e.tag, e.label, e.vocab_code or "", e.authority_uri or ""))
 
 
+_SUBJECT_STRUCTURED_CODES: Final[frozenset[str]] = frozenset({"a", "0", "2"})
+
+
 def _build_subject_emit(graph: Graph, subj_node: URIRef) -> _SubjectEmit | None:
-    """Return the ``_SubjectEmit`` for one ``bffi:subject`` URI, or ``None``
-    if it can't be mapped to a 6XX tag or lacks an ``rdfs:label``."""
+    """Return the ``_SubjectEmit`` for one ``bffi:subject`` URI, or
+    ``None`` when the node can't be mapped to a 6XX tag or lacks both
+    an ``rdfs:label`` and a parseable ``bffi:marcKey`` ``$a``."""
     tag = _subject_marc_tag(graph, subj_node)
     if tag is None:
         return None
-    label = next(graph.objects(subj_node, RDFS.label), None)
-    if not isinstance(label, Literal):
+    label = _subject_label(graph, subj_node)
+    if label is None:
         return None
     vocab_code: str | None = None
     source = next(graph.objects(subj_node, BFFI.source), None)
@@ -1586,11 +1599,49 @@ def _build_subject_emit(graph: Graph, subj_node: URIRef) -> _SubjectEmit | None:
     authority_uri: str | None = (
         str(subj_node) if _SUBJECT_TAG_PATTERN.search(str(subj_node)) is None else None
     )
+    extras = _subject_marckey_extras(graph, subj_node)
     return _SubjectEmit(
         tag=tag,
-        label=str(label),
+        label=label,
         vocab_code=vocab_code,
         authority_uri=authority_uri,
+        extra_subfields=extras,
+    )
+
+
+def _subject_label(graph: Graph, subj_node: URIRef) -> str | None:
+    """Return the heading text (``$a``) for a subject node. Prefers
+    the subject's own ``rdfs:label``; falls back to the marcKey ``$a``
+    when the node is a Hub-style wrapper (e.g. ``Hub600-N``) that
+    carries the source row's marcKey verbatim but no direct label."""
+    label = next(graph.objects(subj_node, RDFS.label), None)
+    if isinstance(label, Literal):
+        return str(label)
+    marc_key = next(graph.objects(subj_node, BFFI.marcKey), None)
+    if isinstance(marc_key, Literal):
+        parsed = _parse_marc_key(str(marc_key))
+        if parsed is not None:
+            for code, value in parsed[3]:
+                if code == "a":
+                    return value
+    return None
+
+
+def _subject_marckey_extras(graph: Graph, subj_node: URIRef) -> tuple[tuple[str, str], ...]:
+    """Parse the subject node's ``bffi:marcKey`` (when present) and
+    return marcKey subfields beyond the structured-BFFI set
+    (``$a`` / ``$0`` / ``$2``) — typically ``$t`` analytical title on
+    name-title subjects (600 ind2=4), occasionally ``$c`` qualifier
+    or ``$d`` dates."""
+    marc_key = next(graph.objects(subj_node, BFFI.marcKey), None)
+    if not isinstance(marc_key, Literal):
+        return ()
+    parsed = _parse_marc_key(str(marc_key))
+    if parsed is None:
+        return ()
+    _tag, _ind1, _ind2, subfields = parsed
+    return tuple(
+        (code, value) for code, value in subfields if code not in _SUBJECT_STRUCTURED_CODES
     )
 
 
@@ -1913,6 +1964,12 @@ def _append_subject_datafields(record: etree._Element, subjects: list[_SubjectEm
         df = etree.SubElement(record, f"{_MARC}datafield", tag=subj.tag, ind1=" ", ind2=ind2)
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
         sf_a.text = subj.label
+        # marcKey-driven extras ($t, $c, $d, …) come between $a and the
+        # structured $0 / $2 — MARC subfield order is alphabetical-ish
+        # but $0 / $2 sort after letters per convention.
+        for code, value in subj.extra_subfields:
+            sf = etree.SubElement(df, f"{_MARC}subfield", code=code)
+            sf.text = value
         if subj.authority_uri:
             sf_0 = etree.SubElement(df, f"{_MARC}subfield", code="0")
             sf_0.text = subj.authority_uri
