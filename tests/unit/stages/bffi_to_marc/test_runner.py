@@ -153,6 +153,30 @@ def test_emit_marcxml_omits_245_b_when_subtitle_absent() -> None:
     assert df245.find(f"{{{MARC21_NS}}}subfield[@code='b']") is None
 
 
+def test_emit_marcxml_emits_245_n_p_when_part_number_and_name_present() -> None:
+    """``bffi:partNumber`` and ``bffi:partName`` on the Title block emit
+    as MARC 245 ``$n`` and ``$p`` respectively, between the main title
+    ``$a`` and the subtitle ``$b`` per MARC 21 subfield order."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="15 ikivihreätä tangoa",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    title_block = next(g.objects(m, BFFI.title))
+    g.add((title_block, BFFI.partNumber, Literal("4")))
+    g.add((title_block, BFFI.partName, Literal("Iltarusko")))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df245 = root.find(f"{{{MARC21_NS}}}datafield[@tag='245']")
+    assert df245 is not None
+    sf_codes = [sf.get("code") for sf in df245.findall(f"{{{MARC21_NS}}}subfield")]
+    sf_values = [sf.text for sf in df245.findall(f"{{{MARC21_NS}}}subfield")]
+    assert sf_codes == ["a", "n", "p"]
+    assert sf_values == ["15 ikivihreätä tangoa", "4", "Iltarusko"]
+
+
 def test_emit_marcxml_emits_245_c_when_responsibility_statement_present() -> None:
     """bffi:responsibilityStatement on the Manifestation maps to MARC 245
     $c (statement of responsibility — directors, screenwriters, etc.)."""

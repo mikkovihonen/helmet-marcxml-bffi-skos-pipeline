@@ -384,6 +384,8 @@ class _TitleParts:
 
     main: str
     subtitle: str | None = None
+    part_number: str | None = None
+    part_name: str | None = None
 
 
 #: Maps a BFFI agent class to a ``(primary_tag, added_tag)`` MARC pair.
@@ -903,18 +905,21 @@ def _extract_classifications(graph: Graph, manifestation: URIRef) -> list[_Class
             ("a", "main title"),
             ("b", "subtitle"),
             ("c", "statement of responsibility"),
+            ("n", "number of part / section of a work"),
+            ("p", "name of part / section of a work"),
         ),
         source=(
             "?m bffi:title / bffi:Title / bffi:mainTitle (mandatory) + "
-            "bffi:subtitle (optional); responsibility comes from "
-            "?m bffi:responsibilityStatement"
+            "bffi:subtitle / bffi:partNumber / bffi:partName (each optional); "
+            "responsibility comes from ?m bffi:responsibilityStatement"
         ),
         notes=("First bffi:title block wins. See known limitations below."),
     )
 )
 def _extract_main_title_parts(graph: Graph, manifestation: URIRef) -> _TitleParts | None:
     """Walk the first ``?m bffi:title / bffi:Title`` block and pull
-    ``bffi:mainTitle`` (mandatory) + ``bffi:subtitle`` (optional).
+    ``bffi:mainTitle`` (mandatory) plus optional ``bffi:subtitle`` /
+    ``bffi:partNumber`` / ``bffi:partName``.
 
     Returns ``None`` when no title block has a ``bffi:mainTitle``. v0
     picks the first block; primary-vs-variant discrimination (by
@@ -925,9 +930,13 @@ def _extract_main_title_parts(graph: Graph, manifestation: URIRef) -> _TitlePart
         if not isinstance(main, Literal):
             continue
         subtitle = next(graph.objects(title_block, BFFI.subtitle), None)
+        part_number = next(graph.objects(title_block, BFFI.partNumber), None)
+        part_name = next(graph.objects(title_block, BFFI.partName), None)
         return _TitleParts(
             main=str(main),
             subtitle=str(subtitle) if isinstance(subtitle, Literal) else None,
+            part_number=str(part_number) if isinstance(part_number, Literal) else None,
+            part_name=str(part_name) if isinstance(part_name, Literal) else None,
         )
     return None
 
@@ -1512,6 +1521,32 @@ def _append_table_of_contents_datafields(
         sf_a.text = text
 
 
+def _append_title_datafield(
+    record: etree._Element,
+    title_parts: _TitleParts,
+    responsibility: str | None,
+) -> None:
+    """Append the MARC 245 datafield. Subfield order follows MARC 21:
+    ``$a`` main title → ``$n`` part number → ``$p`` part name → ``$b``
+    subtitle → ``$c`` statement of responsibility. Each is optional
+    except ``$a``."""
+    df = etree.SubElement(record, f"{_MARC}datafield", tag="245", ind1="0", ind2="0")
+    sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+    sf_a.text = title_parts.main
+    if title_parts.part_number is not None:
+        sf_n = etree.SubElement(df, f"{_MARC}subfield", code="n")
+        sf_n.text = title_parts.part_number
+    if title_parts.part_name is not None:
+        sf_p = etree.SubElement(df, f"{_MARC}subfield", code="p")
+        sf_p.text = title_parts.part_name
+    if title_parts.subtitle is not None:
+        sf_b = etree.SubElement(df, f"{_MARC}subfield", code="b")
+        sf_b.text = title_parts.subtitle
+    if responsibility is not None:
+        sf_c = etree.SubElement(df, f"{_MARC}subfield", code="c")
+        sf_c.text = responsibility
+
+
 def _append_publication_datafield(record: etree._Element, publication: _PublicationEmit) -> None:
     """Append the MARC 260 datafield with structured ``$a`` / ``$b`` / ``$c``
     when ``bffi:simplePlace`` / ``bffi:simpleAgent`` / ``bffi:simpleDate``
@@ -1647,15 +1682,7 @@ def _build_marc_record(
     _append_contributor_datafields(record, (c for c in contributors if c.tag.startswith("1")))
 
     if title_parts is not None:
-        df245 = etree.SubElement(record, f"{_MARC}datafield", tag="245", ind1="0", ind2="0")
-        sf_a = etree.SubElement(df245, f"{_MARC}subfield", code="a")
-        sf_a.text = title_parts.main
-        if title_parts.subtitle is not None:
-            sf_b = etree.SubElement(df245, f"{_MARC}subfield", code="b")
-            sf_b.text = title_parts.subtitle
-        if responsibility is not None:
-            sf_c = etree.SubElement(df245, f"{_MARC}subfield", code="c")
-            sf_c.text = responsibility
+        _append_title_datafield(record, title_parts, responsibility)
 
     if publication is not None:
         _append_publication_datafield(record, publication)
