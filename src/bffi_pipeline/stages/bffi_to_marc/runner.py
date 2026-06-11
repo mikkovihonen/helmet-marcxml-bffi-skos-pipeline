@@ -789,6 +789,7 @@ _MNOTETYPE_ACCMAT: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mnotetyp
 
 _MNOTETYPE_TO_MARC_TAG: Final[dict[URIRef, str]] = {
     URIRef("http://id.loc.gov/vocabulary/mnotetype/lang"): "546",
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/participants"): "511",
 }
 
 #: Note types consumed by other emit families and therefore skipped by
@@ -822,6 +823,15 @@ class _NoteEmit:
             "MARC tag (e.g. mnotetype/lang → 546). Others fall through to "
             "500. Per-tail expansion (504 bibliography / 511 participants "
             "/ 520 summary / etc.) is a follow-on."
+        ),
+    ),
+    MarcEmitMeta(
+        tag="511",
+        indicators=(" ", " "),
+        subfields=(("a", "participants / performers note text"),),
+        source=(
+            "?m bffi:note [a bffi:Note, <…/mnotetype/participants> ; "
+            "rdfs:label ?text] — typed with the participants tail."
         ),
     ),
     MarcEmitMeta(
@@ -861,6 +871,69 @@ def _note_marc_tag(graph: Graph, note: Node) -> str:
         if (note, RDF.type, note_type) in graph:
             return tag
     return "500"
+
+
+_SERIES_RELATIONSHIP: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/relationship/series")
+_MSTATUS_TRANSCRIBED: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mstatus/t")
+_MSTATUS_TRANSCRIBED_AND_TRACED: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mstatus/tr")
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="490",
+        indicators=("0", " "),
+        subfields=(("a", "untraced series statement"),),
+        source=(
+            "?work bffi:relation [a bffi:Relation ; "
+            "bffi:relationship <…/relationship/series> ; "
+            "bffi:associatedResource ?s] . "
+            "?s a bffi:SeriesExpression ; bffi:status <…/mstatus/t> ; "
+            "NOT EXISTS { ?s bffi:status <…/mstatus/tr> } . "
+            "?s bffi:title / bffi:mainTitle ?text"
+        ),
+        notes=(
+            "490 is the *untraced* series statement (no 8XX partner). The "
+            "discriminator is mstatus/t alone — a co-typed mstatus/tr "
+            "signals that an 830 controlled-series partner exists and the "
+            "transcribed view is suppressed here to avoid double-emit. "
+            "ind1=0 (Series not traced) per Helmet convention; \\$v / \\$x "
+            "volume numbering is rare and currently uncovered."
+        ),
+    )
+)
+def _extract_untraced_series(graph: Graph, manifestation: URIRef) -> list[str]:
+    """Walk ``?source bffi:relation [bffi:relationship <series> ;
+    bffi:associatedResource ?s]`` from both the Manifestation and its
+    Work, and emit MARC 490 ``$a`` for every series resource that
+    represents an untraced series statement (mstatus/t but not
+    mstatus/tr)."""
+    work = _find_work_for_manifestation(graph, manifestation)
+    anchors: list[URIRef] = [manifestation]
+    if work is not None:
+        anchors.append(work)
+    texts: list[str] = []
+    for anchor in anchors:
+        for rel in graph.objects(anchor, BFFI.relation):
+            if (rel, BFFI.relationship, _SERIES_RELATIONSHIP) not in graph:
+                continue
+            for target in graph.objects(rel, BFFI.associatedResource):
+                if not _is_untraced_series(graph, target):
+                    continue
+                for title_block in graph.objects(target, BFFI.title):
+                    main = next(graph.objects(title_block, BFFI.mainTitle), None)
+                    if isinstance(main, Literal):
+                        texts.append(str(main))
+                        break
+    return sorted(texts)
+
+
+def _is_untraced_series(graph: Graph, target: Node) -> bool:
+    """True when the series resource has mstatus/t (transcribed) and
+    NOT mstatus/tr (transcribed + traced — the synthetic companion
+    marc2bibframe2 mints alongside a controlled 830)."""
+    has_t = (target, BFFI.status, _MSTATUS_TRANSCRIBED) in graph
+    has_tr = (target, BFFI.status, _MSTATUS_TRANSCRIBED_AND_TRACED) in graph
+    return has_t and not has_tr
 
 
 @marc_emit(
@@ -1030,7 +1103,8 @@ class _IdentifierEmit:
     ``assigner`` carries the issuing body's name (the ``rdfs:label`` of
     a ``bffi:Organization`` referenced by ``bffi:assigner``) and emits
     as MARC ``$b`` on schemes where the source field carries it
-    (notably 028).
+    (notably 028). ``qualifier`` is the ``bffi:qualifier`` literal and
+    emits as MARC ``$q`` — common on 020 ISBNs (e.g. ``$q (nid.)``).
     """
 
     tag: str
@@ -1038,6 +1112,7 @@ class _IdentifierEmit:
     ind2: str
     value: str
     assigner: str | None
+    qualifier: str | None
 
 
 @dataclass(frozen=True)
@@ -1364,11 +1439,14 @@ def _subject_marc_tag(graph: Graph, subj_node: URIRef) -> str | None:
     MarcEmitMeta(
         tag="020",
         indicators=(" ", " "),
-        subfields=(("a", "ISBN value"),),
+        subfields=(
+            ("a", "ISBN value"),
+            ("q", "qualifier (binding / format, e.g. 'nid.', 'pehmeäkantinen')"),
+        ),
         source=(
             "?m bffi:identifiedBy [a bffi:Identifier ; "
             "bffi:source <http://id.loc.gov/vocabulary/identifiers/isbn> ; "
-            "rdf:value ?isbn]"
+            "rdf:value ?isbn ; bffi:qualifier ?qualifier]"
         ),
     ),
     MarcEmitMeta(
@@ -1426,6 +1504,7 @@ def _extract_identifier_datafields(graph: Graph, manifestation: URIRef) -> list[
         value = next(graph.objects(ident, RDF.value), None)
         if not isinstance(value, Literal):
             continue
+        qualifier = next(graph.objects(ident, BFFI.qualifier), None)
         emits.append(
             _IdentifierEmit(
                 tag=scheme.tag,
@@ -1433,6 +1512,7 @@ def _extract_identifier_datafields(graph: Graph, manifestation: URIRef) -> list[
                 ind2=scheme.ind2,
                 value=str(value),
                 assigner=_extract_assigner_label(graph, ident),
+                qualifier=str(qualifier) if isinstance(qualifier, Literal) else None,
             )
         )
     return emits
@@ -1524,9 +1604,10 @@ def _append_identifier_datafields(
 ) -> None:
     """Append one MARC datafield per identifier emit.
 
-    ``$a`` carries the identifier value; ``$b`` carries the assigner /
-    issuing publisher label when present (e.g. MARC 028 ``$b MGM DVD``).
-    Indicators come from the per-scheme dispatch table.
+    Subfield order follows the MARC spec: ``$a`` value → ``$b``
+    assigner (028 issuing-publisher name) → ``$q`` qualifier (020 ISBN
+    binding / format). Indicators come from the per-scheme dispatch
+    table.
     """
     for ident in identifiers:
         df = etree.SubElement(
@@ -1537,6 +1618,9 @@ def _append_identifier_datafields(
         if ident.assigner is not None:
             sf_b = etree.SubElement(df, f"{_MARC}subfield", code="b")
             sf_b.text = ident.assigner
+        if ident.qualifier is not None:
+            sf_q = etree.SubElement(df, f"{_MARC}subfield", code="q")
+            sf_q.text = ident.qualifier
 
 
 def _append_note_datafields(record: etree._Element, notes: list[_NoteEmit]) -> None:
@@ -1706,6 +1790,7 @@ def _build_marc_record(
     subjects: list[_SubjectEmit],
     notes: list[_NoteEmit],
     table_of_contents: list[str],
+    untraced_series: list[str],
     added_titles: list[_AddedTitleEmit],
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
@@ -1752,6 +1837,12 @@ def _build_marc_record(
     _append_rda_datafields(record, "337", rda.media)
     _append_rda_datafields(record, "338", rda.carrier)
 
+    # 490 untraced series statements (after RDA, before notes).
+    for series_text in untraced_series:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag="490", ind1="0", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = series_text
+
     # 500 / 546 notes come after the bibliographic-description block,
     # before 505 (which precedes 6XX subjects per MARC tag order).
     _append_note_datafields(record, notes)
@@ -1793,6 +1884,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     subjects = _extract_subject_datafields(graph, manifestation)
     notes = _extract_notes(graph, manifestation)
     table_of_contents = _extract_table_of_contents(graph, manifestation)
+    untraced_series = _extract_untraced_series(graph, manifestation)
     added_titles = _extract_added_titles(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
@@ -1809,6 +1901,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         subjects=subjects,
         notes=notes,
         table_of_contents=table_of_contents,
+        untraced_series=untraced_series,
         added_titles=added_titles,
     )
     return etree.tostring(
