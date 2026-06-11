@@ -722,10 +722,12 @@ def _parse_marc_key(key: str) -> tuple[str, str, str, tuple[tuple[str, str], ...
         subfields=(
             ("a", "uniform title heading"),
             ("g", "miscellaneous information"),
+            ("i", "relationship information (marcKey-driven)"),
             ("l", "language of a work"),
             ("n", "number of part / section of a work"),
             ("o", "arrangement statement for music"),
             ("p", "name of part / section of a work"),
+            ("s", "version (marcKey-driven)"),
         ),
         source=(
             "?m bffi:relation [bffi:associatedResource ?target] . "
@@ -949,6 +951,25 @@ def _is_untraced_series(graph: Graph, target: Node) -> bool:
     has_t = (target, BFFI.status, _MSTATUS_TRANSCRIBED) in graph
     has_tr = (target, BFFI.status, _MSTATUS_TRANSCRIBED_AND_TRACED) in graph
     return has_t and not has_tr
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="506",
+        indicators=(" ", " "),
+        subfields=(("a", "terms governing access — note text"),),
+        source=("?m bffi:usageAndAccessPolicy [a bffi:AccessPolicy ; rdfs:label ?text]"),
+    )
+)
+def _extract_access_policies(graph: Graph, manifestation: URIRef) -> list[str]:
+    """Return every ``bffi:usageAndAccessPolicy`` block's ``rdfs:label`` —
+    each emits as a MARC 506 datafield."""
+    texts: list[str] = []
+    for policy in graph.objects(manifestation, BFFI.usageAndAccessPolicy):
+        label = next(graph.objects(policy, RDFS.label), None)
+        if isinstance(label, Literal):
+            texts.append(str(label))
+    return sorted(texts)
 
 
 @marc_emit(
@@ -1194,11 +1215,19 @@ def _extract_variant_titles(graph: Graph, manifestation: URIRef) -> list[str]:
     MarcEmitMeta(
         tag="130",
         indicators=("0", " "),
-        subfields=(("a", "uniform title — main entry"),),
+        subfields=(
+            ("a", "uniform title — main entry"),
+            ("d", "date of treaty signing (marcKey-driven)"),
+            ("g", "miscellaneous information (marcKey-driven)"),
+            ("l", "language of a work (marcKey-driven)"),
+            ("n", "number of part / section (marcKey-driven)"),
+            ("p", "name of part / section (marcKey-driven)"),
+        ),
         source=(
             "?m bffi:expressionOf ?hub . ?hub bffi:marcKey ?key "
-            "(where ?key begins with '130'). Subfields are parsed "
-            "verbatim from ?key — same marcKey-driven recovery as 730/740."
+            "(where ?key begins with '130'). Indicators and every "
+            "subfield are parsed verbatim from ?key — same marcKey-driven "
+            "recovery as 730/740."
         ),
     )
 )
@@ -2030,6 +2059,7 @@ def _build_marc_record(
     subjects: list[_SubjectEmit],
     notes: list[_NoteEmit],
     table_of_contents: list[str],
+    access_policies: list[str],
     untraced_series: list[str],
     added_titles: list[_AddedTitleEmit],
 ) -> etree._Element:
@@ -2103,6 +2133,12 @@ def _build_marc_record(
     _append_note_datafields(record, notes)
     _append_table_of_contents_datafields(record, table_of_contents)
 
+    # 506 access-policy notes (after 505 contents per MARC tag order).
+    for policy_text in access_policies:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag="506", ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = policy_text
+
     # 6XX subjects come after the bibliographic-description block.
     _append_subject_datafields(record, subjects)
 
@@ -2142,6 +2178,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     subjects = _extract_subject_datafields(graph, manifestation)
     notes = _extract_notes(graph, manifestation)
     table_of_contents = _extract_table_of_contents(graph, manifestation)
+    access_policies = _extract_access_policies(graph, manifestation)
     untraced_series = _extract_untraced_series(graph, manifestation)
     added_titles = _extract_added_titles(graph, manifestation)
     record = _build_marc_record(
@@ -2162,6 +2199,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         subjects=subjects,
         notes=notes,
         table_of_contents=table_of_contents,
+        access_policies=access_policies,
         untraced_series=untraced_series,
         added_titles=added_titles,
     )
