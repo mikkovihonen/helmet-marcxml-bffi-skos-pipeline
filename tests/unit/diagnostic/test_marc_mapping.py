@@ -73,6 +73,7 @@ def test_marc_emit_registry_includes_expected_tags() -> None:
         "711",
         "730",
         "740",
+        "830",
     }
     actual_tags = {entry.tag for entry in MARC_EMIT_REGISTRY}
     assert actual_tags == expected_tags

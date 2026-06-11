@@ -897,6 +897,58 @@ _MSTATUS_TRANSCRIBED_AND_TRACED: Final[URIRef] = URIRef("http://id.loc.gov/vocab
 
 @marc_emit(
     MarcEmitMeta(
+        tag="830",
+        indicators=(" ", " "),
+        subfields=(
+            ("a", "uniform-title series statement"),
+            ("n", "number of part / section (marcKey-driven)"),
+            ("v", "volume number (marcKey-driven)"),
+        ),
+        source=(
+            "?source bffi:relation [a bffi:Relation ; "
+            "bffi:relationship <…/relationship/series> ; "
+            "bffi:associatedResource ?hub] . "
+            "?hub a bffi:SeriesExpression ; bffi:marcKey ?key "
+            "(where ?key begins with '830') — full subfield set parsed "
+            "from marcKey verbatim."
+        ),
+    )
+)
+def _extract_traced_series(graph: Graph, manifestation: URIRef) -> list[_AddedTitleEmit]:
+    """Walk ``?source bffi:relation [bffi:relationship <series> ;
+    bffi:associatedResource ?hub]`` from both the Manifestation and
+    its Work, looking for Hub Works whose ``bffi:marcKey`` starts with
+    ``"830"``. Each emits as a MARC 830 datafield with the full
+    parsed subfield set."""
+    work = _find_work_for_manifestation(graph, manifestation)
+    anchors: list[URIRef] = [manifestation]
+    if work is not None:
+        anchors.append(work)
+    emits: list[_AddedTitleEmit] = []
+    seen_hubs: set[Node] = set()
+    for anchor in anchors:
+        for rel in graph.objects(anchor, BFFI.relation):
+            if (rel, BFFI.relationship, _SERIES_RELATIONSHIP) not in graph:
+                continue
+            for target in graph.objects(rel, BFFI.associatedResource):
+                if not isinstance(target, URIRef) or target in seen_hubs:
+                    continue
+                seen_hubs.add(target)
+                marc_key = next(graph.objects(target, BFFI.marcKey), None)
+                if not isinstance(marc_key, Literal):
+                    continue
+                parsed = _parse_marc_key(str(marc_key))
+                if parsed is None:
+                    continue
+                tag, ind1, ind2, subfields = parsed
+                if tag != "830" or not subfields:
+                    continue
+                emits.append(_AddedTitleEmit(tag=tag, ind1=ind1, ind2=ind2, subfields=subfields))
+    return sorted(emits, key=lambda e: e.subfields)
+
+
+@marc_emit(
+    MarcEmitMeta(
         tag="490",
         indicators=("0", " "),
         subfields=(("a", "untraced series statement"),),
@@ -2061,6 +2113,7 @@ def _build_marc_record(
     table_of_contents: list[str],
     access_policies: list[str],
     untraced_series: list[str],
+    traced_series: list[_AddedTitleEmit],
     added_titles: list[_AddedTitleEmit],
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
@@ -2147,6 +2200,9 @@ def _build_marc_record(
 
     _append_added_title_datafields(record, added_titles)
 
+    # 830 traced series — last datafield block before record close.
+    _append_added_title_datafields(record, traced_series)
+
     return record
 
 
@@ -2180,6 +2236,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     table_of_contents = _extract_table_of_contents(graph, manifestation)
     access_policies = _extract_access_policies(graph, manifestation)
     untraced_series = _extract_untraced_series(graph, manifestation)
+    traced_series = _extract_traced_series(graph, manifestation)
     added_titles = _extract_added_titles(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
@@ -2201,6 +2258,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         table_of_contents=table_of_contents,
         access_policies=access_policies,
         untraced_series=untraced_series,
+        traced_series=traced_series,
         added_titles=added_titles,
     )
     return etree.tostring(
