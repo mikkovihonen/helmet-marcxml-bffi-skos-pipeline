@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Final, TypeVar
 
 from lxml import etree
-from rdflib import RDF, Graph, Literal, URIRef
+from rdflib import RDF, BNode, Graph, Literal, URIRef
 from rdflib.namespace import RDFS
 from rdflib.term import Node
 
@@ -1782,7 +1782,7 @@ _SUBJECT_TAG_PATTERN: Final[re.Pattern[str]] = re.compile(r"#[A-Za-z]+(\d{3})-")
 #: produced by marc2bibframe2 (e.g. 730 uniform titles via #Work730)
 #: are not subjects and get dispatched separately.
 _SUBJECT_MARC_TAGS: Final[frozenset[str]] = frozenset(
-    {"600", "610", "611", "630", "648", "650", "651", "655"}
+    {"600", "610", "611", "630", "648", "650", "651", "653", "655"}
 )
 
 #: Fallback mapping from BFFI subject-node class to MARC tag, used when
@@ -1799,6 +1799,12 @@ _SUBJECT_TYPE_TO_MARC_TAG: Final[dict[URIRef, str]] = {
     BFFI.Place: "651",
     BFFI.GenreForm: "655",
 }
+
+#: ``bffi:Uncontrolled`` co-type → MARC 653 (Index Term — Uncontrolled).
+#: Takes priority over the Topic/Person/etc. dispatch above because 653
+#: spans every term-kind: source ``653 _ N $a "term"`` is uncontrolled
+#: regardless of whether the term is topical, personal, geographic, etc.
+_UNCONTROLLED_TYPE: Final[URIRef] = URIRef("http://urn.fi/URN:NBN:fi:schema:bffi:Uncontrolled")
 
 
 @dataclass(frozen=True)
@@ -1901,6 +1907,22 @@ _SUBJECT_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
         source=f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed `bffi:Place`",
     ),
     MarcEmitMeta(
+        tag="653",
+        indicators=(" ", " "),
+        subfields=_SUBJECT_SUBFIELDS,
+        source=(
+            f"{_SUBJECT_SOURCE_PREFIX} — `?subject` is typed "
+            "`bffi:Uncontrolled` (any term-kind, anonymous bnode in BFFI)"
+        ),
+        notes=(
+            "653 is MARC's catch-all for uncontrolled subject terms. The "
+            "bffi:Uncontrolled co-type takes priority over the structural "
+            "Topic/Person/Place dispatch — source-MARC 653 spans every "
+            "term-kind so the structural rdf:type isn't the right "
+            "discriminator."
+        ),
+    ),
+    MarcEmitMeta(
         tag="655",
         indicators=(" ", " "),
         subfields=_SUBJECT_SUBFIELDS,
@@ -1934,7 +1956,7 @@ def _extract_subject_datafields(graph: Graph, manifestation: URIRef) -> list[_Su
         return []
     emits: list[_SubjectEmit] = []
     for subj_node in graph.objects(work, BFFI.subject):
-        if not isinstance(subj_node, URIRef):
+        if not isinstance(subj_node, URIRef | BNode):
             continue
         emit = _build_subject_emit(graph, subj_node)
         if emit is not None:
@@ -1945,7 +1967,7 @@ def _extract_subject_datafields(graph: Graph, manifestation: URIRef) -> list[_Su
 _SUBJECT_STRUCTURED_CODES: Final[frozenset[str]] = frozenset({"a", "0", "2"})
 
 
-def _build_subject_emit(graph: Graph, subj_node: URIRef) -> _SubjectEmit | None:
+def _build_subject_emit(graph: Graph, subj_node: URIRef | BNode) -> _SubjectEmit | None:
     """Return the ``_SubjectEmit`` for one ``bffi:subject`` URI, or
     ``None`` when the node can't be mapped to a 6XX tag or lacks both
     an ``rdfs:label`` and a parseable ``bffi:marcKey`` ``$a``."""
@@ -1959,9 +1981,14 @@ def _build_subject_emit(graph: Graph, subj_node: URIRef) -> _SubjectEmit | None:
     source = next(graph.objects(subj_node, BFFI.source), None)
     if isinstance(source, URIRef):
         vocab_code = local_name(source)
-    authority_uri: str | None = (
-        str(subj_node) if _SUBJECT_TAG_PATTERN.search(str(subj_node)) is None else None
-    )
+    # $0 is emitted only when the subject is an external authority URI:
+    # BNodes never have one (their str() is an rdflib-internal id), and
+    # bib-internal mint URIs (#Topic650-12 etc.) shouldn't leak the
+    # mint URI as if it were an authority record number.
+    if isinstance(subj_node, URIRef) and _SUBJECT_TAG_PATTERN.search(str(subj_node)) is None:
+        authority_uri: str | None = str(subj_node)
+    else:
+        authority_uri = None
     extras = _subject_marckey_extras(graph, subj_node)
     return _SubjectEmit(
         tag=tag,
@@ -1972,7 +1999,7 @@ def _build_subject_emit(graph: Graph, subj_node: URIRef) -> _SubjectEmit | None:
     )
 
 
-def _subject_label(graph: Graph, subj_node: URIRef) -> str | None:
+def _subject_label(graph: Graph, subj_node: URIRef | BNode) -> str | None:
     """Return the heading text (``$a``) for a subject node. Prefers
     the subject's own ``rdfs:label``; falls back to the marcKey ``$a``
     when the node is a Hub-style wrapper (e.g. ``Hub600-N``) that
@@ -1990,7 +2017,7 @@ def _subject_label(graph: Graph, subj_node: URIRef) -> str | None:
     return None
 
 
-def _subject_marckey_extras(graph: Graph, subj_node: URIRef) -> tuple[tuple[str, str], ...]:
+def _subject_marckey_extras(graph: Graph, subj_node: URIRef | BNode) -> tuple[tuple[str, str], ...]:
     """Parse the subject node's ``bffi:marcKey`` (when present) and
     return marcKey subfields beyond the structured-BFFI set
     (``$a`` / ``$0`` / ``$2``) — typically ``$t`` analytical title on
@@ -2008,14 +2035,22 @@ def _subject_marckey_extras(graph: Graph, subj_node: URIRef) -> tuple[tuple[str,
     )
 
 
-def _subject_marc_tag(graph: Graph, subj_node: URIRef) -> str | None:
-    """Pick the MARC 6XX tag for a subject URI.
+def _subject_marc_tag(graph: Graph, subj_node: Node) -> str | None:
+    """Pick the MARC 6XX tag for a subject node (URI or BNode).
 
-    Prefers the bib-internal URI fragment (``#Topic650-12``) — that's the
-    source-MARC tag preserved verbatim by marc2bibframe2. Falls back to
-    the subject's ``rdf:type`` when no fragment match exists (the
-    external-authority-URI case).
-    """
+    ``bffi:Uncontrolled`` rdf:type takes priority over the structural
+    Topic/Person/etc. dispatch — source-MARC 653 (Index Term —
+    Uncontrolled) carries terms of any kind, so an Uncontrolled co-type
+    forces the 653 destination regardless of structural typing.
+
+    For typed URIs without the Uncontrolled marker, prefers the
+    bib-internal URI fragment (``#Topic650-12``) — that's the
+    source-MARC tag preserved verbatim by marc2bibframe2. Falls back
+    to the subject's ``rdf:type`` (Topic→650, Place→651, etc.) when
+    no fragment match exists (the external-authority-URI case AND
+    for bnode subjects with structural typing only)."""
+    if (subj_node, RDF.type, _UNCONTROLLED_TYPE) in graph:
+        return "653"
     match = _SUBJECT_TAG_PATTERN.search(str(subj_node))
     if match is not None:
         tag = match.group(1)
