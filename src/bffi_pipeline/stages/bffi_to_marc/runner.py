@@ -947,53 +947,68 @@ def _extract_traced_series(graph: Graph, manifestation: URIRef) -> list[_AddedTi
     return sorted(emits, key=lambda e: e.subfields)
 
 
+@dataclass(frozen=True)
+class _UntracedSeriesEmit:
+    """One MARC 490 datafield: title statement plus optional volume number."""
+
+    title: str
+    volume: str | None
+
+
 @marc_emit(
     MarcEmitMeta(
         tag="490",
         indicators=("0", " "),
-        subfields=(("a", "untraced series statement"),),
+        subfields=(
+            ("a", "untraced series statement"),
+            ("v", "volume number"),
+        ),
         source=(
             "?work bffi:relation [a bffi:Relation ; "
             "bffi:relationship <…/relationship/series> ; "
-            "bffi:associatedResource ?s] . "
+            "bffi:associatedResource ?s ; bffi:seriesEnumeration ?vol] . "
             "?s a bffi:SeriesExpression ; bffi:status <…/mstatus/t> ; "
             "NOT EXISTS { ?s bffi:status <…/mstatus/tr> } . "
-            "?s bffi:title / bffi:mainTitle ?text"
+            "?s bffi:title / bffi:mainTitle ?text — $v from the "
+            "Relation's bffi:seriesEnumeration when present."
         ),
         notes=(
             "490 is the *untraced* series statement (no 8XX partner). The "
             "discriminator is mstatus/t alone — a co-typed mstatus/tr "
             "signals that an 830 controlled-series partner exists and the "
             "transcribed view is suppressed here to avoid double-emit. "
-            "ind1=0 (Series not traced) per Helmet convention; \\$v / \\$x "
-            "volume numbering is rare and currently uncovered."
+            "ind1=0 (Series not traced) per Helmet convention. ISBD "
+            'trailing " ;" is added on $a when $v follows.'
         ),
     )
 )
-def _extract_untraced_series(graph: Graph, manifestation: URIRef) -> list[str]:
+def _extract_untraced_series(graph: Graph, manifestation: URIRef) -> list[_UntracedSeriesEmit]:
     """Walk ``?source bffi:relation [bffi:relationship <series> ;
-    bffi:associatedResource ?s]`` from both the Manifestation and its
-    Work, and emit MARC 490 ``$a`` for every series resource that
-    represents an untraced series statement (mstatus/t but not
-    mstatus/tr)."""
+    bffi:associatedResource ?s ; bffi:seriesEnumeration ?vol]`` from
+    both the Manifestation and its Work, and emit MARC 490 for every
+    series resource that represents an untraced series statement
+    (mstatus/t but not mstatus/tr). $v comes from the Relation's
+    bffi:seriesEnumeration when present."""
     work = _find_work_for_manifestation(graph, manifestation)
     anchors: list[URIRef] = [manifestation]
     if work is not None:
         anchors.append(work)
-    texts: list[str] = []
+    emits: list[_UntracedSeriesEmit] = []
     for anchor in anchors:
         for rel in graph.objects(anchor, BFFI.relation):
             if (rel, BFFI.relationship, _SERIES_RELATIONSHIP) not in graph:
                 continue
+            volume_lit = next(graph.objects(rel, BFFI.seriesEnumeration), None)
+            volume = str(volume_lit) if isinstance(volume_lit, Literal) else None
             for target in graph.objects(rel, BFFI.associatedResource):
                 if not _is_untraced_series(graph, target):
                     continue
                 for title_block in graph.objects(target, BFFI.title):
                     main = next(graph.objects(title_block, BFFI.mainTitle), None)
                     if isinstance(main, Literal):
-                        texts.append(str(main))
+                        emits.append(_UntracedSeriesEmit(title=str(main), volume=volume))
                         break
-    return sorted(texts)
+    return sorted(emits, key=lambda e: (e.title, e.volume or ""))
 
 
 def _is_untraced_series(graph: Graph, target: Node) -> bool:
@@ -2112,7 +2127,7 @@ def _build_marc_record(
     notes: list[_NoteEmit],
     table_of_contents: list[str],
     access_policies: list[str],
-    untraced_series: list[str],
+    untraced_series: list[_UntracedSeriesEmit],
     traced_series: list[_AddedTitleEmit],
     added_titles: list[_AddedTitleEmit],
 ) -> etree._Element:
@@ -2175,11 +2190,15 @@ def _build_marc_record(
     _append_rda_datafields(record, "337", rda.media)
     _append_rda_datafields(record, "338", rda.carrier)
 
-    # 490 untraced series statements (after RDA, before notes).
-    for series_text in untraced_series:
+    # 490 untraced series statements (after RDA, before notes). ISBD
+    # trailing " ;" added on $a when $v volume number follows.
+    for series in untraced_series:
         df = etree.SubElement(record, f"{_MARC}datafield", tag="490", ind1="0", ind2=" ")
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
-        sf_a.text = series_text
+        sf_a.text = series.title + (" ;" if series.volume is not None else "")
+        if series.volume is not None:
+            sf_v = etree.SubElement(df, f"{_MARC}subfield", code="v")
+            sf_v.text = series.volume
 
     # 500 / 546 notes come after the bibliographic-description block,
     # before 505 (which precedes 6XX subjects per MARC tag order).
