@@ -313,69 +313,108 @@ def _first_literal(graph: Graph, subject: Node, predicate: URIRef) -> str | None
 
 
 @dataclass(frozen=True)
-class _RdaDescriptors:
-    """RDA content/media/carrier codes for MARC 336/337/338 emit."""
+class _RdaEntry:
+    """One MARC 336/337/338 emit: ``$a`` label + ``$b`` code + ``$2`` scheme.
 
-    content_codes: tuple[str, ...]
-    media_codes: tuple[str, ...]
-    carrier_codes: tuple[str, ...]
+    ``label`` comes from the URI's ``rdfs:label`` when present (English
+    typically; source-MARC ``$a`` is the cataloguer's display language
+    which BFFI doesn't preserve, so labels will not always round-trip
+    byte-identical). ``code`` is the URI's last segment (e.g. ``"sti"``).
+    ``scheme`` is derived from the URI's namespace (e.g. ``"rdacontent"``
+    for ``…/contentTypes/sti``)."""
+
+    label: str | None
+    code: str
+    scheme: str
+
+
+@dataclass(frozen=True)
+class _RdaDescriptors:
+    """RDA descriptors for MARC 336 (content), 337 (media), 338 (carrier)."""
+
+    content: tuple[_RdaEntry, ...]
+    media: tuple[_RdaEntry, ...]
+    carrier: tuple[_RdaEntry, ...]
+
+
+_RDA_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
+    ("a", "term in the cataloguing language (rdfs:label of the URI)"),
+    ("b", "RDA 3-letter code (URI last segment)"),
+    ("2", "scheme name (rdacontent / rdamedia / rdacarrier)"),
+)
 
 
 @marc_emit(
     MarcEmitMeta(
         tag="336",
         indicators=(" ", " "),
-        subfields=(("a", "RDA content type code"),),
+        subfields=_RDA_SUBFIELDS,
         source=(
             "?m bffi:workManifested ?work . "
-            "?work bffi:content <http://id.loc.gov/vocabulary/contentTypes/{code}>"
+            "?work bffi:content <http://id.loc.gov/vocabulary/contentTypes/{code}> . "
+            "$a = ?content's rdfs:label; $b = {code}; $2 = 'rdacontent'."
+        ),
+        notes=(
+            "Source MARC \\$a is the cataloguer's display label (often Finnish); "
+            "BFFI carries the URI's rdfs:label (typically English). The structure "
+            "round-trips; the \\$a value may not match source verbatim."
         ),
     ),
     MarcEmitMeta(
         tag="337",
         indicators=(" ", " "),
-        subfields=(("a", "RDA media type code"),),
-        source="?m bffi:media <http://id.loc.gov/vocabulary/mediaTypes/{code}>",
+        subfields=_RDA_SUBFIELDS,
+        source=(
+            "?m bffi:media <http://id.loc.gov/vocabulary/mediaTypes/{code}> . "
+            "$a from rdfs:label; $b = {code}; $2 = 'rdamedia'."
+        ),
     ),
     MarcEmitMeta(
         tag="338",
         indicators=(" ", " "),
-        subfields=(("a", "RDA carrier type code"),),
-        source="?m bffi:carrier <http://id.loc.gov/vocabulary/carriers/{code}>",
+        subfields=_RDA_SUBFIELDS,
+        source=(
+            "?m bffi:carrier <http://id.loc.gov/vocabulary/carriers/{code}> . "
+            "$a from rdfs:label; $b = {code}; $2 = 'rdacarrier'."
+        ),
     ),
 )
 def _extract_rda_descriptors(graph: Graph, manifestation: URIRef) -> _RdaDescriptors:
-    """Walk the RDA content / media / carrier predicates and return
-    each as its 3-letter MARC code (the URI's local name, taken from
-    the LoC vocabulary URIs marc2bibframe2 emits).
+    """Walk the RDA content / media / carrier predicates and build a
+    structured emit per row: the MARC 3-letter code (URI's local name),
+    the human-readable label (URI's ``rdfs:label``), and the scheme
+    name derived from the URI's namespace path.
 
-    Content lives on the Expression / Work (FRBR-axis: the work
-    *contains* text vs music vs cartographic material); media and
-    carrier live on the Manifestation (physical-format properties).
-    Multiple values per predicate produce multiple datafields, sorted
-    for determinism.
-    """
+    Content lives on the Work (FRBR-axis); media and carrier live on
+    the Manifestation. Multiple values per predicate produce multiple
+    datafields, sorted for determinism."""
     work = _find_work_for_manifestation(graph, manifestation)
-    content = sorted(
-        local_name(obj)
-        for obj in (graph.objects(work, BFFI.content) if work is not None else ())
-        if isinstance(obj, URIRef)
+    content = _rda_entries(
+        graph,
+        (graph.objects(work, BFFI.content) if work is not None else ()),
+        scheme="rdacontent",
     )
-    media = sorted(
-        local_name(obj)
-        for obj in graph.objects(manifestation, BFFI.media)
-        if isinstance(obj, URIRef)
-    )
-    carrier = sorted(
-        local_name(obj)
-        for obj in graph.objects(manifestation, BFFI.carrier)
-        if isinstance(obj, URIRef)
-    )
-    return _RdaDescriptors(
-        content_codes=tuple(content),
-        media_codes=tuple(media),
-        carrier_codes=tuple(carrier),
-    )
+    media = _rda_entries(graph, graph.objects(manifestation, BFFI.media), scheme="rdamedia")
+    carrier = _rda_entries(graph, graph.objects(manifestation, BFFI.carrier), scheme="rdacarrier")
+    return _RdaDescriptors(content=content, media=media, carrier=carrier)
+
+
+def _rda_entries(graph: Graph, objects: Iterable[Node], *, scheme: str) -> tuple[_RdaEntry, ...]:
+    """Build the sorted tuple of ``_RdaEntry`` values for one of the
+    three RDA predicates. Skips non-URI objects."""
+    entries: list[_RdaEntry] = []
+    for obj in objects:
+        if not isinstance(obj, URIRef):
+            continue
+        label = next(graph.objects(obj, RDFS.label), None)
+        entries.append(
+            _RdaEntry(
+                label=str(label) if isinstance(label, Literal) else None,
+                code=local_name(obj),
+                scheme=scheme,
+            )
+        )
+    return tuple(sorted(entries, key=lambda e: (e.code, e.label or "")))
 
 
 @dataclass(frozen=True)
@@ -1521,6 +1560,23 @@ def _append_table_of_contents_datafields(
         sf_a.text = text
 
 
+def _append_rda_datafields(
+    record: etree._Element, tag: str, entries: tuple[_RdaEntry, ...]
+) -> None:
+    """Append one MARC datafield per RDA descriptor: ``$a`` label (when
+    present), ``$b`` 3-letter code, ``$2`` scheme name. Multiple values
+    on one BFFI predicate produce multiple datafields per MARC convention."""
+    for entry in entries:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=tag, ind1=" ", ind2=" ")
+        if entry.label is not None:
+            sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+            sf_a.text = entry.label
+        sf_b = etree.SubElement(df, f"{_MARC}subfield", code="b")
+        sf_b.text = entry.code
+        sf_2 = etree.SubElement(df, f"{_MARC}subfield", code="2")
+        sf_2.text = entry.scheme
+
+
 def _append_title_datafield(
     record: etree._Element,
     title_parts: _TitleParts,
@@ -1692,9 +1748,9 @@ def _build_marc_record(
 
     # 336/337/338 RDA descriptors. One datafield per code (multiple values
     # on a single predicate produce repeated datafields per MARC convention).
-    _append_simple_a_datafields(record, "336", rda.content_codes)
-    _append_simple_a_datafields(record, "337", rda.media_codes)
-    _append_simple_a_datafields(record, "338", rda.carrier_codes)
+    _append_rda_datafields(record, "336", rda.content)
+    _append_rda_datafields(record, "337", rda.media)
+    _append_rda_datafields(record, "338", rda.carrier)
 
     # 500 / 546 notes come after the bibliographic-description block,
     # before 505 (which precedes 6XX subjects per MARC tag order).

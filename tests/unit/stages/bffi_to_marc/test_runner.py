@@ -680,8 +680,10 @@ def test_emit_marcxml_emits_260_with_only_place_and_date() -> None:
 
 def test_emit_marcxml_emits_336_337_338_rda_descriptors() -> None:
     """bffi:content on the Work + bffi:media / bffi:carrier on the
-    Manifestation each render as MARC 336 / 337 / 338 with the
-    3-letter LoC code in \\$a."""
+    Manifestation each render as MARC 336 / 337 / 338. Each datafield
+    carries the URI's ``rdfs:label`` in ``$a``, the 3-letter LoC code
+    in ``$b``, and the scheme name in ``$2`` (rdacontent / rdamedia /
+    rdacarrier — derived from the URI namespace)."""
     g = _build_minimal_bffi_graph(
         manifestation_uri="http://example.org/b1#Instance",
         bib_id="b1",
@@ -692,24 +694,60 @@ def test_emit_marcxml_emits_336_337_338_rda_descriptors() -> None:
     g.add((work, RDF.type, BFFI.BibframeWork))
     g.add((m, BFFI.workManifested, work))
 
-    g.add(
-        (
-            work,
-            BFFI.content,
-            URIRef("http://id.loc.gov/vocabulary/contentTypes/txt"),
-        )
-    )
-    g.add((m, BFFI.media, URIRef("http://id.loc.gov/vocabulary/mediaTypes/n")))
-    g.add((m, BFFI.carrier, URIRef("http://id.loc.gov/vocabulary/carriers/nc")))
+    content_uri = URIRef("http://id.loc.gov/vocabulary/contentTypes/txt")
+    g.add((work, BFFI.content, content_uri))
+    g.add((content_uri, RDFS.label, Literal("text")))
+    media_uri = URIRef("http://id.loc.gov/vocabulary/mediaTypes/n")
+    g.add((m, BFFI.media, media_uri))
+    g.add((media_uri, RDFS.label, Literal("unmediated")))
+    carrier_uri = URIRef("http://id.loc.gov/vocabulary/carriers/nc")
+    g.add((m, BFFI.carrier, carrier_uri))
+    g.add((carrier_uri, RDFS.label, Literal("volume")))
 
     marcxml = emit_marcxml(g, manifestation=m)
     root = etree.fromstring(marcxml)
     df336 = root.find(f"{{{MARC21_NS}}}datafield[@tag='336']")
     df337 = root.find(f"{{{MARC21_NS}}}datafield[@tag='337']")
     df338 = root.find(f"{{{MARC21_NS}}}datafield[@tag='338']")
-    assert df336 is not None and df336.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "txt"  # type: ignore[union-attr]
-    assert df337 is not None and df337.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "n"  # type: ignore[union-attr]
-    assert df338 is not None and df338.find(f"{{{MARC21_NS}}}subfield[@code='a']").text == "nc"  # type: ignore[union-attr]
+    assert df336 is not None
+    assert df337 is not None
+    assert df338 is not None
+    for df, scheme, label, code in [
+        (df336, "rdacontent", "text", "txt"),
+        (df337, "rdamedia", "unmediated", "n"),
+        (df338, "rdacarrier", "volume", "nc"),
+    ]:
+        sf_a = df.find(f"{{{MARC21_NS}}}subfield[@code='a']")
+        sf_b = df.find(f"{{{MARC21_NS}}}subfield[@code='b']")
+        sf_2 = df.find(f"{{{MARC21_NS}}}subfield[@code='2']")
+        assert sf_a is not None and sf_a.text == label
+        assert sf_b is not None and sf_b.text == code
+        assert sf_2 is not None and sf_2.text == scheme
+
+
+def test_emit_marcxml_emits_336_without_subfield_a_when_uri_has_no_label() -> None:
+    """When the RDA URI lacks an ``rdfs:label`` (rare — happens when the
+    URI dictionary wasn't loaded), the emit drops ``$a`` but still
+    writes ``$b`` (code) and ``$2`` (scheme) so the structural
+    information survives."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+    g.add((work, BFFI.content, URIRef("http://id.loc.gov/vocabulary/contentTypes/txt")))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    df336 = root.find(f"{{{MARC21_NS}}}datafield[@tag='336']")
+    assert df336 is not None
+    assert df336.find(f"{{{MARC21_NS}}}subfield[@code='a']") is None
+    assert df336.find(f"{{{MARC21_NS}}}subfield[@code='b']").text == "txt"  # type: ignore[union-attr]
+    assert df336.find(f"{{{MARC21_NS}}}subfield[@code='2']").text == "rdacontent"  # type: ignore[union-attr]
 
 
 def test_emit_marcxml_emits_500_general_notes() -> None:
