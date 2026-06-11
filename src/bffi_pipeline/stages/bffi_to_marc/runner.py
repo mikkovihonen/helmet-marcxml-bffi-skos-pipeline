@@ -276,6 +276,21 @@ class _PublicationEmit:
         ),
     )
 )
+@marc_emit(
+    MarcEmitMeta(
+        tag="250",
+        indicators=(" ", " "),
+        subfields=(("a", "edition statement"),),
+        source="?m bffi:editionStatement ?text",
+    )
+)
+def _extract_edition_statement(graph: Graph, manifestation: URIRef) -> str | None:
+    """Return the first ``bffi:editionStatement`` literal on the
+    Manifestation. Maps directly to MARC 250 ``$a``."""
+    value = next(graph.objects(manifestation, BFFI.editionStatement), None)
+    return str(value) if isinstance(value, Literal) else None
+
+
 def _extract_publication(graph: Graph, manifestation: URIRef) -> _PublicationEmit | None:
     """Walk the Manifestation's ``bffi:provisionActivity`` blocks for the
     first Publication-typed activity and return its structured place /
@@ -958,39 +973,100 @@ def _extract_table_of_contents(graph: Graph, manifestation: URIRef) -> list[str]
 
 @dataclass(frozen=True)
 class _ClassificationEmit:
-    """One MARC 084 datafield: portion + optional scheme code."""
+    """One MARC classification datafield: tag + portion + optional \\$2 scheme."""
 
+    tag: str
     portion: str
     code: str | None
 
 
+#: BFFI Classification subclass → MARC tag. Plain ``bffi:Classification``
+#: (with no subtype) falls through to 084. The five subclass URIs are
+#: from `lkd.rdf` and map to the LoC-standard 05X / 06X / 07X / 08X
+#: classification fields.
+_CLASSIFICATION_TYPE_TO_MARC_TAG: Final[dict[URIRef, str]] = {
+    URIRef("http://urn.fi/URN:NBN:fi:schema:bffi:ClassificationLcc"): "050",
+    URIRef("http://urn.fi/URN:NBN:fi:schema:bffi:ClassificationNlm"): "060",
+    URIRef("http://urn.fi/URN:NBN:fi:schema:bffi:ClassificationNal"): "070",
+    URIRef("http://urn.fi/URN:NBN:fi:schema:bffi:ClassificationUdc"): "080",
+    URIRef("http://urn.fi/URN:NBN:fi:schema:bffi:ClassificationDdc"): "082",
+}
+
+
+_CLASSIFICATION_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
+    ("a", "classification number"),
+    ("2", "scheme code (e.g. 'ykl'); only when bffi:source present"),
+)
+
+
 @marc_emit(
+    MarcEmitMeta(
+        tag="050",
+        indicators=(" ", " "),
+        subfields=_CLASSIFICATION_SUBFIELDS,
+        source=(
+            "?work bffi:classification [a bffi:ClassificationLcc ; bffi:classificationPortion ?n]"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="060",
+        indicators=(" ", " "),
+        subfields=_CLASSIFICATION_SUBFIELDS,
+        source=(
+            "?work bffi:classification [a bffi:ClassificationNlm ; bffi:classificationPortion ?n]"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="070",
+        indicators=(" ", " "),
+        subfields=_CLASSIFICATION_SUBFIELDS,
+        source=(
+            "?work bffi:classification [a bffi:ClassificationNal ; bffi:classificationPortion ?n]"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="080",
+        indicators=(" ", " "),
+        subfields=_CLASSIFICATION_SUBFIELDS,
+        source=(
+            "?work bffi:classification [a bffi:ClassificationUdc ; bffi:classificationPortion ?n]"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="082",
+        indicators=(" ", " "),
+        subfields=_CLASSIFICATION_SUBFIELDS,
+        source=(
+            "?work bffi:classification [a bffi:ClassificationDdc ; bffi:classificationPortion ?n]"
+        ),
+    ),
     MarcEmitMeta(
         tag="084",
         indicators=(" ", " "),
-        subfields=(
-            ("a", "classification number"),
-            ("2", "scheme code (e.g. 'ykl')"),
-        ),
+        subfields=_CLASSIFICATION_SUBFIELDS,
         source=(
             "?m bffi:workManifested ?work . "
             "?work bffi:classification [a bffi:Classification ; "
             "bffi:classificationPortion ?number ; "
-            "bffi:source [a bffi:Source ; bffi:code ?code]]"
+            "bffi:source [a bffi:Source ; bffi:code ?code]] — "
+            "the catch-all for plain bffi:Classification blocks; "
+            "subclassed UDC / DDC / LCC / NLM / NAL classifications "
+            "dispatch to 080 / 082 / 050 / 060 / 070."
         ),
         notes=(
             "$2 emitted when bffi:source / bffi:code is present (e.g. 'ykl'); "
             "omitted otherwise. Helmet-local 09X (091/092/094/095/097) "
             "classifications are lost upstream of BFFI (marc2bibframe2 "
-            "drops them) — see the Known limitations section below. "
-            "Standard 050/080/082 dispatching by source is a follow-on."
+            "drops them) — see the Known limitations section below."
         ),
-    )
+    ),
 )
 def _extract_classifications(graph: Graph, manifestation: URIRef) -> list[_ClassificationEmit]:
-    """Walk classification blocks on the Work and return each
-    ``bffi:classificationPortion`` paired with its optional scheme code.
-    Used for MARC 084 emit."""
+    """Walk every classification block on the Work and dispatch each
+    to a MARC tag based on its most-specific ``rdf:type``. UDC / DDC /
+    LCC / NLM / NAL subclasses route to 080 / 082 / 050 / 060 / 070;
+    plain ``bffi:Classification`` falls through to 084.
+    """
     work = _find_work_for_manifestation(graph, manifestation)
     if work is None:
         return []
@@ -999,14 +1075,26 @@ def _extract_classifications(graph: Graph, manifestation: URIRef) -> list[_Class
         portion = next(graph.objects(cls_block, BFFI.classificationPortion), None)
         if not isinstance(portion, Literal):
             continue
+        tag = _classification_marc_tag(graph, cls_block)
         code: str | None = None
         source_block = next(graph.objects(cls_block, BFFI.source), None)
         if source_block is not None:
             code_lit = next(graph.objects(source_block, BFFI.code), None)
             if isinstance(code_lit, Literal):
                 code = str(code_lit)
-        emits.append(_ClassificationEmit(portion=str(portion), code=code))
-    return sorted(emits, key=lambda e: (e.portion, e.code or ""))
+        emits.append(_ClassificationEmit(tag=tag, portion=str(portion), code=code))
+    return sorted(emits, key=lambda e: (e.tag, e.portion, e.code or ""))
+
+
+def _classification_marc_tag(graph: Graph, cls_block: Node) -> str:
+    """Pick the MARC tag for a classification block. Prefers the
+    LoC-standard 05X/06X/07X/08X tag when the block is typed with a
+    specific Classification subclass; falls back to 084 for plain
+    ``bffi:Classification``."""
+    for cls_type, tag in _CLASSIFICATION_TYPE_TO_MARC_TAG.items():
+        if (cls_block, RDF.type, cls_type) in graph:
+            return tag
+    return "084"
 
 
 @marc_emit(
@@ -1747,9 +1835,12 @@ def _append_subject_datafields(record: etree._Element, subjects: list[_SubjectEm
 def _append_classification_datafields(
     record: etree._Element, classifications: list[_ClassificationEmit]
 ) -> None:
-    """Append MARC 084 datafields with ``$a`` portion and optional ``$2`` scheme."""
+    """Append one MARC classification datafield per emit with ``$a``
+    portion and optional ``$2`` scheme code. The MARC tag (050 / 060 /
+    070 / 080 / 082 / 084) is picked per-emit by the classification's
+    BFFI type."""
     for cls in classifications:
-        df = etree.SubElement(record, f"{_MARC}datafield", tag="084", ind1=" ", ind2=" ")
+        df = etree.SubElement(record, f"{_MARC}datafield", tag=cls.tag, ind1=" ", ind2=" ")
         sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
         sf_a.text = cls.portion
         if cls.code is not None:
@@ -1780,6 +1871,7 @@ def _build_marc_record(
     change_date: str | None,
     title_parts: _TitleParts | None,
     responsibility: str | None,
+    edition_statement: str | None,
     publication: _PublicationEmit | None,
     identifiers: list[_IdentifierEmit],
     language_codes: list[str],
@@ -1824,6 +1916,11 @@ def _build_marc_record(
 
     if title_parts is not None:
         _append_title_datafield(record, title_parts, responsibility)
+
+    if edition_statement is not None:
+        df250 = etree.SubElement(record, f"{_MARC}datafield", tag="250", ind1=" ", ind2=" ")
+        sf_a = etree.SubElement(df250, f"{_MARC}subfield", code="a")
+        sf_a.text = edition_statement
 
     if publication is not None:
         _append_publication_datafield(record, publication)
@@ -1874,6 +1971,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     change_date = _extract_change_date(graph, manifestation)
     title_parts = _extract_main_title_parts(graph, manifestation)
     responsibility = _extract_responsibility_statement(graph, manifestation)
+    edition_statement = _extract_edition_statement(graph, manifestation)
     publication = _extract_publication(graph, manifestation)
     identifiers = _extract_identifier_datafields(graph, manifestation)
     language_codes = _extract_language_codes(graph, manifestation)
@@ -1891,6 +1989,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         change_date=change_date,
         title_parts=title_parts,
         responsibility=responsibility,
+        edition_statement=edition_statement,
         publication=publication,
         identifiers=identifiers,
         language_codes=language_codes,
