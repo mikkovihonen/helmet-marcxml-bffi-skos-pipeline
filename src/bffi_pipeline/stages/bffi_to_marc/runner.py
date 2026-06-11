@@ -1010,8 +1010,10 @@ class _NoteTarget:
 
 
 _MNOTETYPE_TO_MARC: Final[dict[URIRef, _NoteTarget]] = {
-    URIRef("http://id.loc.gov/vocabulary/mnotetype/lang"): _NoteTarget("546"),
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/biblio"): _NoteTarget("504"),
     URIRef("http://id.loc.gov/vocabulary/mnotetype/participants"): _NoteTarget("511"),
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/computer"): _NoteTarget("538"),
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/lang"): _NoteTarget("546"),
     # 534 source-MARC uses $c (Publication, distribution, etc. of original) —
     # not $a — so the destination subfield code overrides the default.
     URIRef("http://id.loc.gov/vocabulary/mnotetype/orig"): _NoteTarget("534", "c"),
@@ -1056,12 +1058,30 @@ class _NoteEmit:
         ),
     ),
     MarcEmitMeta(
+        tag="504",
+        indicators=(" ", " "),
+        subfields=(("a", "bibliography note text"),),
+        source=(
+            "?m bffi:note [a bffi:Note, <…/mnotetype/biblio> ; "
+            "rdfs:label ?text] — typed with the bibliography tail."
+        ),
+    ),
+    MarcEmitMeta(
         tag="511",
         indicators=(" ", " "),
         subfields=(("a", "participants / performers note text"),),
         source=(
             "?m bffi:note [a bffi:Note, <…/mnotetype/participants> ; "
             "rdfs:label ?text] — typed with the participants tail."
+        ),
+    ),
+    MarcEmitMeta(
+        tag="538",
+        indicators=(" ", " "),
+        subfields=(("a", "system details note text"),),
+        source=(
+            "?m bffi:note [a bffi:Note, <…/mnotetype/computer> ; "
+            "rdfs:label ?text] — typed with the computer tail."
         ),
     ),
     MarcEmitMeta(
