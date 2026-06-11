@@ -1339,9 +1339,15 @@ _CLASSIFICATION_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
         ),
         notes=(
             "$2 emitted when bffi:source / bffi:code is present (e.g. 'ykl'); "
-            "omitted otherwise. Helmet-local 09X (091/092/094/095/097) "
-            "classifications are lost upstream of BFFI (marc2bibframe2 "
-            "drops them) — see the Known limitations section below."
+            "omitted otherwise. **Helmet-local 09X classifications "
+            "(091/092/093/094/095/097) are not reconstructable from BFFI** — "
+            "marc2bibframe2's ConvSpec-050-088.xsl has a template only for "
+            "MARC 084 and the standard 050-088 tags; the 09X tags fall "
+            'through to its default "drop unhandled datafield" path and '
+            "never reach BIBFRAME XML. Corpus coverage is high (091/097 ~98 %, "
+            "095 ~79 %, 092 ~55 %, 094 ~30 %, 093 ~20 %), so the loss is "
+            "material. Consumers who need 09X data must read the source "
+            "MARCXML directly."
         ),
     ),
 )
@@ -1681,6 +1687,17 @@ def _note_text_with_type(graph: Graph, subject: Node, note_type: URIRef) -> str 
         source=(
             "?m bffi:language <http://id.loc.gov/vocabulary/languages/{code}> "
             "— the last URI segment is the MARC code"
+        ),
+        notes=(
+            "Only \\$a is emitted. **MARC 041 sub-language codes "
+            "(\\$h language of original, \\$b summary, \\$d sung/spoken, "
+            "\\$g accompanying material, \\$j subtitles, etc.) collapse "
+            "into flat bffi:language URIs** at the marc2bibframe2 layer: "
+            "every source 041 sub-code becomes bf:language on the Work, "
+            "indistinguishable from the primary \\$a language. The reverse "
+            "converter has no signal to recover which language URI was "
+            "originally \\$h vs \\$a. Corpus impact: small (~54 sub-code "
+            "occurrences across the 500-record bench)."
         ),
     )
 )

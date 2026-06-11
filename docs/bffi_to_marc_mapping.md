@@ -12,7 +12,7 @@ The reverse converter operates entirely from the **published BFFI schema** — t
 
 ### Reading the table
 
-The first column is the MARC tag (or `leader` for the record-level pseudo-tag). The Ind1 / Ind2 column shows the indicators the converter writes; `#` represents the MARC blank indicator (a literal space in MARCXML); `—` indicates a control field or leader with no indicators. The BFFI source column names the predicates the converter walks; the Notes column flags caveats.
+The first column is the MARC tag (or `leader` for the record-level pseudo-tag). The Ind1 / Ind2 column shows the indicators the converter writes; `#` represents the MARC blank indicator (a literal space in MARCXML); `—` indicates a control field or leader with no indicators. The BFFI source column names the predicates the converter walks. The Notes table flags caveats.
 
 ## MARC fields the converter emits
 
@@ -76,7 +76,8 @@ Tags whose mapping carries a caveat worth flagging — known limitations, fallba
 | MARC tag | Notes |
 |---|---|
 | `leader` | Other leader positions hold structural constants (10/11 = '2', 20-23 = '4500') or placeholders (00-04 record length, 12-16 base address — recomputed by downstream MARC binary writers). Source-MARC byte-fidelity is not guaranteed because BFFI doesn't preserve every leader byte (e.g. position 09 character coding). |
-| `084` | $2 emitted when bffi:source / bffi:code is present (e.g. 'ykl'); omitted otherwise. Helmet-local 09X (091/092/094/095/097) classifications are lost upstream of BFFI (marc2bibframe2 drops them) — see the Known limitations section below. |
+| `041` | Only \$a is emitted. **MARC 041 sub-language codes (\$h language of original, \$b summary, \$d sung/spoken, \$g accompanying material, \$j subtitles, etc.) collapse into flat bffi:language URIs** at the marc2bibframe2 layer: every source 041 sub-code becomes bf:language on the Work, indistinguishable from the primary \$a language. The reverse converter has no signal to recover which language URI was originally \$h vs \$a. Corpus impact: small (~54 sub-code occurrences across the 500-record bench). |
+| `084` | $2 emitted when bffi:source / bffi:code is present (e.g. 'ykl'); omitted otherwise. **Helmet-local 09X classifications (091/092/093/094/095/097) are not reconstructable from BFFI** — marc2bibframe2's ConvSpec-050-088.xsl has a template only for MARC 084 and the standard 050-088 tags; the 09X tags fall through to its default "drop unhandled datafield" path and never reach BIBFRAME XML. Corpus coverage is high (091/097 ~98 %, 095 ~79 %, 092 ~55 %, 094 ~30 %, 093 ~20 %), so the loss is material. Consumers who need 09X data must read the source MARCXML directly. |
 | `245` | First non-variant bffi:title block wins. Variant-titled blocks (typed with vartitletype/*) are skipped here and feed the 246 emit instead. |
 | `246` | ind1=1 (Note, added entry) per Helmet convention; the specific vartitletype tail (e.g. /por portion-of-title vs /par parallel title) maps to different MARC ind2 values but the dispatch is deferred. |
 | `260` | ISBD trailing punctuation (" :" before $b, "," before $c) is added at emit time. If no Publication-typed provisionActivity carries the structured parts, the flat bffi:publicationStatement is the fallback — whole transcribed string in $a. |
@@ -88,19 +89,3 @@ Tags whose mapping carries a caveat worth flagging — known limitations, fallba
 | `740` | Indicators (including nonfiling-character counts in ind1) and every subfield are reconstructed from bffi:marcKey verbatim — same shape as 730. |
 
 <!-- END AUTO: shipped -->
-
-## Known limitations
-
-Some MARC fields cannot be reconstructed byte-identical from BFFI alone:
-
-- **`bffi:readMarc382`** is a *synthesised* literal, not the verbatim source MARC 382 string. The forward conversion decomposes MARC 382 into a structured `bf:ensemble` → `bf:Ensemble` tree without preserving the source field verbatim. The reverse converter reconstructs a best-effort summary from the decomposed labels; the round-trip 382 is not byte-identical to the source.
-
-- **The leader** is currently a 24-character placeholder (`"00000nam a2200000 a 4500"`). Per-position population from BFFI state (record-type, bibliographic-level, encoding-level, character-coding, descriptive-cataloguing-form) is deferred. The placeholder is valid MARC; downstream tooling that depends on specific leader positions sees the same value for every record.
-
-- **Primary vs variant title discrimination** for MARC 245 currently picks the first `bffi:title` block on the Manifestation. The proper discrimination is to inspect the `bffi:marcKey` first 3 chars (e.g. blocks with marcKey starting `246` / `740` are variants, not the primary title).
-
-- **First-extent-wins** for MARC 300 in multi-extent records. Rare in the corpus; multiple 300 datafields aren't yet emitted in those cases.
-
-- **Helmet-local 09X classifications (091/092/093/094/095/097) are not reconstructable from BFFI.** marc2bibframe2's `ConvSpec-050-088.xsl` has a template only for MARC 084 (and the standard 050/060/070/072/080/082/083/086); the Helmet-local 09X tags fall through to its default "drop unhandled datafield" path and never reach BIBFRAME XML. By the time the BFFI graph is produced, the 09X data is gone — there is nothing for the reverse converter to read. Coverage in the corpus is high (091 and 097 each ~98 %, 095 ~79 %, 092 ~55 %, 094 ~30 %, 093 ~20 %), so the loss is material. Closing the gap requires either an upstream MARC → BIBFRAME enrichment pass that the project owns (mint `bffi:Classification` blank nodes with Helmet-local source codes before the BFFI conversion sees the BIBFRAME XML) or an upstream patch to marc2bibframe2 (forbidden by project rules — wrap, don't fork). Consumers who need 09X data must read the source MARCXML directly.
-
-- **MARC 041 sub-language codes (`$h` language of original, `$b` summary, `$d` sung/spoken, `$g` accompanying material, `$j` subtitles, etc.) collapse into flat `bffi:language` URIs.** marc2bibframe2's BIBFRAME emit doesn't distinguish the per-subfield language roles: every 041 sub-code becomes `bf:language <…/languages/{code}>` on the Work, indistinguishable from the primary `$a` language. The reverse converter can therefore only emit `041 $a` lines — it has no signal to recover `$h` "language of original" or the other categorical subfields. Corpus impact is small (~54 sub-code occurrences across the 500-record bench); when meaningful, downstream consumers must read the source MARCXML directly.
