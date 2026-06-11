@@ -1166,7 +1166,58 @@ _MSTATUS_TRANSCRIBED: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mstat
 _MSTATUS_TRANSCRIBED_AND_TRACED: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mstatus/tr")
 
 
+#: Series-relation tags emitted via marcKey-driven recovery. 800 is
+#: personal-name traced series, 810 corporate, 811 meeting, 830 the
+#: uniform-title catch-all. Each Hub URI's marcKey starts with the
+#: source MARC tag; the discriminator is purely the first 3 chars.
+_TRACED_SERIES_TAGS: Final[frozenset[str]] = frozenset({"800", "810", "811", "830"})
+
+
 @marc_emit(
+    MarcEmitMeta(
+        tag="800",
+        indicators=("1", " "),
+        subfields=(
+            ("a", "personal-name series statement"),
+            ("t", "title (marcKey-driven)"),
+            ("v", "volume number (marcKey-driven)"),
+        ),
+        source=(
+            "?source bffi:relation [bffi:relationship <…/relationship/series> "
+            "; bffi:associatedResource ?hub] . ?hub bffi:marcKey ?key "
+            "(where ?key begins with '800')"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="810",
+        indicators=("2", " "),
+        subfields=(
+            ("a", "corporate-name series statement"),
+            ("b", "subordinate unit (marcKey-driven)"),
+            ("t", "title (marcKey-driven)"),
+            ("v", "volume number (marcKey-driven)"),
+            ("n", "number of part (marcKey-driven)"),
+        ),
+        source=(
+            "?source bffi:relation [bffi:relationship <…/relationship/series> "
+            "; bffi:associatedResource ?hub] . ?hub bffi:marcKey ?key "
+            "(where ?key begins with '810')"
+        ),
+    ),
+    MarcEmitMeta(
+        tag="811",
+        indicators=("2", " "),
+        subfields=(
+            ("a", "meeting-name series statement"),
+            ("t", "title (marcKey-driven)"),
+            ("v", "volume number (marcKey-driven)"),
+        ),
+        source=(
+            "?source bffi:relation [bffi:relationship <…/relationship/series> "
+            "; bffi:associatedResource ?hub] . ?hub bffi:marcKey ?key "
+            "(where ?key begins with '811')"
+        ),
+    ),
     MarcEmitMeta(
         tag="830",
         indicators=(" ", " "),
@@ -1183,14 +1234,15 @@ _MSTATUS_TRANSCRIBED_AND_TRACED: Final[URIRef] = URIRef("http://id.loc.gov/vocab
             "(where ?key begins with '830') — full subfield set parsed "
             "from marcKey verbatim."
         ),
-    )
+    ),
 )
 def _extract_traced_series(graph: Graph, manifestation: URIRef) -> list[_AddedTitleEmit]:
     """Walk ``?source bffi:relation [bffi:relationship <series> ;
     bffi:associatedResource ?hub]`` from both the Manifestation and
     its Work, looking for Hub Works whose ``bffi:marcKey`` starts with
-    ``"830"``. Each emits as a MARC 830 datafield with the full
-    parsed subfield set."""
+    one of the four traced-series tags (800 / 810 / 811 / 830). Each
+    emits as a MARC datafield with the full parsed subfield set —
+    same marcKey-driven recovery as 730/740/130."""
     work = _find_work_for_manifestation(graph, manifestation)
     anchors: list[URIRef] = [manifestation]
     if work is not None:
@@ -1212,10 +1264,10 @@ def _extract_traced_series(graph: Graph, manifestation: URIRef) -> list[_AddedTi
                 if parsed is None:
                     continue
                 tag, ind1, ind2, subfields = parsed
-                if tag != "830" or not subfields:
+                if tag not in _TRACED_SERIES_TAGS or not subfields:
                     continue
                 emits.append(_AddedTitleEmit(tag=tag, ind1=ind1, ind2=ind2, subfields=subfields))
-    return sorted(emits, key=lambda e: e.subfields)
+    return sorted(emits, key=lambda e: (e.tag, e.subfields))
 
 
 @dataclass(frozen=True)
@@ -1646,19 +1698,54 @@ def _extract_variant_titles(graph: Graph, manifestation: URIRef) -> list[str]:
             ("p", "name of part / section (marcKey-driven)"),
         ),
         source=(
-            "?m bffi:expressionOf ?hub . ?hub bffi:marcKey ?key "
-            "(where ?key begins with '130'). Indicators and every "
-            "subfield are parsed verbatim from ?key — same marcKey-driven "
-            "recovery as 730/740."
+            "?m bffi:expressionOf ?hub . ?hub URI fragment matches "
+            "'#Hub130'; ?hub bffi:marcKey ?key (begins with '130'). "
+            "Indicators and every subfield parsed verbatim — same "
+            "marcKey-driven recovery as 730/740."
         ),
-    )
+    ),
+    MarcEmitMeta(
+        tag="240",
+        indicators=("1", "0"),
+        subfields=(
+            ("a", "uniform title (Manifestation-anchored variant)"),
+            ("g", "miscellaneous information (marcKey-driven)"),
+            ("l", "language of a work (marcKey-driven)"),
+            ("n", "number of part / section (marcKey-driven)"),
+            ("p", "name of part / section (marcKey-driven)"),
+            ("s", "version (marcKey-driven)"),
+        ),
+        source=(
+            "?m bffi:expressionOf ?hub (?hub URI fragment matches '#Hub240'). "
+            "?hub bffi:contribution / bffi:agent / bffi:marcKey carries the "
+            "source 240's subfields as $t/$l/$g/$p/$s/$n/$k extras alongside "
+            "the 1XX contributor; the reconstruction parses those and remaps "
+            "$t → 240 $a."
+        ),
+        notes=(
+            "MARC 240 appears alongside a 1XX main entry (whereas 130 is "
+            "the main entry itself). marc2bibframe2 flattens both into "
+            "one Hub240 with the 240 subfields piggy-backing on the 1XX "
+            "agent's marcKey. ind1=1 (traced) ind2=0 (0 nonfiling chars) "
+            "per the dominant Helmet convention; the actual source value "
+            "is recoverable from the agent marcKey but not yet preserved."
+        ),
+    ),
 )
 def _extract_uniform_main_entry(graph: Graph, manifestation: URIRef) -> _AddedTitleEmit | None:
     """Walk ``?m bffi:expressionOf ?hub`` (and the Work's same predicate)
-    looking for a Hub Expression whose ``bffi:marcKey`` starts with
-    ``"130"``. Returns the parsed marcKey as a ``_AddedTitleEmit`` (we
-    reuse the dataclass since the shape — tag / ind1 / ind2 / subfields
-    — is identical).
+    looking for a Hub Expression that maps to MARC 130 or 240.
+
+    For ``Hub130``: the Hub's own ``bffi:marcKey`` starts with ``"130"``
+    and is parsed verbatim — same marcKey-driven recovery as 730/740.
+
+    For ``Hub240``: the Hub has no 240-marcKey of its own; the 240's
+    source subfields are flattened onto the Hub's contribution-agent
+    marcKey as ``$t`` / ``$l`` / ``$g`` / ``$p`` / ``$s`` extras
+    (marc2bibframe2 collapses the source 1XX + 240 into one contributor
+    chain). The reconstruction parses the agent's marcKey and remaps
+    those extras to MARC 240 subfields (``$t`` → ``$a``, others by
+    code identity).
     """
     work = _find_work_for_manifestation(graph, manifestation)
     anchors: list[URIRef] = [manifestation]
@@ -1668,16 +1755,72 @@ def _extract_uniform_main_entry(graph: Graph, manifestation: URIRef) -> _AddedTi
         for hub in graph.objects(anchor, BFFI.expressionOf):
             if not isinstance(hub, URIRef):
                 continue
-            marc_key = next(graph.objects(hub, BFFI.marcKey), None)
+            emit = _hub_uniform_title_emit(graph, hub)
+            if emit is not None:
+                return emit
+    return None
+
+
+_HUB130_RE: Final[re.Pattern[str]] = re.compile(r"#Hub130\b")
+_HUB240_RE: Final[re.Pattern[str]] = re.compile(r"#Hub240\b")
+
+
+def _hub_uniform_title_emit(graph: Graph, hub: URIRef) -> _AddedTitleEmit | None:
+    """Build a 130 or 240 emit from a Hub URI, choosing the path based
+    on the URI fragment."""
+    hub_uri = str(hub)
+    if _HUB130_RE.search(hub_uri):
+        return _hub130_emit(graph, hub)
+    if _HUB240_RE.search(hub_uri):
+        return _hub240_emit(graph, hub)
+    return None
+
+
+def _hub130_emit(graph: Graph, hub: URIRef) -> _AddedTitleEmit | None:
+    marc_key = next(graph.objects(hub, BFFI.marcKey), None)
+    if not isinstance(marc_key, Literal):
+        return None
+    parsed = _parse_marc_key(str(marc_key))
+    if parsed is None:
+        return None
+    tag, ind1, ind2, subfields = parsed
+    if tag != "130" or not subfields:
+        return None
+    return _AddedTitleEmit(tag=tag, ind1=ind1, ind2=ind2, subfields=subfields)
+
+
+_AGENT_TO_240_SUBFIELD_CODE: Final[dict[str, str]] = {
+    "t": "a",  # source 240 $a is on the agent's $t
+    "l": "l",
+    "g": "g",
+    "p": "p",
+    "s": "s",
+    "n": "n",
+    "k": "k",
+}
+
+
+def _hub240_emit(graph: Graph, hub: URIRef) -> _AddedTitleEmit | None:
+    """Construct a MARC 240 emit by parsing the Hub's contribution-agent
+    marcKey for the 240-relevant subfield extras."""
+    for contrib in graph.objects(hub, BFFI.contribution):
+        for agent in graph.objects(contrib, BFFI.agent):
+            marc_key = next(graph.objects(agent, BFFI.marcKey), None)
             if not isinstance(marc_key, Literal):
                 continue
             parsed = _parse_marc_key(str(marc_key))
             if parsed is None:
                 continue
-            tag, ind1, ind2, subfields = parsed
-            if tag != "130" or not subfields:
-                continue
-            return _AddedTitleEmit(tag=tag, ind1=ind1, ind2=ind2, subfields=subfields)
+            _agent_tag, _ind1, _ind2, agent_subfields = parsed
+            mapped: list[tuple[str, str]] = []
+            for code, value in agent_subfields:
+                target = _AGENT_TO_240_SUBFIELD_CODE.get(code)
+                if target is not None:
+                    mapped.append((target, value))
+            if mapped:
+                # ind1=1 = traced (Helmet's near-universal convention);
+                # ind2=0 = 0 nonfiling characters (default).
+                return _AddedTitleEmit(tag="240", ind1="1", ind2="0", subfields=tuple(mapped))
     return None
 
 

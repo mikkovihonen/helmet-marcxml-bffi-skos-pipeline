@@ -46,6 +46,7 @@ def test_marc_emit_registry_includes_expected_tags() -> None:
         "110",
         "111",
         "130",
+        "240",
         "245",
         "246",
         "250",
@@ -84,6 +85,9 @@ def test_marc_emit_registry_includes_expected_tags() -> None:
         "711",
         "730",
         "740",
+        "800",
+        "810",
+        "811",
         "830",
     }
     actual_tags = {entry.tag for entry in MARC_EMIT_REGISTRY}
