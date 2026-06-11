@@ -53,17 +53,22 @@ def _format_subfields(subfields: tuple[tuple[str, str], ...]) -> str:
 
 
 def _render_shipped_table(rows: Iterable[MarcEmitMeta]) -> str:
-    header = "| MARC tag | Ind1 / Ind2 | Subfields | BFFI source | Notes |\n|---|---|---|---|---|\n"
+    header = "| MARC tag | Ind1 / Ind2 | Subfields | BFFI source |\n|---|---|---|---|\n"
     body = "".join(
-        "| `{tag}` | `{indicators}` | {subfields} | {source} | {notes} |\n".format(
-            tag=row.tag,
-            indicators=_format_indicators(row.indicators),
-            subfields=_format_subfields(row.subfields),
-            source=row.source,
-            notes=row.notes or "—",
-        )
+        f"| `{row.tag}` | `{_format_indicators(row.indicators)}` "
+        f"| {_format_subfields(row.subfields)} | {row.source} |\n"
         for row in rows
     )
+    return header + body
+
+
+def _render_notes_table(rows: Iterable[MarcEmitMeta]) -> str:
+    """Render the companion table of per-tag caveats. Only entries with
+    a non-empty ``notes`` value are listed; tags whose mapping needs no
+    extra commentary stay out of this table."""
+    with_notes = [row for row in rows if row.notes]
+    header = "| MARC tag | Notes |\n|---|---|\n"
+    body = "".join(f"| `{row.tag}` | {row.notes} |\n" for row in with_notes)
     return header + body
 
 
@@ -78,11 +83,23 @@ def _sort_key(tag: str) -> tuple[int, str]:
 
 
 def build_block() -> str:
-    """Return the markdown block the generator emits."""
+    """Return the markdown block the generator emits.
+
+    Two tables: the headline mapping (tag / indicators / subfields /
+    source) and a companion notes table that lists only entries with
+    a non-empty ``notes`` value."""
     sorted_emit = sorted(MARC_EMIT_REGISTRY, key=lambda e: _sort_key(e.tag))
     shipped = _render_shipped_table(sorted_emit)
     tally = f"\n_{len(MARC_EMIT_REGISTRY)} MARC tags currently emitted._\n"
-    return shipped + tally
+    notes_table = _render_notes_table(sorted_emit)
+    notes_section = (
+        "\n### Per-tag notes\n\n"
+        "Tags whose mapping carries a caveat worth flagging — known "
+        "limitations, fallback paths, or marcKey-driven recovery patterns. "
+        "Tags whose row in the table above is self-explanatory are omitted.\n\n"
+        f"{notes_table}"
+    )
+    return shipped + tally + notes_section
 
 
 def _replace_block(doc_text: str, begin_marker: str, end_marker: str, new_block: str) -> str:

@@ -129,6 +129,19 @@ def test_block_shows_dash_for_no_indicators() -> None:
     assert "| `leader` | `—` |" in block
 
 
+def test_block_renders_notes_in_companion_section_only() -> None:
+    """Notes live in a separate per-tag table below the main mapping —
+    the headline table columns are tag / indicators / subfields / source
+    only. The notes section header anchors the companion table; tags
+    without a note are absent from it but still present in the main one."""
+    block = build_block()
+    # Main table header has four columns (no Notes column).
+    assert "| MARC tag | Ind1 / Ind2 | Subfields | BFFI source |" in block
+    # Companion notes section + its 2-column header.
+    assert "### Per-tag notes" in block
+    assert "| MARC tag | Notes |" in block
+
+
 # --- doc-drift guard ----------------------------------------------------
 
 
