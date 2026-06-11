@@ -43,6 +43,7 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `250` | `##` | `$a` — edition statement | ?m bffi:editionStatement ?text |
 | `260` | `##` | `$a` — place of publication / distribution<br>`$b` — publisher / distributor name<br>`$c` — date of publication / distribution | ?m bffi:provisionActivity ?pa . ?pa a bffi:Publication ; bffi:simplePlace ?place ; bffi:simpleAgent ?agent ; bffi:simpleDate ?date . Fallback: ?m bffi:publicationStatement ?text — emits in $a as a single flat string when the structured parts are absent. |
 | `300` | `##` | `$a` — extent<br>`$b` — other physical details (illustrations, colour, etc.)<br>`$c` — dimensions<br>`$e` — accompanying material | ?m bffi:extent / bffi:Extent / rdfs:label (for $a); the Extent's bffi:note typed <…/mnotetype/physical> (for $b); ?m bffi:dimensions literal (for $c); ?m bffi:note typed <…/mnotetype/accmat> (for $e) |
+| `310` | `##` | `$a` — current publication frequency | ?m bffi:frequency [a bffi:Frequency ; rdfs:label ?text] |
 | `336` | `##` | `$a` — term in the cataloguing language (rdfs:label of the URI)<br>`$b` — RDA 3-letter code (URI last segment)<br>`$2` — scheme name (rdacontent / rdamedia / rdacarrier) | ?m bffi:workManifested ?work . ?work bffi:content <http://id.loc.gov/vocabulary/contentTypes/{code}> . $a = ?content's rdfs:label; $b = {code}; $2 = 'rdacontent'. |
 | `337` | `##` | `$a` — term in the cataloguing language (rdfs:label of the URI)<br>`$b` — RDA 3-letter code (URI last segment)<br>`$2` — scheme name (rdacontent / rdamedia / rdacarrier) | ?m bffi:media <http://id.loc.gov/vocabulary/mediaTypes/{code}> . $a from rdfs:label; $b = {code}; $2 = 'rdamedia'. |
 | `338` | `##` | `$a` — term in the cataloguing language (rdfs:label of the URI)<br>`$b` — RDA 3-letter code (URI last segment)<br>`$2` — scheme name (rdacontent / rdamedia / rdacarrier) | ?m bffi:carrier <http://id.loc.gov/vocabulary/carriers/{code}> . $a from rdfs:label; $b = {code}; $2 = 'rdacarrier'. |
@@ -52,9 +53,15 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `505` | `0#` | `$a` — formatted contents note | ?m bffi:tableOfContents [a bffi:TableOfContents ; rdfs:label ?text] |
 | `506` | `##` | `$a` — terms governing access — note text | ?m bffi:usageAndAccessPolicy [a bffi:AccessPolicy ; rdfs:label ?text] |
 | `511` | `##` | `$a` — participants / performers note text | ?m bffi:note [a bffi:Note, <…/mnotetype/participants> ; rdfs:label ?text] — typed with the participants tail. |
+| `520` | `##` | `$a` — summary note text | ?m bffi:summary [a bffi:Summary ; rdfs:label ?text] |
+| `521` | `##` | `$a` — intended audience note | ?m bffi:intendedAudience [a bffi:IntendedAudience ; rdfs:label ?text] |
+| `530` | `##` | `$a` — additional physical form available note | ?m bffi:note [a bffi:Note, <…/mnotetype/addphys> ; rdfs:label ?text] |
 | `534` | `##` | `$c` — publication / distribution of original | ?m bffi:note [a bffi:Note, <…/mnotetype/orig> ; rdfs:label ?text] — note typed with the original-version tail. |
 | `538` | `##` | `$a` — system details note text | ?m bffi:note [a bffi:Note, <…/mnotetype/computer> ; rdfs:label ?text] — typed with the computer tail. |
+| `540` | `##` | `$a` — terms governing use and reproduction — note text | ?m bffi:usageAndAccessPolicy [a bffi:UsePolicy ; rdfs:label ?text] |
 | `546` | `##` | `$a` — language note text | ?m bffi:note [a bffi:Note, <…/mnotetype/lang> ; rdfs:label ?text] — note typed with the language tail. |
+| `586` | `##` | `$a` — awards note text | ?m bffi:note [a bffi:Note, <…/mnotetype/award> ; rdfs:label ?text] |
+| `588` | `##` | `$a` — source of description note | ?m bffi:note [a bffi:Note, <…/mnotetype/descsource> ; rdfs:label ?text] |
 | `600` | `##` | `$a` — subject heading / term<br>`$c` — qualifier (marcKey-driven)<br>`$d` — dates (marcKey-driven)<br>`$t` — title within name-title subject (marcKey-driven, e.g. 600 ind2=4)<br>`$0` — authority URI for the subject heading<br>`$2` — source vocabulary code (e.g. 'yso', 'ysa', 'slm') | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label . $2 = local-name of ?subject's bffi:source URI when present; $0 = ?subject URI itself when it's not a bib-internal mint — `?subject` is typed `bffi:Person` |
 | `610` | `##` | `$a` — subject heading / term<br>`$c` — qualifier (marcKey-driven)<br>`$d` — dates (marcKey-driven)<br>`$t` — title within name-title subject (marcKey-driven, e.g. 600 ind2=4)<br>`$0` — authority URI for the subject heading<br>`$2` — source vocabulary code (e.g. 'yso', 'ysa', 'slm') | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label . $2 = local-name of ?subject's bffi:source URI when present; $0 = ?subject URI itself when it's not a bib-internal mint — `?subject` is typed `bffi:Organization` |
 | `611` | `##` | `$a` — subject heading / term<br>`$c` — qualifier (marcKey-driven)<br>`$d` — dates (marcKey-driven)<br>`$t` — title within name-title subject (marcKey-driven, e.g. 600 ind2=4)<br>`$0` — authority URI for the subject heading<br>`$2` — source vocabulary code (e.g. 'yso', 'ysa', 'slm') | ?m bffi:workManifested ?work . ?work bffi:subject ?subject . ?subject rdfs:label ?label . $2 = local-name of ?subject's bffi:source URI when present; $0 = ?subject URI itself when it's not a bib-internal mint — `?subject` is typed `bffi:Meeting` |
@@ -71,7 +78,7 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 | `740` | `0#` | `$a` — added analytical title<br>`$n` — number of part / section<br>`$p` — name of part / section | Same chain as 730 but with bffi:marcKey beginning with '740' |
 | `830` | `##` | `$a` — uniform-title series statement<br>`$n` — number of part / section (marcKey-driven)<br>`$v` — volume number (marcKey-driven) | ?source bffi:relation [a bffi:Relation ; bffi:relationship <…/relationship/series> ; bffi:associatedResource ?hub] . ?hub a bffi:SeriesExpression ; bffi:marcKey ?key (where ?key begins with '830') — full subfield set parsed from marcKey verbatim. |
 
-_50 MARC tags currently emitted._
+_57 MARC tags currently emitted._
 
 ### Per-tag notes
 
@@ -90,6 +97,7 @@ Tags whose mapping carries a caveat worth flagging — known limitations, fallba
 | `490` | 490 is the *untraced* series statement (no 8XX partner). The discriminator is mstatus/t alone — a co-typed mstatus/tr signals that an 830 controlled-series partner exists and the transcribed view is suppressed here to avoid double-emit. ind1=0 (Series not traced) per Helmet convention. ISBD trailing " ;" is added on $a when $v follows. |
 | `500` | Notes typed with a specific mnotetype dispatch to their own MARC tag (e.g. mnotetype/lang → 546). Others fall through to 500. Per-tail expansion (504 bibliography / 511 participants / 520 summary / etc.) is a follow-on. |
 | `534` | 534 records the original publication of a reproduction or re-release (typical Helmet shape: \$c "Danjaq : United Artists, 1974" on a 2001 DVD reissue). The full source row is collapsed into a single \$c literal at the BFFI layer; \$a main entry, \$b edition, \$f series etc. are not individually preserved. |
+| `540` | 506 vs 540 are disambiguated by the policy's rdf:type: bffi:AccessPolicy → 506 (restrictions on who can access); bffi:UsePolicy → 540 (what users may do with the material). Both predicates funnel through bffi:usageAndAccessPolicy. |
 | `653` | 653 is MARC's catch-all for uncontrolled subject terms. The bffi:Uncontrolled co-type takes priority over the structural Topic/Person/Place dispatch — source-MARC 653 spans every term-kind so the structural rdf:type isn't the right discriminator. |
 | `730` | Indicators and every subfield are reconstructed from bffi:marcKey verbatim. The auto-table lists the common subfields seen in the corpus ($a $g $l $n $o $p); any additional subfield codes carried in bffi:marcKey are emitted in the order they appear. |
 | `740` | Indicators (including nonfiling-character counts in ind1) and every subfield are reconstructed from bffi:marcKey verbatim — same shape as 730. |

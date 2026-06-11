@@ -1012,8 +1012,11 @@ class _NoteTarget:
 _MNOTETYPE_TO_MARC: Final[dict[URIRef, _NoteTarget]] = {
     URIRef("http://id.loc.gov/vocabulary/mnotetype/biblio"): _NoteTarget("504"),
     URIRef("http://id.loc.gov/vocabulary/mnotetype/participants"): _NoteTarget("511"),
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/addphys"): _NoteTarget("530"),
     URIRef("http://id.loc.gov/vocabulary/mnotetype/computer"): _NoteTarget("538"),
     URIRef("http://id.loc.gov/vocabulary/mnotetype/lang"): _NoteTarget("546"),
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/award"): _NoteTarget("586"),
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/descsource"): _NoteTarget("588"),
     # 534 source-MARC uses $c (Publication, distribution, etc. of original) —
     # not $a — so the destination subfield code overrides the default.
     URIRef("http://id.loc.gov/vocabulary/mnotetype/orig"): _NoteTarget("534", "c"),
@@ -1076,6 +1079,12 @@ class _NoteEmit:
         ),
     ),
     MarcEmitMeta(
+        tag="530",
+        indicators=(" ", " "),
+        subfields=(("a", "additional physical form available note"),),
+        source=("?m bffi:note [a bffi:Note, <…/mnotetype/addphys> ; rdfs:label ?text]"),
+    ),
+    MarcEmitMeta(
         tag="538",
         indicators=(" ", " "),
         subfields=(("a", "system details note text"),),
@@ -1083,6 +1092,18 @@ class _NoteEmit:
             "?m bffi:note [a bffi:Note, <…/mnotetype/computer> ; "
             "rdfs:label ?text] — typed with the computer tail."
         ),
+    ),
+    MarcEmitMeta(
+        tag="586",
+        indicators=(" ", " "),
+        subfields=(("a", "awards note text"),),
+        source=("?m bffi:note [a bffi:Note, <…/mnotetype/award> ; rdfs:label ?text]"),
+    ),
+    MarcEmitMeta(
+        tag="588",
+        indicators=(" ", " "),
+        subfields=(("a", "source of description note"),),
+        source=("?m bffi:note [a bffi:Note, <…/mnotetype/descsource> ; rdfs:label ?text]"),
     ),
     MarcEmitMeta(
         tag="534",
@@ -1270,23 +1291,51 @@ def _is_untraced_series(graph: Graph, target: Node) -> bool:
     return has_t and not has_tr
 
 
+@dataclass(frozen=True)
+class _PolicyEmits:
+    """506 (restrictions on access) + 540 (terms governing use) emits."""
+
+    access: tuple[str, ...]
+    use: tuple[str, ...]
+
+
 @marc_emit(
     MarcEmitMeta(
         tag="506",
         indicators=(" ", " "),
         subfields=(("a", "terms governing access — note text"),),
-        source=("?m bffi:usageAndAccessPolicy [a bffi:AccessPolicy ; rdfs:label ?text]"),
-    )
+        source="?m bffi:usageAndAccessPolicy [a bffi:AccessPolicy ; rdfs:label ?text]",
+    ),
+    MarcEmitMeta(
+        tag="540",
+        indicators=(" ", " "),
+        subfields=(("a", "terms governing use and reproduction — note text"),),
+        source="?m bffi:usageAndAccessPolicy [a bffi:UsePolicy ; rdfs:label ?text]",
+        notes=(
+            "506 vs 540 are disambiguated by the policy's rdf:type: "
+            "bffi:AccessPolicy → 506 (restrictions on who can access); "
+            "bffi:UsePolicy → 540 (what users may do with the material). "
+            "Both predicates funnel through bffi:usageAndAccessPolicy."
+        ),
+    ),
 )
-def _extract_access_policies(graph: Graph, manifestation: URIRef) -> list[str]:
-    """Return every ``bffi:usageAndAccessPolicy`` block's ``rdfs:label`` —
-    each emits as a MARC 506 datafield."""
-    texts: list[str] = []
+def _extract_policies(graph: Graph, manifestation: URIRef) -> _PolicyEmits:
+    """Walk ``bffi:usageAndAccessPolicy`` blocks and split by rdf:type:
+    ``bffi:AccessPolicy`` → MARC 506; ``bffi:UsePolicy`` → MARC 540."""
+    access: list[str] = []
+    use: list[str] = []
     for policy in graph.objects(manifestation, BFFI.usageAndAccessPolicy):
         label = next(graph.objects(policy, RDFS.label), None)
-        if isinstance(label, Literal):
-            texts.append(str(label))
-    return sorted(texts)
+        if not isinstance(label, Literal):
+            continue
+        if (policy, RDF.type, BFFI.UsePolicy) in graph:
+            use.append(str(label))
+        else:
+            # AccessPolicy is the default — bf:AccessPolicy was the
+            # original BIBFRAME type before the split; treat untyped
+            # policies as access-restriction notes (the safer fallback).
+            access.append(str(label))
+    return _PolicyEmits(access=tuple(sorted(access)), use=tuple(sorted(use)))
 
 
 @marc_emit(
@@ -1307,6 +1356,56 @@ def _extract_table_of_contents(graph: Graph, manifestation: URIRef) -> list[str]
         if isinstance(label, Literal):
             texts.append(str(label))
     return sorted(texts)
+
+
+def _extract_labelled_block_texts(
+    graph: Graph, manifestation: URIRef, predicate: URIRef
+) -> list[str]:
+    """Walk ``?m <predicate> ?block . ?block rdfs:label ?text`` and
+    return the labels sorted for determinism. The common shape for
+    several simple-$a-note MARC emits (520 / 310 / 521)."""
+    texts: list[str] = []
+    for block in graph.objects(manifestation, predicate):
+        label = next(graph.objects(block, RDFS.label), None)
+        if isinstance(label, Literal):
+            texts.append(str(label))
+    return sorted(texts)
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="520",
+        indicators=(" ", " "),
+        subfields=(("a", "summary note text"),),
+        source="?m bffi:summary [a bffi:Summary ; rdfs:label ?text]",
+    )
+)
+def _extract_summaries(graph: Graph, manifestation: URIRef) -> list[str]:
+    return _extract_labelled_block_texts(graph, manifestation, BFFI.summary)
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="310",
+        indicators=(" ", " "),
+        subfields=(("a", "current publication frequency"),),
+        source="?m bffi:frequency [a bffi:Frequency ; rdfs:label ?text]",
+    )
+)
+def _extract_frequency(graph: Graph, manifestation: URIRef) -> list[str]:
+    return _extract_labelled_block_texts(graph, manifestation, BFFI.frequency)
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="521",
+        indicators=(" ", " "),
+        subfields=(("a", "intended audience note"),),
+        source="?m bffi:intendedAudience [a bffi:IntendedAudience ; rdfs:label ?text]",
+    )
+)
+def _extract_intended_audiences(graph: Graph, manifestation: URIRef) -> list[str]:
+    return _extract_labelled_block_texts(graph, manifestation, BFFI.intendedAudience)
 
 
 @dataclass(frozen=True)
@@ -2249,6 +2348,26 @@ def _append_identifier_datafields(
             sf_q.text = ident.qualifier
 
 
+def _append_note_block(
+    record: etree._Element,
+    *,
+    notes: list[_NoteEmit],
+    table_of_contents: list[str],
+    policies: _PolicyEmits,
+    summaries: list[str],
+    intended_audiences: list[str],
+) -> None:
+    """Append the 5XX note block in (approximately) MARC tag-numeric
+    order: 500-set general notes → 505 contents → 506 access → 520
+    summary → 521 intended audience → 540 use."""
+    _append_note_datafields(record, notes)
+    _append_table_of_contents_datafields(record, table_of_contents)
+    _append_simple_a_datafields(record, "506", policies.access)
+    _append_simple_a_datafields(record, "520", tuple(summaries))
+    _append_simple_a_datafields(record, "521", tuple(intended_audiences))
+    _append_simple_a_datafields(record, "540", policies.use)
+
+
 def _append_note_datafields(record: etree._Element, notes: list[_NoteEmit]) -> None:
     """Append one MARC 5XX-style datafield per note emit (blank
     indicators). Subfield code is per-emit (defaults to ``$a``; 534
@@ -2430,7 +2549,10 @@ def _build_marc_record(
     subjects: list[_SubjectEmit],
     notes: list[_NoteEmit],
     table_of_contents: list[str],
-    access_policies: list[str],
+    policies: _PolicyEmits,
+    summaries: list[str],
+    frequencies: list[str],
+    intended_audiences: list[str],
     untraced_series: list[_UntracedSeriesEmit],
     traced_series: list[_AddedTitleEmit],
     added_titles: list[_AddedTitleEmit],
@@ -2489,6 +2611,8 @@ def _build_marc_record(
     if physical is not None:
         _append_physical_description_datafield(record, physical)
 
+    _append_simple_a_datafields(record, "310", tuple(frequencies))
+
     # 336/337/338 RDA descriptors. One datafield per code (multiple values
     # on a single predicate produce repeated datafields per MARC convention).
     _append_rda_datafields(record, "336", rda.content)
@@ -2505,16 +2629,14 @@ def _build_marc_record(
             sf_v = etree.SubElement(df, f"{_MARC}subfield", code="v")
             sf_v.text = series.volume
 
-    # 500 / 546 notes come after the bibliographic-description block,
-    # before 505 (which precedes 6XX subjects per MARC tag order).
-    _append_note_datafields(record, notes)
-    _append_table_of_contents_datafields(record, table_of_contents)
-
-    # 506 access-policy notes (after 505 contents per MARC tag order).
-    for policy_text in access_policies:
-        df = etree.SubElement(record, f"{_MARC}datafield", tag="506", ind1=" ", ind2=" ")
-        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
-        sf_a.text = policy_text
+    _append_note_block(
+        record,
+        notes=notes,
+        table_of_contents=table_of_contents,
+        policies=policies,
+        summaries=summaries,
+        intended_audiences=intended_audiences,
+    )
 
     # 6XX subjects come after the bibliographic-description block.
     _append_subject_datafields(record, subjects)
@@ -2558,7 +2680,10 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     subjects = _extract_subject_datafields(graph, manifestation)
     notes = _extract_notes(graph, manifestation)
     table_of_contents = _extract_table_of_contents(graph, manifestation)
-    access_policies = _extract_access_policies(graph, manifestation)
+    policies = _extract_policies(graph, manifestation)
+    summaries = _extract_summaries(graph, manifestation)
+    frequencies = _extract_frequency(graph, manifestation)
+    intended_audiences = _extract_intended_audiences(graph, manifestation)
     untraced_series = _extract_untraced_series(graph, manifestation)
     traced_series = _extract_traced_series(graph, manifestation)
     leader_text = _build_leader(graph, manifestation)
@@ -2581,7 +2706,10 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         subjects=subjects,
         notes=notes,
         table_of_contents=table_of_contents,
-        access_policies=access_policies,
+        policies=policies,
+        summaries=summaries,
+        frequencies=frequencies,
+        intended_audiences=intended_audiences,
         untraced_series=untraced_series,
         traced_series=traced_series,
         leader_text=leader_text,
