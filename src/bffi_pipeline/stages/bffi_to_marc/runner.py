@@ -1097,6 +1097,19 @@ def _classification_marc_tag(graph: Graph, cls_block: Node) -> str:
     return "084"
 
 
+_VARTITLETYPE_PREFIX: Final[str] = "http://id.loc.gov/vocabulary/vartitletype/"
+
+
+def _is_variant_title(graph: Graph, title_block: Node) -> bool:
+    """True when the title block carries an ``rdf:type`` from the LoC
+    ``vartitletype/*`` namespace (the marc2bibframe2 marker for source
+    MARC 246 variant titles)."""
+    for type_uri in graph.objects(title_block, RDF.type):
+        if isinstance(type_uri, URIRef) and str(type_uri).startswith(_VARTITLETYPE_PREFIX):
+            return True
+    return False
+
+
 @marc_emit(
     MarcEmitMeta(
         tag="245",
@@ -1113,19 +1126,23 @@ def _classification_marc_tag(graph: Graph, cls_block: Node) -> str:
             "bffi:subtitle / bffi:partNumber / bffi:partName (each optional); "
             "responsibility comes from ?m bffi:responsibilityStatement"
         ),
-        notes=("First bffi:title block wins. See known limitations below."),
+        notes=(
+            "First non-variant bffi:title block wins. Variant-titled "
+            "blocks (typed with vartitletype/*) are skipped here and "
+            "feed the 246 emit instead."
+        ),
     )
 )
 def _extract_main_title_parts(graph: Graph, manifestation: URIRef) -> _TitleParts | None:
-    """Walk the first ``?m bffi:title / bffi:Title`` block and pull
-    ``bffi:mainTitle`` (mandatory) plus optional ``bffi:subtitle`` /
-    ``bffi:partNumber`` / ``bffi:partName``.
+    """Walk ``?m bffi:title / bffi:Title`` blocks and return the first
+    non-variant block as the MARC 245 emit. Variant-typed blocks
+    (``vartitletype/*``) are skipped here — they feed the 246 emit.
 
-    Returns ``None`` when no title block has a ``bffi:mainTitle``. v0
-    picks the first block; primary-vs-variant discrimination (by
-    ``bffi:marcKey``) lands in a follow-on.
+    Returns ``None`` when no non-variant block has a ``bffi:mainTitle``.
     """
     for title_block in graph.objects(manifestation, BFFI.title):
+        if _is_variant_title(graph, title_block):
+            continue
         main = next(graph.objects(title_block, BFFI.mainTitle), None)
         if not isinstance(main, Literal):
             continue
@@ -1138,6 +1155,78 @@ def _extract_main_title_parts(graph: Graph, manifestation: URIRef) -> _TitlePart
             part_number=str(part_number) if isinstance(part_number, Literal) else None,
             part_name=str(part_name) if isinstance(part_name, Literal) else None,
         )
+    return None
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="246",
+        indicators=("1", " "),
+        subfields=(("a", "variant title"),),
+        source=(
+            "?m bffi:title ?t . ?t rdf:type <http://id.loc.gov/vocabulary/"
+            "vartitletype/*> ; bffi:mainTitle ?text — every Title block "
+            "co-typed with a vartitletype URI emits as 246."
+        ),
+        notes=(
+            "ind1=1 (Note, added entry) per Helmet convention; the "
+            "specific vartitletype tail (e.g. /por portion-of-title vs "
+            "/par parallel title) maps to different MARC ind2 values "
+            "but the dispatch is deferred."
+        ),
+    )
+)
+def _extract_variant_titles(graph: Graph, manifestation: URIRef) -> list[str]:
+    """Walk every ``bffi:title`` block typed with a ``vartitletype/*``
+    URI and return its ``bffi:mainTitle`` literal. Each emits as a MARC
+    246 datafield."""
+    titles: list[str] = []
+    for title_block in graph.objects(manifestation, BFFI.title):
+        if not _is_variant_title(graph, title_block):
+            continue
+        main = next(graph.objects(title_block, BFFI.mainTitle), None)
+        if isinstance(main, Literal):
+            titles.append(str(main))
+    return sorted(titles)
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="130",
+        indicators=("0", " "),
+        subfields=(("a", "uniform title — main entry"),),
+        source=(
+            "?m bffi:expressionOf ?hub . ?hub bffi:marcKey ?key "
+            "(where ?key begins with '130'). Subfields are parsed "
+            "verbatim from ?key — same marcKey-driven recovery as 730/740."
+        ),
+    )
+)
+def _extract_uniform_main_entry(graph: Graph, manifestation: URIRef) -> _AddedTitleEmit | None:
+    """Walk ``?m bffi:expressionOf ?hub`` (and the Work's same predicate)
+    looking for a Hub Expression whose ``bffi:marcKey`` starts with
+    ``"130"``. Returns the parsed marcKey as a ``_AddedTitleEmit`` (we
+    reuse the dataclass since the shape — tag / ind1 / ind2 / subfields
+    — is identical).
+    """
+    work = _find_work_for_manifestation(graph, manifestation)
+    anchors: list[URIRef] = [manifestation]
+    if work is not None:
+        anchors.append(work)
+    for anchor in anchors:
+        for hub in graph.objects(anchor, BFFI.expressionOf):
+            if not isinstance(hub, URIRef):
+                continue
+            marc_key = next(graph.objects(hub, BFFI.marcKey), None)
+            if not isinstance(marc_key, Literal):
+                continue
+            parsed = _parse_marc_key(str(marc_key))
+            if parsed is None:
+                continue
+            tag, ind1, ind2, subfields = parsed
+            if tag != "130" or not subfields:
+                continue
+            return _AddedTitleEmit(tag=tag, ind1=ind1, ind2=ind2, subfields=subfields)
     return None
 
 
@@ -1870,6 +1959,8 @@ def _build_marc_record(
     bib_id: str,
     change_date: str | None,
     title_parts: _TitleParts | None,
+    variant_titles: list[str],
+    uniform_main_entry: _AddedTitleEmit | None,
     responsibility: str | None,
     edition_statement: str | None,
     publication: _PublicationEmit | None,
@@ -1910,12 +2001,22 @@ def _build_marc_record(
             sf_a = etree.SubElement(df041, f"{_MARC}subfield", code="a")
             sf_a.text = code
 
-    # Primary contributors (MARC 100/110/111) come before 245 in MARC
+    # Primary contributors (MARC 100/110/111) come before 130 in MARC
     # tag order.
     _append_contributor_datafields(record, (c for c in contributors if c.tag.startswith("1")))
 
+    # 130 uniform main entry — between 1XX contributors and 245.
+    if uniform_main_entry is not None:
+        _append_added_title_datafields(record, [uniform_main_entry])
+
     if title_parts is not None:
         _append_title_datafield(record, title_parts, responsibility)
+
+    # 246 variant titles immediately follow 245.
+    for variant in variant_titles:
+        df = etree.SubElement(record, f"{_MARC}datafield", tag="246", ind1="1", ind2=" ")
+        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
+        sf_a.text = variant
 
     if edition_statement is not None:
         df250 = etree.SubElement(record, f"{_MARC}datafield", tag="250", ind1=" ", ind2=" ")
@@ -1970,6 +2071,8 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         raise BffiToMarcError(f"no bib ID found for manifestation {manifestation}")
     change_date = _extract_change_date(graph, manifestation)
     title_parts = _extract_main_title_parts(graph, manifestation)
+    variant_titles = _extract_variant_titles(graph, manifestation)
+    uniform_main_entry = _extract_uniform_main_entry(graph, manifestation)
     responsibility = _extract_responsibility_statement(graph, manifestation)
     edition_statement = _extract_edition_statement(graph, manifestation)
     publication = _extract_publication(graph, manifestation)
@@ -1988,6 +2091,8 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         bib_id=bib_id,
         change_date=change_date,
         title_parts=title_parts,
+        variant_titles=variant_titles,
+        uniform_main_entry=uniform_main_entry,
         responsibility=responsibility,
         edition_statement=edition_statement,
         publication=publication,
