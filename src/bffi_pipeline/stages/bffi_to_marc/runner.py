@@ -1000,9 +1000,21 @@ def _extract_added_titles(graph: Graph, manifestation: URIRef) -> list[_AddedTit
 _MNOTETYPE_PHYSICAL: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mnotetype/physical")
 _MNOTETYPE_ACCMAT: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/mnotetype/accmat")
 
-_MNOTETYPE_TO_MARC_TAG: Final[dict[URIRef, str]] = {
-    URIRef("http://id.loc.gov/vocabulary/mnotetype/lang"): "546",
-    URIRef("http://id.loc.gov/vocabulary/mnotetype/participants"): "511",
+
+@dataclass(frozen=True)
+class _NoteTarget:
+    """MARC destination for a typed ``bffi:Note`` — tag + subfield code."""
+
+    tag: str
+    subfield_code: str = "a"
+
+
+_MNOTETYPE_TO_MARC: Final[dict[URIRef, _NoteTarget]] = {
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/lang"): _NoteTarget("546"),
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/participants"): _NoteTarget("511"),
+    # 534 source-MARC uses $c (Publication, distribution, etc. of original) —
+    # not $a — so the destination subfield code overrides the default.
+    URIRef("http://id.loc.gov/vocabulary/mnotetype/orig"): _NoteTarget("534", "c"),
 }
 
 #: Note types consumed by other emit families and therefore skipped by
@@ -1016,10 +1028,15 @@ _NOTE_TYPES_HANDLED_ELSEWHERE: Final[frozenset[URIRef]] = frozenset(
 
 @dataclass(frozen=True)
 class _NoteEmit:
-    """One generic-note datafield (MARC 500 / 546 today)."""
+    """One generic-note datafield (MARC 500 / 511 / 534 / 546).
+
+    ``subfield_code`` is the MARC subfield code the text emits as —
+    defaults to ``"a"`` (general-note convention); ``534`` overrides
+    to ``"c"`` (Publication, distribution, etc. of original)."""
 
     tag: str
     text: str
+    subfield_code: str
 
 
 @marc_emit(
@@ -1048,6 +1065,23 @@ class _NoteEmit:
         ),
     ),
     MarcEmitMeta(
+        tag="534",
+        indicators=(" ", " "),
+        subfields=(("c", "publication / distribution of original"),),
+        source=(
+            "?m bffi:note [a bffi:Note, <…/mnotetype/orig> ; "
+            "rdfs:label ?text] — note typed with the original-version tail."
+        ),
+        notes=(
+            "534 records the original publication of a reproduction or "
+            're-release (typical Helmet shape: \\$c "Danjaq : United '
+            'Artists, 1974" on a 2001 DVD reissue). The full source row '
+            "is collapsed into a single \\$c literal at the BFFI layer; "
+            "\\$a main entry, \\$b edition, \\$f series etc. are not "
+            "individually preserved."
+        ),
+    ),
+    MarcEmitMeta(
         tag="546",
         indicators=(" ", " "),
         subfields=(("a", "language note text"),),
@@ -1071,19 +1105,19 @@ def _extract_notes(graph: Graph, manifestation: URIRef) -> list[_NoteEmit]:
         label = next(graph.objects(note, RDFS.label), None)
         if not isinstance(label, Literal):
             continue
-        tag = _note_marc_tag(graph, note)
-        emits.append(_NoteEmit(tag=tag, text=str(label)))
-    return sorted(emits, key=lambda e: (e.tag, e.text))
+        target = _note_marc_target(graph, note)
+        emits.append(_NoteEmit(tag=target.tag, text=str(label), subfield_code=target.subfield_code))
+    return sorted(emits, key=lambda e: (e.tag, e.subfield_code, e.text))
 
 
-def _note_marc_tag(graph: Graph, note: Node) -> str:
-    """Return the MARC tag for a ``bffi:Note`` bnode based on its
-    mnotetype rdf:type. Falls back to ``"500"`` (general note) when no
-    recognised tail is present."""
-    for note_type, tag in _MNOTETYPE_TO_MARC_TAG.items():
+def _note_marc_target(graph: Graph, note: Node) -> _NoteTarget:
+    """Return the MARC ``(tag, subfield_code)`` for a ``bffi:Note`` bnode
+    based on its mnotetype ``rdf:type``. Falls back to ``500 $a`` (general
+    note) when no recognised tail is present."""
+    for note_type, target in _MNOTETYPE_TO_MARC.items():
         if (note, RDF.type, note_type) in graph:
-            return tag
-    return "500"
+            return target
+    return _NoteTarget("500")
 
 
 _SERIES_RELATIONSHIP: Final[URIRef] = URIRef("http://id.loc.gov/vocabulary/relationship/series")
@@ -2161,11 +2195,13 @@ def _append_identifier_datafields(
 
 
 def _append_note_datafields(record: etree._Element, notes: list[_NoteEmit]) -> None:
-    """Append one MARC 5XX-style datafield per note emit (blank indicators)."""
+    """Append one MARC 5XX-style datafield per note emit (blank
+    indicators). Subfield code is per-emit (defaults to ``$a``; 534
+    overrides to ``$c`` for "publication of original")."""
     for note in notes:
         df = etree.SubElement(record, f"{_MARC}datafield", tag=note.tag, ind1=" ", ind2=" ")
-        sf_a = etree.SubElement(df, f"{_MARC}subfield", code="a")
-        sf_a.text = note.text
+        sf = etree.SubElement(df, f"{_MARC}subfield", code=note.subfield_code)
+        sf.text = note.text
 
 
 def _append_table_of_contents_datafields(
