@@ -20,7 +20,7 @@ The first column is the MARC tag (or `leader` for the record-level pseudo-tag). 
 
 | MARC tag | Ind1 / Ind2 | Subfields | BFFI source |
 |---|---|---|---|
-| `leader` | `—` | — | static placeholder |
+| `leader` | `—` | — | Position 05 ← bffi:adminMetadata / bffi:status (mstatus URI); position 06 ← bffi:content URI's last segment (txt → 'a' etc.); position 07 ← bffi:issuance URI (mono → 'm', serl → 's', …); position 17 ← bflc:encodingLevel / bffi:encodingLevel (menclvl/7 → '7', menclvl/f → ' '). |
 | `001` | `—` | — | ?m bffi:identifiedBy [a bffi:Local ; rdf:value ?bib_id] (fallback: parse from the Manifestation URI fragment) |
 | `005` | `—` | — | ?m bffi:adminMetadata [a bffi:AdminMetadata ; bffi:changeDate ?date] |
 | `020` | `##` | `$a` — ISBN value<br>`$q` — qualifier (binding / format, e.g. 'nid.', 'pehmeäkantinen') | ?m bffi:identifiedBy [a bffi:Identifier ; bffi:source <http://id.loc.gov/vocabulary/identifiers/isbn> ; rdf:value ?isbn ; bffi:qualifier ?qualifier] |
@@ -75,7 +75,7 @@ Tags whose mapping carries a caveat worth flagging — known limitations, fallba
 
 | MARC tag | Notes |
 |---|---|
-| `leader` | See known limitations below. |
+| `leader` | Other leader positions hold structural constants (10/11 = '2', 20-23 = '4500') or placeholders (00-04 record length, 12-16 base address — recomputed by downstream MARC binary writers). Source-MARC byte-fidelity is not guaranteed because BFFI doesn't preserve every leader byte (e.g. position 09 character coding). |
 | `084` | $2 emitted when bffi:source / bffi:code is present (e.g. 'ykl'); omitted otherwise. Helmet-local 09X (091/092/094/095/097) classifications are lost upstream of BFFI (marc2bibframe2 drops them) — see the Known limitations section below. |
 | `245` | First non-variant bffi:title block wins. Variant-titled blocks (typed with vartitletype/*) are skipped here and feed the 246 emit instead. |
 | `246` | ind1=1 (Note, added entry) per Helmet convention; the specific vartitletype tail (e.g. /por portion-of-title vs /par parallel title) maps to different MARC ind2 values but the dispatch is deferred. |

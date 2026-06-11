@@ -53,13 +53,84 @@ _MARC: Final[str] = f"{{{MARC21_NS}}}"
 #: How often to emit a ``progress`` event during corpus conversion.
 PROGRESS_CADENCE: Final[int] = 100
 
-#: Placeholder MARC leader. The 24 positions encode record-status / type /
-#: bibliographic-level / control-type / character-coding / indicator-count
-#: / subfield-code-length / base-address-of-data / encoding-level /
-#: descriptive-cataloguing-form / multipart-resource-record-level. v0 emits
-#: a placeholder; populating each position from BFFI state lands in a
-#: follow-on commit alongside the rest of the field families.
-_LEADER_PLACEHOLDER: Final[str] = "00000nam a2200000 a 4500"
+#: Default values for MARC leader positions that aren't derivable from
+#: BFFI signals (or whose derivation lands in a future commit). The
+#: full leader is rebuilt per-record by ``_build_leader``.
+_LEADER_DEFAULT_STATUS: Final[str] = "n"  # 05: new record
+_LEADER_DEFAULT_TYPE: Final[str] = "a"  # 06: language material
+_LEADER_DEFAULT_BIBLIOGRAPHIC_LEVEL: Final[str] = "m"  # 07: monograph
+_LEADER_DEFAULT_ENCODING_LEVEL: Final[str] = " "  # 17: full level
+
+#: BFFI ``bffi:status`` URI → leader position 05 (record status).
+_MSTATUS_TO_LEADER_STATUS: Final[dict[URIRef, str]] = {
+    URIRef("http://id.loc.gov/vocabulary/mstatus/a"): "a",
+    URIRef("http://id.loc.gov/vocabulary/mstatus/c"): "c",
+    URIRef("http://id.loc.gov/vocabulary/mstatus/d"): "d",
+    URIRef("http://id.loc.gov/vocabulary/mstatus/n"): "n",
+    URIRef("http://id.loc.gov/vocabulary/mstatus/p"): "p",
+    URIRef("http://id.loc.gov/vocabulary/mstatus/s"): "s",
+    URIRef("http://id.loc.gov/vocabulary/mstatus/x"): "x",
+}
+
+#: BFFI content-type URI suffix → leader position 06 (type of record).
+#: Maps the last segment of the content-type URI (e.g. ``"txt"``) to
+#: the MARC 21 leader byte.
+_CONTENT_TYPE_TO_LEADER_TYPE: Final[dict[str, str]] = {
+    "txt": "a",  # text → language material
+    "tac": "a",
+    "ntm": "c",  # notated music
+    "ntv": "d",  # notated movement (manuscript-like)
+    "prm": "j",  # performed music → musical sound recording
+    "spw": "i",  # spoken word → non-musical sound recording
+    "snd": "i",
+    "sti": "k",  # still image → two-dim nonprojectable graphic
+    "tdi": "g",  # two-dim moving image → projected medium
+    "tdm": "g",
+    "tcm": "g",
+    "tci": "g",
+    "tdf": "r",  # three-dim form → three-dim artifact
+    "crd": "e",  # cartographic dataset
+    "cri": "e",
+    "crm": "e",
+    "crn": "e",
+    "crt": "e",
+    "crf": "e",
+    "cop": "m",  # computer dataset
+    "cod": "m",
+    "coi": "m",
+    "com": "m",
+    "con": "m",
+    "cos": "m",
+    "cot": "m",
+    "cox": "m",
+    "coz": "m",
+}
+
+#: BFFI issuance URI → leader position 07 (bibliographic level).
+_ISSUANCE_TO_LEADER_LEVEL: Final[dict[URIRef, str]] = {
+    URIRef("http://id.loc.gov/vocabulary/issuance/mono"): "m",
+    URIRef("http://id.loc.gov/vocabulary/issuance/serl"): "s",
+    URIRef("http://id.loc.gov/vocabulary/issuance/intg"): "i",
+    URIRef("http://id.loc.gov/vocabulary/issuance/srcs"): "b",
+    URIRef("http://id.loc.gov/vocabulary/issuance/mums"): "c",
+    URIRef("http://id.loc.gov/vocabulary/issuance/musa"): "a",
+}
+
+#: BFFI ``menclvl`` URI suffix → leader position 17 (encoding level).
+#: ``menclvl/f`` ("full level") corresponds to a literal blank in the
+#: MARC leader; the digit values map directly to their MARC counterparts.
+_MENCLVL_TO_LEADER_ENCODING: Final[dict[str, str]] = {
+    "f": " ",  # full level → blank
+    "1": "1",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "7": "7",
+    "8": "8",
+    "u": "u",
+    "z": "z",
+}
 
 #: LoC relator URI prefix — the namespace for ``$4`` relator-code URIs
 #: that marc2bibframe2 emits when source MARC carried ``$4 <code>``.
@@ -132,20 +203,6 @@ def marc_emit(*entries: MarcEmitMeta) -> Callable[[F], F]:
         return func
 
     return decorator
-
-
-# The leader has no extract function — it's a static placeholder built
-# directly in _build_marc_record. Register its metadata directly so it
-# still appears in the auto-table at position 0.
-MARC_EMIT_REGISTRY.append(
-    MarcEmitMeta(
-        tag="leader",
-        indicators=(),
-        subfields=(),
-        source="static placeholder",
-        notes="See known limitations below.",
-    )
-)
 
 
 @dataclass(frozen=True)
@@ -350,6 +407,145 @@ class _RdaDescriptors:
     content: tuple[_RdaEntry, ...]
     media: tuple[_RdaEntry, ...]
     carrier: tuple[_RdaEntry, ...]
+
+
+@marc_emit(
+    MarcEmitMeta(
+        tag="leader",
+        indicators=(),
+        subfields=(),
+        source=(
+            "Position 05 ← bffi:adminMetadata / bffi:status (mstatus URI); "
+            "position 06 ← bffi:content URI's last segment (txt → 'a' etc.); "
+            "position 07 ← bffi:issuance URI (mono → 'm', serl → 's', …); "
+            "position 17 ← bflc:encodingLevel / bffi:encodingLevel "
+            "(menclvl/7 → '7', menclvl/f → ' ')."
+        ),
+        notes=(
+            "Other leader positions hold structural constants (10/11 = '2', "
+            "20-23 = '4500') or placeholders (00-04 record length, 12-16 "
+            "base address — recomputed by downstream MARC binary writers). "
+            "Source-MARC byte-fidelity is not guaranteed because BFFI doesn't "
+            "preserve every leader byte (e.g. position 09 character coding)."
+        ),
+    )
+)
+def _build_leader(graph: Graph, manifestation: URIRef) -> str:
+    """Construct a 24-character MARC leader from BFFI signals."""
+    status = _leader_status_byte(graph, manifestation)
+    record_type = _leader_record_type_byte(graph, manifestation)
+    level = _leader_bibliographic_level_byte(graph, manifestation)
+    encoding_level = _leader_encoding_level_byte(graph, manifestation)
+    return (
+        "00000"  # 00-04: record length placeholder
+        + status  # 05: record status
+        + record_type  # 06: type of record
+        + level  # 07: bibliographic level
+        + " "  # 08: type of control (default blank)
+        + " "  # 09: character coding (blank = MARC-8; matches Helmet source convention)
+        + "22"  # 10-11: indicator count + subfield code count
+        + "00000"  # 12-16: base address placeholder
+        + encoding_level  # 17: encoding level
+        + " "  # 18: descriptive cataloging form (default blank)
+        + " "  # 19: multipart resource record level (default blank)
+        + "4500"  # 20-23: entry map
+    )
+
+
+def _admin_metadata_anchors(graph: Graph, manifestation: URIRef) -> list[URIRef]:
+    """Return nodes whose ``bffi:adminMetadata`` triples are in scope
+    for this Manifestation — the Manifestation plus its Work.
+    marc2bibframe2 attaches AdminMetadata to either; the leader builder
+    has to walk both."""
+    anchors: list[URIRef] = [manifestation]
+    work = _find_work_for_manifestation(graph, manifestation)
+    if work is not None:
+        anchors.append(work)
+    return anchors
+
+
+def _leader_status_byte(graph: Graph, manifestation: URIRef) -> str:
+    """Pick the MARC leader position-05 byte from
+    ``bffi:adminMetadata / bffi:status`` URIs on either the
+    Manifestation or its Work.
+
+    Prefers ``mstatus/n`` (new) when present — marc2bibframe2 adds a
+    separate AdminMetadata block with ``mstatus/c`` (corrected) to
+    record its own conversion step, and that block's status is NOT
+    the original source-MARC leader byte. The source's own
+    AdminMetadata typically carries ``mstatus/n``; preferring it
+    keeps the round-trip byte-faithful for the vast majority of
+    Helmet records.
+
+    Falls through to any other recognised status, then to ``"n"``
+    (the corpus-wide default for source-MARC leader position 05).
+    """
+    statuses: list[URIRef] = []
+    for anchor in _admin_metadata_anchors(graph, manifestation):
+        for am in graph.objects(anchor, BFFI.adminMetadata):
+            for status_uri in graph.objects(am, BFFI.status):
+                if isinstance(status_uri, URIRef):
+                    statuses.append(status_uri)
+    if not statuses:
+        return _LEADER_DEFAULT_STATUS
+    new = URIRef("http://id.loc.gov/vocabulary/mstatus/n")
+    if new in statuses:
+        return "n"
+    for status_uri in statuses:
+        mapped = _MSTATUS_TO_LEADER_STATUS.get(status_uri)
+        if mapped is not None:
+            return mapped
+    return _LEADER_DEFAULT_STATUS
+
+
+def _leader_record_type_byte(graph: Graph, manifestation: URIRef) -> str:
+    """Pick the MARC leader position-06 byte (type of record) from
+    ``?work bffi:content <…/contentTypes/{code}>``. Returns the
+    default ``"a"`` (language material) when no content URI matches
+    the dispatch table."""
+    work = _find_work_for_manifestation(graph, manifestation)
+    if work is None:
+        return _LEADER_DEFAULT_TYPE
+    for content_uri in graph.objects(work, BFFI.content):
+        if not isinstance(content_uri, URIRef):
+            continue
+        mapped = _CONTENT_TYPE_TO_LEADER_TYPE.get(local_name(content_uri))
+        if mapped is not None:
+            return mapped
+    return _LEADER_DEFAULT_TYPE
+
+
+def _leader_bibliographic_level_byte(graph: Graph, manifestation: URIRef) -> str:
+    """Pick the MARC leader position-07 byte from ``bffi:issuance``
+    (``mono`` → ``"m"``, ``serl`` → ``"s"``, etc.). Defaults to
+    ``"m"`` (monograph) when no recognised issuance URI is present."""
+    for issuance in graph.objects(manifestation, BFFI.issuance):
+        if isinstance(issuance, URIRef):
+            mapped = _ISSUANCE_TO_LEADER_LEVEL.get(issuance)
+            if mapped is not None:
+                return mapped
+    return _LEADER_DEFAULT_BIBLIOGRAPHIC_LEVEL
+
+
+def _leader_encoding_level_byte(graph: Graph, manifestation: URIRef) -> str:
+    """Pick the MARC leader position-17 byte (encoding level) from
+    ``bffi:adminMetadata / bffi:encodingLevel`` (or its pre-rename
+    ``bflc:encodingLevel`` shape) on either the Manifestation or its
+    Work. ``menclvl/f`` "full level" maps to a literal blank; digit
+    URIs map directly. Defaults to blank when absent."""
+    encoding_level_uris = (
+        URIRef("http://urn.fi/URN:NBN:fi:schema:bffi:encodingLevel"),
+        URIRef("http://id.loc.gov/ontologies/bflc/encodingLevel"),
+    )
+    for anchor in _admin_metadata_anchors(graph, manifestation):
+        for am in graph.objects(anchor, BFFI.adminMetadata):
+            for predicate in encoding_level_uris:
+                for ev in graph.objects(am, predicate):
+                    if isinstance(ev, URIRef):
+                        mapped = _MENCLVL_TO_LEADER_ENCODING.get(local_name(ev))
+                        if mapped is not None:
+                            return mapped
+    return _LEADER_DEFAULT_ENCODING_LEVEL
 
 
 _RDA_SUBFIELDS: Final[tuple[tuple[str, str], ...]] = (
@@ -2130,11 +2326,12 @@ def _build_marc_record(
     untraced_series: list[_UntracedSeriesEmit],
     traced_series: list[_AddedTitleEmit],
     added_titles: list[_AddedTitleEmit],
+    leader_text: str,
 ) -> etree._Element:
     """Build one MARCXML ``<record>`` element with the v0+ field set."""
     record = etree.Element(f"{_MARC}record")
     leader = etree.SubElement(record, f"{_MARC}leader")
-    leader.text = _LEADER_PLACEHOLDER
+    leader.text = leader_text
 
     cf001 = etree.SubElement(record, f"{_MARC}controlfield", tag="001")
     cf001.text = bib_id
@@ -2256,6 +2453,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
     access_policies = _extract_access_policies(graph, manifestation)
     untraced_series = _extract_untraced_series(graph, manifestation)
     traced_series = _extract_traced_series(graph, manifestation)
+    leader_text = _build_leader(graph, manifestation)
     added_titles = _extract_added_titles(graph, manifestation)
     record = _build_marc_record(
         bib_id=bib_id,
@@ -2278,6 +2476,7 @@ def emit_marcxml(graph: Graph, *, manifestation: URIRef) -> bytes:
         access_policies=access_policies,
         untraced_series=untraced_series,
         traced_series=traced_series,
+        leader_text=leader_text,
         added_titles=added_titles,
     )
     return etree.tostring(

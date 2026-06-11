@@ -114,6 +114,107 @@ def test_emit_marcxml_minimal_record_round_trips_bib_id_and_title() -> None:
     assert sf_a.text == "Test Title"
 
 
+def test_emit_marcxml_leader_defaults_for_unsignalled_record() -> None:
+    """A minimal Manifestation (no issuance, content, status, encoding
+    level) yields a leader with the documented defaults: position 05
+    'n' (new), 06 'a' (language material), 07 'm' (monograph), 17 ' '
+    (full level). Positions 10-11 = '22' (indicator + subfield code
+    count), 20-23 = '4500' per MARC 21 convention."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    leader = root.find(f"{{{MARC21_NS}}}leader")
+    assert leader is not None
+    text = leader.text or ""
+    assert len(text) == 24
+    assert text[5] == "n"  # status
+    assert text[6] == "a"  # record type
+    assert text[7] == "m"  # bibliographic level
+    assert text[10:12] == "22"
+    assert text[17] == " "  # encoding level
+    assert text[20:24] == "4500"
+
+
+def test_emit_marcxml_leader_derives_from_bffi_signals() -> None:
+    """A DVD-like record (issuance=mono, content=tdi two-dim moving
+    image, status=corrected, menclvl/7 minimal) yields a leader of
+    the shape ``"00000cgm  22000007  4500"`` — position 05 'c'
+    (corrected), 06 'g' (projected medium), 07 'm' (monograph),
+    17 '7' (minimal level)."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    work = URIRef("http://example.org/b1#Work")
+    g.add((work, RDF.type, BFFI.BibframeWork))
+    g.add((m, BFFI.workManifested, work))
+    g.add(
+        (
+            work,
+            BFFI.content,
+            URIRef("http://id.loc.gov/vocabulary/contentTypes/tdi"),
+        )
+    )
+    g.add((m, BFFI.issuance, URIRef("http://id.loc.gov/vocabulary/issuance/mono")))
+    admin = URIRef("http://example.org/b1#admin")
+    g.add((admin, RDF.type, BFFI.AdminMetadata))
+    g.add((admin, BFFI.status, URIRef("http://id.loc.gov/vocabulary/mstatus/c")))
+    g.add(
+        (
+            admin,
+            URIRef("http://id.loc.gov/ontologies/bflc/encodingLevel"),
+            URIRef("http://id.loc.gov/vocabulary/menclvl/7"),
+        )
+    )
+    g.add((m, BFFI.adminMetadata, admin))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    leader = root.find(f"{{{MARC21_NS}}}leader")
+    assert leader is not None
+    text = leader.text or ""
+    assert text[5] == "c"
+    assert text[6] == "g"
+    assert text[7] == "m"
+    assert text[17] == "7"
+
+
+def test_emit_marcxml_leader_full_level_menclvl_f_emits_blank() -> None:
+    """``bffi:adminMetadata / bflc:encodingLevel <…/menclvl/f>`` (full
+    level) emits a literal blank at leader position 17 — the MARC
+    convention for full bibliographic encoding."""
+    g = _build_minimal_bffi_graph(
+        manifestation_uri="http://example.org/b1#Instance",
+        bib_id="b1",
+        title="t",
+    )
+    m = next(g.subjects(RDF.type, BFFI.Manifestation))
+    admin = URIRef("http://example.org/b1#admin")
+    g.add((admin, RDF.type, BFFI.AdminMetadata))
+    g.add(
+        (
+            admin,
+            URIRef("http://id.loc.gov/ontologies/bflc/encodingLevel"),
+            URIRef("http://id.loc.gov/vocabulary/menclvl/f"),
+        )
+    )
+    g.add((m, BFFI.adminMetadata, admin))
+
+    marcxml = emit_marcxml(g, manifestation=m)
+    root = etree.fromstring(marcxml)
+    leader = root.find(f"{{{MARC21_NS}}}leader")
+    assert leader is not None
+    assert (leader.text or "")[17] == " "
+
+
 def test_emit_marcxml_emits_245_b_when_subtitle_is_present() -> None:
     """A bffi:Title block carrying both bffi:mainTitle and bffi:subtitle
     produces a 245 datafield with $a and $b subfields. Maps to MARC 245
